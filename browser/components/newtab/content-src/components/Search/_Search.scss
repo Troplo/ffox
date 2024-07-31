@@ -22,6 +22,11 @@ $glyph-forward: url('chrome://browser/skin/forward.svg');
     justify-content: center;
     margin-bottom: 48px;
 
+    // Flowinity FlowFox change
+    &:hover .logo {
+      background: image-set(url('chrome://branding/content/about-logo-gradient@2x.png') 2x) no-repeat center !important;
+    }
+
     .logo {
       display: inline-block;
       height: $logo-size;

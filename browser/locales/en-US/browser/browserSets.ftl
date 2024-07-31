@@ -48,19 +48,13 @@ search-find-selection-shortcut =
 # are recommended by the Human Interface Guidelines
 # of each platform for your locale.
 search-focus-shortcut-alt =
-    .key = { PLATFORM() ->
-        [linux] J
-       *[other] E
-    }
+    .key = E
 
 # Verify what shortcut for that operation
 # are recommended by the Human Interface Guidelines
 # of each platform for your locale.
 downloads-shortcut =
-    .key = { PLATFORM() ->
-        [linux] Y
-       *[other] J
-    }
+    .key = J
 
 addons-shortcut =
     .key = A

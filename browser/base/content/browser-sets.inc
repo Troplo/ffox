@@ -153,11 +153,7 @@
          command="Tools:Search"/>
     <key id="key_openDownloads"
          data-l10n-id="downloads-shortcut"
-#ifdef XP_GNOME
-         modifiers="accel,shift"
-#else
          modifiers="accel"
-#endif
          command="Tools:Downloads"/>
     <key id="key_openAddons" data-l10n-id="addons-shortcut" command="Tools:Addons" modifiers="accel,shift"/>
     <key id="openFileKb" data-l10n-id="file-open-shortcut" command="Browser:OpenFile"  modifiers="accel"/>
