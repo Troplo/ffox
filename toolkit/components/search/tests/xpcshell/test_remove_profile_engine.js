@@ -5,8 +5,7 @@
 // profile directory when a user removes the actual engine from their profile.
 
 add_setup(async function () {
-  await SearchTestUtils.useTestEngines("data1");
-  await AddonTestUtils.promiseStartupManager();
+  SearchTestUtils.setRemoteSettingsConfig([{ identifier: "unused" }]);
 });
 
 add_task(async function run_test() {

@@ -48,12 +48,9 @@ struct VideoRateControlConfig {
 
 class RateControlSettings final {
  public:
-  ~RateControlSettings();
+  explicit RateControlSettings(const FieldTrialsView& key_value_config);
   RateControlSettings(RateControlSettings&&);
-
-  static RateControlSettings ParseFromFieldTrials();
-  static RateControlSettings ParseFromKeyValueConfig(
-      const FieldTrialsView* const key_value_config);
+  ~RateControlSettings();
 
   // When CongestionWindowPushback is enabled, the pacer is oblivious to
   // the congestion window. The relation between outstanding data and
@@ -82,8 +79,6 @@ class RateControlSettings final {
   bool BitrateAdjusterCanUseNetworkHeadroom() const;
 
  private:
-  explicit RateControlSettings(const FieldTrialsView* const key_value_config);
-
   CongestionWindowConfig congestion_window_config_;
   VideoRateControlConfig video_config_;
 };

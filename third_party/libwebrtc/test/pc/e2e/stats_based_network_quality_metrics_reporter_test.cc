@@ -77,8 +77,9 @@ absl::optional<Metric> FindMeetricByName(absl::string_view name,
 
 TEST(StatsBasedNetworkQualityMetricsReporterTest, DebugStatsAreCollected) {
   std::unique_ptr<NetworkEmulationManager> network_emulation =
-      CreateNetworkEmulationManager(TimeMode::kSimulated,
-                                    EmulatedNetworkStatsGatheringMode::kDebug);
+      CreateNetworkEmulationManager(
+          {.time_mode = TimeMode::kSimulated,
+           .stats_gathering_mode = EmulatedNetworkStatsGatheringMode::kDebug});
   DefaultMetricsLogger metrics_logger(
       network_emulation->time_controller()->GetClock());
   PeerConnectionE2EQualityTest fixture(
@@ -91,11 +92,13 @@ TEST(StatsBasedNetworkQualityMetricsReporterTest, DebugStatsAreCollected) {
   EmulatedEndpoint* bob_endpoint =
       network_emulation->CreateEndpoint(EmulatedEndpointConfig());
 
-  EmulatedNetworkNode* alice_link = network_emulation->CreateEmulatedNode(
-      BuiltInNetworkBehaviorConfig{.link_capacity_kbps = 500});
+  EmulatedNetworkNode* alice_link =
+      network_emulation->CreateEmulatedNode(BuiltInNetworkBehaviorConfig{
+          .link_capacity = DataRate::KilobitsPerSec(500)});
   network_emulation->CreateRoute(alice_endpoint, {alice_link}, bob_endpoint);
-  EmulatedNetworkNode* bob_link = network_emulation->CreateEmulatedNode(
-      BuiltInNetworkBehaviorConfig{.link_capacity_kbps = 500});
+  EmulatedNetworkNode* bob_link =
+      network_emulation->CreateEmulatedNode(BuiltInNetworkBehaviorConfig{
+          .link_capacity = DataRate::KilobitsPerSec(500)});
   network_emulation->CreateRoute(bob_endpoint, {bob_link}, alice_endpoint);
 
   EmulatedNetworkManagerInterface* alice_network =

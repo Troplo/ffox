@@ -1,5 +1,8 @@
 // META: title=validation tests for WebNN API split operation
 // META: global=window,dedicatedworker
+// META: variant=?cpu
+// META: variant=?gpu
+// META: variant=?npu
 // META: script=../resources/utils_validation.js
 
 'use strict';
@@ -13,6 +16,7 @@ multi_builder_test(async (t, builder, otherBuilder) => {
       TypeError, () => builder.split(inputFromOtherBuilder, splits));
 }, '[split] throw if input is from another builder');
 
+const label = 'xxx-split';
 const tests = [
   {
     name: '[split] Test with default options.',
@@ -38,6 +42,7 @@ const tests = [
     name: '[split] Throw if splitting a scalar.',
     input: {dataType: 'float32', dimensions: []},
     splits: [2],
+    options: {label}
   },
   {
     name: '[split] Throw if axis is larger than input rank.',
@@ -45,6 +50,7 @@ const tests = [
     splits: [2],
     options: {
       axis: 2,
+      label: label,
     }
   },
   {
@@ -52,8 +58,18 @@ const tests = [
     input: {dataType: 'float32', dimensions: [2, 6]},
     splits: [0],
     options: {
-      axis: 2,
+      axis: 0,
+      label: label,
     }
+  },
+  {
+    name: '[split] Throw if splits (scalar) is equal to 0.',
+    input: {dataType: 'float32', dimensions: [2, 6]},
+    splits: 0,
+    options: {
+      axis: 0,
+      label: label,
+    },
   },
   {
     name:
@@ -62,7 +78,18 @@ const tests = [
     splits: [2],
     options: {
       axis: 1,
+      label: label,
     }
+  },
+  {
+    name:
+        '[split] Throw if splits (scalar) can not evenly divide the dimension size of input along options.axis.',
+    input: {dataType: 'float32', dimensions: [2, 5]},
+    splits: 2,
+    options: {
+      axis: 1,
+      label: label,
+    },
   },
   {
     name:
@@ -71,12 +98,14 @@ const tests = [
     splits: [2, 2, 3],
     options: {
       axis: 1,
+      label: label,
     }
   },
 ];
 
 tests.forEach(
     test => promise_test(async t => {
+      const builder = new MLGraphBuilder(context);
       const input = builder.input(
           'input',
           {dataType: test.input.dataType, dimensions: test.input.dimensions});
@@ -88,7 +117,8 @@ tests.forEach(
           assert_array_equals(outputs[i].shape(), test.outputs[i].dimensions);
         }
       } else {
-        assert_throws_js(
-            TypeError, () => builder.split(input, test.splits, test.options));
+        const regrexp = new RegExp('\\[' + label + '\\]');
+        assert_throws_with_label(
+            () => builder.split(input, test.splits, test.options), regrexp);
       }
     }, test.name));

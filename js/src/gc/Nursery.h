@@ -151,6 +151,11 @@ class Nursery {
   std::tuple<void*, bool> allocateBuffer(JS::Zone* zone, size_t nbytes,
                                          arena_id_t arenaId);
 
+  // Like allocateBuffer, but returns nullptr if the buffer can't be allocated
+  // in the nursery.
+  void* tryAllocateNurseryBuffer(JS::Zone* zone, size_t nbytes,
+                                 arena_id_t arenaId);
+
   // Allocate a buffer for a given Cell, using the nursery if possible and
   // owner is in the nursery.
   void* allocateBuffer(JS::Zone* zone, gc::Cell* owner, size_t nbytes,
@@ -251,6 +256,10 @@ class Nursery {
   }
 
   [[nodiscard]] inline bool addStringBuffer(JSLinearString* s);
+
+  [[nodiscard]] inline bool addExtensibleStringBuffer(
+      JSLinearString* s, mozilla::StringBuffer* buffer);
+  inline void removeExtensibleStringBuffer(JSLinearString* s);
 
   size_t sizeOfMallocedBuffers(mozilla::MallocSizeOf mallocSizeOf) const;
 
@@ -511,6 +520,8 @@ class Nursery {
   void clearMapAndSetNurseryRanges();
   void sweepMapAndSetObjects();
 
+  void sweepStringsWithBuffer();
+
   // Allocate a buffer for a given zone, using the nursery if possible.
   void* allocateBuffer(JS::Zone* zone, size_t nbytes);
 
@@ -725,9 +736,22 @@ class Nursery {
   // string and the StringBuffer to simplify interaction with AtomRefs and
   // string deduplication.
   using StringAndBuffer = std::pair<JSLinearString*, mozilla::StringBuffer*>;
-  using StringBufferVector =
+  using StringAndBufferVector =
       JS::GCVector<StringAndBuffer, 8, SystemAllocPolicy>;
-  StringBufferVector stringBuffers_;
+  StringAndBufferVector stringBuffers_;
+
+  // Like stringBuffers_, but for extensible strings for flattened ropes. This
+  // requires a HashMap instead of a Vector because we need to remove the entry
+  // when transferring the buffer to a new extensible string during flattening.
+  using ExtensibleStringBuffers =
+      HashMap<JSLinearString*, mozilla::StringBuffer*,
+              js::PointerHasher<JSLinearString*>, js::SystemAllocPolicy>;
+  ExtensibleStringBuffers extensibleStringBuffers_;
+
+  // List of StringBuffers to release off-thread.
+  using StringBufferVector =
+      Vector<mozilla::StringBuffer*, 8, SystemAllocPolicy>;
+  StringBufferVector stringBuffersToReleaseAfterMinorGC_;
 
   UniquePtr<NurseryDecommitTask> decommitTask;
 

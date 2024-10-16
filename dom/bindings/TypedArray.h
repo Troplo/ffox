@@ -475,6 +475,25 @@ struct TypedArray_base : public SpiderMonkeyInterfaceObjectStorage,
         std::forward<Calculator>(aCalculator)...);
   }
 
+  template <typename T, size_t N, typename... Calculator>
+  [[nodiscard]] bool CopyDataTo(std::array<T, N>* const aResult,
+                                Calculator&&... aCalculator) const {
+    static_assert(sizeof...(aCalculator) <= 1,
+                  "CopyDataTo takes at most one aCalculator");
+
+    return ProcessDataHelper(
+        [&](const Span<const element_type>& aData, JS::AutoCheckCannotGC&&) {
+          if (aData.Length() != N) {
+            return false;
+          }
+          for (size_t i = 0; i < N; ++i) {
+            (*aResult).at(i) = aData[i];
+          }
+          return true;
+        },
+        std::forward<Calculator>(aCalculator)...);
+  }
+
   /**
    * Helper functions to copy this typed array's data to a newly created
    * container. Returns Nothing() if creating the container with the right size
@@ -781,6 +800,7 @@ struct TypedArray : public TypedArray_base<ArrayT> {
   }
   static inline ArrayT CreateCommon(JSContext* cx, size_t length,
                                     ErrorResult& error) {
+    error.MightThrowJSException();
     ArrayT array = CreateCommon(cx, length);
     if (array) {
       return array;
@@ -860,23 +880,25 @@ using ArrayBuffer = TypedArray<JS::ArrayBuffer>;
 //       things that understand TypedArray, as with ToJSValue.
 template <typename TypedArrayType>
 class MOZ_STACK_CLASS TypedArrayCreator {
-  typedef nsTArray<typename TypedArrayType::element_type> ArrayType;
+  using ValuesType = typename TypedArrayType::element_type;
+  using ArrayType = nsTArray<ValuesType>;
 
  public:
-  explicit TypedArrayCreator(const ArrayType& aArray) : mArray(aArray) {}
+  explicit TypedArrayCreator(const ArrayType& aArray) : mValues(aArray) {}
+  explicit TypedArrayCreator(const nsCString& aString) : mValues(aString) {}
 
   // NOTE: this leaves any exceptions on the JSContext, and the caller is
   //       required to deal with them.
   JSObject* Create(JSContext* aCx) const {
-    auto array = TypedArrayType::CreateCommon(aCx, mArray.Length());
+    auto array = TypedArrayType::CreateCommon(aCx, mValues.Length());
     if (array) {
-      TypedArrayType::CopyFrom(aCx, mArray, array);
+      TypedArrayType::CopyFrom(aCx, mValues, array);
     }
     return array.asObject();
   }
 
  private:
-  const ArrayType& mArray;
+  Span<const ValuesType> mValues;
 };
 
 namespace binding_detail {

@@ -10,13 +10,21 @@
 
 #include "audio/channel_receive_frame_transformer_delegate.h"
 
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 
+#include "absl/types/optional.h"
+#include "api/array_view.h"
+#include "api/frame_transformer_interface.h"
+#include "api/rtp_headers.h"
+#include "api/scoped_refptr.h"
+#include "api/sequence_checker.h"
+#include "api/task_queue/task_queue_base.h"
 #include "rtc_base/buffer.h"
 
 namespace webrtc {
-namespace {
 
 class TransformableIncomingAudioFrame
     : public TransformableAudioFrameInterface {
@@ -25,7 +33,8 @@ class TransformableIncomingAudioFrame
                                   const RTPHeader& header,
                                   uint32_t ssrc,
                                   const std::string& codec_mime_type)
-      : payload_(payload.data(), payload.size()),
+      : TransformableAudioFrameInterface(Passkey()),
+        payload_(payload.data(), payload.size()),
         header_(header),
         ssrc_(ssrc),
         codec_mime_type_(codec_mime_type) {}
@@ -70,13 +79,19 @@ class TransformableIncomingAudioFrame
                : FrameType::kAudioFrameCN;
   }
 
+  absl::optional<uint8_t> AudioLevel() const override {
+    if (header_.extension.audio_level()) {
+      return header_.extension.audio_level()->level();
+    }
+    return absl::nullopt;
+  }
+
  private:
   rtc::Buffer payload_;
   RTPHeader header_;
   uint32_t ssrc_;
   std::string codec_mime_type_;
 };
-}  // namespace
 
 ChannelReceiveFrameTransformerDelegate::ChannelReceiveFrameTransformerDelegate(
     ReceiveFrameCallback receive_frame_callback,

@@ -18,13 +18,17 @@ import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
  *
  * The "accordion" type will initially not show any content. The card
  * will contain an arrow to expand the card so that all of the content
- * is visible.
+ * is visible. You can use the "expanded" attribute to force the accordion
+ * card to show its content on initial render.
  *
  *
  * @property {string} heading - The heading text that will be used for the card.
  * @property {string} icon - (optional) A flag to indicate the header should include an icon
  * @property {string} type - (optional) The type of card. No type specified
  *   will be the default card. The other available type is "accordion"
+ * @property {boolean} expanded - A flag to indicate whether the card is
+ *  expanded or not. Can be used to expand the content section of the
+ *  accordion card on initial render.
  * @slot content - The content to show inside of the card.
  */
 export default class MozCard extends MozLitElement {
@@ -43,8 +47,8 @@ export default class MozCard extends MozLitElement {
 
   constructor() {
     super();
-    this.expanded = false;
     this.type = "default";
+    this.expanded = false;
   }
 
   headingTemplate() {
@@ -62,7 +66,9 @@ export default class MozCard extends MozLitElement {
           () =>
             html`<div part="icon" id="heading-icon" role="presentation"></div>`
         )}
-        <span id="heading">${this.heading}</span>
+        <span id="heading" title=${ifDefined(this.heading)} part="heading"
+          >${this.heading}</span
+        >
       </div>
     `;
   }
@@ -70,17 +76,23 @@ export default class MozCard extends MozLitElement {
   cardTemplate() {
     if (this.type === "accordion") {
       return html`
-        <details id="moz-card-details" @toggle="${this.onToggle}">
-          <summary>${this.headingTemplate()}</summary>
+        <details
+          id="moz-card-details"
+          @toggle="${this.onToggle}"
+          ?open=${this.expanded}
+        >
+          <summary part="summary">${this.headingTemplate()}</summary>
           <div id="content"><slot></slot></div>
         </details>
       `;
     }
 
     return html`
-      ${this.headingTemplate()}
-      <div id="content" aria-describedby="content">
-        <slot></slot>
+      <div id="moz-card-details">
+        ${this.headingTemplate()}
+        <div id="content" aria-describedby="content">
+          <slot></slot>
+        </div>
       </div>
     `;
   }
@@ -103,10 +115,11 @@ export default class MozCard extends MozLitElement {
    * @memberof MozCard
    */
   toggleDetails(force) {
-    this.detailsEl.open = force ?? !this.detailsEl.open;
+    this.expanded = force ?? !this.detailsEl.open;
   }
 
   onToggle() {
+    this.expanded = this.detailsEl.open;
     this.dispatchEvent(
       new ToggleEvent("toggle", {
         newState: this.detailsEl.open ? "open" : "closed",

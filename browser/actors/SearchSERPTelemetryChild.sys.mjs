@@ -8,6 +8,7 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   clearTimeout: "resource://gre/modules/Timer.sys.mjs",
+  SearchUtils: "resource://gre/modules/SearchUtils.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
 });
 
@@ -17,6 +18,13 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "browser.search.serpEventTelemetryCategorization.enabled",
   false
 );
+
+ChromeUtils.defineLazyGetter(lazy, "logConsole", () => {
+  return console.createInstance({
+    prefix: "SearchTelemetry",
+    maxLogLevel: lazy.SearchUtils.loggingEnabled ? "Debug" : "Warn",
+  });
+});
 
 export const CATEGORIZATION_SETTINGS = {
   MAX_DOMAINS_TO_CATEGORIZE: 10,
@@ -546,7 +554,16 @@ class SearchAdImpression {
   #categorizeAnchors(anchors, origin) {
     for (let anchor of anchors) {
       if (this.#shouldInspectAnchor(anchor, origin)) {
-        let result = this.#findDataForAnchor(anchor);
+        let result;
+        try {
+          // We use a schema to ensure the values for each search provider
+          // aligns to what is expected, but tests don't enforce the schema
+          // and thus, can technically input faulty values.
+          result = this.#findDataForAnchor(anchor);
+        } catch (ex) {
+          lazy.logConsole.error("Could not find data for anchor:", ex);
+          continue;
+        }
         if (result) {
           this.#recordElementData(result.element, {
             type: result.type,
@@ -555,7 +572,7 @@ class SearchAdImpression {
             childElements: result.childElements,
           });
         }
-        if (result.relatedElements?.length) {
+        if (result?.relatedElements?.length) {
           // Bug 1880413: Deprecate related elements.
           // Bottom-up approach with related elements are only used for
           // non-link elements related to ads, like carousel arrows.
@@ -735,10 +752,13 @@ class SearchAdImpression {
    *
    * @param {HTMLAnchorElement} anchor
    *  The anchor to be inspected.
-   * @returns {object}
+   * @returns {object | null}
    *  An object containing the element representing the root DOM element for
    *  the component, the type of component, how many ads were counted,
    *  and whether or not the count was of all the children.
+   * @throws {Error}
+   *  Will throw an error if certain properties of a component are missing.
+   *  Required properties are listed in search-telemetry-v2-schema.json.
    */
   #findDataForAnchor(anchor) {
     for (let component of this.#providerInfo.components) {
@@ -781,6 +801,12 @@ class SearchAdImpression {
         continue;
       }
 
+      // If a parent was found, we may want to ignore reporting the element
+      // to telemetry.
+      if (component.included.parent.skipCount) {
+        return null;
+      }
+
       // If we've already inspected the parent, add the child element to the
       // list of anchors. Don't increment the ads loaded count, as we only care
       // about grouping the anchor with the correct parent.
@@ -805,6 +831,9 @@ class SearchAdImpression {
           // If counting by child, get all of them at once.
           if (child.countChildren) {
             let proxyChildElements = parent.querySelectorAll(child.selector);
+            if (child.skipCount) {
+              return null;
+            }
             if (proxyChildElements.length) {
               return {
                 element: parent,
@@ -816,6 +845,9 @@ class SearchAdImpression {
               };
             }
           } else if (parent.querySelector(child.selector)) {
+            if (child.skipCount) {
+              return null;
+            }
             return {
               element: parent,
               type: child.type ?? component.type,
@@ -881,9 +913,15 @@ class SearchAdImpression {
     let elementRect =
       element.ownerGlobal.windowUtils.getBoundsWithoutFlushing(element);
 
-    // If the element lacks a dimension, assume all ads that
-    // were contained within it are hidden.
-    if (elementRect.width == 0 || elementRect.height == 0) {
+    // If the parent element is not visible, assume all ads within are
+    // also not visible.
+    if (
+      !element.checkVisibility({
+        visibilityProperty: true,
+        opacityProperty: true,
+      })
+    ) {
+      Glean.serp.adsBlockedCount.hidden_parent.add();
       return {
         adsVisible: 0,
         adsHidden: adsLoaded,
@@ -896,6 +934,7 @@ class SearchAdImpression {
       elementRect.bottom < 0 &&
       innerWindowHeight + scrollY + elementRect.bottom < 0
     ) {
+      Glean.serp.adsBlockedCount.beyond_viewport.add();
       return {
         adsVisible: 0,
         adsHidden: adsLoaded,
@@ -921,15 +960,19 @@ class SearchAdImpression {
     let adsVisible = 0;
     let adsHidden = 0;
     for (let child of childElements) {
-      let itemRect =
-        child.ownerGlobal.windowUtils.getBoundsWithoutFlushing(child);
-
-      // If the child element we're inspecting has no dimension, it is hidden.
-      if (itemRect.height == 0 || itemRect.width == 0) {
+      if (
+        !child.checkVisibility({
+          visibilityProperty: true,
+          opacityProperty: true,
+        })
+      ) {
         adsHidden += 1;
+        Glean.serp.adsBlockedCount.hidden_child.add();
         continue;
       }
 
+      let itemRect =
+        child.ownerGlobal.windowUtils.getBoundsWithoutFlushing(child);
       // If the child element is to the right of the containing element and
       // can't be viewed, skip it. We do this check because some elements like
       // carousels can hide additional content horizontally. We don't apply the

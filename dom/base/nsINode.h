@@ -45,6 +45,7 @@ class nsIAnimationObserver;
 class nsIContent;
 class nsIContentSecurityPolicy;
 class nsIFrame;
+class nsIFormControl;
 class nsIHTMLCollection;
 class nsMultiMutationObserver;
 class nsINode;
@@ -102,6 +103,7 @@ class MutationObservers;
 template <typename T>
 class Optional;
 class OwningNodeOrString;
+class SelectionNodeCache;
 template <typename>
 class Sequence;
 class ShadowRoot;
@@ -626,6 +628,16 @@ class nsINode : public mozilla::dom::EventTarget {
    */
   inline mozilla::dom::Text* AsText();
   inline const mozilla::dom::Text* AsText() const;
+
+  /**
+   * Return this node if the instance type inherits nsIFormControl, or an
+   * nsIFormControl instance which ia associated with this node.  Otherwise,
+   * returns nullptr.
+   */
+  [[nodiscard]] virtual nsIFormControl* GetAsFormControl() { return nullptr; }
+  [[nodiscard]] virtual const nsIFormControl* GetAsFormControl() const {
+    return nullptr;
+  }
 
   /*
    * Return whether the node is a ProcessingInstruction node.
@@ -1159,6 +1171,12 @@ class nsINode : public mozilla::dom::EventTarget {
   inline mozilla::dom::Element* GetAsElementOrParentElement() const;
 
   /**
+   * Get inclusive ancestor element in the flattened tree.
+   */
+  inline mozilla::dom::Element* GetInclusiveFlattenedTreeAncestorElement()
+      const;
+
+  /**
    * Get the root of the subtree this node belongs to.  This never returns
    * null.  It may return 'this' (e.g. for document nodes, and nodes that
    * are the roots of disconnected subtrees).
@@ -1637,8 +1655,12 @@ class nsINode : public mozilla::dom::EventTarget {
    * for that nsRange.  Collapsed ranges always counts as non-overlapping.
    *
    * @param aStartOffset has to be less or equal to aEndOffset.
+   * @param aCache A cache which contains all fully selected nodes for each
+   *               selection. If present, this provides a fast path to check if
+   *               a node is fully selected.
    */
-  bool IsSelected(uint32_t aStartOffset, uint32_t aEndOffset) const;
+  bool IsSelected(uint32_t aStartOffset, uint32_t aEndOffset,
+                  mozilla::dom::SelectionNodeCache* aCache = nullptr) const;
 
   /**
    * Get the root element of the text editor associated with this node or the
@@ -1941,11 +1963,14 @@ class nsINode : public mozilla::dom::EventTarget {
     // flags, because we can't use those to distinguish
     // <bdi dir="some-invalid-value"> and <bdi dir="auto">.
     NodeHasValidDirAttribute,
-    // Set if this node, which must be a text node, might be responsible for
-    // setting the directionality of a dir="auto" ancestor.
-    NodeMaySetDirAuto,
-    // Set if a node in the node's parent chain has dir=auto.
+    // Set if a node in the node's parent chain has dir=auto and nothing
+    // inbetween nor the node itself establishes its own direction.
     NodeAncestorHasDirAuto,
+    // Set if the node or an ancestor is assigned to a dir=auto slot and
+    // nothing between nor the node itself establishes its own direction.
+    // Except for when the node assigned to the dir=auto slot establishes
+    // its own direction, then the flag is still set.
+    NodeAffectsDirAutoSlot,
     // Set if the node is handling a click.
     NodeHandlingClick,
     // Set if the element has a parser insertion mode other than "in body",
@@ -2070,23 +2095,17 @@ class nsINode : public mozilla::dom::EventTarget {
   void SetHasValidDir() { SetBoolFlag(NodeHasValidDirAttribute); }
   void ClearHasValidDir() { ClearBoolFlag(NodeHasValidDirAttribute); }
   bool HasValidDir() const { return GetBoolFlag(NodeHasValidDirAttribute); }
-  void SetMaySetDirAuto() {
-    // FIXME(bug 1881225): dir=auto should probably work on CDATA too.
-    MOZ_ASSERT(NodeType() == TEXT_NODE);
-    SetBoolFlag(NodeMaySetDirAuto);
-  }
-  bool MaySetDirAuto() const {
-    MOZ_ASSERT(NodeType() == TEXT_NODE);
-    return GetBoolFlag(NodeMaySetDirAuto);
-  }
-  void ClearMaySetDirAuto() {
-    MOZ_ASSERT(NodeType() == TEXT_NODE);
-    ClearBoolFlag(NodeMaySetDirAuto);
-  }
   void SetAncestorHasDirAuto() { SetBoolFlag(NodeAncestorHasDirAuto); }
   void ClearAncestorHasDirAuto() { ClearBoolFlag(NodeAncestorHasDirAuto); }
   bool AncestorHasDirAuto() const {
     return GetBoolFlag(NodeAncestorHasDirAuto);
+  }
+  void SetAffectsDirAutoSlot() { SetBoolFlag(NodeAffectsDirAutoSlot); }
+  void ClearAffectsDirAutoSlot() { ClearBoolFlag(NodeAffectsDirAutoSlot); }
+
+  // Set if the node or an ancestor is assigned to a dir=auto slot.
+  bool AffectsDirAutoSlot() const {
+    return GetBoolFlag(NodeAffectsDirAutoSlot);
   }
 
   // Implemented in nsIContentInlines.h.

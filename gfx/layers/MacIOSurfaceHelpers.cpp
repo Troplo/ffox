@@ -27,7 +27,7 @@ static nsresult CopyFromLockedMacIOSurface(MacIOSurface* aSurface,
   size_t bytesPerRow = aSurface->GetBytesPerRow();
   SurfaceFormat ioFormat = aSurface->GetFormat();
 
-  if ((ioFormat == SurfaceFormat::NV12 || ioFormat == SurfaceFormat::YUV422) &&
+  if ((ioFormat == SurfaceFormat::NV12 || ioFormat == SurfaceFormat::YUY2) &&
       (aSize.width > PlanarYCbCrImage::MAX_DIMENSION ||
        aSize.height > PlanarYCbCrImage::MAX_DIMENSION)) {
     return NS_ERROR_FAILURE;
@@ -72,8 +72,13 @@ static nsresult CopyFromLockedMacIOSurface(MacIOSurface* aSurface,
                                                : gfx::ColorRange::LIMITED;
     data.mChromaSubsampling = ChromaSubsampling::HALF_WIDTH_AND_HEIGHT;
 
-    ConvertYCbCrToRGB(data, SurfaceFormat::B8G8R8X8, aSize, aData, aStride);
-  } else if (ioFormat == SurfaceFormat::YUV422) {
+    nsresult result =
+        ConvertYCbCrToRGB(data, SurfaceFormat::B8G8R8X8, aSize, aData, aStride);
+    MOZ_ASSERT(NS_SUCCEEDED(result), "Failed to convert YUV into RGB data");
+    return result;
+  }
+
+  if (ioFormat == SurfaceFormat::YUY2) {
     if (aSize.width == ALIGNED_32(aSize.width)) {
       // Optimization when width is aligned to 32.
       libyuv::ConvertToARGB((uint8_t*)aSurface->GetBaseAddress(),
@@ -135,7 +140,10 @@ static nsresult CopyFromLockedMacIOSurface(MacIOSurface* aSurface,
                                                  : gfx::ColorRange::LIMITED;
       data.mChromaSubsampling = ChromaSubsampling::HALF_WIDTH;
 
-      ConvertYCbCrToRGB(data, SurfaceFormat::B8G8R8X8, aSize, aData, aStride);
+      nsresult result = ConvertYCbCrToRGB(data, SurfaceFormat::B8G8R8X8, aSize,
+                                          aData, aStride);
+      MOZ_ASSERT(NS_SUCCEEDED(result), "Failed to convert YUV into RGB data");
+      return result;
     }
   } else {
     unsigned char* ioData = (unsigned char*)aSurface->GetBaseAddress();
@@ -150,7 +158,10 @@ static nsresult CopyFromLockedMacIOSurface(MacIOSurface* aSurface,
 
 already_AddRefed<SourceSurface> CreateSourceSurfaceFromMacIOSurface(
     MacIOSurface* aSurface, gfx::DataSourceSurface* aDataSurface) {
-  aSurface->Lock();
+  if (NS_WARN_IF(!aSurface->Lock())) {
+    return nullptr;
+  }
+
   auto scopeExit = MakeScopeExit([&]() { aSurface->Unlock(); });
 
   size_t ioWidth = aSurface->GetDevicePixelWidth();
@@ -159,7 +170,7 @@ already_AddRefed<SourceSurface> CreateSourceSurfaceFromMacIOSurface(
   SurfaceFormat ioFormat = aSurface->GetFormat();
 
   SurfaceFormat format =
-      (ioFormat == SurfaceFormat::NV12 || ioFormat == SurfaceFormat::YUV422)
+      (ioFormat == SurfaceFormat::NV12 || ioFormat == SurfaceFormat::YUY2)
           ? SurfaceFormat::B8G8R8X8
           : SurfaceFormat::B8G8R8A8;
 
@@ -198,7 +209,10 @@ nsresult CreateSurfaceDescriptorBufferFromMacIOSurface(
     MacIOSurface* aSurface, SurfaceDescriptorBuffer& aSdBuffer,
     Image::BuildSdbFlags aFlags,
     const std::function<MemoryOrShmem(uint32_t)>& aAllocate) {
-  aSurface->Lock();
+  if (NS_WARN_IF(!aSurface->Lock())) {
+    return NS_ERROR_FAILURE;
+  }
+
   auto scopeExit = MakeScopeExit([&]() { aSurface->Unlock(); });
 
   size_t ioWidth = aSurface->GetDevicePixelWidth();
@@ -207,7 +221,7 @@ nsresult CreateSurfaceDescriptorBufferFromMacIOSurface(
   SurfaceFormat ioFormat = aSurface->GetFormat();
 
   SurfaceFormat format =
-      (ioFormat == SurfaceFormat::NV12 || ioFormat == SurfaceFormat::YUV422)
+      (ioFormat == SurfaceFormat::NV12 || ioFormat == SurfaceFormat::YUY2)
           ? SurfaceFormat::B8G8R8X8
           : SurfaceFormat::B8G8R8A8;
 

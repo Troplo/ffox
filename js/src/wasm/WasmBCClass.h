@@ -88,23 +88,23 @@ struct Control {
 
 // A vector of Nothing values, used for reading opcodes.
 class BaseNothingVector {
-  Nothing unused_;
+  mozilla::Nothing unused_;
 
  public:
   bool reserve(size_t size) { return true; }
   bool resize(size_t length) { return true; }
-  Nothing& operator[](size_t) { return unused_; }
-  Nothing& back() { return unused_; }
+  mozilla::Nothing& operator[](size_t) { return unused_; }
+  mozilla::Nothing& back() { return unused_; }
   size_t length() const { return 0; }
-  bool append(Nothing& nothing) { return true; }
-  void infallibleAppend(Nothing& nothing) {}
+  bool append(mozilla::Nothing& nothing) { return true; }
+  void infallibleAppend(mozilla::Nothing& nothing) {}
 };
 
 // The baseline compiler tracks values on a stack of its own -- it needs to scan
 // that stack for spilling -- and thus has no need for the values maintained by
 // the iterator.
 struct BaseCompilePolicy {
-  using Value = Nothing;
+  using Value = mozilla::Nothing;
   using ValueVector = BaseNothingVector;
 
   // The baseline compiler uses the iterator's control stack, attaching
@@ -228,9 +228,9 @@ struct BaseCompiler final {
   // generation and only used by the caller.
   FuncOffsets offsets_;
 
-  // We call this address from the breakable point when the breakpoint handler
-  // is not null.
-  NonAssertingLabel debugTrapStub_;
+  // We call this address from the breakable point when the (per-module) debug
+  // stub pointer in the Instance is not null.
+  NonAssertingLabel perFunctionDebugStub_;
   uint32_t previousBreakablePoint_;
 
   // BaselineCompileFunctions() "lends" us the StkVector to use in this
@@ -516,9 +516,6 @@ struct BaseCompiler final {
   // the low part of a pair.
   inline RegI32 maybeHighPart(RegI64 r);
 
-  // On 64-bit systems, do nothing.  On 32-bit systems, clear the high register.
-  inline void maybeClearHighPart(RegI64 r);
-
   //////////////////////////////////////////////////////////////////////////////
   //
   // Values and value stack: Low-level methods for moving Stk values of specific
@@ -772,6 +769,14 @@ struct BaseCompiler final {
   // Pop an I32 or I64 as an I64. The value is zero extended out to 64-bits.
   inline RegI64 popIndexToInt64(IndexType indexType);
 
+  // Pop an I32 or I64 as an I32. The value is clamped to UINT32_MAX to ensure
+  // that it trips bounds checks.
+  inline RegI32 popTableIndexToClampedInt32(IndexType indexType);
+
+  // A combined push/pop that replaces an I32 or I64 on the stack with a clamped
+  // I32, which will trip bounds checks if out of I32 range.
+  inline void replaceTableIndexWithClampedInt32(IndexType indexType);
+
   // Pop the stack until it has the desired size, but do not move the physical
   // stack pointer.
   inline void popValueStackTo(uint32_t stackSize);
@@ -939,7 +944,7 @@ struct BaseCompiler final {
   void insertBreakablePoint(CallSiteDesc::Kind kind);
 
   // Insert code at the end of a function for breakpoint filtering.
-  void insertBreakpointStub();
+  void insertPerFunctionDebugStub();
 
   // Debugger API used at the return point: shuffle register return values off
   // to memory for the debugger to see; and get them back again.
@@ -979,7 +984,8 @@ struct BaseCompiler final {
   CodeOffset callImport(unsigned instanceDataOffset, const FunctionCall& call);
 #ifdef ENABLE_WASM_GC
   void callRef(const Stk& calleeRef, const FunctionCall& call,
-               CodeOffset* fastCallOffset, CodeOffset* slowCallOffset);
+               mozilla::Maybe<size_t> callRefIndex, CodeOffset* fastCallOffset,
+               CodeOffset* slowCallOffset);
 #  ifdef ENABLE_WASM_TAIL_CALLS
   void returnCallRef(const Stk& calleeRef, const FunctionCall& call,
                      const FuncType* funcType);
@@ -1035,6 +1041,11 @@ struct BaseCompiler final {
   //////////////////////////////////////////////////////////////////////
   //
   // Sundry low-level code generators.
+
+  // Decrement the per-instance function hotness counter, and possibly request
+  // optimized compilation for this function if it crosses the hotness
+  // threshold.
+  [[nodiscard]] bool addHotnessCheck();
 
   // Check the interrupt flag, trap if it is set.
   [[nodiscard]] bool addInterruptCheck();
@@ -1342,17 +1353,17 @@ struct BaseCompiler final {
   // stored. This register is consumed by this function.
   // `value` is the value that was stored in the field. This register is
   // preserved by this function.
-  [[nodiscard]] bool emitPostBarrierImprecise(const Maybe<RegRef>& object,
-                                              RegPtr valueAddr, RegRef value);
-  [[nodiscard]] bool emitPostBarrierPrecise(const Maybe<RegRef>& object,
-                                            RegPtr valueAddr, RegRef prevValue,
-                                            RegRef value);
+  [[nodiscard]] bool emitPostBarrierImprecise(
+      const mozilla::Maybe<RegRef>& object, RegPtr valueAddr, RegRef value);
+  [[nodiscard]] bool emitPostBarrierPrecise(
+      const mozilla::Maybe<RegRef>& object, RegPtr valueAddr, RegRef prevValue,
+      RegRef value);
 
   // Emits a store to a JS object pointer at the address `valueAddr`, which is
   // inside the GC cell `object`.
   //
   // Preserves `object` and `value`. Consumes `valueAddr`.
-  [[nodiscard]] bool emitBarrieredStore(const Maybe<RegRef>& object,
+  [[nodiscard]] bool emitBarrieredStore(const mozilla::Maybe<RegRef>& object,
                                         RegPtr valueAddr, RegRef value,
                                         PreBarrierKind preBarrierKind,
                                         PostBarrierKind postBarrierKind);

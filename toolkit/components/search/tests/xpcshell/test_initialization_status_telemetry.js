@@ -9,8 +9,7 @@ const searchService = Services.search.wrappedJSObject;
 
 add_setup(async () => {
   consoleAllowList.push("#init: failure initializing search:");
-  await SearchTestUtils.useTestEngines("simple-engines");
-  await AddonTestUtils.promiseStartupManager();
+  SearchTestUtils.setRemoteSettingsConfig([{ identifier: "unused" }]);
   Services.fog.initializeFOG();
 });
 

@@ -178,7 +178,8 @@ nsresult nsExtProtocolChannel::OpenURL() {
     }
     rv = extProtService->LoadURI(mUrl, triggeringPrincipal, redirectPrincipal,
                                  ctx, mLoadInfo->GetLoadTriggeredFromExternal(),
-                                 mLoadInfo->GetHasValidUserGestureActivation());
+                                 mLoadInfo->GetHasValidUserGestureActivation(),
+                                 mLoadInfo->GetIsNewWindowTarget());
 
     if (NS_SUCCEEDED(rv) && mListener) {
       mStatus = NS_ERROR_NO_CONTENT;

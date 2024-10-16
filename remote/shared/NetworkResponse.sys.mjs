@@ -18,6 +18,7 @@ export class NetworkResponse {
   #decodedBodySize;
   #encodedBodySize;
   #fromCache;
+  #fromServiceWorker;
   #isDataURL;
   #headersTransmittedSize;
   #status;
@@ -32,13 +33,16 @@ export class NetworkResponse {
    * @param {object} params
    * @param {boolean} params.fromCache
    *     Whether the response was read from the cache or not.
+   * @param {boolean} params.fromServiceWorker
+   *     Whether the response is coming from a service worker or not.
    * @param {string=} params.rawHeaders
    *     The response's raw (ie potentially compressed) headers
    */
   constructor(channel, params) {
     this.#channel = channel;
-    const { fromCache, rawHeaders = "" } = params;
+    const { fromCache, fromServiceWorker, rawHeaders = "" } = params;
     this.#fromCache = fromCache;
+    this.#fromServiceWorker = fromServiceWorker;
     this.#isDataURL = this.#channel instanceof Ci.nsIDataChannel;
     this.#wrappedChannel = ChannelWrapper.get(channel);
 
@@ -47,13 +51,13 @@ export class NetworkResponse {
     this.#headersTransmittedSize = rawHeaders.length;
     this.#totalTransmittedSize = rawHeaders.length;
 
-    // TODO: responseStatus and responseStatusText are sometimes inconsistent.
-    // For instance, they might be (304, Not Modified) when retrieved during the
-    // responseStarted event, and then (200, OK) during the responseCompleted
-    // event.
-    // For now consider them as immutable and store them on startup.
-    // According to the fetch spec for data URLs we can just hardcode
-    // status `200` and statusMessage `OK`.
+    // See https://github.com/w3c/webdriver-bidi/issues/761
+    // For 304 responses, the response will be replaced by the cached response
+    // between responseStarted and responseCompleted, which will effectively
+    // change the status and statusMessage.
+    // Until the issue linked above has been discussed and closed, we will
+    // cache the status/statusMessage in order to ensure consistent values
+    // between responseStarted and responseCompleted.
     this.#status = this.#isDataURL ? 200 : this.#channel.responseStatus;
     this.#statusMessage = this.#isDataURL
       ? "OK"
@@ -76,6 +80,10 @@ export class NetworkResponse {
     return this.#fromCache;
   }
 
+  get fromServiceWorker() {
+    return this.#fromServiceWorker;
+  }
+
   get protocol() {
     return lazy.NetworkUtils.getProtocol(this.#channel);
   }
@@ -96,10 +104,18 @@ export class NetworkResponse {
     return this.#totalTransmittedSize;
   }
 
-  addResponseContent(responseContent) {
-    this.#decodedBodySize = responseContent.decodedBodySize;
-    this.#encodedBodySize = responseContent.bodySize;
-    this.#totalTransmittedSize = responseContent.transferredSize;
+  /**
+   * Clear a response header from the responses's headers list.
+   *
+   * @param {string} name
+   *     The header's name.
+   */
+  clearResponseHeader(name) {
+    this.#channel.setResponseHeader(
+      name, // aName
+      "", // aValue="" as an empty value
+      false // aMerge=false to force clearing the header
+    );
   }
 
   getComputedMimeType() {
@@ -135,7 +151,7 @@ export class NetworkResponse {
     if (this.#isDataURL) {
       headers.push(["Content-Type", this.#channel.contentType]);
     } else {
-      this.#channel.visitOriginalResponseHeaders({
+      this.#channel.visitResponseHeaders({
         visitHeader(name, value) {
           headers.push([name, value]);
         },
@@ -143,5 +159,61 @@ export class NetworkResponse {
     }
 
     return headers;
+  }
+
+  /**
+   * Set a response header
+   *
+   * @param {string} name
+   *     The header's name.
+   * @param {string} value
+   *     The header's value.
+   * @param {object} options
+   * @param {boolean} options.merge
+   *     True if the value should be merged with the existing value, false if it
+   *     should override it. Defaults to false.
+   */
+  setResponseHeader(name, value, options) {
+    const { merge = false } = options;
+    this.#channel.setResponseHeader(name, value, merge);
+  }
+
+  setResponseStatus(options) {
+    let { status, statusText } = options;
+    if (status === null) {
+      status = this.#channel.responseStatus;
+    }
+
+    if (statusText === null) {
+      statusText = this.#channel.responseStatusText;
+    }
+
+    this.#channel.setResponseStatus(status, statusText);
+
+    // Update the cached status and statusMessage.
+    this.#status = this.#channel.responseStatus;
+    this.#statusMessage = this.#channel.responseStatusText;
+  }
+
+  /**
+   * Set the various response sizes for this response. Depending on how the
+   * completion was monitored (DevTools NetworkResponseListener or ChannelWrapper
+   * event), sizes need to be retrieved differently.
+   * There this is a simple setter and the actual logic to retrieve sizes is in
+   * NetworkEventRecord.
+   *
+   * @param {object} sizes
+   * @param {number} sizes.decodedBodySize
+   *     The decoded body size.
+   * @param {number} sizes.encodedBodySize
+   *     The encoded body size.
+   * @param {number} sizes.totalTransmittedSize
+   *     The total transmitted size.
+   */
+  setResponseSizes(sizes) {
+    const { decodedBodySize, encodedBodySize, totalTransmittedSize } = sizes;
+    this.#decodedBodySize = decodedBodySize;
+    this.#encodedBodySize = encodedBodySize;
+    this.#totalTransmittedSize = totalTransmittedSize;
   }
 }

@@ -216,13 +216,13 @@ addonsManager:
           - site_warning, site_blocked, install_disabled_warning
           - download_started, download_completed, download_failed
     notification_emails: ["addons-dev-internal@mozilla.com"]
-    expiry_version: "132"
+    expiry_version: "140"
     products:
       - "firefox"
       - "fennec"
       - "thunderbird"
     record_in_processes: ["main"]
-    bug_numbers: [1433335, 1515697, 1523641, 1549770, 1590736, 1630596, 1672570, 1714251, 1749878, 1781974, 1817100, 1861295]
+    bug_numbers: [1433335, 1515697, 1523641, 1549770, 1590736, 1630596, 1672570, 1714251, 1749878, 1781974, 1817100, 1861295, 1912166]
     release_channel_collection: opt-out
   install_stats:
     description: >
@@ -288,13 +288,13 @@ addonsManager:
         e.g. install events with source "about:addons" may have "install-from-file" or "url" as method).
       num_strings: The number of permission description strings in the extension permission doorhanger
     notification_emails: ["addons-dev-internal@mozilla.com"]
-    expiry_version: "132"
+    expiry_version: "140"
     products:
       - "firefox"
       - "fennec"
       - "thunderbird"
     record_in_processes: ["main"]
-    bug_numbers: [1433335, 1515697, 1523641, 1549770, 1590736, 1630596, 1672570, 1714251, 1749878, 1781974, 1817100, 1861295]
+    bug_numbers: [1433335, 1515697, 1523641, 1549770, 1590736, 1630596, 1672570, 1714251, 1749878, 1781974, 1817100, 1861295, 1912166]
     release_channel_collection: opt-out
   reportSuspiciousSite:
     description: >
@@ -304,11 +304,31 @@ addonsManager:
     objects:
       - suspiciousSite
     notification_emails: ["addons-dev-internal@mozilla.com"]
-    expiry_version: "132"
+    expiry_version: "140"
     products:
       - "firefox"
     record_in_processes: ["main"]
-    bug_numbers: [1806056, 1817100, 1861295]
+    bug_numbers: [1806056, 1817100, 1861295, 1912166]
+    release_channel_collection: opt-out
+
+addonsSearchDetection:
+  etld_change:
+    description: |
+      Recorded when a request for a search query is redirected to another
+      domain. This can be via the webRequest API, or through other means.
+    objects: ["webrequest", "other"]
+    methods: ["etld_change"]
+    extra_keys:
+      addonId: The id of the addon, if available.
+      addonVersion: The version of the addon.
+      from: The original domain (eTLD+1) of the request that matched a search endpoint.
+      to: The domain (eTLD+1) of the final redirect target.
+    notification_emails: ["addons-dev-internal@mozilla.com", "tlong@mozilla.com"]
+    expiry_version: "never"
+    products:
+      - "firefox"
+    record_in_processes: ["main"]
+    bug_numbers: [1894526]
     release_channel_collection: opt-out
 
 blocklist:
@@ -356,11 +376,11 @@ blocklist:
         This field is documented in more detail in the definition of the blocklist.mlbf_source scalar.
         Possible values are "dump_match", "cache_match", "remote_match", "dump_fallback", "cache_fallback", "unknown".
     notification_emails: ["addons-dev-internal@mozilla.com", "rwu@mozilla.com"]
-    expiry_version: "132"
+    expiry_version: never
     products:
       - "firefox"
     record_in_processes: ["main"]
-    bug_numbers: [1662857, 1730037, 1763529, 1811159, 1861296]
+    bug_numbers: [1662857, 1730037, 1763529, 1811159, 1861296, 1912167]
     release_channel_collection: opt-out
 
 downloads:
@@ -466,7 +486,7 @@ address:
     expiry_version: never
     products:
       - "firefox"
-    record_in_processes: ["content"]
+    record_in_processes: ["main"]
     release_channel_collection: opt-out
     extra_keys:
       street_address: street address result, filled when method is `detected`, `filled`, or `filled_modified`
@@ -489,7 +509,7 @@ address:
     expiry_version: never
     products:
       - "firefox"
-    record_in_processes: ["content"]
+    record_in_processes: ["main"]
     release_channel_collection: opt-out
     extra_keys:
       name: name
@@ -570,7 +590,7 @@ creditcard:
     expiry_version: never
     products:
       - "firefox"
-    record_in_processes: ["content"]
+    record_in_processes: ["main"]
     release_channel_collection: opt-out
     extra_keys:
       cc_name: cardholder name field result. Used by `detected`, `filled`, and `filled_modified` methods.
@@ -584,9 +604,9 @@ creditcard:
 extensions.data:
   migrateResult:
     objects: ["storageLocal"]
-    bug_numbers: [1470213, 1553297, 1590736, 1630596, 1672570, 1714251, 1749878, 1781974, 1817100, 1861295]
+    bug_numbers: [1470213, 1553297, 1590736, 1630596, 1672570, 1714251, 1749878, 1781974, 1817100, 1861295, 1912166]
     notification_emails: ["addons-dev-internal@mozilla.com"]
-    expiry_version: "132"
+    expiry_version: "140"
     products:
       - "firefox"
       - "fennec"
@@ -607,9 +627,9 @@ extensions.data:
       the value of this event is the addon id.
   storageLocalError:
     objects: ["get", "set", "remove", "clear"]
-    bug_numbers: [1606903, 1649948, 1689255, 1730038, 1763523, 1811148, 1861297]
+    bug_numbers: [1606903, 1649948, 1689255, 1730038, 1763523, 1811148, 1861297, 1912166]
     notification_emails: ["addons-dev-internal@mozilla.com"]
-    expiry_version: "132"
+    expiry_version: "140"
     products:
       - "firefox"
     record_in_processes: ["main", "content"]
@@ -924,7 +944,7 @@ normandy:
     description: >
       This records when validation of a recipe fails.
     bug_numbers: [1762652]
-    notification_emails: ["barret@mozilla.com"]
+    notification_emails: ["beth@mozilla.com"]
     expiry_version: never
     extra_keys:
       reason: Why validation failed (one of "invalid-recipe", "invalid-branch", or "invalid-reason").
@@ -1505,6 +1525,7 @@ messaging_experiments:
       "infobar",
       "spotlight",
       "featureCallout",
+      "fxms_bmb_button",
       "fxms_message_1",
       "fxms_message_2",
       "fxms_message_3",
@@ -2600,6 +2621,7 @@ intl.ui.browserLanguage:
       - apply
       - accept
       - cancel
+      - set_fallback
     extra_keys:
       installId: The id for an install.
     products:
@@ -2608,6 +2630,7 @@ intl.ui.browserLanguage:
     notification_emails:
       - flod@mozilla.com
       - mstriemer@mozilla.com
+      - earo@mozilla.com
     release_channel_collection: opt-out
     record_in_processes: ["main"]
     bug_numbers:
@@ -2618,6 +2641,7 @@ intl.ui.browserLanguage:
       - 1739288
       - 1796396
       - 1861299
+      - 1911321
 
 network.dns:
   trrConfirmation:
@@ -2860,7 +2884,7 @@ pictureinpicture:
     expiry_version: "never"
     release_channel_collection: opt-out
   opened_method:
-    objects: ["toggle", "contextMenu", "urlBar", "shortcut"]
+    objects: ["toggle", "contextMenu", "urlBar", "shortcut", "autoPip"]
     description: >
       Records the method for opening the Picture-in-Picture window.
     extra_keys:
@@ -2881,7 +2905,7 @@ pictureinpicture:
     expiry_version: "never"
     release_channel_collection: opt-out
   closed_method:
-    objects: ["closeButton", "unpip", "pagehide", "fullscreen", "setupFailure", "closePlayerShortcut", "contextMenu", "videoElRemove", "videoElEmptied", "urlBar", "shortcut"]
+    objects: ["closeButton", "unpip", "pagehide", "foregrounded","fullscreen", "setupFailure", "closePlayerShortcut", "contextMenu", "videoElRemove", "videoElEmptied", "urlBar", "shortcut"]
     description: >
       Records the method for closing the Picture-in-Picture window.
     notification_emails:
@@ -2974,6 +2998,20 @@ pictureinpicture.settings:
       - main
     bug_numbers:
       - 1639774
+    expiry_version: "never"
+    release_channel_collection: opt-out
+  enable_autotrigger:
+    objects: ["settings"]
+    description: Recorded when the Picture-in-Picture auto-trigger is enabled.
+    notification_emails:
+      - mconley@mozilla.com
+    products:
+      - "firefox"
+    record_in_processes:
+      - main
+    bug_numbers:
+      - 1647800
+      - 1910505
     expiry_version: "never"
     release_channel_collection: opt-out
 
@@ -3248,6 +3286,7 @@ security.ui.certerror:
       is_frame: If the error page is loaded in an iframe.
       has_sts: If the error page is for a site with HSTS headers or with a pinned key.
       channel_status: The status of the failed channel, as an nsresult.
+      issued_by_cca: If trusting the CCA India roots would fix this error.
   click:
     objects: [
       "advanced_button",

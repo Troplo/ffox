@@ -1,11 +1,14 @@
 [DEFAULT]
 prefs = [
+  "dom.viewTransitions.enabled=true",
   "gfx.omta.background-color=true",
   "gfx.font_loader.delay=0",
   "layout.css.motion-path-url.enabled=true",
   "layout.css.backdrop-filter.enabled=true",
   "layout.css.fit-content-function.enabled=true",
   "layout.css.scroll-driven-animations.enabled=true",
+  "layout.css.stretch-size-keyword.enabled=true",
+  "layout.css.webkit-fill-available.enabled=true",
   "layout.css.animation-composition.enabled=true",
   "layout.css.basic-shape-rect.enabled=true",
   "layout.css.basic-shape-shape.enabled=true",
@@ -13,6 +16,7 @@ prefs = [
   "layout.css.transform-box-content-stroke.enabled=true",
   "layout.css.transition-behavior.enabled=true",
   "layout.css.field-sizing.enabled=true",
+  "layout.css.anchor-positioning.enabled=true",
 ]
 support-files = [
   "animation_utils.js",
@@ -432,6 +436,8 @@ skip-if = ["verify"]
 ["test_flushing_frame.html"]
 
 ["test_font_face_cascade.html"]
+
+["test_font_face_gc.html"]
 
 ["test_font_face_parser.html"]
 

@@ -74,6 +74,38 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "browser.translations.enable"
 );
 
+/**
+ * Retrieves the most recent target languages that have been requested for translation by the user.
+ * Inserting into this pref should be managed by the static TranslationsParent class.
+ *
+ * @see {TranslationsParent.storeMostRecentTargetLanguage}
+ *
+ * There is a linear chain of synchronously dependent observers related to this pref.
+ *
+ * When this pref's value is updated, it sends "translations:most-recent-target-language-changed"
+ * which is observed by the static global TranslationsParent object to know when to clear its cache.
+ *
+ * Once the cache has been cleared, the static global TranslationsParent object then sends
+ * "translations:maybe-update-user-lang-tag" which is observed by every instantiated TranslationsParent
+ * actor object to consider updating their cached userLangTag.
+ *
+ * @see {TranslationsParent} for further descriptions and diagrams.
+ */
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "mostRecentTargetLanguages",
+  "browser.translations.mostRecentTargetLanguages",
+  /* aDefaultValue */ "",
+  /* aOnUpdate */ () => {
+    Services.obs.notifyObservers(
+      null,
+      "translations:most-recent-target-language-changed"
+    );
+  },
+  /* aTransform */ rawLangTags =>
+    rawLangTags ? new Set(rawLangTags.split(",")) : new Set()
+);
+
 XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
   "chaosErrorsPref",
@@ -100,7 +132,11 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "alwaysTranslateLangTags",
   ALWAYS_TRANSLATE_LANGS_PREF,
   /* aDefaultPrefValue */ "",
-  /* onUpdate */ null,
+  /* onUpdate */ () =>
+    Services.obs.notifyObservers(
+      null,
+      "translations:always-translate-languages-changed"
+    ),
   /* aTransform */ rawLangTags =>
     rawLangTags ? new Set(rawLangTags.split(",")) : new Set()
 );
@@ -113,7 +149,11 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "neverTranslateLangTags",
   NEVER_TRANSLATE_LANGS_PREF,
   /* aDefaultPrefValue */ "",
-  /* onUpdate */ null,
+  /* onUpdate */ () =>
+    Services.obs.notifyObservers(
+      null,
+      "translations:never-translate-languages-changed"
+    ),
   /* aTransform */ rawLangTags =>
     rawLangTags ? new Set(rawLangTags.split(",")) : new Set()
 );
@@ -327,6 +367,18 @@ export class TranslationsParent extends JSWindowActorParent {
     );
     windowState.previousDetectedLanguages = null;
 
+    // Attach a closure to this so that we can remove the observer when didDestroy() is called.
+    this.maybeUpdateUserLangTag = () => {
+      const langTag = TranslationsParent.getPreferredLanguages({
+        excludeLangTags: [this.languageState.detectedLanguages?.docLangTag],
+      })[0];
+      this.languageState.maybeUpdateUserLangTag(langTag);
+    };
+    Services.obs.addObserver(
+      this.maybeUpdateUserLangTag,
+      "translations:maybe-update-user-lang-tag"
+    );
+
     if (windowState.translateOnPageReload) {
       // The actor was recreated after a page reload, start the translation.
       const { fromLanguage, toLanguage } = windowState.translateOnPageReload;
@@ -381,13 +433,35 @@ export class TranslationsParent extends JSWindowActorParent {
 
   /**
    * An ordered list of preferred languages based on:
-   *   1. App languages
+   *
+   *   1. Most recent target languages
    *   2. Web requested languages
-   *   3. OS language
+   *   3. App languages
+   *   4. OS language
+   *
+   * This is the composition of #mostRecentTargetLanguages and #userSettingsLanguages
    *
    * @type {null | string[]}
    */
   static #preferredLanguages = null;
+
+  /**
+   * An ordered list of the most recently translated-into target languages.
+   *
+   * @type {null | string[]}
+   */
+  static #mostRecentTargetLanguages = null;
+
+  /**
+   * An ordered list of languages specified in the user's settings based on:
+   *
+   *   1. Web requested languages
+   *   2. App languages
+   *   3. OS languages
+   *
+   * @type {null | string[]}
+   */
+  static #userSettingsLanguages = null;
 
   /**
    * The value of navigator.languages.
@@ -674,22 +748,33 @@ export class TranslationsParent extends JSWindowActorParent {
     return true;
   }
 
-  static #resetPreferredLanguages() {
-    TranslationsParent.#webContentLanguages = null;
+  /**
+   * Invalidates the #mostRecentTargetLanguages portion of #preferredLanguages.
+   *
+   * This means that the next time getPreferredLanguages() is called, it will
+   * need to re-fetch the mostRecentTargetLanguages, but it may still use a
+   * cached version of userSettingsLanguages.
+   *
+   * @see {getPreferredLanguages}
+   */
+  static #invalidateMostRecentTargetLanguages() {
+    TranslationsParent.#mostRecentTargetLanguages = null;
     TranslationsParent.#preferredLanguages = null;
-    TranslationsParent.getPreferredLanguages();
   }
 
-  static async observe(_subject, topic, _data) {
-    switch (topic) {
-      case "nsPref:changed":
-      case "intl:app-locales-changed": {
-        TranslationsParent.#resetPreferredLanguages();
-        break;
-      }
-      default:
-        throw new Error("Unknown observer event", topic);
-    }
+  /**
+   * Invalidates the #userSettingsLanguages portion of #preferredLanguages.
+   *
+   * This means that the next time getPreferredLanguages() is called, it will
+   * need to re-fetch the userSettingsLanguages, but it may still use a
+   * cached version of mostRecentTargetLanguages.
+   *
+   * @see {getPreferredLanguages}
+   */
+  static #invalidateUserSettingsLanguages() {
+    TranslationsParent.#webContentLanguages = null;
+    TranslationsParent.#userSettingsLanguages = null;
+    TranslationsParent.#preferredLanguages = null;
   }
 
   /**
@@ -752,29 +837,46 @@ export class TranslationsParent extends JSWindowActorParent {
   }
 
   /**
-   * An ordered list of preferred languages based on:
+   * Retrieves the most recently translated-into target languages.
    *
-   *   1. App languages
-   *   2. Web requested languages
-   *   3. OS language
+   * This will return a cached value unless #invalidateMostRecentTargetLanguages
+   * has been called.
    *
-   * @returns {string[]}
+   * @see {#invalidateMostRecentTargetLanguages}
+   *
+   * @returns {string[]} - An ordered list of the most recent target languages.
    */
-  static getPreferredLanguages() {
-    if (TranslationsParent.#preferredLanguages) {
-      return TranslationsParent.#preferredLanguages;
+  static #getMostRecentTargetLanguages() {
+    if (TranslationsParent.#mostRecentTargetLanguages) {
+      return TranslationsParent.#mostRecentTargetLanguages;
     }
 
-    if (!TranslationsParent.#observingLanguages) {
-      Services.obs.addObserver(
-        TranslationsParent.#resetPreferredLanguages,
-        "intl:app-locales-changed"
-      );
-      Services.prefs.addObserver(
-        "intl.accept_languages",
-        TranslationsParent.#resetPreferredLanguages
-      );
-      TranslationsParent.#observingLanguages = true;
+    // Store the mostRecentTargetLanguage values in reverse order
+    // so that the most recently used language is first in the array.
+    TranslationsParent.#mostRecentTargetLanguages = [
+      ...lazy.mostRecentTargetLanguages,
+    ].reverse();
+
+    return TranslationsParent.#mostRecentTargetLanguages;
+  }
+
+  /**
+   * Retrieves the user's preferred languages from the settings based on:
+   *
+   *   1. Web requested languages
+   *   2. App languages
+   *   3. OS language
+   *
+   * This will return a cached value unless #invalidateUserSettingsLanguages
+   * has been called.
+   *
+   * @see {#invalidateUserSettingsLanguages}
+   *
+   * @returns {string[]} - An ordered list of the user's settings languages.
+   */
+  static #getUserSettingsLanguages() {
+    if (TranslationsParent.#userSettingsLanguages) {
+      return TranslationsParent.#userSettingsLanguages;
     }
 
     // The system language could also be a good option for a language to offer the user.
@@ -785,7 +887,7 @@ export class TranslationsParent extends JSWindowActorParent {
       TranslationsParent.mockedSystemLocales ?? osPrefs.systemLocales;
 
     // Combine the locales together.
-    const preferredLocales = new Set([
+    const userSettingsLocales = new Set([
       ...TranslationsParent.getWebContentLanguages(),
       ...Services.locale.appLocalesAsBCP47,
       ...systemLocales,
@@ -794,41 +896,96 @@ export class TranslationsParent extends JSWindowActorParent {
     // Attempt to convert the locales to lang tags. Do not completely trust the
     // values coming from preferences and the OS to have been validated as correct
     // BCP 47 locale identifiers.
-    const langTags = new Set();
-    for (const locale of preferredLocales) {
+    const userSettingsLangTags = new Set();
+    for (const locale of userSettingsLocales) {
       try {
-        langTags.add(new Intl.Locale(locale).language);
+        userSettingsLangTags.add(new Intl.Locale(locale).language);
       } catch (_) {
         // The locale was invalid, discard it.
       }
     }
 
     // Convert the Set to an array to indicate that it is an ordered listing of languages.
-    TranslationsParent.#preferredLanguages = [...langTags];
+    TranslationsParent.#userSettingsLanguages = [...userSettingsLangTags];
+    return TranslationsParent.#userSettingsLanguages;
+  }
 
-    return TranslationsParent.#preferredLanguages;
+  /**
+   * An ordered list of preferred languages based on:
+   *
+   *   1. Most recent target languages
+   *   2. Web requested languages
+   *   3. App languages
+   *   4. OS language
+   *
+   * @param {object} options
+   * @param {string[]} [options.excludeLangTags] - BCP-47 language tags to intentionally exclude.
+   *
+   * @returns {string[]}
+   */
+  static getPreferredLanguages({ excludeLangTags } = {}) {
+    if (TranslationsParent.#preferredLanguages) {
+      return TranslationsParent.#preferredLanguages.filter(
+        langTag => !excludeLangTags?.includes(langTag)
+      );
+    }
+
+    if (!TranslationsParent.#observingLanguages) {
+      Services.obs.addObserver(
+        TranslationsParent.#invalidateUserSettingsLanguages,
+        "intl:app-locales-changed"
+      );
+      Services.obs.addObserver(() => {
+        TranslationsParent.#invalidateMostRecentTargetLanguages();
+        Services.obs.notifyObservers(
+          null,
+          "translations:maybe-update-user-lang-tag"
+        );
+      }, "translations:most-recent-target-language-changed");
+      Services.prefs.addObserver(
+        "intl.accept_languages",
+        TranslationsParent.#invalidateUserSettingsLanguages
+      );
+
+      TranslationsParent.#observingLanguages = true;
+    }
+
+    const preferredLanguages = new Set([
+      ...TranslationsParent.#getMostRecentTargetLanguages(),
+      ...TranslationsParent.#getUserSettingsLanguages(),
+    ]);
+
+    // Convert the Set to an array to indicate that it is an ordered listing of languages.
+    TranslationsParent.#preferredLanguages = [...preferredLanguages];
+
+    return TranslationsParent.#preferredLanguages.filter(
+      langTag => !excludeLangTags?.includes(langTag)
+    );
   }
 
   /**
    * Requests a new translations port.
    *
-   * @param {number} innerWindowId - The id of the current window.
    * @param {string} fromLanguage - The BCP-47 from-language tag.
    * @param {string} toLanguage - The BCP-47 to-language tag.
+   * @param {TranslationsParent} [translationsParent] - A TranslationsParent actor instance.
+   *   NOTE: This value should be provided only if your port is associated with Full Page Translations.
+   *   This will associate this translations port with the TranslationsParent actor instance, which will mean that changes
+   *   in the translation state will affect the state of the Full-Page Translations UI, e.g. the URL-bar Translations button.
    *
    * @returns {Promise<MessagePort | undefined>} The port for communication with the translation engine, or undefined on failure.
    */
   static async requestTranslationsPort(
-    innerWindowId,
     fromLanguage,
-    toLanguage
+    toLanguage,
+    translationsParent
   ) {
     let translationsEngineParent;
     try {
       translationsEngineParent =
         await lazy.EngineProcess.getTranslationsEngineParent();
     } catch (error) {
-      console.error("Failed to get the translation engine process", error);
+      lazy.console.error("Failed to get the translation engine process", error);
       return undefined;
     }
 
@@ -839,7 +996,7 @@ export class TranslationsParent extends JSWindowActorParent {
       fromLanguage,
       toLanguage,
       port1,
-      innerWindowId
+      translationsParent
     );
 
     return port2;
@@ -888,14 +1045,6 @@ export class TranslationsParent extends JSWindowActorParent {
           return undefined;
         }
 
-        let actor;
-        try {
-          actor = await lazy.EngineProcess.getTranslationsEngineParent();
-        } catch (error) {
-          console.error("Failed to get the translation engine process", error);
-          return undefined;
-        }
-
         if (this.#isDestroyed) {
           // This actor was already destroyed.
           return undefined;
@@ -907,21 +1056,24 @@ export class TranslationsParent extends JSWindowActorParent {
           );
         }
 
-        // The MessageChannel will be used for communicating directly between the content
-        // process and the engine's process.
-        const { port1, port2 } = new MessageChannel();
-        actor.startTranslation(
-          requestedTranslationPair.fromLanguage,
-          requestedTranslationPair.toLanguage,
-          port1,
-          this.innerWindowId,
+        const { fromLanguage, toLanguage } = requestedTranslationPair;
+        const port = await TranslationsParent.requestTranslationsPort(
+          fromLanguage,
+          toLanguage,
           this
         );
 
+        if (!port) {
+          lazy.console.error(
+            `Failed to create a translations port for language pair: (${fromLanguage} -> ${toLanguage})`
+          );
+          return undefined;
+        }
+
         this.sendAsyncMessage(
           "Translations:AcquirePort",
-          { port: port2 },
-          [port2] // Mark the port as transferable.
+          { port },
+          [port] // Mark the port as transferable.
         );
 
         return undefined;
@@ -1159,6 +1311,21 @@ export class TranslationsParent extends JSWindowActorParent {
         displayName,
       }))
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }
+
+  /**
+   * Get the display name for the given language Tag.
+   *
+   * @param {string} langTag
+   * @returns {string}
+   */
+  static getLanguageDisplayName(langTag) {
+    // Services.intl.getLanguageDisplayNames takes a list of language codes and
+    // returns a list of correspoding display names. Hence the langTag is sent as a list
+    let displayName = Services.intl.getLanguageDisplayNames(undefined, [
+      langTag,
+    ]);
+    return displayName[0];
   }
 
   /**
@@ -1471,7 +1638,6 @@ export class TranslationsParent extends JSWindowActorParent {
    * @param {number} majorVersion
    * @param {string} nextVersion
    * @param {string} [existingVersion]
-   *
    */
   static isBetterRecordVersion(majorVersion, nextVersion, existingVersion) {
     return (
@@ -2202,6 +2368,23 @@ export class TranslationsParent extends JSWindowActorParent {
     return results;
   }
 
+  static async getLanguageSize(language) {
+    const records = [
+      ...(await TranslationsParent.#getTranslationModelRecords()).values(),
+    ];
+
+    let downloadSize = 0;
+    await Promise.all(
+      records.map(async record => {
+        if (record.fromLang !== language && record.toLang !== language) {
+          return;
+        }
+        downloadSize += parseInt(record.attachment.size);
+      })
+    );
+    return downloadSize;
+  }
+
   /**
    * Gets the expected download size that will occur (if any) if translate is called on two given languages for display purposes.
    *
@@ -2329,6 +2512,8 @@ export class TranslationsParent extends JSWindowActorParent {
 
     // Derived data.
     TranslationsParent.#clearCachedLanguagePairs();
+    TranslationsParent.#mostRecentTargetLanguages = null;
+    TranslationsParent.#userSettingsLanguages = null;
     TranslationsParent.#preferredLanguages = null;
     TranslationsParent.#isTranslationsEngineSupported = null;
   }
@@ -2395,14 +2580,6 @@ export class TranslationsParent extends JSWindowActorParent {
     } else {
       const { docLangTag } = this.languageState.detectedLanguages;
 
-      let actor;
-      try {
-        actor = await lazy.EngineProcess.getTranslationsEngineParent();
-      } catch (error) {
-        console.error("Failed to get the translation engine process", error);
-        return;
-      }
-
       if (!this.innerWindowId) {
         throw new Error(
           "The innerWindowId for the TranslationsParent was not available."
@@ -2411,14 +2588,18 @@ export class TranslationsParent extends JSWindowActorParent {
 
       // The MessageChannel will be used for communicating directly between the content
       // process and the engine's process.
-      const { port1, port2 } = new MessageChannel();
-      actor.startTranslation(
+      const port = await TranslationsParent.requestTranslationsPort(
         fromLanguage,
         toLanguage,
-        port1,
-        this.innerWindowId,
         this
       );
+
+      if (!port) {
+        lazy.console.error(
+          `Failed to create a translations port for language pair: (${fromLanguage} -> ${toLanguage})`
+        );
+        return;
+      }
 
       this.languageState.requestedTranslationPair = {
         fromLanguage,
@@ -2440,16 +2621,18 @@ export class TranslationsParent extends JSWindowActorParent {
         requestTarget: "full_page",
       });
 
+      TranslationsParent.storeMostRecentTargetLanguage(toLanguage);
+
       this.sendAsyncMessage(
         "Translations:TranslatePage",
         {
           fromLanguage,
           toLanguage,
-          port: port2,
+          port,
         },
         // https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Transferable_objects
         // Mark the MessageChannel port as transferable.
-        [port2]
+        [port]
       );
     }
   }
@@ -2562,13 +2745,21 @@ export class TranslationsParent extends JSWindowActorParent {
   /**
    * Retrieves the top preferred user language for which translation
    * is supported when translating to that language.
+   *
+   * @param {object} options
+   * @param {string[]} [options.excludeLangTags] - BCP-47 language tags to intentionally exclude.
    */
-  static async getTopPreferredSupportedToLang() {
-    for (const langTag of TranslationsParent.getPreferredLanguages()) {
+  static async getTopPreferredSupportedToLang({ excludeLangTags } = {}) {
+    const preferredLanguages = TranslationsParent.getPreferredLanguages({
+      excludeLangTags,
+    });
+
+    for (const langTag of preferredLanguages) {
       if (await TranslationsParent.isSupportedAsToLang(langTag)) {
         return langTag;
       }
     }
+
     return PIVOT_LANGUAGE;
   }
 
@@ -2650,8 +2841,6 @@ export class TranslationsParent extends JSWindowActorParent {
       langTags.isDocLangTagSupported = determineIsDocLangTagSupported();
     }
 
-    const preferredLanguages = TranslationsParent.getPreferredLanguages();
-
     if (!langTags.docLangTag) {
       const message = "No valid language detected.";
       ChromeUtils.addProfilerMarker(
@@ -2661,15 +2850,14 @@ export class TranslationsParent extends JSWindowActorParent {
       );
       lazy.console.log(message, href);
 
-      const languagePairs = await TranslationsParent.getLanguagePairs();
+      const langTag = await TranslationsParent.getTopPreferredSupportedToLang();
       if (this.#isDestroyed) {
         return null;
       }
 
-      // Attempt to find a good language to select for the user.
-      langTags.userLangTag =
-        preferredLanguages.find(langTag => langTag === languagePairs.toLang) ??
-        null;
+      if (langTag) {
+        langTags.userLangTag = langTag;
+      }
 
       return langTags;
     }
@@ -2689,44 +2877,15 @@ export class TranslationsParent extends JSWindowActorParent {
       return langTags;
     }
 
-    // Attempt to find a matching language pair for a preferred language.
-    for (const preferredLangTag of preferredLanguages) {
-      if (!langTags.isDocLangTagSupported) {
-        if (languagePairs.some(({ toLang }) => toLang === preferredLangTag)) {
-          // Only match the "to" language, since the "from" is not supported.
-          langTags.userLangTag = preferredLangTag;
-        }
-        break;
-      }
+    const langTag = await TranslationsParent.getTopPreferredSupportedToLang({
+      excludeLangTags: [langTags.docLangTag],
+    });
+    if (this.#isDestroyed) {
+      return null;
+    }
 
-      // Is there a direct language pair match?
-      if (
-        languagePairs.some(
-          ({ fromLang, toLang }) =>
-            fromLang === langTags.docLangTag && toLang === preferredLangTag
-        )
-      ) {
-        // A match was found in one of the preferred languages.
-        langTags.userLangTag = preferredLangTag;
-        break;
-      }
-
-      // Is there a pivot language match?
-      if (
-        // Match doc -> pivot
-        languagePairs.some(
-          ({ fromLang, toLang }) =>
-            fromLang === langTags.docLangTag && toLang === PIVOT_LANGUAGE
-        ) &&
-        // Match pivot -> preferred language
-        languagePairs.some(
-          ({ fromLang, toLang }) =>
-            fromLang === PIVOT_LANGUAGE && toLang === preferredLangTag
-        )
-      ) {
-        langTags.userLangTag = preferredLangTag;
-        break;
-      }
+    if (langTag) {
+      langTags.userLangTag = langTag;
     }
 
     if (!langTags.userLangTag) {
@@ -2830,6 +2989,55 @@ export class TranslationsParent extends JSWindowActorParent {
   }
 
   /**
+   * Stores the given langTag as the most recent target language in the
+   * browser.translations.mostRecentTargetLanguage pref.
+   *
+   * @param {string} langTag - A BCP-47 language tag.
+   */
+  static storeMostRecentTargetLanguage(langTag) {
+    // The pref's language tags are managed by this function as a unique-item
+    // sliding window with a max size.
+    //
+    // Examples with MAX_SIZE = 3:
+    //
+    //  Add a new item to an empty window:
+    //  [ ] + a => [a]
+    //
+    //  Add a new item to a non-full window:
+    //  [a] + b => [a, b]
+    //
+    //  [a, b] + c => [a, b, c]
+    //
+    //  Add a new item to a full window:
+    //  [a, b, c] + z => [b, c, z]
+    //
+    //  Add an item that is already within a window:
+    //  [b, c, z] + z => [b, c, z]
+    //
+    //  [b, c, z] + c => [b, z, c]
+    //
+    //  [b, z, c] + b => [z, c, b]
+    const MAX_SIZE = 3;
+    const mostRecentTargetLanguages = lazy.mostRecentTargetLanguages;
+
+    if (mostRecentTargetLanguages.has(langTag)) {
+      // The language tag is already present, so delete it to ensure that its order is updated when it gets re-added.
+      mostRecentTargetLanguages.delete(langTag);
+    } else if (mostRecentTargetLanguages.size === MAX_SIZE) {
+      // We only store MAX_SIZE lang tags, so remove the oldest language tag to make room for the new language tag.
+      const oldestLangTag = mostRecentTargetLanguages.keys().next().value;
+      mostRecentTargetLanguages.delete(oldestLangTag);
+    }
+
+    mostRecentTargetLanguages.add(langTag);
+
+    Services.prefs.setCharPref(
+      "browser.translations.mostRecentTargetLanguages",
+      [...mostRecentTargetLanguages].join(",")
+    );
+  }
+
+  /**
    * Toggles the always-translate language preference by adding the language
    * to the pref list if it is not present, or removing it if it is present.
    *
@@ -2858,6 +3066,14 @@ export class TranslationsParent extends JSWindowActorParent {
     this.addLangTagToPref(docLangTag, ALWAYS_TRANSLATE_LANGS_PREF);
     this.removeLangTagFromPref(docLangTag, NEVER_TRANSLATE_LANGS_PREF);
     return true;
+  }
+
+  static getAlwaysTranslateLanguages() {
+    return lazy.alwaysTranslateLangTags;
+  }
+
+  static getNeverTranslateLanguages() {
+    return lazy.neverTranslateLangTags;
   }
 
   /**
@@ -3028,6 +3244,11 @@ export class TranslationsParent extends JSWindowActorParent {
       );
     }
 
+    Services.obs.removeObserver(
+      this.maybeUpdateUserLangTag,
+      "translations:maybe-update-user-lang-tag"
+    );
+
     this.#ensureTranslationsDiscarded();
 
     this.#isDestroyed = true;
@@ -3038,29 +3259,33 @@ export class TranslationsParent extends JSWindowActorParent {
  * Validate some simple Wasm that uses a SIMD operation.
  */
 function detectSimdSupport() {
-  return WebAssembly.validate(
-    new Uint8Array(
-      // ```
-      // ;; Detect SIMD support.
-      // ;; Compile by running: wat2wasm --enable-all simd-detect.wat
-      //
-      // (module
-      //   (func (result v128)
-      //     i32.const 0
-      //     i8x16.splat
-      //     i8x16.popcnt
-      //   )
-      // )
-      // ```
+  try {
+    return WebAssembly.validate(
+      new Uint8Array(
+        // ```
+        // ;; Detect SIMD support.
+        // ;; Compile by running: wat2wasm --enable-all simd-detect.wat
+        //
+        // (module
+        //   (func (result v128)
+        //     i32.const 0
+        //     i8x16.splat
+        //     i8x16.popcnt
+        //   )
+        // )
+        // ```
 
-      // prettier-ignore
-      [
+        // prettier-ignore
+        [
         0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00,
         0x01, 0x7b, 0x03, 0x02, 0x01, 0x00, 0x0a, 0x0a, 0x01, 0x08, 0x00, 0x41, 0x00,
         0xfd, 0x0f, 0xfd, 0x62, 0x0b
       ]
-    )
-  );
+      )
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -3102,7 +3327,7 @@ class TranslationsLanguageState {
   /**
    * Dispatch anytime the language details change, so that any UI can react to it.
    */
-  dispatch() {
+  dispatch({ reason } = {}) {
     const browser = this.#actor.browsingContext.top.embedderElement;
     if (!browser) {
       return;
@@ -3113,6 +3338,7 @@ class TranslationsLanguageState {
         bubbles: true,
         detail: {
           actor: this.#actor,
+          reason,
         },
       })
     );
@@ -3137,7 +3363,7 @@ class TranslationsLanguageState {
     this.#error = null;
     this.#isEngineReady = false;
     this.#requestedTranslationPair = requestedTranslationPair;
-    this.dispatch();
+    this.dispatch({ reason: "requestedTranslationPair" });
   }
 
   /**
@@ -3155,7 +3381,7 @@ class TranslationsLanguageState {
     }
 
     this.#detectedLanguages = detectedLanguages;
-    this.dispatch();
+    this.dispatch({ reason: "detectedLanguages" });
   }
 
   /**
@@ -3173,7 +3399,7 @@ class TranslationsLanguageState {
     }
 
     this.#hasVisibleChange = hasVisibleChange;
-    this.dispatch();
+    this.dispatch({ reason: "hasVisibleChange" });
   }
 
   /**
@@ -3182,11 +3408,38 @@ class TranslationsLanguageState {
    */
   locationChanged() {
     this.#error = null;
-    this.dispatch();
+    this.dispatch({ reason: "locationChanged" });
   }
 
   /**
-   * The last error that occured during translation.
+   * Makes a determination about whether to update the cached userLangTag with the given langTag.
+   */
+  maybeUpdateUserLangTag(langTag) {
+    const currentUserLangTag = this.#detectedLanguages?.userLangTag;
+
+    if (!currentUserLangTag) {
+      // The userLangTag is not present in the detectedLanguages cache.
+      // This is intentional and we should not update it in this case,
+      // otherwise we may end up showing the Translations URL-bar button
+      // on a page where it is currently hidden.
+      return;
+    }
+
+    this.#detectedLanguages.userLangTag = langTag;
+    // There is no need to call this.dispatch() in this function.
+    //
+    // Updating the userLangTag will affect which language is offered the next time
+    // a panel is opened, or which language is auto-translated into when a page loads,
+    // but this information should not eagerly affect the visual states of Translations
+    // content across the browser. Relevant consumers will fetch the updated langTag from
+    // the cache when they need it.
+    //
+    // In theory, calling this.dispatch() should be fine to do since the LanguageState event
+    // guards itself against irrelevant changes, but that would ultimately cause unneeded noise.
+  }
+
+  /**
+   * The last error that occurred during translation.
    */
   get error() {
     return this.#error;
@@ -3200,7 +3453,7 @@ class TranslationsLanguageState {
     // Setting an error invalidates the requested translation pair.
     this.#requestedTranslationPair = null;
     this.#isEngineReady = false;
-    this.dispatch();
+    this.dispatch({ reason: "error" });
   }
 
   /**
@@ -3216,7 +3469,7 @@ class TranslationsLanguageState {
       return;
     }
     this.#isEngineReady = isEngineReady;
-    this.dispatch();
+    this.dispatch({ reason: "isEngineReady" });
   }
 }
 

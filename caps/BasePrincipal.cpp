@@ -660,18 +660,18 @@ nsresult BasePrincipal::CheckMayLoadHelper(nsIURI* aURI,
 
   // If the URL being loaded corresponds to a WebExtension URL, ask the policy
   // if the path should be accessible.
-  //
-  // This is done directly, rather than first checking `NS_URIChainHasFlags` for
-  // `WEBEXT_URI_WEB_ACCESSIBLE`, as `CheckMayLoadHelper` may be called
-  // off-main-thread, and it is not safe to check dynamic URI flags
-  // off-main-thread. MV2 web-accessible resources also currently do not set
-  // `WEBEXT_URI_WEB_ACCESSIBLE`, and need to be allowed in this code.
-  extensions::URLInfo urlInfo(aURI);
-  if (RefPtr<extensions::WebExtensionPolicyCore> urlPolicyCore =
-          ExtensionPolicyService::GetCoreByURL(urlInfo)) {
-    extensions::URLInfo prinUrlInfo(prinURI);
-    if (urlPolicyCore->SourceMayAccessPath(prinUrlInfo, urlInfo.FilePath())) {
-      return NS_OK;
+  bool isWebExtensionResource;
+  rv = NS_URIChainHasFlags(aURI,
+                           nsIProtocolHandler::URI_IS_WEBEXTENSION_RESOURCE,
+                           &isWebExtensionResource);
+  if (NS_SUCCEEDED(rv) && isWebExtensionResource) {
+    extensions::URLInfo urlInfo(aURI);
+    if (RefPtr<extensions::WebExtensionPolicyCore> urlPolicyCore =
+            ExtensionPolicyService::GetCoreByURL(urlInfo)) {
+      extensions::URLInfo prinUrlInfo(prinURI);
+      if (urlPolicyCore->SourceMayAccessPath(prinUrlInfo, urlInfo.FilePath())) {
+        return NS_OK;
+      }
     }
   }
 
@@ -764,6 +764,10 @@ BasePrincipal::IsL10nAllowed(nsIURI* aURI, bool* aRes) {
   nsresult rv = GetURI(getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, NS_OK);
 
+  if (!uri) {
+    return NS_OK;
+  }
+
   bool hasFlags;
 
   // Allow access to uris that cannot be loaded by web content.
@@ -786,18 +790,6 @@ BasePrincipal::IsL10nAllowed(nsIURI* aURI, bool* aRes) {
 
   auto policy = AddonPolicyCore();
   *aRes = (policy && policy->IsPrivileged());
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-BasePrincipal::AllowsRelaxStrictFileOriginPolicy(nsIURI* aURI, bool* aRes) {
-  *aRes = false;
-  nsCOMPtr<nsIURI> prinURI;
-  nsresult rv = GetURI(getter_AddRefs(prinURI));
-  if (NS_FAILED(rv) || !prinURI) {
-    return NS_OK;
-  }
-  *aRes = NS_RelaxStrictFileOriginPolicy(aURI, prinURI);
   return NS_OK;
 }
 
@@ -846,12 +838,24 @@ BasePrincipal::HasFirstpartyStorageAccess(mozIDOMWindow* aCheckWindow,
   *aRejectedReason = 0;
   *aOutAllowed = false;
 
+  if (IsSystemPrincipal()) {
+    // System principal is always considered to have first-party storage access.
+    *aOutAllowed = true;
+    return NS_OK;
+  }
+
   nsPIDOMWindowInner* win = nsPIDOMWindowInner::From(aCheckWindow);
   nsCOMPtr<nsIURI> uri;
   nsresult rv = GetURI(getter_AddRefs(uri));
   if (NS_FAILED(rv)) {
     return rv;
   }
+
+  // The uri could be null if the principal is an expanded principal.
+  if (!uri) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
   *aOutAllowed = ShouldAllowAccessFor(win, uri, aRejectedReason);
   return NS_OK;
 }
@@ -1180,6 +1184,12 @@ BasePrincipal::GetUserContextId(uint32_t* aUserContextId) {
 NS_IMETHODIMP
 BasePrincipal::GetPrivateBrowsingId(uint32_t* aPrivateBrowsingId) {
   *aPrivateBrowsingId = PrivateBrowsingId();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+BasePrincipal::GetIsInPrivateBrowsing(bool* aIsInPrivateBrowsing) {
+  *aIsInPrivateBrowsing = mOriginAttributes.IsPrivateBrowsing();
   return NS_OK;
 }
 

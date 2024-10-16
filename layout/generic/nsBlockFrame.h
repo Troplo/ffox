@@ -273,9 +273,13 @@ class nsBlockFrame : public nsContainerFrame {
                                     BaselineSharingGroup aBaselineGroup,
                                     BaselineExportContext aExportContext) const;
 
+  // MinISize() and PrefISize() are helpers to implement IntrinsicISize().
+  nscoord MinISize(gfxContext* aContext);
+  nscoord PrefISize(gfxContext* aContext);
+
  public:
-  nscoord GetMinISize(gfxContext* aRenderingContext) override;
-  nscoord GetPrefISize(gfxContext* aRenderingContext) override;
+  nscoord IntrinsicISize(gfxContext* aContext,
+                         mozilla::IntrinsicISizeType aType) override;
 
   nsRect ComputeTightBounds(DrawTarget* aDrawTarget) const override;
 
@@ -432,6 +436,13 @@ class nsBlockFrame : public nsContainerFrame {
   nsLineBox* GetLineCursorForQuery() {
     return MaybeHasLineCursor() ? GetProperty(LineCursorPropertyQuery())
                                 : nullptr;
+  }
+
+  void SetLineCursorForDisplay(nsLineBox* aLine) {
+    MOZ_ASSERT(aLine, "must have a line");
+    MOZ_ASSERT(!mLines.empty(), "aLine isn't my line");
+    SetProperty(LineCursorPropertyDisplay(), aLine);
+    AddStateBits(NS_BLOCK_HAS_LINE_CURSOR);
   }
 
   nsLineBox* NewLineBox(nsIFrame* aFrame, bool aIsBlock) {
@@ -626,7 +637,7 @@ class nsBlockFrame : public nsContainerFrame {
 
   bool ComputeCustomOverflow(mozilla::OverflowAreas&) override;
 
-  void UnionChildOverflow(mozilla::OverflowAreas&) override;
+  void UnionChildOverflow(mozilla::OverflowAreas&, bool aAsIfScrolled) override;
 
   /**
    * Load all of aFrame's floats into the float manager iff aFrame is not a

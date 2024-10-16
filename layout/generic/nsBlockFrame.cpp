@@ -807,29 +807,39 @@ bool nsBlockFrame::TextIndentAppliesTo(const LineIterator& aLine) const {
   return isFirstLineOrAfterHardBreak != textIndent.hanging;
 }
 
-/* virtual */
-nscoord nsBlockFrame::GetMinISize(gfxContext* aRenderingContext) {
-  nsIFrame* firstInFlow = FirstContinuation();
-  if (firstInFlow != this) {
-    return firstInFlow->GetMinISize(aRenderingContext);
+nscoord nsBlockFrame::IntrinsicISize(gfxContext* aContext,
+                                     IntrinsicISizeType aType) {
+  nsIFrame* firstCont = FirstContinuation();
+  if (firstCont != this) {
+    return firstCont->IntrinsicISize(aContext, aType);
   }
 
   CheckIntrinsicCacheAgainstShrinkWrapState();
 
-  if (mCachedMinISize != NS_INTRINSIC_ISIZE_UNKNOWN) {
+  if (aType == IntrinsicISizeType::MinISize) {
+    if (mCachedMinISize == NS_INTRINSIC_ISIZE_UNKNOWN) {
+      mCachedMinISize = MinISize(aContext);
+    }
     return mCachedMinISize;
   }
 
+  if (mCachedPrefISize == NS_INTRINSIC_ISIZE_UNKNOWN) {
+    mCachedPrefISize = PrefISize(aContext);
+  }
+  return mCachedPrefISize;
+}
+
+/* virtual */
+nscoord nsBlockFrame::MinISize(gfxContext* aContext) {
   if (Maybe<nscoord> containISize = ContainIntrinsicISize()) {
-    mCachedMinISize = *containISize;
-    return mCachedMinISize;
+    return *containISize;
   }
 
 #ifdef DEBUG
   if (gNoisyIntrinsic) {
     IndentBy(stdout, gNoiseIndent);
     ListTag(stdout);
-    printf(": GetMinISize\n");
+    printf(": MinISize\n");
   }
   AutoNoisyIndenter indenter(gNoisyIntrinsic);
 #endif
@@ -862,7 +872,7 @@ nscoord nsBlockFrame::GetMinISize(gfxContext* aRenderingContext) {
       if (line->IsBlock()) {
         data.ForceBreak();
         data.mCurrentLine = nsLayoutUtils::IntrinsicForContainer(
-            aRenderingContext, line->mFirstChild, IntrinsicISizeType::MinISize);
+            aContext, line->mFirstChild, IntrinsicISizeType::MinISize);
         data.ForceBreak();
       } else {
         if (!curFrame->GetPrevContinuation() && TextIndentAppliesTo(line)) {
@@ -873,7 +883,7 @@ nscoord nsBlockFrame::GetMinISize(gfxContext* aRenderingContext) {
         nsIFrame* kid = line->mFirstChild;
         for (int32_t i = 0, i_end = line->GetChildCount(); i != i_end;
              ++i, kid = kid->GetNextSibling()) {
-          kid->AddInlineMinISize(aRenderingContext, &data);
+          kid->AddInlineMinISize(aContext, &data);
           if (whiteSpaceCanWrap && data.mTrailingWhitespace) {
             data.OptionallyBreak();
           }
@@ -889,34 +899,20 @@ nscoord nsBlockFrame::GetMinISize(gfxContext* aRenderingContext) {
     }
   }
   data.ForceBreak();
-
-  mCachedMinISize = data.mPrevLines;
-  return mCachedMinISize;
+  return data.mPrevLines;
 }
 
 /* virtual */
-nscoord nsBlockFrame::GetPrefISize(gfxContext* aRenderingContext) {
-  nsIFrame* firstInFlow = FirstContinuation();
-  if (firstInFlow != this) {
-    return firstInFlow->GetPrefISize(aRenderingContext);
-  }
-
-  CheckIntrinsicCacheAgainstShrinkWrapState();
-
-  if (mCachedPrefISize != NS_INTRINSIC_ISIZE_UNKNOWN) {
-    return mCachedPrefISize;
-  }
-
+nscoord nsBlockFrame::PrefISize(gfxContext* aContext) {
   if (Maybe<nscoord> containISize = ContainIntrinsicISize()) {
-    mCachedPrefISize = *containISize;
-    return mCachedPrefISize;
+    return *containISize;
   }
 
 #ifdef DEBUG
   if (gNoisyIntrinsic) {
     IndentBy(stdout, gNoiseIndent);
     ListTag(stdout);
-    printf(": GetPrefISize\n");
+    printf(": PrefISize\n");
   }
   AutoNoisyIndenter indenter(gNoisyIntrinsic);
 #endif
@@ -953,8 +949,7 @@ nscoord nsBlockFrame::GetPrefISize(gfxContext* aRenderingContext) {
         }
         data.ForceBreak(clearType);
         data.mCurrentLine = nsLayoutUtils::IntrinsicForContainer(
-            aRenderingContext, line->mFirstChild,
-            IntrinsicISizeType::PrefISize);
+            aContext, line->mFirstChild, IntrinsicISizeType::PrefISize);
         data.ForceBreak();
       } else {
         if (!curFrame->GetPrevContinuation() && TextIndentAppliesTo(line)) {
@@ -970,7 +965,7 @@ nscoord nsBlockFrame::GetPrefISize(gfxContext* aRenderingContext) {
         nsIFrame* kid = line->mFirstChild;
         for (int32_t i = 0, i_end = line->GetChildCount(); i != i_end;
              ++i, kid = kid->GetNextSibling()) {
-          kid->AddInlinePrefISize(aRenderingContext, &data);
+          kid->AddInlinePrefISize(aContext, &data);
         }
       }
 #ifdef DEBUG
@@ -983,9 +978,7 @@ nscoord nsBlockFrame::GetPrefISize(gfxContext* aRenderingContext) {
     }
   }
   data.ForceBreak();
-
-  mCachedPrefISize = data.mPrevLines;
-  return mCachedPrefISize;
+  return data.mPrevLines;
 }
 
 nsRect nsBlockFrame::ComputeTightBounds(DrawTarget* aDrawTarget) const {
@@ -1792,7 +1785,7 @@ void nsBlockFrame::Reflow(nsPresContext* aPresContext, ReflowOutput& aMetrics,
     ListTag(stdout);
     printf(": status=%s metrics=%d,%d carriedMargin=%d",
            ToString(aStatus).c_str(), aMetrics.ISize(parentWM),
-           aMetrics.BSize(parentWM), aMetrics.mCarriedOutBEndMargin.get());
+           aMetrics.BSize(parentWM), aMetrics.mCarriedOutBEndMargin.Get());
     if (HasOverflowAreas()) {
       printf(" overflow-vis={%d,%d,%d,%d}", aMetrics.InkOverflow().x,
              aMetrics.InkOverflow().y, aMetrics.InkOverflow().width,
@@ -2145,7 +2138,7 @@ nscoord nsBlockFrame::ComputeFinalSize(const ReflowInput& aReflowInput,
     if (CheckForCollapsedBEndMarginFromClearanceLine()) {
       // Convert the children's carried out margin to something that
       // we will include in our height
-      nonCarriedOutBDirMargin = aState.mPrevBEndMargin.get();
+      nonCarriedOutBDirMargin = aState.mPrevBEndMargin.Get();
       aState.mPrevBEndMargin.Zero();
     }
     aMetrics.mCarriedOutBEndMargin = aState.mPrevBEndMargin;
@@ -2166,7 +2159,7 @@ nscoord nsBlockFrame::ComputeFinalSize(const ReflowInput& aReflowInput,
     if (blockEndEdgeOfChildren < aState.mReflowInput.AvailableBSize()) {
       // Truncate block-end margin if it doesn't fit to our available BSize.
       blockEndEdgeOfChildren =
-          std::min(blockEndEdgeOfChildren + aState.mPrevBEndMargin.get(),
+          std::min(blockEndEdgeOfChildren + aState.mPrevBEndMargin.Get(),
                    aState.mReflowInput.AvailableBSize());
     }
   }
@@ -2545,7 +2538,8 @@ void nsBlockFrame::ComputeOverflowAreas(OverflowAreas& aOverflowAreas,
 #endif
 }
 
-void nsBlockFrame::UnionChildOverflow(OverflowAreas& aOverflowAreas) {
+void nsBlockFrame::UnionChildOverflow(OverflowAreas& aOverflowAreas,
+                                      bool aAsIfScrolled) {
   // We need to update the overflow areas of lines manually, as they
   // get cached and re-used otherwise. Lines aren't exposed as normal
   // frame children, so calling UnionChildOverflow alone will end up
@@ -2868,7 +2862,7 @@ static void DumpLine(const BlockReflowState& aState, nsLineBox* aLine,
         aLine->IsDirty() ? "yes" : "no", aLine->IStart(), aLine->BStart(),
         aLine->ISize(), aLine->BSize(), ovis.x, ovis.y, ovis.width, ovis.height,
         oscr.x, oscr.y, oscr.width, oscr.height, aDeltaBCoord,
-        aState.mPrevBEndMargin.get(), aLine->GetChildCount());
+        aState.mPrevBEndMargin.Get(), aLine->GetChildCount());
   }
 #endif
 }
@@ -3443,6 +3437,7 @@ bool nsBlockFrame::ReflowDirtyLines(BlockReflowState& aState) {
       if (!nextInFlow->mLines.empty()) {
         RemoveFirstLine(nextInFlow->mLines, nextInFlow->mFrames, &pulledLine,
                         &pulledFrames);
+        ClearLineCursors();
       } else {
         // Grab an overflow line if there are any
         FrameLines* overflowLines = nextInFlow->GetOverflowLines();
@@ -3663,6 +3658,7 @@ void nsBlockFrame::DeleteLine(BlockReflowState& aState,
     nsLineBox* line = aLine;
     aLine = mLines.erase(aLine);
     FreeLineBox(line);
+    ClearLineCursors();
     // Mark the previous margin of the next line dirty since we need to
     // recompute its top position.
     if (aLine != aLineEnd) {
@@ -4091,7 +4087,7 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowState& aState,
   // assumption.
   if (!treatWithClearance && !applyBStartMargin && mightClearFloats &&
       aState.mReflowInput.mDiscoveredClearance) {
-    nscoord curBCoord = aState.mBCoord + aState.mPrevBEndMargin.get();
+    nscoord curBCoord = aState.mBCoord + aState.mPrevBEndMargin.Get();
     if (auto [clearBCoord, result] =
             aState.ClearFloats(curBCoord, clearType, floatAvoidingBlock);
         result != ClearFloatsResult::BCoordNoChange) {
@@ -4113,7 +4109,7 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowState& aState,
 
   nsIFrame* clearanceFrame = nullptr;
   const nscoord startingBCoord = aState.mBCoord;
-  const nsCollapsingMargin incomingMargin = aState.mPrevBEndMargin;
+  const CollapsingMargin incomingMargin = aState.mPrevBEndMargin;
   nscoord clearance;
   // Save the original position of the frame so that we can reposition
   // its view as needed.
@@ -4144,7 +4140,7 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowState& aState,
                               availSpace);
 
       if (treatWithClearance) {
-        aState.mBCoord += aState.mPrevBEndMargin.get();
+        aState.mBCoord += aState.mPrevBEndMargin.Get();
         aState.mPrevBEndMargin.Zero();
       }
 
@@ -4171,7 +4167,7 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowState& aState,
         // this block has clearance to change on the second pass; that
         // decision is only allowed to be made under the optimistic
         // first pass.
-        nscoord curBCoord = aState.mBCoord + aState.mPrevBEndMargin.get();
+        nscoord curBCoord = aState.mBCoord + aState.mPrevBEndMargin.Get();
         if (auto [clearBCoord, result] =
                 aState.ClearFloats(curBCoord, clearType, floatAvoidingBlock);
             result != ClearFloatsResult::BCoordNoChange) {
@@ -4184,7 +4180,7 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowState& aState,
           aLine->SetHasClearance();
 
           // Apply incoming margins
-          aState.mBCoord += aState.mPrevBEndMargin.get();
+          aState.mBCoord += aState.mPrevBEndMargin.Get();
           aState.mPrevBEndMargin.Zero();
 
           // Compute the collapsed margin again, ignoring the incoming margin
@@ -4198,7 +4194,7 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowState& aState,
       // Temporarily advance the running block-direction value so that the
       // GetFloatAvailableSpace method will return the right available space.
       // This undone as soon as the horizontal margins are computed.
-      bStartMargin = aState.mPrevBEndMargin.get();
+      bStartMargin = aState.mPrevBEndMargin.Get();
 
       if (treatWithClearance) {
         nscoord currentBCoord = aState.mBCoord;
@@ -4517,7 +4513,7 @@ void nsBlockFrame::ReflowBlockFrame(BlockReflowState& aState,
       // isImpacted doesn't include impact from the block's own floats.
       bool forceFit = aState.IsAdjacentWithBStart() && clearance <= 0 &&
                       !floatAvailableSpace.HasFloats();
-      nsCollapsingMargin collapsedBEndMargin;
+      CollapsingMargin collapsedBEndMargin;
       OverflowAreas overflowAreas;
       *aKeepReflowGoing =
           brc.PlaceBlock(*childReflowInput, forceFit, aLine.get(),
@@ -4708,7 +4704,7 @@ bool nsBlockFrame::ReflowInlineFrames(BlockReflowState& aState,
   // Setup initial coordinate system for reflowing the inline frames
   // into. Apply a previous block frame's block-end margin first.
   if (ShouldApplyBStartMargin(aState, aLine)) {
-    aState.mBCoord += aState.mPrevBEndMargin.get();
+    aState.mBCoord += aState.mPrevBEndMargin.Get();
   }
   nsFlowAreaRect floatAvailableSpace = aState.GetFloatAvailableSpace();
 
@@ -4880,6 +4876,7 @@ void nsBlockFrame::DoReflowInlineFrames(
   for (i = 0;
        LineReflowStatus::OK == lineReflowStatus && i < aLine->GetChildCount();
        i++, frame = frame->GetNextSibling()) {
+    SetLineCursorForDisplay(aLine);
     ReflowInlineFrame(aState, aLineLayout, aLine, frame, &lineReflowStatus);
     if (LineReflowStatus::OK != lineReflowStatus) {
       // It is possible that one or more of next lines are empty
@@ -4893,6 +4890,7 @@ void nsBlockFrame::DoReflowInlineFrames(
         aLine = mLines.erase(aLine);
         NS_ASSERTION(nullptr == toremove->mFirstChild, "bad empty line");
         FreeLineBox(toremove);
+        ClearLineCursors();
       }
       --aLine;
 
@@ -4913,6 +4911,7 @@ void nsBlockFrame::DoReflowInlineFrames(
 
       while (LineReflowStatus::OK == lineReflowStatus) {
         int32_t oldCount = aLine->GetChildCount();
+        SetLineCursorForDisplay(aLine);
         ReflowInlineFrame(aState, aLineLayout, aLine, frame, &lineReflowStatus);
         if (aLine->GetChildCount() != oldCount) {
           // We just created a continuation for aFrame AND its going
@@ -4926,6 +4925,7 @@ void nsBlockFrame::DoReflowInlineFrames(
       }
     }
   }
+  ClearLineCursors();
 
   aState.mFlags.mIsLineLayoutEmpty = aLineLayout.LineIsEmpty();
 
@@ -5539,7 +5539,7 @@ bool nsBlockFrame::PlaceLine(BlockReflowState& aState,
     // We already called |ShouldApplyBStartMargin|, and if we applied it
     // then mShouldApplyBStartMargin is set.
     nscoord dy = aState.mFlags.mShouldApplyBStartMargin
-                     ? -aState.mPrevBEndMargin.get()
+                     ? -aState.mPrevBEndMargin.Get()
                      : 0;
     newBCoord = aState.mBCoord + dy;
   }
@@ -5670,10 +5670,15 @@ void nsBlockFrame::PushLines(BlockReflowState& aState,
       // Mark all the overflow lines dirty so that they get reflowed when
       // they are pulled up by our next-in-flow.
 
+      nsLineBox* cursor = GetLineCursorForDisplay();
+
       // XXXldb Can this get called O(N) times making the whole thing O(N^2)?
       for (LineIterator line = overflowLines->mLines.begin(),
                         line_end = overflowLines->mLines.end();
            line != line_end; ++line) {
+        if (line == cursor) {
+          ClearLineCursors();
+        }
         line->MarkDirty();
         line->MarkPreviousMarginDirty();
         line->SetMovedFragments();
@@ -6888,8 +6893,8 @@ bool nsBlockInFlowLineIterator::FindValidLine() {
 // on looking for continuations.
 void nsBlockFrame::DoRemoveFrame(DestroyContext& aContext,
                                  nsIFrame* aDeletedFrame, uint32_t aFlags) {
-  // Clear our line cursor, since our lines may change.
-  ClearLineCursors();
+  // We use the line cursor to attempt to optimize removal, but must ensure
+  // it is cleared if lines change such that it may become invalid.
 
   if (aDeletedFrame->HasAnyStateBits(NS_FRAME_OUT_OF_FLOW |
                                      NS_FRAME_IS_OVERFLOW_CONTAINER)) {
@@ -6905,22 +6910,49 @@ void nsBlockFrame::DoRemoveFrame(DestroyContext& aContext,
     return;
   }
 
-  // Find the line that contains deletedFrame
+  // Find the line that contains deletedFrame. Start from the line cursor
+  // (if available) and search to the end of the normal line list, then
+  // from the start to the line cursor, and last the overflow lines.
   nsLineList::iterator line_start = mLines.begin(), line_end = mLines.end();
   nsLineList::iterator line = line_start;
+
+  bool found = false;
+  if (nsLineBox* cursor = GetLineCursorForDisplay()) {
+    for (line.SetPosition(cursor); line != line_end; ++line) {
+      if (line->Contains(aDeletedFrame)) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      // Setup for a shorter TryAllLines normal line search to avoid searching
+      // the [cursor .. line_end] range again.
+      line = line_start;
+      line_end.SetPosition(cursor);
+    }
+  }
+
   FrameLines* overflowLines = nullptr;
   bool searchingOverflowList = false;
-  // Make sure we look in the overflow lines even if the normal line
-  // list is empty
-  TryAllLines(&line, &line_start, &line_end, &searchingOverflowList,
-              &overflowLines);
-  while (line != line_end) {
-    if (line->Contains(aDeletedFrame)) {
-      break;
-    }
-    ++line;
+  if (!found) {
+    // Make sure we look in the overflow lines even if the normal line
+    // list is empty.
     TryAllLines(&line, &line_start, &line_end, &searchingOverflowList,
                 &overflowLines);
+    while (line != line_end) {
+      if (line->Contains(aDeletedFrame)) {
+        break;
+      }
+      ++line;
+      TryAllLines(&line, &line_start, &line_end, &searchingOverflowList,
+                  &overflowLines);
+    }
+    if (!searchingOverflowList && (GetStateBits() & NS_BLOCK_HAS_LINE_CURSOR)) {
+      // Restore line_end since we shortened the search to the cursor.
+      line_end = mLines.end();
+      // Clear our line cursors, since our normal line list may change.
+      ClearLineCursors();
+    }
   }
 
   if (line == line_end) {
@@ -7028,6 +7060,7 @@ void nsBlockFrame::DoRemoveFrame(DestroyContext& aContext,
       nsLineBox* cur = line;
       if (!searchingOverflowList) {
         line = mLines.erase(line);
+        ClearLineCursors();
         // Invalidate the space taken up by the line.
         // XXX We need to do this if we're removing a frame as a result of
         // a call to RemoveFrame(), but we may not need to do this in all
@@ -7220,6 +7253,7 @@ void nsBlockFrame::RemoveFrameFromLine(nsIFrame* aChild,
       aLine->MarkPreviousMarginDirty();
     }
     FreeLineBox(lineBox);
+    ClearLineCursors();
   }
 }
 
@@ -7263,7 +7297,7 @@ void nsBlockFrame::ReflowFloat(BlockReflowState& aState, ReflowInput& aFloatRI,
 
   nsIFrame* clearanceFrame = nullptr;
   do {
-    nsCollapsingMargin margin;
+    CollapsingMargin margin;
     bool mayNeedRetry = false;
     aFloatRI.mDiscoveredClearance = nullptr;
     // Only first in flow gets a block-start margin.
@@ -8331,7 +8365,8 @@ nsBlockFrame::FloatAvoidingISizeToClear nsBlockFrame::ISizeToClearPastFloats(
 
   nscoord marginISize = computedMargin.IStartEnd(wm);
   const auto& iSize = reflowInput.mStylePosition->ISize(wm);
-  if (marginISize < 0 && (iSize.IsAuto() || iSize.IsMozAvailable())) {
+  if (marginISize < 0 &&
+      (iSize.IsAuto() || iSize.BehavesLikeStretchOnInlineAxis())) {
     // If we get here, floatAvoidingBlock has a negative amount of inline-axis
     // margin and an 'auto' (or ~equivalently, -moz-available) inline
     // size. Under these circumstances, we use the margin to establish a

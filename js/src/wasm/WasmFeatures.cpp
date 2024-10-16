@@ -22,7 +22,7 @@
 #include "jit/JitContext.h"
 #include "jit/JitOptions.h"
 #include "js/Prefs.h"
-#include "util/StringBuffer.h"
+#include "util/StringBuilder.h"
 #include "vm/JSContext.h"
 #include "vm/Realm.h"
 #include "vm/StringType.h"
@@ -302,6 +302,11 @@ bool wasm::CodeCachingAvailable(JSContext* cx) {
 #ifdef FUZZING_JS_FUZZILLI
   return false;
 #else
+
+  // We temporarily don't support caching with our new compile pipeline
+  if (ExperimentalCompilePipelineAvailable(cx)) {
+    return false;
+  }
 
   // At the moment, we require Ion support for code caching.  The main reason
   // for this is that wasm::CompileAndSerialize() does not have access to

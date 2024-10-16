@@ -175,6 +175,16 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared {
     xorl(Operand(HighWord(address)), dest.high);
   }
 
+  template <typename T1, typename T2>
+  inline void cmp64SetAliased(Condition cond, T1 lhs, T2 rhs, Register dest);
+
+  template <typename T1, typename T2>
+  inline void cmp64SetNonAliased(Condition cond, T1 lhs, T2 rhs, Register dest);
+
+  template <typename T1, typename T2>
+  inline void branch64Impl(Condition cond, T1 lhs, T2 rhs, Label* success,
+                           Label* fail);
+
   /////////////////////////////////////////////////////////////////
   // X86/X64-common interface.
   /////////////////////////////////////////////////////////////////
@@ -1154,15 +1164,15 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared {
 
  public:
   // Used from within an Exit frame to handle a pending exception.
-  void handleFailureWithHandlerTail(Label* profilerExitTail,
-                                    Label* bailoutTail);
+  void handleFailureWithHandlerTail(Label* profilerExitTail, Label* bailoutTail,
+                                    uint32_t* returnValueCheckOffset);
 
   // Instrumentation for entering and leaving the profiler.
   void profilerEnterFrame(Register framePtr, Register scratch);
   void profilerExitFrame();
 };
 
-typedef MacroAssemblerX86 MacroAssemblerSpecific;
+using MacroAssemblerSpecific = MacroAssemblerX86;
 
 }  // namespace jit
 }  // namespace js

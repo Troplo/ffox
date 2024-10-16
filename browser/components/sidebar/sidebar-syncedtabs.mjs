@@ -22,6 +22,10 @@ import { SidebarPage } from "./sidebar-page.mjs";
 class SyncedTabsInSidebar extends SidebarPage {
   controller = new lazy.SyncedTabsController(this);
 
+  static queries = {
+    cards: { all: "moz-card" },
+  };
+
   constructor() {
     super();
     this.onSearchQuery = this.onSearchQuery.bind(this);
@@ -31,11 +35,34 @@ class SyncedTabsInSidebar extends SidebarPage {
     super.connectedCallback();
     this.controller.addSyncObservers();
     this.controller.updateStates();
+    this.addContextMenuListeners();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
     this.controller.removeSyncObservers();
+    this.removeContextMenuListeners();
+  }
+
+  handleContextMenuEvent(e) {
+    this.triggerNode = this.findTriggerNode(e, "fxview-tab-row");
+    if (!this.triggerNode) {
+      e.preventDefault();
+    }
+  }
+
+  handleCommandEvent(e) {
+    switch (e.target.id) {
+      case "sidebar-synced-tabs-context-bookmark-tab":
+        this.topWindow.PlacesCommandHook.bookmarkLink(
+          this.triggerNode.url,
+          this.triggerNode.title
+        );
+        break;
+      default:
+        super.handleCommandEvent(e);
+        break;
+    }
   }
 
   /**
@@ -82,7 +109,6 @@ class SyncedTabsInSidebar extends SidebarPage {
           data-l10n-id="${ifDefined(buttonLabel)}"
           data-action="${action}"
           @click=${e => this.controller.handleEvent(e)}
-          aria-details="empty-container"
         ></button>
       </fxview-empty-state>
     `;
@@ -99,6 +125,7 @@ class SyncedTabsInSidebar extends SidebarPage {
   deviceTemplate(deviceName, deviceType, tabItems) {
     return html`<moz-card
       type="accordion"
+      expanded
       .heading=${deviceName}
       icon
       class=${deviceType}
@@ -173,23 +200,24 @@ class SyncedTabsInSidebar extends SidebarPage {
     const messageCard = this.controller.getMessageCard();
     return html`
       ${this.stylesheet()}
-      <div class="container">
+      <div class="sidebar-panel">
         <sidebar-panel-header
           data-l10n-id="sidebar-menu-syncedtabs-header"
           data-l10n-attrs="heading"
           view="viewTabsSidebar"
         >
         </sidebar-panel-header>
+        <fxview-search-textbox
+          autofocus
+          data-l10n-id="firefoxview-search-text-box-syncedtabs"
+          data-l10n-attrs="placeholder"
+          @fxview-search-textbox-query=${this.onSearchQuery}
+          size="15"
+        ></fxview-search-textbox>
         ${when(
           messageCard,
           () => this.messageCardTemplate(messageCard),
-          () => html`<fxview-search-textbox
-              data-l10n-id="firefoxview-search-text-box-syncedtabs"
-              data-l10n-attrs="placeholder"
-              @fxview-search-textbox-query=${this.onSearchQuery}
-              size="15"
-            ></fxview-search-textbox>
-            ${this.deviceListTemplate()}`
+          () => html`${this.deviceListTemplate()}`
         )}
       </div>
     `;

@@ -35,6 +35,7 @@
   _(AtomicsXor)                                    \
   _(AtomicsIsLockFree)                             \
                                                    \
+  _(BigInt)                                        \
   _(BigIntAsIntN)                                  \
   _(BigIntAsUintN)                                 \
                                                    \
@@ -46,6 +47,7 @@
   _(DataViewGetUint16)                             \
   _(DataViewGetInt32)                              \
   _(DataViewGetUint32)                             \
+  _(DataViewGetFloat16)                            \
   _(DataViewGetFloat32)                            \
   _(DataViewGetFloat64)                            \
   _(DataViewGetBigInt64)                           \
@@ -56,6 +58,7 @@
   _(DataViewSetUint16)                             \
   _(DataViewSetInt32)                              \
   _(DataViewSetUint32)                             \
+  _(DataViewSetFloat16)                            \
   _(DataViewSetFloat32)                            \
   _(DataViewSetFloat64)                            \
   _(DataViewSetBigInt64)                           \
@@ -91,6 +94,7 @@
   _(MathRandom)                                    \
   _(MathImul)                                      \
   _(MathFRound)                                    \
+  _(MathF16Round)                                  \
   _(MathSin)                                       \
   _(MathTan)                                       \
   _(MathCos)                                       \

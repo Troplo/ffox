@@ -28,6 +28,7 @@ export default class FxviewSearchTextbox extends MozLitElement {
     placeholder: { type: String },
     size: { type: Number },
     pageName: { type: String },
+    autofocus: { type: Boolean },
   };
 
   static queries = {
@@ -37,6 +38,12 @@ export default class FxviewSearchTextbox extends MozLitElement {
 
   #query = "";
   #searchTimer;
+
+  firstUpdated() {
+    if (this.autofocus) {
+      this.focus();
+    }
+  }
 
   disconnectedCallback() {
     super.disconnectedCallback();
@@ -107,9 +114,10 @@ export default class FxviewSearchTextbox extends MozLitElement {
   render() {
     return html`
     <link rel="stylesheet" href="chrome://browser/content/firefoxview/fxview-search-textbox.css" />
-    <div class="search-container">
+    <div class="search-container" part="container">
       <div class="search-icon"></div>
       <input
+        part="input"
         type="search"
         .placeholder=${ifDefined(this.placeholder)}
         .size=${ifDefined(this.size)}

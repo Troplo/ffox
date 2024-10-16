@@ -18,11 +18,29 @@ namespace jit {
 // ===============================================================
 // Move instructions
 
+void MacroAssembler::moveFloat16ToGPR(FloatRegister src, Register dest) {
+  vmovd(src, dest);
+
+  // Ensure the hi-word is zeroed.
+  movzwl(dest, dest);
+}
+
+void MacroAssembler::moveGPRToFloat16(Register src, FloatRegister dest) {
+  // Ensure the hi-word is zeroed.
+  movzwl(src, src);
+
+  vmovd(src, dest);
+}
+
 void MacroAssembler::moveFloat32ToGPR(FloatRegister src, Register dest) {
   vmovd(src, dest);
 }
 
 void MacroAssembler::moveGPRToFloat32(Register src, FloatRegister dest) {
+  vmovd(src, dest);
+}
+
+void MacroAssembler::moveLowDoubleToGPR(FloatRegister src, Register dest) {
   vmovd(src, dest);
 }
 
@@ -486,16 +504,14 @@ void MacroAssembler::branch16(Condition cond, const Address& lhs, Imm32 rhs,
   j(cond, label);
 }
 
-template <class L>
 void MacroAssembler::branch32(Condition cond, Register lhs, Register rhs,
-                              L label) {
+                              Label* label) {
   cmp32(lhs, rhs);
   j(cond, label);
 }
 
-template <class L>
 void MacroAssembler::branch32(Condition cond, Register lhs, Imm32 rhs,
-                              L label) {
+                              Label* label) {
   cmp32(lhs, rhs);
   j(cond, label);
 }
@@ -536,9 +552,8 @@ void MacroAssembler::branch32(Condition cond, const Operand& lhs, Imm32 rhs,
   j(cond, label);
 }
 
-template <class L>
 void MacroAssembler::branchPtr(Condition cond, Register lhs, Register rhs,
-                               L label) {
+                               Label* label) {
   cmpPtr(lhs, rhs);
   j(cond, label);
 }
@@ -563,9 +578,8 @@ void MacroAssembler::branchPtr(Condition cond, Register lhs, ImmWord rhs,
   branchPtrImpl(cond, lhs, rhs, label);
 }
 
-template <class L>
 void MacroAssembler::branchPtr(Condition cond, const Address& lhs, Register rhs,
-                               L label) {
+                               Label* label) {
   branchPtrImpl(cond, lhs, rhs, label);
 }
 
@@ -705,18 +719,16 @@ void MacroAssembler::decBranchPtr(Condition cond, Register lhs, Imm32 rhs,
   j(cond, label);
 }
 
-template <class L>
 void MacroAssembler::branchTest32(Condition cond, Register lhs, Register rhs,
-                                  L label) {
+                                  Label* label) {
   MOZ_ASSERT(cond == Zero || cond == NonZero || cond == Signed ||
              cond == NotSigned);
   test32(lhs, rhs);
   j(cond, label);
 }
 
-template <class L>
 void MacroAssembler::branchTest32(Condition cond, Register lhs, Imm32 rhs,
-                                  L label) {
+                                  Label* label) {
   MOZ_ASSERT(cond == Zero || cond == NonZero || cond == Signed ||
              cond == NotSigned);
   test32(lhs, rhs);
@@ -731,9 +743,8 @@ void MacroAssembler::branchTest32(Condition cond, const Address& lhs, Imm32 rhs,
   j(cond, label);
 }
 
-template <class L>
 void MacroAssembler::branchTestPtr(Condition cond, Register lhs, Register rhs,
-                                   L label) {
+                                   Label* label) {
   testPtr(lhs, rhs);
   j(cond, label);
 }
@@ -1096,9 +1107,8 @@ void MacroAssembler::branchTestMagic(Condition cond, const BaseIndex& address,
   branchTestMagicImpl(cond, address, label);
 }
 
-template <class L>
 void MacroAssembler::branchTestMagic(Condition cond, const ValueOperand& value,
-                                     L label) {
+                                     Label* label) {
   branchTestMagicImpl(cond, value, label);
 }
 
@@ -1243,6 +1253,23 @@ FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat32(
 
 template FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
                                                          const Operand& dest);
+
+FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat16(
+    FloatRegister src, const Address& dest, Register scratch) {
+  vmovd(src, scratch);
+
+  FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  movw(scratch, Operand(dest));
+  return fco;
+}
+FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat16(
+    FloatRegister src, const BaseIndex& dest, Register scratch) {
+  vmovd(src, scratch);
+
+  FaultingCodeOffset fco = FaultingCodeOffset(currentOffset());
+  movw(scratch, Operand(dest));
+  return fco;
+}
 
 void MacroAssembler::memoryBarrier(MemoryBarrierBits barrier) {
   if (barrier & MembarStoreLoad) {

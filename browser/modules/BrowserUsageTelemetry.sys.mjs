@@ -74,7 +74,9 @@ const UI_TARGET_ELEMENTS = [
   "image",
   "radio",
   "richlistitem",
+  "moz-checkbox",
 ];
+const UI_TARGET_COMPOSED_ELEMENTS_MAP = new Map([["moz-checkbox", "input"]]);
 
 // The containers of interactive elements that we care about and their pretty
 // names. These should be listed in order of most-specific to least-specific,
@@ -461,6 +463,10 @@ export let BrowserUsageTelemetry = {
     this._inited = true;
 
     Services.prefs.addObserver("browser.tabs.inTitlebar", this);
+    Services.prefs.addObserver(
+      "media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled",
+      this
+    );
 
     this._recordUITelemetry();
 
@@ -527,6 +533,15 @@ export let BrowserUsageTelemetry = {
               Services.appinfo.drawInTitlebar ? "off" : "on",
               "pref"
             );
+            break;
+          case "media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled":
+            if (Services.prefs.getBoolPref(data)) {
+              Services.telemetry.recordEvent(
+                "pictureinpicture.settings",
+                "enable_autotrigger",
+                "settings"
+              );
+            }
             break;
         }
         break;
@@ -862,6 +877,20 @@ export let BrowserUsageTelemetry = {
       }
     }
 
+    // When the expected target is a Custom Element with a Shadow Root, there
+    // may be a specific part of the component that click events correspond to
+    // changes. Ignore any other events if requested.
+    let expectedEventTarget = UI_TARGET_COMPOSED_ELEMENTS_MAP.get(
+      node.localName
+    );
+    if (
+      event.type == "click" &&
+      expectedEventTarget &&
+      expectedEventTarget != event.composedTarget?.localName
+    ) {
+      return;
+    }
+
     if (sourceEvent.type === "command") {
       const { command, ownerDocument, parentNode } = node;
       // Check if this command is for a history or bookmark link being opened
@@ -930,8 +959,8 @@ export let BrowserUsageTelemetry = {
 
     const extra = {
       source,
-      widgetId: telemetryId(widgetId),
-      flowId: this._flowId,
+      widget_id: telemetryId(widgetId),
+      flow_id: this._flowId,
     };
     Glean.browserUsage.interaction.record(extra);
   },
@@ -1043,6 +1072,18 @@ export let BrowserUsageTelemetry = {
 
   _recordUITelemetry() {
     this.widgetMap = this._buildWidgetPositions();
+
+    // FIXME(bug 1883857): object metric type not available in artefact builds.
+    if ("toolbarWidgets" in Glean.browserUi) {
+      Glean.browserUi.toolbarWidgets.set(
+        this.widgetMap
+          .entries()
+          .map(([widgetId, position]) => {
+            return { widgetId: telemetryId(widgetId, false), position };
+          })
+          .toArray()
+      );
+    }
 
     for (let [widgetId, position] of this.widgetMap.entries()) {
       let key = `${telemetryId(widgetId, false)}_pinned_${position}`;

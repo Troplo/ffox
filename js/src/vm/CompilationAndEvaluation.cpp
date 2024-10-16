@@ -32,7 +32,7 @@
 #include "js/Value.h"              // JS::Value
 #include "util/CompleteFile.h"     // js::FileContents, js::ReadCompleteFile
 #include "util/Identifier.h"       // js::IsIdentifier
-#include "util/StringBuffer.h"     // js::StringBuffer
+#include "util/StringBuilder.h"    // js::StringBuilder
 #include "vm/EnvironmentObject.h"  // js::CreateNonSyntacticEnvironmentChain
 #include "vm/ErrorReporting.h"  // js::ErrorMetadata, js::ReportCompileErrorLatin1
 #include "vm/Interpreter.h"     // js::Execute
@@ -110,7 +110,8 @@ JSScript* JS::Compile(JSContext* cx, const ReadOnlyCompileOptions& options,
 }
 
 JS_PUBLIC_API bool JS::StartIncrementalEncoding(JSContext* cx,
-                                                RefPtr<JS::Stencil>&& stencil) {
+                                                RefPtr<JS::Stencil>&& stencil,
+                                                bool& alreadyStarted) {
   MOZ_ASSERT(cx);
   MOZ_ASSERT(!stencil->hasMultipleReference());
 
@@ -133,7 +134,8 @@ JS_PUBLIC_API bool JS::StartIncrementalEncoding(JSContext* cx,
     }
   }
 
-  return source->startIncrementalEncoding(cx, std::move(initial));
+  return source->startIncrementalEncoding(cx, std::move(initial),
+                                          alreadyStarted);
 }
 
 JSScript* JS::CompileUtf8File(JSContext* cx,
@@ -229,7 +231,7 @@ class FunctionCompiler {
  private:
   JSContext* const cx_;
   Rooted<JSAtom*> nameAtom_;
-  StringBuffer funStr_;
+  StringBuilder funStr_;
 
   uint32_t parameterListEnd_ = 0;
   bool nameIsIdentifier_ = true;

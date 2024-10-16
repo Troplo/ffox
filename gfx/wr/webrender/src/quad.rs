@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-use api::{units::*, ClipMode, PremultipliedColorF};
+use api::{units::*, ClipMode, ColorF};
 use euclid::point2;
 
 use crate::batch::{BatchKey, BatchKind, BatchTextures};
@@ -15,11 +15,12 @@ use crate::internal_types::TextureSource;
 use crate::pattern::{Pattern, PatternBuilder, PatternBuilderContext, PatternBuilderState, PatternKind, PatternShaderInput};
 use crate::prim_store::{PrimitiveInstanceIndex, PrimitiveScratchBuffer};
 use crate::render_task::{MaskSubPass, RenderTask, RenderTaskAddress, RenderTaskKind, SubPass};
-use crate::render_task_graph::{RenderTaskGraph, RenderTaskId};
+use crate::render_task_graph::{RenderTaskGraph, RenderTaskGraphBuilder, RenderTaskId};
 use crate::renderer::{BlendMode, GpuBufferAddress, GpuBufferBuilder, GpuBufferBuilderF};
 use crate::segment::EdgeAaSegmentMask;
 use crate::space::SpaceMapper;
 use crate::spatial_tree::{SpatialNodeIndex, SpatialTree};
+use crate::surface::SurfaceBuilder;
 use crate::util::{extract_inner_rect_k, MaxRect, ScaleOffset};
 
 const MIN_AA_SEGMENTS_SIZE: f32 = 4.0;
@@ -75,32 +76,46 @@ pub fn prepare_quad(
     pic_state: &mut PictureState,
     scratch: &mut PrimitiveScratchBuffer,
 ) {
-    let ctx = PatternBuilderContext {
-        scene_properties: frame_context.scene_properties,
-    };
-
-    let mut state = PatternBuilderState {
-        frame_gpu_data: frame_state.frame_gpu_data,
-    };
-
-    let pattern = pattern_builder.build(
-        &ctx,
-        &mut state,
-    );
-
     let map_prim_to_raster = frame_context.spatial_tree.get_relative_transform(
         prim_spatial_node_index,
         pic_context.raster_spatial_node_index,
     );
+
+    let ctx = PatternBuilderContext {
+        scene_properties: frame_context.scene_properties,
+        spatial_tree: frame_context.spatial_tree,
+    };
+
+    let mut state = PatternBuilderState {
+        frame_gpu_data: frame_state.frame_gpu_data,
+        rg_builder: frame_state.rg_builder,
+        clip_store: frame_state.clip_store,
+    };
+
+    let shared_pattern = if pattern_builder.use_shared_pattern() {
+        Some(pattern_builder.build(
+            None,
+            &ctx,
+            &mut state,
+        ))
+    } else {
+        None
+    };
+
     let prim_is_2d_scale_translation = map_prim_to_raster.is_2d_scale_translation();
     let prim_is_2d_axis_aligned = map_prim_to_raster.is_2d_axis_aligned();
+
+    // TODO(gw): Can't support 9-patch for box-shadows for now as should_create_task
+    //           assumes pattern is solid. This is a temporary hack until as once that's
+    //           fixed we can select 9-patch for box-shadows
+    let can_use_nine_patch = prim_is_2d_scale_translation && pattern_builder.can_use_nine_patch();
 
     let strategy = get_prim_render_strategy(
         prim_spatial_node_index,
         clip_chain,
-        frame_state.clip_store,
+        state.clip_store,
         interned_clips,
-        prim_is_2d_scale_translation,
+        can_use_nine_patch,
         frame_context.spatial_tree,
     );
 
@@ -112,9 +127,6 @@ pub fn prepare_quad(
         quad_flags |= QuadFlags::USE_AA_SEGMENTS;
     }
 
-    if pattern.is_opaque {
-        quad_flags |= QuadFlags::IS_OPAQUE;
-    }
     let needs_scissor = !prim_is_2d_scale_translation;
     if !needs_scissor {
         quad_flags |= QuadFlags::APPLY_RENDER_TASK_CLIP;
@@ -136,25 +148,36 @@ pub fn prepare_quad(
         frame_context.spatial_tree,
     );
 
-    // TODO(gw): Perhaps rather than writing untyped data here (we at least do validate
-    //           the written block count) to gpu-buffer, we could add a trait for
-    //           writing typed data?
-    let main_prim_address = write_prim_blocks(
-        &mut frame_state.frame_gpu_data.f32,
-        *local_rect,
-        clip_chain.local_clip_rect,
-        pattern.base_color.premultiplied(),
-        &[],
-        ScaleOffset::identity(),
-    );
-
     if let QuadRenderStrategy::Direct = strategy {
+        let pattern = shared_pattern.unwrap_or_else(|| {
+            pattern_builder.build(
+                None,
+                &ctx,
+                &mut state,
+            )
+        });
+
+        if pattern.is_opaque {
+            quad_flags |= QuadFlags::IS_OPAQUE;
+        }
+
+        let main_prim_address = write_prim_blocks(
+            &mut frame_state.frame_gpu_data.f32,
+            *local_rect,
+            clip_chain.local_clip_rect,
+            pattern.base_color,
+            pattern.texture_input.task_id,
+            &[],
+            ScaleOffset::identity(),
+        );
+
         // Render the primitive as a single instance. Coordinates are provided to the
         // shader in layout space.
         frame_state.push_prim(
             &PrimitiveCommand::quad(
                 pattern.kind,
                 pattern.shader_input,
+                pattern.texture_input.task_id,
                 prim_instance_index,
                 main_prim_address,
                 transform_id,
@@ -164,6 +187,15 @@ pub fn prepare_quad(
             prim_spatial_node_index,
             targets,
         );
+
+        // If the pattern samples from a texture, add it as a dependency
+        // of the surface we're drawing directly on to.
+        if pattern.texture_input.task_id != RenderTaskId::INVALID {
+            frame_state
+                .surface_builder
+                .add_child_render_task(pattern.texture_input.task_id, frame_state.rg_builder);
+        }
+
         return;
     }
 
@@ -177,6 +209,28 @@ pub fn prepare_quad(
     match strategy {
         QuadRenderStrategy::Direct => {}
         QuadRenderStrategy::Indirect => {
+            let pattern = shared_pattern.unwrap_or_else(|| {
+                pattern_builder.build(
+                    None,
+                    &ctx,
+                    &mut state,
+                )
+            });
+
+            if pattern.is_opaque {
+                quad_flags |= QuadFlags::IS_OPAQUE;
+            }
+
+            let main_prim_address = write_prim_blocks(
+                &mut frame_state.frame_gpu_data.f32,
+                *local_rect,
+                clip_chain.local_clip_rect,
+                pattern.base_color,
+                pattern.texture_input.task_id,
+                &[],
+                ScaleOffset::identity(),
+            );
+
             // Render the primtive as a single instance in a render task, apply a mask
             // and composite it in the current picture.
             // The coordinates are provided to the shaders:
@@ -195,14 +249,13 @@ pub fn prepare_quad(
                 quad_flags,
                 device_pixel_scale,
                 needs_scissor,
-                frame_state,
+                frame_state.rg_builder,
+                &mut frame_state.surface_builder,
             );
 
             let rect = clipped_surface_rect.to_f32().cast_unit();
-            let is_masked = true;
             add_composite_prim(
-                &pattern,
-                is_masked,
+                pattern_builder.get_base_color(&ctx),
                 prim_instance_index,
                 rect,
                 frame_state,
@@ -241,7 +294,7 @@ pub fn prepare_quad(
 
             // Walk each clip, extract the local mask regions and add them to the tile classifier.
             for i in 0 .. clip_chain.clips_range.count {
-                let clip_instance = frame_state.clip_store.get_instance_from_range(&clip_chain.clips_range, i);
+                let clip_instance = state.clip_store.get_instance_from_range(&clip_chain.clips_range, i);
                 let clip_node = &interned_clips[clip_instance.handle];
 
                 // Construct a prim <-> clip space converter
@@ -381,7 +434,7 @@ pub fn prepare_quad(
                             continue;
                         }
                         QuadTileKind::Pattern { has_mask } => {
-                            prim_is_2d_scale_translation && !has_mask
+                            prim_is_2d_scale_translation && !has_mask && shared_pattern.is_some()
                         }
                     };
 
@@ -400,6 +453,31 @@ pub fn prepare_quad(
                     if is_direct {
                         scratch.quad_direct_segments.push(QuadSegment { rect: rect.cast_unit(), task_id: RenderTaskId::INVALID });
                     } else {
+                        let pattern = match shared_pattern {
+                            Some(ref shared_pattern) => shared_pattern.clone(),
+                            None => {
+                                pattern_builder.build(
+                                    Some(rect),
+                                    &ctx,
+                                    &mut state,
+                                )
+                            }
+                        };
+
+                        if pattern.is_opaque {
+                            quad_flags |= QuadFlags::IS_OPAQUE;
+                        }
+
+                        let main_prim_address = write_prim_blocks(
+                            &mut state.frame_gpu_data.f32,
+                            *local_rect,
+                            clip_chain.local_clip_rect,
+                            pattern.base_color,
+                            pattern.texture_input.task_id,
+                            &[],
+                            ScaleOffset::identity(),
+                        );
+
                         let task_id = add_render_task_with_mask(
                             &pattern,
                             int_rect.round().to_i32().size(),
@@ -413,7 +491,8 @@ pub fn prepare_quad(
                             quad_flags,
                             device_pixel_scale,
                             needs_scissor,
-                            frame_state,
+                            state.rg_builder,
+                            &mut frame_state.surface_builder,
                         );
 
                         scratch.quad_indirect_segments.push(QuadSegment { rect: rect.cast_unit(), task_id });
@@ -427,6 +506,17 @@ pub fn prepare_quad(
                     .then_scale(device_pixel_scale.0);
 
                 let device_prim_rect: DeviceRect = local_to_device.map_rect(&local_rect);
+
+                let pattern = match shared_pattern {
+                    Some(ref shared_pattern) => shared_pattern.clone(),
+                    None => {
+                        pattern_builder.build(
+                            Some(device_prim_rect),
+                            &ctx,
+                            &mut state,
+                        )
+                    }
+                };
 
                 add_pattern_prim(
                     &pattern,
@@ -443,8 +533,7 @@ pub fn prepare_quad(
 
             if !scratch.quad_indirect_segments.is_empty() {
                 add_composite_prim(
-                    &pattern,
-                    true,       // is_masked
+                    pattern_builder.get_base_color(&ctx),
                     prim_instance_index,
                     clip_coverage_rect.cast_unit(),
                     frame_state,
@@ -549,6 +638,24 @@ pub fn prepare_quad(
                     };
 
                     if should_create_task(mode, x, y) {
+                        let pattern = shared_pattern
+                            .as_ref()
+                            .expect("bug: nine-patch expects shared pattern, for now");
+
+                        if pattern.is_opaque {
+                            quad_flags |= QuadFlags::IS_OPAQUE;
+                        }
+
+                        let main_prim_address = write_prim_blocks(
+                            &mut state.frame_gpu_data.f32,
+                            *local_rect,
+                            clip_chain.local_clip_rect,
+                            pattern.base_color,
+                            pattern.texture_input.task_id,
+                            &[],
+                            ScaleOffset::identity(),
+                        );
+
                         let task_id = add_render_task_with_mask(
                             &pattern,
                             device_rect.size(),
@@ -562,7 +669,8 @@ pub fn prepare_quad(
                             quad_flags,
                             device_pixel_scale,
                             false,
-                            frame_state,
+                            state.rg_builder,
+                            &mut frame_state.surface_builder,
                         );
                         scratch.quad_indirect_segments.push(QuadSegment {
                             rect: device_rect.to_f32().cast_unit(),
@@ -578,6 +686,12 @@ pub fn prepare_quad(
             }
 
             if !scratch.quad_direct_segments.is_empty() {
+                let pattern =  pattern_builder.build(
+                    None,
+                    &ctx,
+                    &mut state,
+                );
+
                 add_pattern_prim(
                     &pattern,
                     local_to_device.inverse(),
@@ -592,10 +706,8 @@ pub fn prepare_quad(
             }
 
             if !scratch.quad_indirect_segments.is_empty() {
-                let is_masked = true;
                 add_composite_prim(
-                    &pattern,
-                    is_masked,
+                    pattern_builder.get_base_color(&ctx),
                     prim_instance_index,
                     clip_coverage_rect.cast_unit(),
                     frame_state,
@@ -692,9 +804,10 @@ fn add_render_task_with_mask(
     quad_flags: QuadFlags,
     device_pixel_scale: DevicePixelScale,
     needs_scissor_rect: bool,
-    frame_state: &mut FrameBuildingState,
+    rg_builder: &mut RenderTaskGraphBuilder,
+    surface_builder: &mut SurfaceBuilder,
 ) -> RenderTaskId {
-    let task_id = frame_state.rg_builder.add().init(RenderTask::new_dynamic(
+    let task_id = rg_builder.add().init(RenderTask::new_dynamic(
         task_size,
         RenderTaskKind::new_prim(
             pattern.kind,
@@ -707,8 +820,15 @@ fn add_render_task_with_mask(
             aa_flags,
             quad_flags,
             needs_scissor_rect,
+            pattern.texture_input.task_id,
         ),
     ));
+
+    // If the pattern samples from a texture, add it as a dependency
+    // of the indirect render task that relies on it.
+    if pattern.texture_input.task_id != RenderTaskId::INVALID {
+        rg_builder.add_dependency(task_id, pattern.texture_input.task_id);
+    }
 
     if clips_range.count > 0 {
         let masks = MaskSubPass {
@@ -717,13 +837,11 @@ fn add_render_task_with_mask(
             prim_address_f,
         };
 
-        let task = frame_state.rg_builder.get_task_mut(task_id);
+        let task = rg_builder.get_task_mut(task_id);
         task.add_sub_pass(SubPass::Masks { masks });
     }
 
-    frame_state
-        .surface_builder
-        .add_child_render_task(task_id, frame_state.rg_builder);
+    surface_builder.add_child_render_task(task_id, rg_builder);
 
     task_id
 }
@@ -743,7 +861,8 @@ fn add_pattern_prim(
         &mut frame_state.frame_gpu_data.f32,
         rect,
         clip_rect,
-        pattern.base_color.premultiplied(),
+        pattern.base_color,
+        pattern.texture_input.task_id,
         segments,
         pattern_transform,
     );
@@ -761,6 +880,7 @@ fn add_pattern_prim(
         &PrimitiveCommand::quad(
             pattern.kind,
             pattern.shader_input,
+            pattern.texture_input.task_id,
             prim_instance_index,
             prim_address,
             TransformPaletteId::IDENTITY,
@@ -773,14 +893,15 @@ fn add_pattern_prim(
 }
 
 fn add_composite_prim(
-    pattern: &Pattern,
-    is_masked: bool,
+    base_color: ColorF,
     prim_instance_index: PrimitiveInstanceIndex,
     rect: LayoutRect,
     frame_state: &mut FrameBuildingState,
     targets: &[CommandBufferIndex],
     segments: &[QuadSegment],
 ) {
+    assert!(!segments.is_empty());
+
     let composite_prim_address = write_prim_blocks(
         &mut frame_state.frame_gpu_data.f32,
         rect,
@@ -790,24 +911,22 @@ fn add_composite_prim(
         // in the quad primitive). However, passing opaque white
         // here causes glitches with Adreno GPUs on Windows specifically
         // (See bug 1897444).
-        pattern.base_color.premultiplied(),
+        base_color,
+        RenderTaskId::INVALID,
         segments,
         ScaleOffset::identity(),
     );
 
     frame_state.set_segments(segments, targets);
 
-    let mut quad_flags = QuadFlags::IGNORE_DEVICE_PIXEL_SCALE
+    let quad_flags = QuadFlags::IGNORE_DEVICE_PIXEL_SCALE
         | QuadFlags::APPLY_RENDER_TASK_CLIP;
-
-    if pattern.is_opaque && !is_masked {
-        quad_flags |= QuadFlags::IS_OPAQUE;
-    }
 
     frame_state.push_cmd(
         &PrimitiveCommand::quad(
             PatternKind::ColorOrTexture,
-            pattern.shader_input,
+            PatternShaderInput::default(),
+            RenderTaskId::INVALID,
             prim_instance_index,
             composite_prim_address,
             TransformPaletteId::IDENTITY,
@@ -823,27 +942,22 @@ pub fn write_prim_blocks(
     builder: &mut GpuBufferBuilderF,
     prim_rect: LayoutRect,
     clip_rect: LayoutRect,
-    color: PremultipliedColorF,
+    pattern_base_color: ColorF,
+    pattern_texture_input: RenderTaskId,
     segments: &[QuadSegment],
     scale_offset: ScaleOffset,
 ) -> GpuBufferAddress {
-    let mut writer = builder.write_blocks(4 + segments.len() * 2);
+    let mut writer = builder.write_blocks(5 + segments.len() * 2);
 
     writer.push_one(prim_rect);
     writer.push_one(clip_rect);
+    writer.push_render_task(pattern_texture_input);
     writer.push_one(scale_offset);
-    writer.push_one(color);
+    writer.push_one(pattern_base_color.premultiplied());
 
     for segment in segments {
         writer.push_one(segment.rect);
-        match segment.task_id {
-            RenderTaskId::INVALID => {
-                writer.push_one([0.0; 4]);
-            }
-            task_id => {
-                writer.push_render_task(task_id);
-            }
-        }
+        writer.push_render_task(segment.task_id)
     }
 
     writer.finish()

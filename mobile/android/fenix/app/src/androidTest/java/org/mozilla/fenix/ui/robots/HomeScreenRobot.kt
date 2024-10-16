@@ -44,6 +44,7 @@ import androidx.test.uiautomator.UiScrollable
 import androidx.test.uiautomator.UiSelector
 import androidx.test.uiautomator.Until
 import androidx.test.uiautomator.Until.findObject
+import com.google.android.material.textfield.TextInputEditText
 import org.hamcrest.CoreMatchers.allOf
 import org.hamcrest.CoreMatchers.containsString
 import org.hamcrest.CoreMatchers.instanceOf
@@ -66,6 +67,7 @@ import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdAndText
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdContainingText
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithText
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTime
+import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeLong
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeShort
 import org.mozilla.fenix.helpers.TestHelper.appName
 import org.mozilla.fenix.helpers.TestHelper.mDevice
@@ -232,7 +234,7 @@ class HomeScreenRobot {
             Log.i(TAG, "verifyThirdOnboardingCard: Verified that the third onboarding screen title exists")
             Log.i(TAG, "verifyThirdOnboardingCard: Trying to verify that the  third onboarding screen description exists")
             it.onNodeWithText(
-                getStringResource(R.string.juno_onboarding_sign_in_description_2),
+                getStringResource(R.string.juno_onboarding_sign_in_description_3),
             ).assertExists()
             Log.i(TAG, "verifyThirdOnboardingCard: Verified that the third onboarding screen description exists")
             Log.i(TAG, "verifyThirdOnboardingCard: Trying to verify that the first onboarding \"Sign in\" button exists")
@@ -364,13 +366,13 @@ class HomeScreenRobot {
         Log.i(TAG, "verifyExistingTopSitesTabs: Trying to scroll into view the top sites list")
         homeScreenList().scrollIntoView(itemWithResId("$packageName:id/top_sites_list"))
         Log.i(TAG, "verifyExistingTopSitesTabs: Scrolled into view the top sites list")
-        Log.i(TAG, "verifyExistingTopSitesTabs: Waiting for $waitingTime ms for top site: $title to exist")
+        Log.i(TAG, "verifyExistingTopSitesTabs: Waiting for $waitingTimeLong ms for top site: $title to exist")
         mDevice.findObject(
             UiSelector()
                 .resourceId("$packageName:id/top_site_title")
                 .textContains(title),
-        ).waitForExists(waitingTime)
-        Log.i(TAG, "verifyExistingTopSitesTabs: Waited for $waitingTime ms for top site: $title to exist")
+        ).waitForExists(waitingTimeLong)
+        Log.i(TAG, "verifyExistingTopSitesTabs: Waited for $waitingTimeLong ms for top site: $title to exist")
         Log.i(TAG, "verifyExistingTopSitesTabs: Trying to verify top site: $title is visible")
         onView(allOf(withId(R.id.top_sites_list)))
             .check(matches(hasDescendant(withText(title))))
@@ -409,6 +411,9 @@ class HomeScreenRobot {
             findObject(By.text("Remove")),
             waitingTime,
         )
+    }
+    fun verifyTopSiteContextMenuUrlErrorMessage() {
+        assertUIObjectExists(itemContainingText(getStringResource(R.string.top_sites_edit_dialog_url_error)))
     }
 
     fun verifyJumpBackInSectionIsDisplayed() {
@@ -828,19 +833,27 @@ class HomeScreenRobot {
             return BrowserRobot.Transition()
         }
 
-        fun renameTopSite(title: String, interact: HomeScreenRobot.() -> Unit): Transition {
-            Log.i(TAG, "renameTopSite: Trying to click context menu \"Rename\" button")
-            onView(withText("Rename"))
+        fun editTopSite(
+            title: String,
+            url: String,
+            interact: HomeScreenRobot.() -> Unit,
+        ): Transition {
+            Log.i(TAG, "editTopSite: Trying to click context menu \"Edit\" button")
+            onView(withText("Edit"))
                 .check((matches(withEffectiveVisibility(Visibility.VISIBLE))))
                 .perform(click())
-            Log.i(TAG, "renameTopSite: Clicked context menu \"Rename\" button")
-            Log.i(TAG, "renameTopSite: Trying to set top site title to: $title")
+            Log.i(TAG, "editTopSite: Clicked context menu \"Edit\" button")
+            Log.i(TAG, "editTopSite: Trying to set top site title to: $title")
             onView(Matchers.allOf(withId(R.id.top_site_title), instanceOf(EditText::class.java)))
                 .perform(ViewActions.replaceText(title))
-            Log.i(TAG, "renameTopSite: Set top site title to: $title")
-            Log.i(TAG, "renameTopSite: Trying to click \"Ok\" rename top site dialog button")
+            Log.i(TAG, "editTopSite: Set top site title to: $title")
+            Log.i(TAG, "editTopSite: Trying to set top site URL to: $url")
+            onView(Matchers.allOf(withId(R.id.top_site_url), instanceOf(TextInputEditText::class.java)))
+                .perform(ViewActions.replaceText(url))
+            Log.i(TAG, "editTopSite: Set top site title to: $title")
+            Log.i(TAG, "editTopSite: Trying to click \"Save\" edit top site dialog button")
             onView(withId(android.R.id.button1)).perform((click()))
-            Log.i(TAG, "renameTopSite: Clicked \"Ok\" rename top site dialog button")
+            Log.i(TAG, "editTopSite: Clicked \"Save\" edit top site dialog button")
 
             HomeScreenRobot().interact()
             return Transition()

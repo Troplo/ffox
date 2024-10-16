@@ -10,6 +10,7 @@ interface HTMLFencedFrameElement : HTMLElement {
   [CEReactions] attribute FencedFrameConfig? config;
   [CEReactions] attribute DOMString width;
   [CEReactions] attribute DOMString height;
+  [SameObject, PutForwards=value] readonly attribute DOMTokenList sandbox;
   [CEReactions] attribute DOMString allow;
 };
 
@@ -35,6 +36,8 @@ typedef (USVString or FencedFrameConfig) UrnOrConfig;
 partial interface Navigator {
   Promise<undefined> deprecatedReplaceInURN(
     UrnOrConfig urnOrConfig, record<USVString, USVString> replacements);
+  Promise<USVString> deprecatedURNtoURL(
+    UrnOrConfig urnOrConfig, optional boolean send_reports = false);
   sequence<USVString> adAuctionComponents(unsigned short numAdComponents);
 };
 

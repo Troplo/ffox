@@ -7,14 +7,19 @@
 import type {Protocol} from 'devtools-protocol';
 
 import type {CDPSession} from '../api/CDPSession.js';
+import type {WaitForOptions} from '../api/Frame.js';
 import {Frame, FrameEvent, throwIfDetached} from '../api/Frame.js';
 import type {HTTPResponse} from '../api/HTTPResponse.js';
 import type {WaitTimeoutOptions} from '../api/Page.js';
 import {UnsupportedOperation} from '../common/Errors.js';
+import {debugError} from '../common/util.js';
 import {Deferred} from '../util/Deferred.js';
 import {disposeSymbol} from '../util/disposable.js';
 import {isErrorLike} from '../util/ErrorLike.js';
 
+import {Accessibility} from './Accessibility.js';
+import type {Binding} from './Binding.js';
+import type {CdpPreloadScript} from './CdpPreloadScript.js';
 import type {
   DeviceRequestPrompt,
   DeviceRequestPromptManager,
@@ -29,6 +34,7 @@ import {
   type PuppeteerLifeCycleEvent,
 } from './LifecycleWatcher.js';
 import type {CdpPage} from './Page.js';
+import {CDP_BINDING_PREFIX} from './utils.js';
 
 /**
  * @internal
@@ -44,6 +50,7 @@ export class CdpFrame extends Frame {
 
   override _id: string;
   override _parentId?: string;
+  override accessibility: Accessibility;
 
   worlds: IsolatedWorldChart;
 
@@ -69,6 +76,8 @@ export class CdpFrame extends Frame {
         this._frameManager.timeoutSettings
       ),
     };
+
+    this.accessibility = new Accessibility(this.worlds[MAIN_WORLD]);
 
     this.on(FrameEvent.FrameSwappedByActivation, () => {
       // Emulate loading process for swapped frames.
@@ -125,10 +134,6 @@ export class CdpFrame extends Frame {
 
   override page(): CdpPage {
     return this._frameManager.page();
-  }
-
-  override isOOPFrame(): boolean {
-    return this.#client !== this._frameManager.client;
   }
 
   @throwIfDetached
@@ -217,21 +222,19 @@ export class CdpFrame extends Frame {
 
   @throwIfDetached
   override async waitForNavigation(
-    options: {
-      timeout?: number;
-      waitUntil?: PuppeteerLifeCycleEvent | PuppeteerLifeCycleEvent[];
-      ignoreSameDocumentNavigation?: boolean;
-    } = {}
+    options: WaitForOptions = {}
   ): Promise<HTTPResponse | null> {
     const {
       waitUntil = ['load'],
       timeout = this._frameManager.timeoutSettings.navigationTimeout(),
+      signal,
     } = options;
     const watcher = new LifecycleWatcher(
       this._frameManager.networkManager,
       this,
       waitUntil,
-      timeout
+      timeout,
+      signal
     );
     const error = await Deferred.race([
       watcher.terminationPromise(),
@@ -314,12 +317,63 @@ export class CdpFrame extends Frame {
   }
 
   #deviceRequestPromptManager(): DeviceRequestPromptManager {
-    const rootFrame = this.page().mainFrame();
-    if (this.isOOPFrame() || rootFrame === null) {
-      return this._frameManager._deviceRequestPromptManager(this.#client);
-    } else {
-      return rootFrame._frameManager._deviceRequestPromptManager(this.#client);
+    return this._frameManager._deviceRequestPromptManager(this.#client);
+  }
+
+  @throwIfDetached
+  async addPreloadScript(preloadScript: CdpPreloadScript): Promise<void> {
+    // TODO: this might be not correct and we might be adding a preload
+    // script multiple times to the nested frames.
+    if (
+      this.#client === this._frameManager.client &&
+      this !== this._frameManager.mainFrame()
+    ) {
+      return;
     }
+    if (preloadScript.getIdForFrame(this)) {
+      return;
+    }
+    const {identifier} = await this.#client.send(
+      'Page.addScriptToEvaluateOnNewDocument',
+      {
+        source: preloadScript.source,
+      }
+    );
+    preloadScript.setIdForFrame(this, identifier);
+  }
+
+  @throwIfDetached
+  async addExposedFunctionBinding(binding: Binding): Promise<void> {
+    // If a frame has not started loading, it might never start. Rely on
+    // addScriptToEvaluateOnNewDocument in that case.
+    if (this !== this._frameManager.mainFrame() && !this._hasStartedLoading) {
+      return;
+    }
+    await Promise.all([
+      this.#client.send('Runtime.addBinding', {
+        name: CDP_BINDING_PREFIX + binding.name,
+      }),
+      this.evaluate(binding.initSource).catch(debugError),
+    ]);
+  }
+
+  @throwIfDetached
+  async removeExposedFunctionBinding(binding: Binding): Promise<void> {
+    // If a frame has not started loading, it might never start. Rely on
+    // addScriptToEvaluateOnNewDocument in that case.
+    if (this !== this._frameManager.mainFrame() && !this._hasStartedLoading) {
+      return;
+    }
+    await Promise.all([
+      this.#client.send('Runtime.removeBinding', {
+        name: CDP_BINDING_PREFIX + binding.name,
+      }),
+      this.evaluate(name => {
+        // Removes the dangling Puppeteer binding wrapper.
+        // @ts-expect-error: In a different context.
+        globalThis[name] = undefined;
+      }, binding.name).catch(debugError),
+    ]);
   }
 
   @throwIfDetached

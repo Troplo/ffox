@@ -49,9 +49,9 @@
 #include "js/ErrorReport.h"           // JSErrorBase
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/HashTable.h"
-#include "js/RegExpFlags.h"     // JS::RegExpFlags
-#include "js/Stack.h"           // JS::NativeStackLimit
-#include "util/StringBuffer.h"  // StringBuffer
+#include "js/RegExpFlags.h"      // JS::RegExpFlags
+#include "js/Stack.h"            // JS::NativeStackLimit
+#include "util/StringBuilder.h"  // StringBuilder
 #include "vm/BytecodeUtil.h"
 #include "vm/FunctionFlags.h"          // js::FunctionFlags
 #include "vm/GeneratorAndAsyncKind.h"  // js::GeneratorKind, js::FunctionAsyncKind
@@ -2628,7 +2628,7 @@ bool ParserBase::leaveInnerFunction(ParseContext* outerpc) {
 
 TaggedParserAtomIndex ParserBase::prefixAccessorName(
     PropertyType propType, TaggedParserAtomIndex propAtom) {
-  StringBuffer prefixed(fc_);
+  StringBuilder prefixed(fc_);
   if (propType == PropertyType::Setter) {
     if (!prefixed.append("set ")) {
       return TaggedParserAtomIndex::null();
@@ -5412,8 +5412,13 @@ GeneralParser<ParseHandler, Unit>::importDeclarationOrImportExpr(
 template <typename Unit>
 bool Parser<FullParseHandler, Unit>::checkExportedName(
     TaggedParserAtomIndex exportName) {
-  if (!pc_->sc()->asModuleContext()->builder.hasExportedName(exportName)) {
-    return true;
+  switch (pc_->sc()->asModuleContext()->builder.noteExportedName(exportName)) {
+    case ModuleBuilder::NoteExportedNameResult::Success:
+      return true;
+    case ModuleBuilder::NoteExportedNameResult::OutOfMemory:
+      return false;
+    case ModuleBuilder::NoteExportedNameResult::AlreadyDeclared:
+      break;
   }
 
   UniqueChars str = this->parserAtoms().toPrintableString(exportName);
@@ -7709,19 +7714,19 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
       propType == PropertyType::FieldWithAccessor) {
     if (isStatic) {
       if (propAtom == TaggedParserAtomIndex::WellKnown::prototype()) {
-        errorAt(propNameOffset, JSMSG_BAD_METHOD_DEF);
+        errorAt(propNameOffset, JSMSG_CLASS_STATIC_PROTO);
         return false;
       }
     }
 
     if (propAtom == TaggedParserAtomIndex::WellKnown::constructor()) {
-      errorAt(propNameOffset, JSMSG_BAD_METHOD_DEF);
+      errorAt(propNameOffset, JSMSG_BAD_CONSTRUCTOR_DEF);
       return false;
     }
 
     if (handler_.isPrivateName(propName)) {
       if (propAtom == TaggedParserAtomIndex::WellKnown::hash_constructor_()) {
-        errorAt(propNameOffset, JSMSG_BAD_METHOD_DEF);
+        errorAt(propNameOffset, JSMSG_BAD_CONSTRUCTOR_DEF);
         return false;
       }
 
@@ -7747,7 +7752,7 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
       // ...
       // Step 3. Let privateStateDesc be the string-concatenation of name
       // and " accessor storage".
-      StringBuffer privateStateDesc(fc_);
+      StringBuilder privateStateDesc(fc_);
       if (!privateStateDesc.append(this->parserAtoms(), propAtom)) {
         return false;
       }
@@ -7865,7 +7870,7 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
       propType != PropertyType::GeneratorMethod &&
       propType != PropertyType::AsyncMethod &&
       propType != PropertyType::AsyncGeneratorMethod) {
-    errorAt(propNameOffset, JSMSG_BAD_METHOD_DEF);
+    errorAt(propNameOffset, JSMSG_BAD_CLASS_MEMBER_DEF);
     return false;
   }
 
@@ -7873,11 +7878,11 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
       !isStatic && propAtom == TaggedParserAtomIndex::WellKnown::constructor();
   if (isConstructor) {
     if (propType != PropertyType::Method) {
-      errorAt(propNameOffset, JSMSG_BAD_METHOD_DEF);
+      errorAt(propNameOffset, JSMSG_BAD_CONSTRUCTOR_DEF);
       return false;
     }
     if (classStmt.constructorBox) {
-      errorAt(propNameOffset, JSMSG_DUPLICATE_PROPERTY, "constructor");
+      errorAt(propNameOffset, JSMSG_DUPLICATE_CONSTRUCTOR);
       return false;
     }
     propType = hasHeritage == HasHeritage::Yes
@@ -7885,7 +7890,7 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
                    : PropertyType::Constructor;
   } else if (isStatic &&
              propAtom == TaggedParserAtomIndex::WellKnown::prototype()) {
-    errorAt(propNameOffset, JSMSG_BAD_METHOD_DEF);
+    errorAt(propNameOffset, JSMSG_CLASS_STATIC_PROTO);
     return false;
   }
 
@@ -7969,7 +7974,7 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
   if (handler_.isPrivateName(propName)) {
     if (propAtom == TaggedParserAtomIndex::WellKnown::hash_constructor_()) {
       // #constructor is an invalid private name.
-      errorAt(propNameOffset, JSMSG_BAD_METHOD_DEF);
+      errorAt(propNameOffset, JSMSG_BAD_CONSTRUCTOR_DEF);
       return false;
     }
 
@@ -8959,7 +8964,7 @@ GeneralParser<ParseHandler, Unit>::synthesizePrivateMethodInitializer(
 
   // Synthesize a name for the lexical variable that will store the
   // accessor body.
-  StringBuffer storedMethodName(fc_);
+  StringBuilder storedMethodName(fc_);
   if (!storedMethodName.append(this->parserAtoms(), propAtom)) {
     return errorResult();
   }
@@ -9127,7 +9132,7 @@ GeneralParser<ParseHandler, Unit>::synthesizeAccessor(
   //
   // https://arai-a.github.io/ecma262-compare/?pr=2417&id=sec-makeautoaccessorsetter
   // 2. Let setter be CreateBuiltinFunction(setterClosure, 1, "set", « »).
-  StringBuffer storedMethodName(fc_);
+  StringBuilder storedMethodName(fc_);
   if (!storedMethodName.append(accessorType == AccessorType::Getter ? "get"
                                                                     : "set")) {
     return errorResult();
@@ -11997,8 +12002,7 @@ GeneralParser<ParseHandler, Unit>::propertyName(
 static bool TokenKindCanStartPropertyName(TokenKind tt) {
   return TokenKindIsPossibleIdentifierName(tt) || tt == TokenKind::String ||
          tt == TokenKind::Number || tt == TokenKind::LeftBracket ||
-         tt == TokenKind::Mul || tt == TokenKind::BigInt ||
-         tt == TokenKind::PrivateName;
+         tt == TokenKind::BigInt || tt == TokenKind::PrivateName;
 }
 
 template <class ParseHandler, typename Unit>
@@ -12064,7 +12068,7 @@ GeneralParser<ParseHandler, Unit>::propertyOrMethodName(
     if (!tokenStream.peekTokenSameLine(&tt)) {
       return errorResult();
     }
-    if (TokenKindCanStartPropertyName(tt)) {
+    if (TokenKindCanStartPropertyName(tt) || tt == TokenKind::Mul) {
       isAsync = true;
       tokenStream.consumeKnownToken(tt);
       ltok = tt;

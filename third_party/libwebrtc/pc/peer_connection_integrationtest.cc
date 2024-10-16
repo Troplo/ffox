@@ -77,12 +77,12 @@
 #include "pc/test/fake_periodic_video_source.h"
 #include "pc/test/integration_test_helpers.h"
 #include "pc/test/mock_peer_connection_observers.h"
+#include "rtc_base/crypto_random.h"
 #include "rtc_base/fake_clock.h"
 #include "rtc_base/fake_mdns_responder.h"
 #include "rtc_base/fake_network.h"
 #include "rtc_base/firewall_socket_server.h"
 #include "rtc_base/gunit.h"
-#include "rtc_base/helpers.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/socket_address.h"
 #include "rtc_base/ssl_certificate.h"
@@ -2573,7 +2573,7 @@ TEST_P(PeerConnectionIntegrationTest, CodecNamesAreCaseInsensitive) {
     ASSERT_NE(nullptr, audio);
     auto audio_codecs = audio->codecs();
     audio_codecs.erase(std::remove_if(audio_codecs.begin(), audio_codecs.end(),
-                                      [](const cricket::AudioCodec& codec) {
+                                      [](const cricket::Codec& codec) {
                                         return codec.name != "opus";
                                       }),
                        audio_codecs.end());
@@ -2586,7 +2586,7 @@ TEST_P(PeerConnectionIntegrationTest, CodecNamesAreCaseInsensitive) {
     ASSERT_NE(nullptr, video);
     auto video_codecs = video->codecs();
     video_codecs.erase(std::remove_if(video_codecs.begin(), video_codecs.end(),
-                                      [](const cricket::VideoCodec& codec) {
+                                      [](const cricket::Codec& codec) {
                                         return codec.name != "VP8";
                                       }),
                        video_codecs.end());

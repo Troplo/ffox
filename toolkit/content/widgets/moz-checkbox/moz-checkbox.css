@@ -22,6 +22,7 @@ input {
   min-width: var(--checkbox-size);
   height: var(--checkbox-size);
   accent-color: var(--color-accent-primary);
+  -moz-theme: non-native;
   font-size: inherit;
   /* Bug 1901865: Due to the "MS Shell Dlg 2" font, we need inherits to
    * keep the checkbox aligned */
@@ -54,4 +55,8 @@ input,
 
 .description {
   margin-inline-start: var(--checkbox-space-offset);
+}
+
+.label {
+  padding-inline-end: var(--space-xsmall);
 }

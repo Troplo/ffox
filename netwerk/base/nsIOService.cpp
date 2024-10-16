@@ -59,6 +59,7 @@
 #include "mozilla/net/SocketProcessHost.h"
 #include "mozilla/net/SocketProcessParent.h"
 #include "mozilla/net/SSLTokensCache.h"
+#include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/Unused.h"
 #include "nsContentSecurityManager.h"
 #include "nsContentUtils.h"
@@ -240,6 +241,7 @@ static const char* gCallbackPrefsForSocketProcess[] = {
     "network.proxy.allow_hijacking_localhost",
     "network.connectivity-service.",
     "network.captive-portal-service.testMode",
+    "network.socket.ip_addr_any.disabled",
     nullptr,
 };
 
@@ -257,11 +259,6 @@ static const char* gCallbackSecurityPrefs[] = {
     "security.ssl.disable_session_identifiers",
     "security.tls.enable_post_handshake_auth",
     "security.tls.enable_delegated_credentials",
-    // Note the prefs listed below should be in sync with the code in
-    // SetValidationOptionsCommon().
-    "security.ssl.enable_ocsp_stapling",
-    "security.ssl.enable_ocsp_must_staple",
-    "security.pki.certificate_transparency.mode",
     nullptr,
 };
 
@@ -438,13 +435,9 @@ void nsIOService::OnTLSPrefChange(const char* aPref, void* aSelf) {
 
   nsAutoCString pref(aPref);
   // The preferences listed in gCallbackSecurityPrefs need to be in sync with
-  // the code in HandleTLSPrefChange() and SetValidationOptionsCommon().
+  // the code in HandleTLSPrefChange().
   if (HandleTLSPrefChange(pref)) {
     LOG(("HandleTLSPrefChange done"));
-  } else if (pref.EqualsLiteral("security.ssl.enable_ocsp_stapling") ||
-             pref.EqualsLiteral("security.ssl.enable_ocsp_must_staple") ||
-             pref.EqualsLiteral("security.pki.certificate_transparency.mode")) {
-    SetValidationOptionsCommon();
   }
 }
 
@@ -1263,6 +1256,22 @@ nsIOService::NewWebTransport(nsIWebTransport** result) {
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsIOService::OriginAttributesForNetworkState(
+    nsIChannel* aChannel, JSContext* cx, JS::MutableHandle<JS::Value> _retval) {
+  OriginAttributes attrs;
+  if (!StoragePrincipalHelper::GetOriginAttributesForNetworkState(aChannel,
+                                                                  attrs)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  if (NS_WARN_IF(!mozilla::dom::ToJSValue(cx, attrs, _retval))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
 bool nsIOService::IsLinkUp() {
   InitializeNetworkLinkService();
 
@@ -1766,6 +1775,9 @@ nsIOService::Observe(nsISupports* subject, const char* topic,
     // https://bugzilla.mozilla.org/show_bug.cgi?id=1152048#c19
     nsCOMPtr<nsIRunnable> wakeupNotifier = new nsWakeupNotifier(this);
     NS_DispatchToMainThread(wakeupNotifier);
+    mInSleepMode = false;
+  } else if (!strcmp(topic, NS_WIDGET_SLEEP_OBSERVER_TOPIC)) {
+    mInSleepMode = true;
   }
 
   return NS_OK;

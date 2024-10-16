@@ -221,10 +221,9 @@ absl::optional<float> GetConfiguredPacingFactor(
   if (alr_settings)
     return alr_settings->pacing_factor;
 
-  RateControlSettings rate_control_settings =
-      RateControlSettings::ParseFromKeyValueConfig(&field_trials);
-  return rate_control_settings.GetPacingFactor().value_or(
-      default_pacing_config.pacing_factor);
+  return RateControlSettings(field_trials)
+      .GetPacingFactor()
+      .value_or(default_pacing_config.pacing_factor);
 }
 
 int GetEncoderPriorityBitrate(std::string codec_name,
@@ -419,7 +418,7 @@ VideoSendStreamImpl::VideoSendStreamImpl(
                     metronome,
                     config_.encoder_selector)),
       encoder_feedback_(
-          &env_.clock(),
+          env_,
           SupportsPerLayerPictureLossIndication(
               encoder_config.video_format.parameters),
           config_.rtp.ssrcs,
@@ -485,9 +484,8 @@ VideoSendStreamImpl::VideoSendStreamImpl(
       enable_alr_bw_probing = true;
       queue_time_limit_ms = alr_settings->max_paced_queue_time;
     } else {
-      RateControlSettings rate_control_settings =
-          RateControlSettings::ParseFromKeyValueConfig(&env_.field_trials());
-      enable_alr_bw_probing = rate_control_settings.UseAlrProbing();
+      enable_alr_bw_probing =
+          RateControlSettings(env_.field_trials()).UseAlrProbing();
       queue_time_limit_ms = pacing_config_.max_pacing_delay.Get().ms();
     }
 
@@ -683,7 +681,8 @@ void VideoSendStreamImpl::Stop() {
   if (!rtp_video_sender_->IsActive())
     return;
 
-  TRACE_EVENT_INSTANT0("webrtc", "VideoSendStream::Stop");
+  TRACE_EVENT_INSTANT0("webrtc", "VideoSendStream::Stop",
+                       TRACE_EVENT_SCOPE_GLOBAL);
   rtp_video_sender_->SetSending(false);
   if (IsRunning()) {
     StopVideoSendStream();
@@ -807,13 +806,12 @@ void VideoSendStreamImpl::OnEncoderConfigurationChanged(
             ? experimental_min_bitrate->bps()
             : std::max(streams[0].min_bitrate_bps,
                        GetDefaultMinVideoBitrateBps(codec_type));
-
-    encoder_max_bitrate_bps_ = 0;
     double stream_bitrate_priority_sum = 0;
+    uint32_t encoder_max_bitrate_bps = 0;
     for (const auto& stream : streams) {
       // We don't want to allocate more bitrate than needed to inactive streams.
       if (stream.active) {
-        encoder_max_bitrate_bps_ += stream.max_bitrate_bps;
+        encoder_max_bitrate_bps += stream.max_bitrate_bps;
       }
       if (stream.bitrate_priority) {
         RTC_DCHECK_GT(*stream.bitrate_priority, 0);
@@ -822,9 +820,11 @@ void VideoSendStreamImpl::OnEncoderConfigurationChanged(
     }
     RTC_DCHECK_GT(stream_bitrate_priority_sum, 0);
     encoder_bitrate_priority_ = stream_bitrate_priority_sum;
-    encoder_max_bitrate_bps_ =
-        std::max(static_cast<uint32_t>(encoder_min_bitrate_bps_),
-                 encoder_max_bitrate_bps_);
+    if (encoder_max_bitrate_bps > 0) {
+      encoder_max_bitrate_bps_ =
+          std::max(static_cast<uint32_t>(encoder_min_bitrate_bps_),
+                   encoder_max_bitrate_bps);
+    }
 
     // TODO(bugs.webrtc.org/10266): Query the VideoBitrateAllocator instead.
     max_padding_bitrate_ = CalculateMaxPadBitrateBps(

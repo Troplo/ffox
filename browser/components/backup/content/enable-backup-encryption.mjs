@@ -5,6 +5,13 @@
 import { html, ifDefined } from "chrome://global/content/vendor/lit.all.mjs";
 import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
 
+// eslint-disable-next-line import/no-unassigned-import
+import "chrome://global/content/elements/moz-message-bar.mjs";
+// eslint-disable-next-line import/no-unassigned-import
+import "chrome://browser/content/backup/password-validation-inputs.mjs";
+
+import { ERRORS } from "chrome://browser/content/backup/backup-constants.mjs";
+
 /**
  * Valid attributes for the enable-backup-encryption dialog type.
  *
@@ -20,130 +27,179 @@ const VALID_L10N_IDS = new Map([
   [VALID_TYPES.CHANGE_PASSWORD, "change-backup-encryption-header"],
 ]);
 
+const ERROR_L10N_IDS = Object.freeze({
+  [ERRORS.INVALID_PASSWORD]: "backup-error-password-requirements",
+  [ERRORS.UNKNOWN]: "backup-error-retry",
+});
+
+/**
+ * @param {number} errorCode Error code from backup-constants.mjs
+ * @returns {string} Localization ID for error message
+ */
+function getErrorL10nId(errorCode) {
+  return ERROR_L10N_IDS[errorCode] ?? ERROR_L10N_IDS[ERRORS.UNKNOWN];
+}
+
 /**
  * The widget for enabling password protection if the backup is not yet
  * encrypted.
  */
 export default class EnableBackupEncryption extends MozLitElement {
   static properties = {
-    passwordsMatch: { type: Boolean, reflect: true },
-    passwordsRequired: { type: Boolean, reflect: true },
+    // internal state
+    _inputPassValue: { type: String, state: true },
+    _passwordsMatch: { type: Boolean, state: true },
+
+    // passed from parents
+    supportBaseLink: { type: String },
     /**
      * The "type" attribute changes the layout.
      *
      * @see VALID_TYPES
      */
     type: { type: String, reflect: true },
+
+    // managed by BackupUIChild
+    enableEncryptionErrorCode: { type: Number },
+    rerunEncryptionErrorCode: { type: Number },
   };
 
   static get queries() {
     return {
       cancelButtonEl: "#backup-enable-encryption-cancel-button",
       confirmButtonEl: "#backup-enable-encryption-confirm-button",
-      inputNewPasswordEl: "#new-password-input",
-      inputRepeatPasswordEl: "#repeat-password-input",
+      contentEl: "#backup-enable-encryption-content",
+      textHeaderEl: "#backup-enable-encryption-header",
       textDescriptionEl: "#backup-enable-encryption-description",
+      passwordInputsEl: "#backup-enable-encryption-password-inputs",
+      errorEl: "#enable-backup-encryption-error",
     };
   }
 
   constructor() {
     super();
-    this.passwordsMatch = false;
-    this.passwordsRequired = true;
+    this.supportBaseLink = "";
     this.type = VALID_TYPES.SET_PASSWORD;
+    this._inputPassValue = "";
+    this._passwordsMatch = false;
+    this.enableEncryptionErrorCode = 0;
+    this.rerunEncryptionErrorCode = 0;
   }
 
-  /**
-   * Dispatches the BackupUI:InitWidget custom event upon being attached to the
-   * DOM, which registers with BackupUIChild for BackupService state updates.
-   */
   connectedCallback() {
     super.connectedCallback();
-    this.dispatchEvent(
-      new CustomEvent("BackupUI:InitWidget", { bubbles: true })
-    );
+    // Listening to events from child <password-validation-inputs>
+    this.addEventListener("ValidPasswordsDetected", this);
+    this.addEventListener("InvalidPasswordsDetected", this);
   }
 
-  handleCancel() {
+  handleEvent(event) {
+    if (event.type == "ValidPasswordsDetected") {
+      let { password } = event.detail;
+      this._passwordsMatch = true;
+      this._inputPassValue = password;
+    } else if (event.type == "InvalidPasswordsDetected") {
+      this._passwordsMatch = false;
+      this._inputPassValue = "";
+    }
+  }
+
+  close() {
     this.dispatchEvent(
       new CustomEvent("dialogCancel", {
         bubbles: true,
         composed: true,
       })
     );
-    this.resetChanges();
+    this.reset();
+  }
+
+  reset() {
+    this._inputPassValue = "";
+    this._passwordsMatch = false;
+    this.passwordInputsEl.reset();
+    this.enableEncryptionErrorCode = 0;
   }
 
   handleConfirm() {
     switch (this.type) {
       case VALID_TYPES.SET_PASSWORD:
         this.dispatchEvent(
-          new CustomEvent("enableEncryption", {
+          new CustomEvent("BackupUI:EnableEncryption", {
             bubbles: true,
-            composed: true,
             detail: {
-              password: this.inputNewPasswordEl.value,
+              password: this._inputPassValue,
             },
           })
         );
         break;
       case VALID_TYPES.CHANGE_PASSWORD:
         this.dispatchEvent(
-          new CustomEvent("rerunEncryption", {
+          new CustomEvent("BackupUI:RerunEncryption", {
             bubbles: true,
-            composed: true,
             detail: {
-              password: this.inputNewPasswordEl.value,
+              password: this._inputPassValue,
             },
           })
         );
         break;
     }
-    this.resetChanges();
   }
 
-  handleChangeNewPassword() {
-    this.updatePasswordValidity();
+  descriptionTemplate() {
+    return html`
+      <div id="backup-enable-encryption-description">
+        <span
+          id="backup-enable-encryption-description-span"
+          data-l10n-id="enable-backup-encryption-description"
+        >
+          <!--TODO: finalize support page links (bug 1900467)-->
+        </span>
+        <a
+          id="backup-enable-encryption-learn-more-link"
+          is="moz-support-link"
+          support-page="todo-backup"
+          data-l10n-id="enable-backup-encryption-support-link"
+        ></a>
+      </div>
+    `;
   }
 
-  handleChangeRepeatPassword() {
-    this.updatePasswordValidity();
+  buttonGroupTemplate() {
+    return html`
+      <moz-button-group id="backup-enable-encryption-button-group">
+        <moz-button
+          id="backup-enable-encryption-cancel-button"
+          @click=${this.close}
+          data-l10n-id="enable-backup-encryption-cancel-button"
+        ></moz-button>
+        <moz-button
+          id="backup-enable-encryption-confirm-button"
+          @click=${this.handleConfirm}
+          type="primary"
+          data-l10n-id="enable-backup-encryption-confirm-button"
+          ?disabled=${!this._passwordsMatch}
+        ></moz-button>
+      </moz-button-group>
+    `;
   }
 
-  updatePasswordValidity() {
-    // If the "required" attribute was previously removed, add it back
-    // to make password validation work as expected.
-    if (!this.passwordsRequired) {
-      this.passwordsRequired = true;
-    }
-
-    let isNewPasswordInputValid = this.inputNewPasswordEl?.checkValidity();
-    let isRepeatPasswordInputValid =
-      this.inputRepeatPasswordEl?.checkValidity();
-    /**
-     * TODO: Before confirmation, verify FxA format rules (bug 1896772).
-     * This step may involve async validation with BackupService. For instance, we have to
-     * check against a list of common passwords (bug 1905140) and display a message if an
-     * issue occurs (bug 1905145).
-     */
-    this.passwordsMatch =
-      isNewPasswordInputValid &&
-      isRepeatPasswordInputValid &&
-      this.inputNewPasswordEl.value == this.inputRepeatPasswordEl.value;
-  }
-
-  resetChanges() {
-    this.passwordsMatch = false;
-    this.inputNewPasswordEl.value = "";
-    this.inputRepeatPasswordEl.value = "";
-    // Temporarily remove "required" attribute to remove styles for invalid inputs.
-    // The attribute will be added again when we run validation.
-    this.passwordsRequired = false;
+  errorTemplate() {
+    let messageId = this.enableEncryptionErrorCode
+      ? getErrorL10nId(this.enableEncryptionErrorCode)
+      : getErrorL10nId(this.rerunEncryptionErrorCode);
+    return html`
+      <moz-message-bar
+        id="enable-backup-encryption-error"
+        type="error"
+        .messageL10nId="${messageId}"
+      ></moz-message-bar>
+    `;
   }
 
   contentTemplate() {
     return html`
-      <form
+      <div
         id="backup-enable-encryption-wrapper"
         aria-labelledby="backup-enable-encryption-header"
         aria-describedby="backup-enable-encryption-description"
@@ -153,67 +209,22 @@ export default class EnableBackupEncryption extends MozLitElement {
           class="heading-medium"
           data-l10n-id=${ifDefined(VALID_L10N_IDS.get(this.type))}
         ></h1>
-        <main id="backup-enable-encryption-content">
+        <div id="backup-enable-encryption-content">
           ${this.type === VALID_TYPES.SET_PASSWORD
-            ? html` <div id="backup-enable-encryption-description">
-                <span
-                  id="backup-enable-encryption-description-span"
-                  data-l10n-id="enable-backup-encryption-description"
-                >
-                  <!--TODO: finalize support page links (bug 1900467)-->
-                </span>
-                <a
-                  id="backup-enable-encryption-learn-more-link"
-                  is="moz-support-link"
-                  support-page="todo-backup"
-                  data-l10n-id="enable-backup-encryption-support-link"
-                ></a>
-              </div>`
+            ? this.descriptionTemplate()
             : null}
+          <password-validation-inputs
+            id="backup-enable-encryption-password-inputs"
+            .supportBaseLink=${this.supportBaseLink}
+          >
+          </password-validation-inputs>
 
-          <fieldset id="passwords">
-            <label id="new-password-label" for="new-password-input">
-              <span
-                id="new-password-span"
-                data-l10n-id="enable-backup-encryption-create-password-label"
-              ></span>
-              <input
-                type="password"
-                id="new-password-input"
-                ?required=${this.passwordsRequired}
-                @input=${this.handleChangeNewPassword}
-              />
-            </label>
-            <label id="repeat-password-label" for="repeat-password-input">
-              <span
-                id="repeat-password-span"
-                data-l10n-id="enable-backup-encryption-repeat-password-label"
-              ></span>
-              <input
-                type="password"
-                id="repeat-password-input"
-                ?required=${this.passwordsRequired}
-                @input=${this.handleChangeRepeatPassword}
-              />
-            </label>
-          </fieldset>
-        </main>
-
-        <moz-button-group id="backup-enable-encryption-button-group">
-          <moz-button
-            id="backup-enable-encryption-cancel-button"
-            @click=${this.handleCancel}
-            data-l10n-id="enable-backup-encryption-cancel-button"
-          ></moz-button>
-          <moz-button
-            id="backup-enable-encryption-confirm-button"
-            @click=${this.handleConfirm}
-            type="primary"
-            data-l10n-id="enable-backup-encryption-confirm-button"
-            ?disabled=${!this.passwordsMatch}
-          ></moz-button>
-        </moz-button-group>
-      </form>
+          ${this.enableEncryptionErrorCode || this.rerunEncryptionErrorCode
+            ? this.errorTemplate()
+            : null}
+        </div>
+        ${this.buttonGroupTemplate()}
+      </div>
     `;
   }
 

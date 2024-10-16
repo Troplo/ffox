@@ -4,25 +4,35 @@
 
 .wrapper {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto min-content min-content;
   box-sizing: border-box;
   height: 100%;
   min-width: 50px;
-  padding-inline-start: var(--space-medium);
-  border-inline-end: 1px solid var(--chrome-content-separator-color);
-  background-color: var(--sidebar-background-color);
-  color: var(--sidebar-text-color);
-  :host([positionend]) & {
-    border-inline-start: 1px solid var(--chrome-content-separator-color);
-    border-inline-end: none;
+  padding: var(--space-small);
+  padding-inline-end: 0;
+  background-color: var(--toolbar-bgcolor);
+  color: var(--toolbar-color);
+
+  /* stylelint-disable-next-line media-query-no-invalid */
+  @media (-moz-bool-pref: "sidebar.verticalTabs") {
+    :host([expanded]) & {
+      min-width: 280px;
+    }
   }
 }
 
 .actions-list {
   display: flex;
   flex-direction: column;
-  justify-content: end;
-  gap: var(--space-xsmall);
+  padding-inline-end: var(--space-small);
+  align-items: center;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  moz-button::part(label) {
+    opacity: 0;
+    transition: opacity 300ms ease-in-out;
+  }
 }
 
 .expanded-button {
@@ -32,5 +42,18 @@
     font-size: var(--font-size-large);
     font-weight: var(--font-weight);
     justify-content: flex-start;
+    padding-inline-start: 8px;
   }
+
+  &::part(label) {
+    opacity: 1;
+  }
+}
+
+.tools-and-extensions {
+  align-self: start;
+}
+
+.bottom-actions {
+  align-self: end;
 }

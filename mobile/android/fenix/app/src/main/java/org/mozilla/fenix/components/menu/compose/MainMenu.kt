@@ -6,23 +6,217 @@ package org.mozilla.fenix.components.menu.compose
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import mozilla.components.compose.cfr.CFRPopup
+import mozilla.components.compose.cfr.CFRPopupLayout
+import mozilla.components.compose.cfr.CFRPopupProperties
+import mozilla.components.lib.state.ext.observeAsState
 import mozilla.components.service.fxa.manager.AccountState
 import mozilla.components.service.fxa.manager.AccountState.NotAuthenticated
 import mozilla.components.service.fxa.store.Account
+import mozilla.components.service.fxa.store.SyncStore
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.menu.MenuAccessPoint
 import org.mozilla.fenix.components.menu.compose.header.MenuHeader
+import org.mozilla.fenix.components.menu.store.MenuAction
+import org.mozilla.fenix.components.menu.store.MenuStore
 import org.mozilla.fenix.compose.Divider
 import org.mozilla.fenix.compose.annotation.LightDarkPreview
 import org.mozilla.fenix.theme.FirefoxTheme
 import org.mozilla.fenix.theme.Theme
 
 internal const val MAIN_MENU_ROUTE = "main_menu"
+
+private const val ARROW_VERTICAL_OFFSET = 10
+private const val INDICATOR_START_OFFSET = 46
+
+/**
+ * Wrapper composable to display a Contextual Feature Recommendation popup on [MainMenu]
+ *
+ * @param accessPoint The [MenuAccessPoint] that was used to navigate to the menu dialog.
+ * @param store The [MenuStore] that is used for the current state.
+ * @param syncStore The [SyncStore] used to determine account information.
+ * @param showQuitMenu Whether or not to show the [QuitMenuGroup].
+ * @param isPrivate Whether or not the browsing mode is in private mode.
+ * @param isDesktopMode Whether or not the current site is in desktop mode.
+ * @param isTranslationSupported Whether or not Translations are supported.
+ * @param isExtensionsProcessDisabled Whether or not the extensions process is disabled due to extension errors.
+ */
+@Suppress("LongParameterList")
+@Composable
+internal fun MainMenuWithCFR(
+    accessPoint: MenuAccessPoint,
+    store: MenuStore,
+    syncStore: SyncStore,
+    showQuitMenu: Boolean,
+    isPrivate: Boolean,
+    isDesktopMode: Boolean,
+    isTranslationSupported: Boolean,
+    isExtensionsProcessDisabled: Boolean,
+) {
+    val configuration = LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp
+    val indicatorArrowStartOffset = (screenWidth / 2) - INDICATOR_START_OFFSET
+
+    CFRPopupLayout(
+        showCFR = true,
+        properties = CFRPopupProperties(
+            popupBodyColors = listOf(
+                FirefoxTheme.colors.layerGradientEnd.toArgb(),
+                FirefoxTheme.colors.layerGradientStart.toArgb(),
+            ),
+            dismissButtonColor = FirefoxTheme.colors.iconOnColor.toArgb(),
+            indicatorDirection = CFRPopup.IndicatorDirection.DOWN,
+            popupVerticalOffset = ARROW_VERTICAL_OFFSET.dp,
+            indicatorArrowStartOffset = indicatorArrowStartOffset.dp,
+        ),
+        onCFRShown = {
+            store.dispatch(MenuAction.ShowCFR)
+        },
+        onDismiss = {
+            store.dispatch(MenuAction.DismissCFR)
+        },
+        title = {
+            FirefoxTheme {
+                Text(
+                    text = stringResource(R.string.menu_cfr_title),
+                    color = FirefoxTheme.colors.textOnColorPrimary,
+                    style = FirefoxTheme.typography.subtitle2,
+                )
+            }
+        },
+        text = {
+            FirefoxTheme {
+                Text(
+                    text = stringResource(R.string.menu_cfr_body),
+                    color = FirefoxTheme.colors.textOnColorPrimary,
+                    style = FirefoxTheme.typography.body2,
+                )
+            }
+        },
+    ) {
+        MainMenu(
+            accessPoint = accessPoint,
+            store = store,
+            syncStore = syncStore,
+            showQuitMenu = showQuitMenu,
+            isPrivate = isPrivate,
+            isDesktopMode = isDesktopMode,
+            isTranslationSupported = isTranslationSupported,
+            isExtensionsProcessDisabled = isExtensionsProcessDisabled,
+        )
+    }
+}
+
+/**
+ * Wrapper of [MainMenu]
+ *
+ * @param accessPoint The [MenuAccessPoint] that was used to navigate to the menu dialog.
+ * @param store The [MenuStore] that is used for the current state.
+ * @param syncStore The [SyncStore] used to determine account information.
+ * @param showQuitMenu Whether or not to show the [QuitMenuGroup].
+ * @param isPrivate Whether or not the browsing mode is in private mode.
+ * @param isDesktopMode Whether or not the current site is in desktop mode.
+ * @param isTranslationSupported Whether or not Translations are supported.
+ * @param isExtensionsProcessDisabled Whether or not the extensions process is disabled due to extension errors.
+ */
+@Suppress("LongMethod", "LongParameterList")
+@Composable
+internal fun MainMenu(
+    accessPoint: MenuAccessPoint,
+    store: MenuStore,
+    syncStore: SyncStore,
+    showQuitMenu: Boolean,
+    isPrivate: Boolean,
+    isDesktopMode: Boolean,
+    isTranslationSupported: Boolean,
+    isExtensionsProcessDisabled: Boolean,
+) {
+    val account by syncStore.observeAsState(initialValue = null) { state -> state.account }
+    val accountState by syncStore.observeAsState(initialValue = NotAuthenticated) { state ->
+        state.accountState
+    }
+
+    MainMenu(
+        accessPoint = accessPoint,
+        account = account,
+        accountState = accountState,
+        isPrivate = isPrivate,
+        isDesktopMode = isDesktopMode,
+        isTranslationSupported = isTranslationSupported,
+        showQuitMenu = showQuitMenu,
+        isExtensionsProcessDisabled = isExtensionsProcessDisabled,
+        onMozillaAccountButtonClick = {
+            store.dispatch(
+                MenuAction.Navigate.MozillaAccount(
+                    accountState = accountState,
+                    accesspoint = accessPoint,
+                ),
+            )
+        },
+        onHelpButtonClick = {
+            store.dispatch(MenuAction.Navigate.Help)
+        },
+        onSettingsButtonClick = {
+            store.dispatch(MenuAction.Navigate.Settings)
+        },
+        onNewTabMenuClick = {
+            store.dispatch(MenuAction.Navigate.NewTab)
+        },
+        onNewPrivateTabMenuClick = {
+            store.dispatch(MenuAction.Navigate.NewPrivateTab)
+        },
+        onSwitchToDesktopSiteMenuClick = {
+            if (isDesktopMode) {
+                store.dispatch(MenuAction.RequestMobileSite)
+            } else {
+                store.dispatch(MenuAction.RequestDesktopSite)
+            }
+        },
+        onFindInPageMenuClick = {
+            store.dispatch(MenuAction.FindInPage)
+        },
+        onToolsMenuClick = {
+            store.dispatch(MenuAction.Navigate.Tools)
+        },
+        onSaveMenuClick = {
+            store.dispatch(MenuAction.Navigate.Save)
+        },
+        onExtensionsMenuClick = {
+            store.dispatch(MenuAction.Navigate.Extensions)
+        },
+        onBookmarksMenuClick = {
+            store.dispatch(MenuAction.Navigate.Bookmarks)
+        },
+        onHistoryMenuClick = {
+            store.dispatch(MenuAction.Navigate.History)
+        },
+        onDownloadsMenuClick = {
+            store.dispatch(MenuAction.Navigate.Downloads)
+        },
+        onPasswordsMenuClick = {
+            store.dispatch(MenuAction.Navigate.Passwords)
+        },
+        onCustomizeHomepageMenuClick = {
+            store.dispatch(MenuAction.Navigate.CustomizeHomepage)
+        },
+        onNewInFirefoxMenuClick = {
+            store.dispatch(MenuAction.Navigate.ReleaseNotes)
+        },
+        onQuitMenuClick = {
+            store.dispatch(MenuAction.DeleteBrowsingDataAndQuit)
+        },
+    )
+}
 
 /**
  * Wrapper column containing the main menu items.
@@ -31,8 +225,11 @@ internal const val MAIN_MENU_ROUTE = "main_menu"
  * @param account [Account] information available for a synced account.
  * @param accountState The [AccountState] of a Mozilla account.
  * @param isPrivate Whether or not the browsing mode is in private mode.
+ * @param isDesktopMode Whether or not the desktop mode is enabled.
+ * @param isTranslationSupported Whether or not translation is supported.
  * @param showQuitMenu Whether or not the button to delete browsing data and quit
  * should be visible.
+ * @param isExtensionsProcessDisabled Whether or not the extensions process is disabled due to extension errors.
  * @param onMozillaAccountButtonClick Invoked when the user clicks on Mozilla account button.
  * @param onHelpButtonClick Invoked when the user clicks on the help button.
  * @param onSettingsButtonClick Invoked when the user clicks on the settings button.
@@ -60,7 +257,10 @@ internal fun MainMenu(
     account: Account?,
     accountState: AccountState,
     isPrivate: Boolean,
+    isDesktopMode: Boolean,
+    isTranslationSupported: Boolean,
     showQuitMenu: Boolean,
+    isExtensionsProcessDisabled: Boolean,
     onMozillaAccountButtonClick: () -> Unit,
     onHelpButtonClick: () -> Unit,
     onSettingsButtonClick: () -> Unit,
@@ -99,6 +299,9 @@ internal fun MainMenu(
 
         ToolsAndActionsMenuGroup(
             accessPoint = accessPoint,
+            isDesktopMode = isDesktopMode,
+            isTranslationSupported = isTranslationSupported,
+            isExtensionsProcessDisabled = isExtensionsProcessDisabled,
             onSwitchToDesktopSiteMenuClick = onSwitchToDesktopSiteMenuClick,
             onFindInPageMenuClick = onFindInPageMenuClick,
             onToolsMenuClick = onToolsMenuClick,
@@ -134,7 +337,10 @@ private fun QuitMenuGroup(
 ) {
     MenuGroup {
         MenuItem(
-            label = stringResource(id = R.string.delete_browsing_data_on_quit_action),
+            label = stringResource(
+                id = R.string.browser_menu_delete_browsing_data_on_quit,
+                stringResource(id = R.string.app_name),
+            ),
             beforeIconPainter = painterResource(id = R.drawable.mozac_ic_cross_circle_fill_24),
             state = MenuItemState.WARNING,
             onClick = onQuitMenuClick,
@@ -185,9 +391,13 @@ private fun NewTabsMenuGroup(
     }
 }
 
+@Suppress("LongParameterList")
 @Composable
 private fun ToolsAndActionsMenuGroup(
     accessPoint: MenuAccessPoint,
+    isDesktopMode: Boolean,
+    isTranslationSupported: Boolean,
+    isExtensionsProcessDisabled: Boolean,
     onSwitchToDesktopSiteMenuClick: () -> Unit,
     onFindInPageMenuClick: () -> Unit,
     onToolsMenuClick: () -> Unit,
@@ -196,9 +406,24 @@ private fun ToolsAndActionsMenuGroup(
 ) {
     MenuGroup {
         if (accessPoint == MenuAccessPoint.Browser) {
+            val labelId: Int
+            val iconId: Int
+            val menuItemState: MenuItemState
+
+            if (isDesktopMode) {
+                labelId = R.string.browser_menu_switch_to_mobile_site
+                iconId = R.drawable.mozac_ic_device_mobile_24
+                menuItemState = MenuItemState.ACTIVE
+            } else {
+                labelId = R.string.browser_menu_switch_to_desktop_site
+                iconId = R.drawable.mozac_ic_device_desktop_24
+                menuItemState = MenuItemState.ENABLED
+            }
+
             MenuItem(
-                label = stringResource(id = R.string.browser_menu_switch_to_desktop_site),
-                beforeIconPainter = painterResource(id = R.drawable.mozac_ic_device_desktop_24),
+                label = stringResource(id = labelId),
+                beforeIconPainter = painterResource(id = iconId),
+                state = menuItemState,
                 onClick = onSwitchToDesktopSiteMenuClick,
             )
 
@@ -215,6 +440,13 @@ private fun ToolsAndActionsMenuGroup(
             MenuItem(
                 label = stringResource(id = R.string.browser_menu_tools),
                 beforeIconPainter = painterResource(id = R.drawable.mozac_ic_tool_24),
+                description = stringResource(
+                    id = if (isTranslationSupported) {
+                        R.string.browser_menu_tools_description_with_translate
+                    } else {
+                        R.string.browser_menu_tools_description
+                    },
+                ),
                 onClick = onToolsMenuClick,
                 afterIconPainter = painterResource(id = R.drawable.mozac_ic_chevron_right_24),
             )
@@ -224,6 +456,7 @@ private fun ToolsAndActionsMenuGroup(
             MenuItem(
                 label = stringResource(id = R.string.browser_menu_save),
                 beforeIconPainter = painterResource(id = R.drawable.mozac_ic_save_24),
+                description = stringResource(id = R.string.browser_menu_save_description),
                 onClick = onSaveMenuClick,
                 afterIconPainter = painterResource(id = R.drawable.mozac_ic_chevron_right_24),
             )
@@ -233,6 +466,16 @@ private fun ToolsAndActionsMenuGroup(
 
         MenuItem(
             label = stringResource(id = R.string.browser_menu_extensions),
+            description = if (isExtensionsProcessDisabled) {
+                stringResource(R.string.browser_menu_extensions_disabled_description)
+            } else {
+                null
+            },
+            descriptionState = if (isExtensionsProcessDisabled) {
+                MenuItemState.WARNING
+            } else {
+                MenuItemState.ENABLED
+            },
             beforeIconPainter = painterResource(id = R.drawable.mozac_ic_extension_24),
             onClick = onExtensionsMenuClick,
             afterIconPainter = painterResource(id = R.drawable.mozac_ic_chevron_right_24),
@@ -318,7 +561,10 @@ private fun MenuDialogPreview() {
                 account = null,
                 accountState = NotAuthenticated,
                 isPrivate = false,
+                isDesktopMode = false,
+                isTranslationSupported = true,
                 showQuitMenu = true,
+                isExtensionsProcessDisabled = true,
                 onMozillaAccountButtonClick = {},
                 onHelpButtonClick = {},
                 onSettingsButtonClick = {},
@@ -354,7 +600,10 @@ private fun MenuDialogPrivatePreview() {
                 account = null,
                 accountState = NotAuthenticated,
                 isPrivate = false,
+                isDesktopMode = false,
+                isTranslationSupported = true,
                 showQuitMenu = true,
+                isExtensionsProcessDisabled = false,
                 onMozillaAccountButtonClick = {},
                 onHelpButtonClick = {},
                 onSettingsButtonClick = {},

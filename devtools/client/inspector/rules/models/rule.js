@@ -52,17 +52,11 @@ class Rule {
     this.domRule = options.rule;
     this.compatibilityIssues = null;
 
-    if (this.domRule.hasMatchedSelectorIndexesTrait) {
-      this.matchedSelectorIndexes = options.matchedSelectorIndexes || [];
-    } else {
-      // @backward-compat { version 128 } this.matchedDesugaredSelectors can be removed
-      // once 128 hits release
-      this.matchedDesugaredSelectors = options.matchedDesugaredSelectors || [];
-    }
-
+    this.matchedSelectorIndexes = options.matchedSelectorIndexes || [];
     this.pseudoElement = options.pseudoElement || "";
     this.isSystem = options.isSystem;
     this.isUnmatched = options.isUnmatched || false;
+    this.darkColorScheme = options.darkColorScheme;
     this.inherited = options.inherited || null;
     this.keyframes = options.keyframes || null;
     this.userAdded = options.rule.userAdded;
@@ -108,23 +102,14 @@ class Rule {
   }
 
   get selector() {
-    const data = {
+    return {
       getUniqueSelector: this.getUniqueSelector,
+      matchedSelectorIndexes: this.matchedSelectorIndexes,
       selectors: this.domRule.selectors,
       selectorsSpecificity: this.domRule.selectorsSpecificity,
       selectorWarnings: this.domRule.selectors,
       selectorText: this.keyframes ? this.domRule.keyText : this.selectorText,
     };
-
-    if (this.domRule.hasMatchedSelectorIndexesTrait) {
-      data.matchedSelectorIndexes = this.matchedSelectorIndexes;
-    } else {
-      // @backward-compat { version 128 } matchedDesugaredSelectors can be removed
-      // once 128 hits release
-      data.matchedDesugaredSelectors = this.matchedDesugaredSelectors;
-    }
-
-    return data;
   }
 
   get sourceMapURLService() {
@@ -652,13 +637,10 @@ class Rule {
    * properties as needed.
    */
   refresh(options) {
-    if (this.domRule.hasMatchedSelectorIndexesTrait) {
-      this.matchedSelectorIndexes = options.matchedSelectorIndexes || [];
-    } else {
-      // @backward-compat { version 128 } this.matchedDesugaredSelectors can be removed
-      // once 128 hits release
-      this.matchedDesugaredSelectors = options.matchedDesugaredSelectors || [];
-    }
+    this.matchedSelectorIndexes = options.matchedSelectorIndexes || [];
+    const colorSchemeChanged = this.darkColorScheme !== options.darkColorScheme;
+    this.darkColorScheme = options.darkColorScheme;
+
     const newTextProps = this._getTextProperties();
 
     // The element style rule behaves differently on refresh. We basically need to update
@@ -699,6 +681,17 @@ class Rule {
         prop.updateEditor();
       } else {
         delete prop._visited;
+      }
+
+      // Valid properties that aren't disabled might need to get updated in some condition
+      if (
+        prop.enabled &&
+        prop.isValid() &&
+        // Update if it's using light-dark and the color scheme changed
+        colorSchemeChanged &&
+        prop.value.includes("light-dark")
+      ) {
+        prop.updateEditor();
       }
     }
 

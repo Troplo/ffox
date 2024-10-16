@@ -2,19 +2,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { Module } from "chrome://remote/content/shared/messagehandler/Module.sys.mjs";
+import { RootBiDiModule } from "chrome://remote/content/webdriver-bidi/modules/RootBiDiModule.sys.mjs";
 
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   assert: "chrome://remote/content/shared/webdriver/Assert.sys.mjs",
   error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
+  pprint: "chrome://remote/content/shared/Format.sys.mjs",
   TabManager: "chrome://remote/content/shared/TabManager.sys.mjs",
   WindowGlobalMessageHandler:
     "chrome://remote/content/shared/messagehandler/WindowGlobalMessageHandler.sys.mjs",
 });
 
-class InputModule extends Module {
+class InputModule extends RootBiDiModule {
   destroy() {}
 
   async performActions(options = {}) {
@@ -22,7 +23,7 @@ class InputModule extends Module {
 
     lazy.assert.string(
       contextId,
-      `Expected "context" to be a string, got ${contextId}`
+      lazy.pprint`Expected "context" to be a string, got ${contextId}`
     );
 
     const context = lazy.TabManager.getBrowsingContextById(contextId);
@@ -66,7 +67,7 @@ class InputModule extends Module {
 
     lazy.assert.string(
       contextId,
-      `Expected "context" to be a string, got ${contextId}`
+      lazy.pprint`Expected "context" to be a string, got ${contextId}`
     );
 
     const context = lazy.TabManager.getBrowsingContextById(contextId);
@@ -118,7 +119,7 @@ class InputModule extends Module {
 
     lazy.assert.string(
       contextId,
-      `Expected "context" to be a string, got ${contextId}`
+      lazy.pprint`Expected "context" to be a string, got ${contextId}`
     );
 
     const context = lazy.TabManager.getBrowsingContextById(contextId);
@@ -128,12 +129,15 @@ class InputModule extends Module {
       );
     }
 
-    lazy.assert.array(files, `Expected "files" to be an array, got ${files}`);
+    lazy.assert.array(
+      files,
+      lazy.pprint`Expected "files" to be an array, got ${files}`
+    );
 
     for (const file of files) {
       lazy.assert.string(
         file,
-        `Expected an element of "files" to be a string, got ${file}`
+        lazy.pprint`Expected an element of "files" to be a string, got ${file}`
       );
     }
 

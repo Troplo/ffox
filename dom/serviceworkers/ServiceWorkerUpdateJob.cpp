@@ -6,7 +6,6 @@
 
 #include "ServiceWorkerUpdateJob.h"
 
-#include "mozilla/Telemetry.h"
 #include "nsIScriptError.h"
 #include "nsIURL.h"
 #include "nsNetUtil.h"
@@ -16,6 +15,7 @@
 #include "ServiceWorkerRegistrationInfo.h"
 #include "ServiceWorkerScriptCache.h"
 #include "mozilla/dom/WorkerCommon.h"
+#include "mozilla/ProfilerMarkers.h"
 
 namespace mozilla::dom {
 
@@ -212,6 +212,9 @@ void ServiceWorkerUpdateJob::FailUpdateJob(nsresult aRv) {
 }
 
 void ServiceWorkerUpdateJob::AsyncExecute() {
+  AUTO_PROFILER_MARKER_TEXT("ServiceWorkerUpdateJob::AsyncExecute", DOM, {},
+                            ""_ns);
+
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(GetType() == Type::Update);
 
@@ -265,6 +268,8 @@ void ServiceWorkerUpdateJob::SetRegistration(
 }
 
 void ServiceWorkerUpdateJob::Update() {
+  AUTO_PROFILER_MARKER_TEXT("ServiceWorkerUpdateJob::Update", DOM, {}, ""_ns);
+
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!Canceled());
 
@@ -387,7 +392,7 @@ void ServiceWorkerUpdateJob::ComparisonResult(nsresult aStatus,
         message, nsContentUtils::eDOM_PROPERTIES,
         "ServiceWorkerScopePathMismatch", reportScope, reportMaxPrefix);
     NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Failed to format localized string");
-    swm->ReportToAllClients(mScope, message, u""_ns, u""_ns, 0, 0,
+    swm->ReportToAllClients(mScope, message, ""_ns, u""_ns, 0, 0,
                             nsIScriptError::errorFlag);
     FailUpdateJob(NS_ERROR_DOM_SECURITY_ERR);
     return;
@@ -399,8 +404,6 @@ void ServiceWorkerUpdateJob::ComparisonResult(nsresult aStatus,
     Finish(NS_OK);
     return;
   }
-
-  Telemetry::Accumulate(Telemetry::SERVICE_WORKER_UPDATED, 1);
 
   // Begin step 7 of the Update algorithm to evaluate the new script.
   nsLoadFlags flags = aLoadFlags;
@@ -462,6 +465,8 @@ void ServiceWorkerUpdateJob::ContinueUpdateAfterScriptEval(
 }
 
 void ServiceWorkerUpdateJob::Install() {
+  AUTO_PROFILER_MARKER_TEXT("ServiceWorkerUpdateJob::Install", DOM, {}, ""_ns);
+
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_DIAGNOSTIC_ASSERT(!Canceled());
 

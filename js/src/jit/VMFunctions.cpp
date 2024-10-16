@@ -32,6 +32,7 @@
 #include "util/Unicode.h"
 #include "vm/ArrayObject.h"
 #include "vm/Compartment.h"
+#include "vm/Float16.h"
 #include "vm/Interpreter.h"
 #include "vm/JSAtomUtils.h"  // AtomizeString
 #include "vm/PlainObject.h"  // js::PlainObject
@@ -43,6 +44,7 @@
 #include "wasm/WasmGcObject.h"
 
 #include "debugger/DebugAPI-inl.h"
+#include "gc/StoreBuffer-inl.h"
 #include "jit/BaselineFrame-inl.h"
 #include "jit/VMFunctionList-inl.h"
 #include "vm/Interpreter-inl.h"
@@ -956,21 +958,18 @@ void PostWriteElementBarrier(JSRuntime* rt, JSObject* obj, int32_t index) {
   MOZ_ASSERT(index >= 0);
   MOZ_ASSERT(uint32_t(index) < nobj->getDenseInitializedLength());
 
-  if (nobj->isInWholeCellBuffer()) {
+  if (gc::StoreBuffer::isInWholeCellBuffer(nobj)) {
     return;
   }
 
-  if (nobj->getDenseInitializedLength() > MAX_WHOLE_CELL_BUFFER_SIZE
-#ifdef JS_GC_ZEAL
-      || rt->hasZealMode(gc::ZealMode::ElementsBarrier)
-#endif
-  ) {
-    rt->gc.storeBuffer().putSlot(nobj, HeapSlot::Element,
-                                 nobj->unshiftedIndex(index), 1);
+  gc::StoreBuffer* sb = &rt->gc.storeBuffer();
+  if (nobj->getDenseInitializedLength() > MAX_WHOLE_CELL_BUFFER_SIZE ||
+      rt->hasZealMode(gc::ZealMode::ElementsBarrier)) {
+    sb->putSlot(nobj, HeapSlot::Element, nobj->unshiftedIndex(index), 1);
     return;
   }
 
-  rt->gc.storeBuffer().putWholeCell(obj);
+  sb->putWholeCell(obj);
 }
 
 void PostGlobalWriteBarrier(JSRuntime* rt, GlobalObject* obj) {
@@ -1330,6 +1329,33 @@ bool PushClassBodyEnv(JSContext* cx, BaselineFrame* frame,
 bool PushVarEnv(JSContext* cx, BaselineFrame* frame, Handle<Scope*> scope) {
   return frame->pushVarEnvironment(cx, scope);
 }
+
+#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+bool AddDisposableResource(JSContext* cx, BaselineFrame* frame,
+                           JS::Handle<JS::Value> val,
+                           JS::Handle<JS::Value> method,
+                           JS::Handle<JS::Value> needsClosure, UsingHint hint) {
+  JS::Rooted<ArrayObject*> disposeCapability(
+      cx, frame->getOrCreateDisposeCapability(cx));
+  if (!disposeCapability) {
+    return false;
+  }
+  return js::AddDisposableResourceToCapability(cx, disposeCapability, val,
+                                               method, needsClosure, hint);
+}
+
+bool CreateSuppressedError(JSContext* cx, BaselineFrame* frame,
+                           JS::Handle<JS::Value> error,
+                           JS::Handle<JS::Value> suppressed,
+                           JS::MutableHandle<JS::Value> rval) {
+  ErrorObject* errorObj = js::CreateSuppressedError(cx, error, suppressed);
+  if (!errorObj) {
+    return false;
+  }
+  rval.setObject(*errorObj);
+  return true;
+}
+#endif
 
 bool EnterWith(JSContext* cx, BaselineFrame* frame, HandleValue val,
                Handle<WithScope*> templ) {
@@ -2535,6 +2561,10 @@ void TraceCreateObject(JSObject* obj) {
 }
 #endif
 
+BigInt* CreateBigIntFromInt32(JSContext* cx, int32_t i32) {
+  return js::BigInt::createFromInt64(cx, int64_t(i32));
+}
+
 #if JS_BITS_PER_WORD == 32
 BigInt* CreateBigIntFromInt64(JSContext* cx, uint32_t low, uint32_t high) {
   uint64_t n = (static_cast<uint64_t>(high) << 32) + low;
@@ -3062,6 +3092,31 @@ BigInt* AtomicsXor64(JSContext* cx, TypedArrayObject* typedArray, size_t index,
         return jit::AtomicOperations::fetchXorSeqCst(addr, val);
       },
       value);
+}
+
+float RoundFloat16ToFloat32(int32_t d) {
+  AutoUnsafeCallWithABI unsafe;
+  return static_cast<float>(js::float16{d});
+}
+
+float RoundFloat16ToFloat32(float d) {
+  AutoUnsafeCallWithABI unsafe;
+  return static_cast<float>(js::float16{d});
+}
+
+float RoundFloat16ToFloat32(double d) {
+  AutoUnsafeCallWithABI unsafe;
+  return static_cast<float>(js::float16{d});
+}
+
+float Float16ToFloat32(int32_t value) {
+  AutoUnsafeCallWithABI unsafe;
+  return static_cast<float>(js::float16::fromRawBits(value));
+}
+
+int32_t Float32ToFloat16(float value) {
+  AutoUnsafeCallWithABI unsafe;
+  return static_cast<int32_t>(js::float16{value}.toRawBits());
 }
 
 JSAtom* AtomizeStringNoGC(JSContext* cx, JSString* str) {

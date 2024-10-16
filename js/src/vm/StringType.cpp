@@ -99,14 +99,6 @@ size_t JSString::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) {
     }
   }
 
-  // JSExtensibleString: count the full capacity, not just the used space.
-  if (isExtensible()) {
-    JSExtensibleString& extensible = asExtensible();
-    return extensible.hasLatin1Chars()
-               ? mallocSizeOf(extensible.rawLatin1Chars())
-               : mallocSizeOf(extensible.rawTwoByteChars());
-  }
-
   // JSInlineString, JSFatInlineString, js::ThinInlineAtom, js::FatInlineAtom:
   // the chars are inline.
   if (isInline()) {
@@ -613,22 +605,88 @@ JSExtensibleString& JSLinearString::makeExtensible(size_t capacity) {
 }
 
 template <typename CharT>
-static MOZ_ALWAYS_INLINE bool AllocCharsForFlatten(JSString* str, size_t length,
+static MOZ_ALWAYS_INLINE bool AllocCharsForFlatten(Nursery& nursery,
+                                                   JSString* str, size_t length,
                                                    CharT** chars,
-                                                   size_t* capacity) {
+                                                   size_t* capacity,
+                                                   bool* hasStringBuffer) {
   /*
    * Grow by 12.5% if the buffer is very large. Otherwise, round up to the
    * next power of 2. This is similar to what we do with arrays; see
    * JSObject::ensureDenseArrayElements.
    */
-  static const size_t DOUBLING_MAX = 1024 * 1024;
-  *capacity =
-      length > DOUBLING_MAX ? length + (length / 8) : RoundUpPow2(length);
+  auto calcCapacity = [](size_t length, size_t maxCapacity) {
+    static const size_t DOUBLING_MAX = 1024 * 1024;
+    if (length > DOUBLING_MAX) {
+      return std::min<size_t>(maxCapacity, length + (length / 8));
+    }
+    size_t capacity = RoundUpPow2(length);
+    MOZ_ASSERT(capacity <= maxCapacity);
+    return capacity;
+  };
 
-  static_assert(JSString::MAX_LENGTH * sizeof(CharT) <= UINT32_MAX);
-  *chars =
-      str->zone()->pod_arena_malloc<CharT>(js::StringBufferArena, *capacity);
-  return *chars != nullptr;
+  if (length < JSString::MIN_BYTES_FOR_BUFFER / sizeof(CharT)) {
+    *capacity = calcCapacity(length, JSString::MAX_LENGTH);
+    MOZ_ASSERT(length <= *capacity);
+    MOZ_ASSERT(*capacity <= JSString::MAX_LENGTH);
+
+    auto buffer = str->zone()->make_pod_arena_array<CharT>(
+        js::StringBufferArena, *capacity);
+    if (!buffer) {
+      return false;
+    }
+    if (!str->isTenured()) {
+      if (!nursery.registerMallocedBuffer(buffer.get(),
+                                          *capacity * sizeof(CharT))) {
+        return false;
+      }
+    }
+    *chars = buffer.release();
+    *hasStringBuffer = false;
+    return true;
+  }
+
+  using mozilla::StringBuffer;
+
+  static_assert(StringBuffer::IsValidLength<CharT>(JSString::MAX_LENGTH),
+                "JSString length must be valid for StringBuffer");
+
+  // Include extra space for the header and the null-terminator before
+  // calculating the capacity. This ensures we make good use of jemalloc's
+  // bucket sizes. For example, for a Latin1 string with length 2000 we want to
+  // get a capacity of 2039 (chars). With the StringBuffer header (8 bytes) and
+  // the null-terminator this results in an allocation of 2048 bytes.
+  //
+  // Note: the null-terminator will not be included in the extensible string's
+  // capacity field.
+  static_assert(sizeof(StringBuffer) % sizeof(CharT) == 0);
+  static constexpr size_t ExtraChars = sizeof(StringBuffer) / sizeof(CharT) + 1;
+
+  size_t fullCapacity =
+      calcCapacity(length + ExtraChars, JSString::MAX_LENGTH + ExtraChars);
+  *capacity = fullCapacity - ExtraChars;
+  MOZ_ASSERT(length <= *capacity);
+  MOZ_ASSERT(*capacity <= JSString::MAX_LENGTH);
+
+  RefPtr<StringBuffer> buffer = StringBuffer::Alloc(
+      (*capacity + 1) * sizeof(CharT), mozilla::Some(js::StringBufferArena));
+  if (!buffer) {
+    return false;
+  }
+  if (!str->isTenured()) {
+    auto* linear = static_cast<JSLinearString*>(str);  // True when we're done.
+    if (!nursery.addExtensibleStringBuffer(linear, buffer)) {
+      return false;
+    }
+  }
+  // Transfer ownership to the caller, where the buffer will be used for the
+  // extensible string.
+  // Note: the null-terminator will be stored in flattenInternal.
+  StringBuffer* buf;
+  buffer.forget(&buf);
+  *chars = static_cast<CharT*>(buf->Data());
+  *hasStringBuffer = true;
+  return true;
 }
 
 UniqueLatin1Chars JSRope::copyLatin1Chars(JSContext* maybecx,
@@ -650,26 +708,75 @@ static MOZ_ALWAYS_INLINE JSString::OwnedChars<CharT> AllocChars(JSContext* cx,
                                                                 gc::Heap heap) {
   if (heap == gc::Heap::Default && cx->zone()->allocNurseryStrings()) {
     MOZ_ASSERT(cx->nursery().isEnabled());
-    auto [buffer, isMalloced] = cx->nursery().allocateBuffer(
+    void* buffer = cx->nursery().tryAllocateNurseryBuffer(
         cx->zone(), length * sizeof(CharT), js::StringBufferArena);
-    if (!buffer) {
-      ReportOutOfMemory(cx);
-      return {};
+    if (buffer) {
+      using Kind = typename JSString::OwnedChars<CharT>::Kind;
+      return {static_cast<CharT*>(buffer), length, Kind::Nursery};
     }
-
-    using Kind = typename JSString::OwnedChars<CharT>::Kind;
-    Kind kind = isMalloced ? Kind::Malloc : Kind::Nursery;
-    return {static_cast<CharT*>(buffer), length, kind};
   }
 
-  auto buffer = cx->make_pod_arena_array<CharT>(js::StringBufferArena, length);
+  static_assert(JSString::MIN_BYTES_FOR_BUFFER % sizeof(CharT) == 0);
+
+  if (length < JSString::MIN_BYTES_FOR_BUFFER / sizeof(CharT)) {
+    auto buffer =
+        cx->make_pod_arena_array<CharT>(js::StringBufferArena, length);
+    if (!buffer) {
+      return {};
+    }
+    return {std::move(buffer), length};
+  }
+
+  if (MOZ_UNLIKELY(!mozilla::StringBuffer::IsValidLength<CharT>(length))) {
+    ReportOversizedAllocation(cx, JSMSG_ALLOC_OVERFLOW);
+    return {};
+  }
+
+  // Note: StringBuffers must be null-terminated.
+  RefPtr<mozilla::StringBuffer> buffer = mozilla::StringBuffer::Alloc(
+      (length + 1) * sizeof(CharT), mozilla::Some(js::StringBufferArena));
   if (!buffer) {
     ReportOutOfMemory(cx);
     return {};
   }
-
+  static_cast<CharT*>(buffer->Data())[length] = '\0';
   return {std::move(buffer), length};
 }
+
+// Like AllocChars but for atom characters. Does not report an exception on OOM.
+template <typename CharT>
+JSString::OwnedChars<CharT> js::AllocAtomCharsValidLength(JSContext* cx,
+                                                          size_t length) {
+  MOZ_ASSERT(cx->zone()->isAtomsZone());
+  MOZ_ASSERT(JSAtom::validateLength(cx, length));
+  MOZ_ASSERT(mozilla::StringBuffer::IsValidLength<CharT>(length));
+
+  static_assert(JSString::MIN_BYTES_FOR_BUFFER % sizeof(CharT) == 0);
+
+  if (length < JSString::MIN_BYTES_FOR_BUFFER / sizeof(CharT)) {
+    auto buffer =
+        cx->make_pod_arena_array<CharT>(js::StringBufferArena, length);
+    if (!buffer) {
+      cx->recoverFromOutOfMemory();
+      return {};
+    }
+    return {std::move(buffer), length};
+  }
+
+  // Note: StringBuffers must be null-terminated.
+  RefPtr<mozilla::StringBuffer> buffer = mozilla::StringBuffer::Alloc(
+      (length + 1) * sizeof(CharT), mozilla::Some(js::StringBufferArena));
+  if (!buffer) {
+    return {};
+  }
+  static_cast<CharT*>(buffer->Data())[length] = '\0';
+  return {std::move(buffer), length};
+}
+
+template JSString::OwnedChars<Latin1Char> js::AllocAtomCharsValidLength(
+    JSContext* cx, size_t length);
+template JSString::OwnedChars<char16_t> js::AllocAtomCharsValidLength(
+    JSContext* cx, size_t length);
 
 template <typename CharT>
 UniquePtr<CharT[], JS::FreePolicy> JSRope::copyCharsInternal(
@@ -820,23 +927,37 @@ static constexpr uint32_t StringFlagsForCharType(uint32_t baseFlags) {
   return baseFlags | JSString::LATIN1_CHARS_BIT;
 }
 
-static bool UpdateNurseryBuffersOnTransfer(js::Nursery& nursery, JSString* from,
-                                           JSString* to, void* buffer,
+static bool UpdateNurseryBuffersOnTransfer(js::Nursery& nursery,
+                                           JSExtensibleString* from,
+                                           JSString* to, void* chars,
                                            size_t size) {
   // Update the list of buffers associated with nursery cells when |buffer| is
   // moved from string |from| to string |to|, depending on whether those strings
   // are in the nursery or not.
 
+  if (from->hasStringBuffer()) {
+    if (!from->isTenured()) {
+      nursery.removeExtensibleStringBuffer(from);
+    }
+    if (!to->isTenured()) {
+      auto* linear = static_cast<JSLinearString*>(to);
+      if (!nursery.addExtensibleStringBuffer(linear, from->stringBuffer())) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   if (from->isTenured() && !to->isTenured()) {
     // Tenured leftmost child is giving its chars buffer to the
     // nursery-allocated root node.
-    if (!nursery.registerMallocedBuffer(buffer, size)) {
+    if (!nursery.registerMallocedBuffer(chars, size)) {
       return false;
     }
   } else if (!from->isTenured() && to->isTenured()) {
     // Leftmost child is giving its nursery-held chars buffer to a
     // tenured string.
-    nursery.removeMallocedBuffer(buffer, size);
+    nursery.removeMallocedBuffer(chars, size);
   }
 
   return true;
@@ -849,6 +970,13 @@ static bool CanReuseLeftmostBuffer(JSString* leftmostChild, size_t wholeLength,
   }
 
   JSExtensibleString& str = leftmostChild->asExtensible();
+
+  // Don't mutate the StringBuffer if there are other references to it, possibly
+  // on other threads.
+  if (str.hasStringBuffer() && str.stringBuffer()->IsReadonly()) {
+    return false;
+  }
+
   return str.capacity() >= wholeLength &&
          str.hasTwoByteChars() == hasTwoByteChars;
 }
@@ -967,10 +1095,12 @@ JSLinearString* JSRope::flattenInternal(JSRope* root) {
   bool reuseLeftmostBuffer = CanReuseLeftmostBuffer(
       leftmostChild, wholeLength, std::is_same_v<CharT, char16_t>);
 
+  bool hasStringBuffer = false;
   if (reuseLeftmostBuffer) {
     JSExtensibleString& left = leftmostChild->asExtensible();
     wholeCapacity = left.capacity();
     wholeChars = const_cast<CharT*>(left.nonInlineChars<CharT>(nogc));
+    hasStringBuffer = left.hasStringBuffer();
 
     // Nursery::registerMallocedBuffer is fallible, so attempt it first before
     // doing anything irreversible.
@@ -980,16 +1110,9 @@ JSLinearString* JSRope::flattenInternal(JSRope* root) {
     }
   } else {
     // If we can't reuse the leftmost child's buffer, allocate a new one.
-    if (!AllocCharsForFlatten(root, wholeLength, &wholeChars, &wholeCapacity)) {
+    if (!AllocCharsForFlatten(nursery, root, wholeLength, &wholeChars,
+                              &wholeCapacity, &hasStringBuffer)) {
       return nullptr;
-    }
-
-    if (!root->isTenured()) {
-      if (!nursery.registerMallocedBuffer(wholeChars,
-                                          wholeCapacity * sizeof(CharT))) {
-        js_free(wholeChars);
-        return nullptr;
-      }
     }
   }
 
@@ -1084,9 +1207,13 @@ finish_root:
   MOZ_ASSERT(str == root);
   MOZ_ASSERT(pos == wholeChars + wholeLength);
 
-  root->setLengthAndFlags(wholeLength,
-                          StringFlagsForCharType<CharT>(EXTENSIBLE_FLAGS));
-  root->setNonInlineChars(wholeChars, /* usesStringBuffer = */ false);
+  uint32_t flags = StringFlagsForCharType<CharT>(EXTENSIBLE_FLAGS);
+  if (hasStringBuffer) {
+    flags |= HAS_STRING_BUFFER_BIT;
+    wholeChars[wholeLength] = '\0';
+  }
+  root->setLengthAndFlags(wholeLength, flags);
+  root->setNonInlineChars(wholeChars, hasStringBuffer);
   root->d.s.u3.capacity = wholeCapacity;
   AddCellMemory(root, root->asLinear().allocSize(), MemoryUse::StringContents);
 
@@ -1844,16 +1971,16 @@ static JSAtom* NewAtomDeflatedValidLength(JSContext* cx, const char16_t* s,
     return NewInlineAtomDeflated(cx, s, n, hash);
   }
 
-  auto news = cx->make_pod_arena_array<Latin1Char>(js::StringBufferArena, n);
-  if (!news) {
-    cx->recoverFromOutOfMemory();
+  JSString::OwnedChars<Latin1Char> newChars(
+      AllocAtomCharsValidLength<Latin1Char>(cx, n));
+  if (!newChars) {
     return nullptr;
   }
 
   MOZ_ASSERT(CanStoreCharsAsLatin1(s, n));
-  FillFromCompatible(news.get(), s, n);
+  FillFromCompatible(newChars.data(), s, n);
 
-  return JSAtom::newValidLength(cx, std::move(news), n, hash);
+  return JSAtom::newValidLength<Latin1Char>(cx, newChars, hash);
 }
 
 template <AllowGC allowGC, typename CharT>
@@ -2031,15 +2158,14 @@ JSAtom* NewAtomCopyNDontDeflateValidLength(JSContext* cx, const CharT* s,
     return NewInlineAtom(cx, s, n, hash);
   }
 
-  auto news = cx->make_pod_arena_array<CharT>(js::StringBufferArena, n);
-  if (!news) {
-    cx->recoverFromOutOfMemory();
+  JSString::OwnedChars<CharT> newChars(AllocAtomCharsValidLength<CharT>(cx, n));
+  if (!newChars) {
     return nullptr;
   }
 
-  PodCopy(news.get(), s, n);
+  PodCopy(newChars.data(), s, n);
 
-  return JSAtom::newValidLength(cx, std::move(news), n, hash);
+  return JSAtom::newValidLength<CharT>(cx, newChars, hash);
 }
 
 template JSAtom* NewAtomCopyNDontDeflateValidLength(JSContext* cx,

@@ -171,29 +171,29 @@ class InputScope {
   };
   inline InputScope enclosing() const;
   bool hasOnChain(ScopeKind kind) const {
-    return scope_.match(
-        [=](const Scope* ptr) { return ptr->hasOnChain(kind); },
-        [=](const ScopeStencilRef& ref) {
-          ScopeStencilRef it = ref;
-          while (true) {
-            const ScopeStencil& scope = it.scope();
-            if (scope.kind() == kind) {
-              return true;
-            }
-            if (scope.kind() == ScopeKind::Module &&
-                kind == ScopeKind::Global) {
-              return true;
-            }
-            if (!scope.hasEnclosing()) {
-              break;
-            }
-            new (&it) ScopeStencilRef{ref.context_, scope.enclosing()};
-          }
-          return false;
-        },
-        [=](const FakeStencilGlobalScope&) {
-          return kind == ScopeKind::Global;
-        });
+    return scope_.match([=](const Scope* ptr) { return ptr->hasOnChain(kind); },
+                        [=](const ScopeStencilRef& ref) {
+                          ScopeStencilRef it = ref;
+                          while (true) {
+                            const ScopeStencil& scope = it.scope();
+                            if (scope.kind() == kind) {
+                              return true;
+                            }
+                            if (scope.kind() == ScopeKind::Module &&
+                                kind == ScopeKind::Global) {
+                              return true;
+                            }
+                            if (!scope.hasEnclosing()) {
+                              break;
+                            }
+                            new (&it) ScopeStencilRef{ref.context_,
+                                                      scope.enclosing()};
+                          }
+                          return false;
+                        },
+                        [=](const FakeStencilGlobalScope&) {
+                          return kind == ScopeKind::Global;
+                        });
   }
   uint32_t environmentChainLength() const {
     return scope_.match(
@@ -1223,7 +1223,7 @@ struct CompilationStencil {
 
   // Construct a CompilationStencil
   explicit CompilationStencil(ScriptSource* source)
-      : alloc(LifoAllocChunkSize), source(source) {}
+      : alloc(LifoAllocChunkSize, js::BackgroundMallocArena), source(source) {}
 
   // Take the ownership of on-heap ExtensibleCompilationStencil and
   // borrow from it.
@@ -1389,7 +1389,8 @@ struct ExtensibleCompilationStencil {
   ExtensibleCompilationStencil(ExtensibleCompilationStencil&& other) noexcept
       : canLazilyParse(other.canLazilyParse),
         functionKey(other.functionKey),
-        alloc(CompilationStencil::LifoAllocChunkSize),
+        alloc(CompilationStencil::LifoAllocChunkSize,
+              js::BackgroundMallocArena),
         source(std::move(other.source)),
         scriptData(std::move(other.scriptData)),
         scriptExtra(std::move(other.scriptExtra)),

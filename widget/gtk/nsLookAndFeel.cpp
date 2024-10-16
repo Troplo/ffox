@@ -51,6 +51,14 @@
 #include "nsCSSColorUtils.h"
 #include "mozilla/Preferences.h"
 
+#ifdef MOZ_X11
+#  include <X11/XKBlib.h>
+#endif
+
+#ifdef MOZ_WAYLAND
+#  include <xkbcommon/xkbcommon.h>
+#endif
+
 using namespace mozilla;
 using namespace mozilla::widget;
 
@@ -970,6 +978,12 @@ nsresult nsLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
     case IntID::GTKCSDAvailable:
       aResult = sCSDAvailable;
       break;
+    case IntID::GTKCSDTransparencyAvailable: {
+      auto* screen = gdk_screen_get_default();
+      aResult = gdk_screen_get_rgba_visual(screen) &&
+                gdk_screen_is_composited(screen);
+      break;
+    }
     case IntID::GTKCSDMaximizeButton:
       EnsureInit();
       aResult = mCSDMaximizeButton;
@@ -2295,25 +2309,64 @@ bool nsLookAndFeel::WidgetUsesImage(WidgetNodeType aNodeType) {
   return false;
 }
 
+nsresult nsLookAndFeel::GetKeyboardLayoutImpl(nsACString& aLayout) {
+  if (mozilla::widget::GdkIsX11Display()) {
+#if defined(MOZ_X11)
+    Display* display = gdk_x11_get_default_xdisplay();
+    if (!display) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+    XkbDescRec* kbdDesc = XkbAllocKeyboard();
+    if (!kbdDesc) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+    auto cleanup = MakeScopeExit([&] { XkbFreeKeyboard(kbdDesc, 0, true); });
+
+    XkbStateRec state;
+    XkbGetState(display, XkbUseCoreKbd, &state);
+    uint32_t group = state.group;
+
+    XkbGetNames(display, XkbGroupNamesMask, kbdDesc);
+
+    if (!kbdDesc->names || !kbdDesc->names->groups[group]) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+
+    char* layout = XGetAtomName(display, kbdDesc->names->groups[group]);
+
+    aLayout.Assign(layout);
+#endif
+  } else {
+#if defined(MOZ_WAYLAND)
+    struct xkb_context* context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    if (!context) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+    auto cleanupContext = MakeScopeExit([&] { xkb_context_unref(context); });
+
+    struct xkb_keymap* keymap = xkb_keymap_new_from_names(
+        context, nullptr, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    if (!keymap) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+    auto cleanupKeymap = MakeScopeExit([&] { xkb_keymap_unref(keymap); });
+
+    const char* layout = xkb_keymap_layout_get_name(keymap, 0);
+
+    if (layout) {
+      aLayout.Assign(layout);
+    }
+#endif
+  }
+
+  return NS_OK;
+}
+
 void nsLookAndFeel::RecordLookAndFeelSpecificTelemetry() {
   // Gtk version we're on.
   nsString version;
   version.AppendPrintf("%d.%d", gtk_major_version, gtk_minor_version);
   Telemetry::ScalarSet(Telemetry::ScalarID::WIDGET_GTK_VERSION, version);
-
-  // Whether the current Gtk theme has scrollbar buttons.
-  bool hasScrollbarButtons =
-      GetInt(LookAndFeel::IntID::ScrollArrowStyle) != eScrollArrow_None;
-  mozilla::Telemetry::ScalarSet(
-      mozilla::Telemetry::ScalarID::WIDGET_GTK_THEME_HAS_SCROLLBAR_BUTTONS,
-      hasScrollbarButtons);
-
-  // Whether the current Gtk theme uses something other than a solid color
-  // background for scrollbar parts.
-  bool scrollbarUsesImage = !ShouldHonorThemeScrollbarColors();
-  mozilla::Telemetry::ScalarSet(
-      mozilla::Telemetry::ScalarID::WIDGET_GTK_THEME_SCROLLBAR_USES_IMAGES,
-      scrollbarUsesImage);
 }
 
 bool nsLookAndFeel::ShouldHonorThemeScrollbarColors() {

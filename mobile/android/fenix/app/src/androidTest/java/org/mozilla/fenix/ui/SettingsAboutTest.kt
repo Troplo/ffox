@@ -7,6 +7,8 @@ package org.mozilla.fenix.ui
 import androidx.test.uiautomator.UiSelector
 import org.junit.Rule
 import org.junit.Test
+import org.mozilla.fenix.BuildConfig
+import org.mozilla.fenix.helpers.AppAndSystemHelper.runWithCondition
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.RetryTestRule
 import org.mozilla.fenix.helpers.TestHelper.mDevice
@@ -28,7 +30,7 @@ class SettingsAboutTest : TestSetup() {
     val retryTestRule = RetryTestRule(3)
 
     // Walks through the About settings menu to ensure all items are present
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2092700
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2092700
     @Test
     fun verifyAboutSettingsItemsTest() {
         homeScreen {
@@ -40,7 +42,7 @@ class SettingsAboutTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/246966
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/246966
     @Test
     fun verifyRateOnGooglePlayButton() {
         activityIntentTestRule.applySettingsExceptions {
@@ -58,7 +60,7 @@ class SettingsAboutTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/246961
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/246961
     @Test
     fun verifyAboutFirefoxMenuItems() {
         homeScreen {
@@ -66,6 +68,19 @@ class SettingsAboutTest : TestSetup() {
         }.openSettings {
         }.openAboutFirefoxPreview {
             verifyAboutFirefoxPreviewInfo()
+        }
+    }
+
+    @Test
+    fun verifyLibrariesListInReleaseBuilds() {
+        runWithCondition(!BuildConfig.DEBUG) {
+            homeScreen {
+            }.openThreeDotMenu {
+            }.openSettings {
+            }.openAboutFirefoxPreview {
+                verifyLibrariesUsedLink()
+                verifyTheLibrariesListNotEmpty()
+            }
         }
     }
 }

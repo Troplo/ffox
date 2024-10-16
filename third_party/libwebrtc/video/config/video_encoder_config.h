@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "absl/types/optional.h"
+#include "api/field_trials_view.h"
 #include "api/scoped_refptr.h"
 #include "api/video/resolution.h"
 #include "api/video_codecs/scalability_mode.h"
@@ -90,7 +91,7 @@ class VideoEncoderConfig {
   // kept alive until all encoder_specific_settings go out of scope.
   // TODO(kthelgason): Consider removing the need for copying VideoEncoderConfig
   // and use absl::optional for encoder_specific_settings instead.
-  class EncoderSpecificSettings : public rtc::RefCountInterface {
+  class EncoderSpecificSettings : public RefCountInterface {
    public:
     // TODO(pbos): Remove FillEncoderSpecificSettings as soon as VideoCodec is
     // not in use and encoder implementations ask for codec-specific structs
@@ -138,13 +139,14 @@ class VideoEncoderConfig {
     kScreen,
   };
 
-  class VideoStreamFactoryInterface : public rtc::RefCountInterface {
+  class VideoStreamFactoryInterface : public RefCountInterface {
    public:
     // An implementation should return a std::vector<VideoStream> with the
     // wanted VideoStream settings for the given video resolution.
     // The size of the vector may not be larger than
     // `encoder_config.number_of_streams`.
     virtual std::vector<VideoStream> CreateEncoderStreams(
+        const FieldTrialsView& field_trials,
         int frame_width,
         int frame_height,
         const VideoEncoderConfig& encoder_config) = 0;

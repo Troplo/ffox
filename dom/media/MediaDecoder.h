@@ -21,6 +21,7 @@
 #  include "TimeUnits.h"
 #  include "mozilla/Atomics.h"
 #  include "mozilla/CDMProxy.h"
+#  include "mozilla/DefineEnum.h"
 #  include "mozilla/MozPromise.h"
 #  include "mozilla/ReentrantMonitor.h"
 #  include "mozilla/StateMirroring.h"
@@ -123,15 +124,9 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MediaDecoder)
 
   // Enumeration for the valid play states (see mPlayState)
-  enum PlayState {
-    PLAY_STATE_LOADING,
-    PLAY_STATE_PAUSED,
-    PLAY_STATE_PLAYING,
-    PLAY_STATE_ENDED,
-    PLAY_STATE_SHUTDOWN
-  };
-
-  static const char* ToPlayStateStr(MediaDecoder::PlayState aState);
+  MOZ_DEFINE_ENUM_WITH_TOSTRING_AT_CLASS_SCOPE(
+      PlayState, (PLAY_STATE_LOADING, PLAY_STATE_PAUSED, PLAY_STATE_PLAYING,
+                  PLAY_STATE_ENDED, PLAY_STATE_SHUTDOWN));
 
   // Must be called exactly once, on the main thread, during startup.
   static void InitStatics();
@@ -175,8 +170,10 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   virtual void Play();
 
   // Notify activity of the decoder owner is changed.
-  virtual void NotifyOwnerActivityChanged(bool aIsOwnerInvisible,
-                                          bool aIsOwnerConnected);
+  void NotifyOwnerActivityChanged(bool aIsOwnerInvisible,
+                                  bool aIsOwnerConnected,
+                                  bool aIsOwnerInBackground,
+                                  bool aHasOwnerPendingCallbacks);
 
   // Pause video playback.
   virtual void Pause();
@@ -208,20 +205,8 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   // replaying after the input as ended. In the latter case, the new source is
   // not connected to streams created by captureStreamUntilEnded.
 
-  enum class OutputCaptureState { Capture, Halt, None };
-  const char* OutputCaptureStateToStr(OutputCaptureState aState) const {
-    switch (aState) {
-      case OutputCaptureState::Capture:
-        return "Capture";
-      case OutputCaptureState::Halt:
-        return "Halt";
-      case OutputCaptureState::None:
-        return "None";
-      default:
-        MOZ_ASSERT_UNREACHABLE("Not defined state!");
-        return "Not-defined";
-    }
-  }
+  MOZ_DEFINE_ENUM_CLASS_WITH_TOSTRING_AT_CLASS_SCOPE(OutputCaptureState,
+                                                     (Capture, Halt, None));
 
   // Set the output capture state of this decoder.
   // @param aState Capture: Output is captured into output tracks, and
@@ -353,8 +338,9 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   bool CanPlayThrough();
 
   // Called from HTMLMediaElement when owner document activity changes
-  virtual void SetElementVisibility(bool aIsOwnerInvisible,
-                                    bool aIsOwnerConnected);
+  void SetElementVisibility(bool aIsOwnerInvisible, bool aIsOwnerConnected,
+                            bool aIsOwnerInBackground,
+                            bool aHasOwnerPendingCallbacks);
 
   // Force override the visible state to hidden.
   // Called from HTMLMediaElement when testing of video decode suspend from
@@ -539,6 +525,13 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   // double.
   Variant<media::TimeUnit, double> mDuration;
 
+#  ifdef MOZ_WMF_MEDIA_ENGINE
+  // True when we need to update the newly created MDSM's status to make it
+  // consistent with the previous destroyed one.
+  bool mPendingStatusUpdateForNewlyCreatedStateMachine = false;
+  void SetStatusUpdateForNewlyCreatedStateMachineIfNeeded();
+#  endif
+
   /******
    * The following member variables can be accessed from any thread.
    ******/
@@ -598,8 +591,6 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
 
   MozPromiseRequestHolder<SeekPromise> mSeekRequest;
 
-  const char* PlayStateStr();
-
   void OnMetadataUpdate(TimedMetadata&& aMetadata);
 
   // This should only ever be accessed from the main thread.
@@ -644,6 +635,12 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   // True if the owner element is connected to a document tree.
   // https://dom.spec.whatwg.org/#connected
   bool mIsOwnerConnected;
+
+  // True if the owner element is in a backgrounded tab/window.
+  bool mIsOwnerInBackground;
+
+  // True if the owner element has pending rVFC callbacks.
+  bool mHasOwnerPendingCallbacks;
 
   // If true, forces the decoder to be considered hidden.
   bool mForcedHidden;
@@ -796,7 +793,6 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   double GetTotalVideoHDRPlayTimeInSeconds() const;
   double GetVisibleVideoPlayTimeInSeconds() const;
   double GetInvisibleVideoPlayTimeInSeconds() const;
-  double GetVideoDecodeSuspendedTimeInSeconds() const;
   double GetTotalAudioPlayTimeInSeconds() const;
   double GetAudiblePlayTimeInSeconds() const;
   double GetInaudiblePlayTimeInSeconds() const;
@@ -827,12 +823,6 @@ class MediaDecoder : public DecoderDoctorLifeLogger<MediaDecoder> {
   bool mCanPlayThrough = false;
 
   UniquePtr<TelemetryProbesReporter> mTelemetryProbesReporter;
-
-#  ifdef MOZ_WMF_MEDIA_ENGINE
-  // True when we need to update the newly created MDSM's status to make it
-  // consistent with the previous destroyed one.
-  bool mPendingStatusUpdateForNewlyCreatedStateMachine = false;
-#  endif
 
   // The time of creating the media decoder state machine, it's used to record
   // the probe for measuring the first video frame loaded time. Reset after

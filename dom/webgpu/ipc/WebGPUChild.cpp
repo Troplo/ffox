@@ -88,15 +88,18 @@ RefPtr<AdapterPromise> WebGPUChild::InstanceRequestAdapter(
 }
 
 Maybe<DeviceRequest> WebGPUChild::AdapterRequestDevice(
-    RawId aSelfId, const ffi::WGPUDeviceDescriptor& aDesc) {
-  RawId id = ffi::wgpu_client_make_device_id(mClient.get(), aSelfId);
+    RawId aSelfId, const ffi::WGPUFfiDeviceDescriptor& aDesc) {
+  ffi::WGPUDeviceQueueId ids =
+      ffi::wgpu_client_make_device_queue_id(mClient.get(), aSelfId);
 
   ByteBuf bb;
   ffi::wgpu_client_serialize_device_descriptor(&aDesc, ToFFI(&bb));
 
   DeviceRequest request;
-  request.mId = id;
-  request.mPromise = SendAdapterRequestDevice(aSelfId, std::move(bb), id);
+  request.mDeviceId = ids.device;
+  request.mQueueId = ids.queue;
+  request.mPromise =
+      SendAdapterRequestDevice(aSelfId, std::move(bb), ids.device, ids.queue);
 
   return Some(std::move(request));
 }

@@ -43,13 +43,14 @@
 #include "mozilla/StaticPrefs_extensions.h"
 #include "nsContentUtils.h"
 #include "nsIChannel.h"
-#include "nsIContentSecurityPolicy.h"
+#include "nsIContentPolicy.h"
 #include "nsIEventTarget.h"
 #include "nsILoadInfo.h"
 #include "nsRFPService.h"
 #include "nsTObserverArray.h"
 #include "stdint.h"
 
+class nsIContentSecurityPolicy;
 class nsIThreadInternal;
 
 namespace JS {
@@ -406,7 +407,7 @@ class WorkerPrivate final
 
   void SetDebuggerImmediate(Function& aHandler, ErrorResult& aRv);
 
-  void ReportErrorToDebugger(const nsAString& aFilename, uint32_t aLineno,
+  void ReportErrorToDebugger(const nsACString& aFilename, uint32_t aLineno,
                              const nsAString& aMessage);
 
   bool NotifyInternal(WorkerStatus aStatus);
@@ -718,6 +719,16 @@ class WorkerPrivate final
   // worker, so WorkerPrivate* should be safe in the moment of calling.
   // We would like to have stronger type-system annotated/enforced handling.
   WorkerPrivate* GetParent() const { return mParent; }
+
+  // Returns the top level worker. It can be the current worker if it's the top
+  // level one.
+  WorkerPrivate* GetTopLevelWorker() const {
+    WorkerPrivate const* wp = this;
+    while (wp->GetParent()) {
+      wp = wp->GetParent();
+    }
+    return const_cast<WorkerPrivate*>(wp);
+  }
 
   bool IsFrozen() const {
     AssertIsOnParentThread();
@@ -1199,6 +1210,22 @@ class WorkerPrivate final
 
   RefPtr<WorkerParentRef> GetWorkerParentRef() const;
 
+  bool MayContinueRunning() {
+    AssertIsOnWorkerThread();
+
+    WorkerStatus status;
+    {
+      MutexAutoLock lock(mMutex);
+      status = mStatus;
+    }
+
+    if (status < Canceling) {
+      return true;
+    }
+
+    return false;
+  }
+
  private:
   WorkerPrivate(
       WorkerPrivate* aParent, const nsAString& aScriptURL, bool aIsChromeWorker,
@@ -1220,22 +1247,6 @@ class WorkerPrivate final
   static AgentClusterIdAndCoop ComputeAgentClusterIdAndCoop(
       WorkerPrivate* aParent, WorkerKind aWorkerKind,
       WorkerLoadInfo* aLoadInfo);
-
-  bool MayContinueRunning() {
-    AssertIsOnWorkerThread();
-
-    WorkerStatus status;
-    {
-      MutexAutoLock lock(mMutex);
-      status = mStatus;
-    }
-
-    if (status < Canceling) {
-      return true;
-    }
-
-    return false;
-  }
 
   void CancelAllTimeouts();
 

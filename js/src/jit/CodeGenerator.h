@@ -211,7 +211,10 @@ class CodeGenerator final : public CodeGeneratorSpecific {
 
 #ifdef ENABLE_WASM_JSPI
   void callWasmUpdateSuspenderState(wasm::UpdateSuspenderStateAction kind,
-                                    Register suspender);
+                                    Register suspender, Register temp);
+  // Stack switching trampoline requires two arguments (suspender and data) to
+  // be passed. The function prepares stack and registers according Wasm ABI.
+  void prepareWasmStackSwitchTrampolineCall(Register suspender, Register data);
 #endif
 
  private:
@@ -345,7 +348,8 @@ class CodeGenerator final : public CodeGeneratorSpecific {
                                        Register64 input, Register output);
 
   void emitCreateBigInt(LInstruction* lir, Scalar::Type type, Register64 input,
-                        Register output, Register maybeTemp);
+                        Register output, Register maybeTemp,
+                        Register64 maybeTemp64 = Register64::Invalid());
 
   template <size_t NumDefs>
   void emitIonToWasmCallBase(LIonToWasmCallBase<NumDefs>* lir);

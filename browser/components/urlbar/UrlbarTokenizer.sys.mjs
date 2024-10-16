@@ -10,6 +10,7 @@
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
+  UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
   UrlbarUtils: "resource:///modules/UrlbarUtils.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
 });
@@ -17,6 +18,17 @@ ChromeUtils.defineESModuleGetters(lazy, {
 ChromeUtils.defineLazyGetter(lazy, "logger", () =>
   lazy.UrlbarUtils.getLogger({ prefix: "Tokenizer" })
 );
+
+ChromeUtils.defineLazyGetter(lazy, "gFluentStrings", function () {
+  return new Localization(["browser/browser.ftl"]);
+});
+
+/*
+ * This Map stores key-value pairs where each key is a restrict token
+ * and each value is a corresponding localized restrict keyword.
+ * E.g. "*" maps to "Bookmarks"
+ */
+let tokenToKeyword = new Map();
 
 export var UrlbarTokenizer = {
   // Regex matching on whitespaces.
@@ -73,16 +85,48 @@ export var UrlbarTokenizer = {
     SEARCH: "?",
     TITLE: "#",
     URL: "$",
+    ACTION: ">",
   },
 
   // The keys of characters in RESTRICT that will enter search mode.
   get SEARCH_MODE_RESTRICT() {
-    return new Set([
+    const keys = [
       this.RESTRICT.HISTORY,
       this.RESTRICT.BOOKMARK,
       this.RESTRICT.OPENPAGE,
       this.RESTRICT.SEARCH,
-    ]);
+    ];
+    if (lazy.UrlbarPrefs.get("scotchBonnet.enableOverride")) {
+      keys.push(this.RESTRICT.ACTION);
+    }
+    return new Set(keys);
+  },
+
+  async loadL10nRestrictKeywords() {
+    let l10nKeywords = await lazy.gFluentStrings.formatValues(
+      lazy.UrlbarUtils.LOCAL_SEARCH_MODES.map(mode => {
+        let name = lazy.UrlbarUtils.getResultSourceName(mode.source);
+        return { id: `urlbar-search-mode-${name}` };
+      })
+    );
+
+    for (let { restrict } of lazy.UrlbarUtils.LOCAL_SEARCH_MODES) {
+      tokenToKeyword.set(restrict, l10nKeywords.shift());
+    }
+  },
+
+  /**
+   * Gets the cached localized restrict keywords. If keywords are not cached
+   * fetch the localized keywords first and then return the keywords.
+   *
+   * @returns {Map} The tokenToKeyword Map.
+   */
+  async getL10nRestrictKeywords() {
+    if (tokenToKeyword.size === 0) {
+      await this.loadL10nRestrictKeywords();
+    }
+
+    return tokenToKeyword;
   },
 
   /**

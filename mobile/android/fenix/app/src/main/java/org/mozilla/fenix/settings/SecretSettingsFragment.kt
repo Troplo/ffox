@@ -32,7 +32,7 @@ class SecretSettingsFragment : PreferenceFragmentCompat() {
         showToolbar(getString(R.string.preferences_debug_settings))
     }
 
-    @Suppress("LongMethod")
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         val debugSettingsRepository = DefaultDebugSettingsRepository(
             context = requireContext(),
@@ -150,10 +150,18 @@ class SecretSettingsFragment : PreferenceFragmentCompat() {
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
-        // This is only available in Nightly or Debug builds for verification.
         requirePreference<SwitchPreference>(R.string.pref_key_microsurvey_feature_enabled).apply {
-            isVisible = Config.channel.isNightlyOrDebug
+            isVisible = true
             isChecked = context.settings().microsurveyFeatureEnabled
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        // This is only available in Debug builds for verification.
+        requirePreference<SwitchPreference>(
+            R.string.pref_key_set_as_default_browser_prompt_enabled,
+        ).apply {
+            isVisible = true
+            isChecked = context.settings().setAsDefaultBrowserPromptForExistingUsersEnabled
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
     }

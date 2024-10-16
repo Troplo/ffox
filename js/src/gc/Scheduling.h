@@ -536,6 +536,9 @@ static const bool PerZoneGCEnabled = false;
 /* JSGC_COMPACTING_ENABLED */
 static const bool CompactingEnabled = true;
 
+/* JSGC_NURSERY_ENABLED */
+static const bool NurseryEnabled = true;
+
 /* JSGC_PARALLEL_MARKING_ENABLED */
 static const bool ParallelMarkingEnabled = false;
 
@@ -597,10 +600,12 @@ class GCSchedulingState {
 
   bool inHighFrequencyGCMode() const { return inHighFrequencyGCMode_; }
 
-  void updateHighFrequencyMode(const mozilla::TimeStamp& lastGCTime,
-                               const mozilla::TimeStamp& currentTime,
-                               const GCSchedulingTunables& tunables);
-  void updateHighFrequencyModeForReason(JS::GCReason reason);
+  void updateHighFrequencyModeOnGCStart(JS::GCOptions options,
+                                        const mozilla::TimeStamp& lastGCTime,
+                                        const mozilla::TimeStamp& currentTime,
+                                        const GCSchedulingTunables& tunables);
+  void updateHighFrequencyModeOnSliceStart(JS::GCOptions options,
+                                           JS::GCReason reason);
 };
 
 struct TriggerResult {

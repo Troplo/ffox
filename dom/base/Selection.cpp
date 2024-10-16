@@ -87,6 +87,10 @@
 #include "nsFocusManager.h"
 #include "nsPIDOMWindow.h"
 
+#ifdef ACCESSIBILITY
+#  include "nsAccessibilityService.h"
+#endif
+
 namespace mozilla {
 // "Selection" logs only the calls of AddRangesForSelectableNodes and
 // NotifySelectionListeners in debug level.
@@ -298,6 +302,65 @@ nsCString SelectionChangeReasonsToCString(int16_t aReasons) {
 }
 
 }  // namespace mozilla
+
+SelectionNodeCache::SelectionNodeCache(PresShell& aOwningPresShell)
+    : mOwningPresShell(aOwningPresShell) {
+  MOZ_ASSERT(!mOwningPresShell.mSelectionNodeCache);
+  mOwningPresShell.mSelectionNodeCache = this;
+}
+
+SelectionNodeCache::~SelectionNodeCache() {
+  mOwningPresShell.mSelectionNodeCache = nullptr;
+}
+
+bool SelectionNodeCache::MaybeCollectNodesAndCheckIfFullySelectedInAnyOf(
+    const nsINode* aNode, const nsTArray<Selection*>& aSelections) {
+  for (const auto* sel : aSelections) {
+    if (MaybeCollectNodesAndCheckIfFullySelected(aNode, sel)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const nsTHashSet<const nsINode*>& SelectionNodeCache::MaybeCollect(
+    const Selection* aSelection) {
+  MOZ_ASSERT(aSelection);
+  return mSelectedNodes.LookupOrInsertWith(aSelection, [sel = RefPtr(
+                                                            aSelection)] {
+    nsTHashSet<const nsINode*> fullySelectedNodes;
+    for (size_t rangeIndex = 0; rangeIndex < sel->RangeCount(); ++rangeIndex) {
+      AbstractRange* range = sel->GetAbstractRangeAt(rangeIndex);
+      MOZ_ASSERT(range);
+      if(range->Collapsed()) {
+        continue;
+      }
+      if(range->IsStaticRange() && !range->AsStaticRange()->IsValid()) {
+        continue;
+      }
+      const RangeBoundary& startRef = range->MayCrossShadowBoundaryStartRef();
+      const RangeBoundary& endRef = range->MayCrossShadowBoundaryEndRef();
+
+      const nsINode* startContainer =
+          startRef.IsStartOfContainer() ? nullptr : startRef.Container();
+      const nsINode* endContainer =
+          endRef.IsEndOfContainer() ? nullptr : endRef.Container();
+      UnsafePreContentIterator iter;
+      iter.Init(range);
+      for (; !iter.IsDone(); iter.Next()) {
+        if (const nsINode* node = iter.GetCurrentNode()) {
+          // Only collect start and end container if they are fully
+          // selected (they are null in that case).
+          if (node == startContainer || node == endContainer) {
+            continue;
+          }
+          fullySelectedNodes.Insert(node);
+        }
+      }
+    }
+    return fullySelectedNodes;
+  });
+}
 
 // #define DEBUG_SELECTION // uncomment for printf describing every collapse and
 //  extend. #define DEBUG_NAVIGATION
@@ -1169,6 +1232,10 @@ nsresult Selection::StyledRanges::AddRangeAndIgnoreOverlaps(
   if (mRanges.Length() == 0) {
     mRanges.AppendElement(StyledRange(aRange));
     aRange->RegisterSelection(MOZ_KnownLive(mSelection));
+#ifdef ACCESSIBILITY
+    a11y::SelectionManager::SelectionRangeChanged(mSelection.GetType(),
+                                                  *aRange);
+#endif
     return NS_OK;
   }
 
@@ -1194,6 +1261,9 @@ nsresult Selection::StyledRanges::AddRangeAndIgnoreOverlaps(
 
   mRanges.InsertElementAt(startIndex, StyledRange(aRange));
   aRange->RegisterSelection(MOZ_KnownLive(mSelection));
+#ifdef ACCESSIBILITY
+  a11y::SelectionManager::SelectionRangeChanged(mSelection.GetType(), *aRange);
+#endif
   return NS_OK;
 }
 
@@ -1210,6 +1280,10 @@ nsresult Selection::StyledRanges::MaybeAddRangeAndTruncateOverlaps(
     // pretended earlier.
     mRanges.AppendElement(StyledRange(aRange));
     aRange->RegisterSelection(MOZ_KnownLive(mSelection));
+#ifdef ACCESSIBILITY
+    a11y::SelectionManager::SelectionRangeChanged(mSelection.GetType(),
+                                                  *aRange);
+#endif
 
     aOutIndex->emplace(0u);
     return NS_OK;
@@ -1243,6 +1317,14 @@ nsresult Selection::StyledRanges::MaybeAddRangeAndTruncateOverlaps(
     aOutIndex->emplace(startIndex);
     return NS_OK;
   }
+
+  // Beyond this point, we will expand the selection to cover aRange.
+  // Accessibility doesn't need to know about ranges split due to overlaps. It
+  // just needs a range that covers any text leaf that is impacted by the
+  // change.
+#ifdef ACCESSIBILITY
+  a11y::SelectionManager::SelectionRangeChanged(mSelection.GetType(), *aRange);
+#endif
 
   if (startIndex == endIndex) {
     // The new range doesn't overlap any existing ranges
@@ -1320,6 +1402,9 @@ nsresult Selection::StyledRanges::RemoveRangeAndUnregisterSelection(
 
   mRanges.RemoveElementAt(idx);
   aRange.UnregisterSelection(mSelection);
+#ifdef ACCESSIBILITY
+  a11y::SelectionManager::SelectionRangeChanged(mSelection.GetType(), aRange);
+#endif
 
   return NS_OK;
 }
@@ -1928,6 +2013,29 @@ UniquePtr<SelectionDetails> Selection::LookUpSelection(
   }
 
   nsTArray<AbstractRange*> overlappingRanges;
+  SelectionNodeCache* cache =
+      GetPresShell() ? GetPresShell()->GetSelectionNodeCache() : nullptr;
+  if (cache && RangeCount() == 1) {
+    const bool isFullySelected =
+        cache->MaybeCollectNodesAndCheckIfFullySelected(aContent, this);
+    if (isFullySelected) {
+      auto newHead = MakeUnique<SelectionDetails>();
+
+      newHead->mNext = std::move(aDetailsHead);
+      newHead->mStart = AssertedCast<int32_t>(0);
+      newHead->mEnd = AssertedCast<int32_t>(aContentLength);
+      newHead->mSelectionType = aSelectionType;
+      newHead->mHighlightData = mHighlightData;
+      StyledRange* rd = mStyledRanges.FindRangeData(GetAbstractRangeAt(0));
+      if (rd) {
+        newHead->mTextRangeStyle = rd->mTextRangeStyle;
+      }
+      auto detailsHead = std::move(newHead);
+
+      return detailsHead;
+    }
+  }
+
   nsresult rv = GetAbstractRangesForIntervalArray(
       aContent, aContentOffset, aContent, aContentOffset + aContentLength,
       false, &overlappingRanges);
@@ -2099,6 +2207,14 @@ void Selection::StyledRanges::UnregisterSelection() {
 }
 
 void Selection::StyledRanges::Clear() {
+#ifdef ACCESSIBILITY
+  for (auto& range : mRanges) {
+    if (!a11y::SelectionManager::SelectionRangeChanged(mSelection.GetType(),
+                                                       *range.mRange)) {
+      break;
+    }
+  }
+#endif
   mRanges.Clear();
   mInvalidStaticRanges.Clear();
 }
@@ -3545,21 +3661,6 @@ nsresult Selection::PostScrollSelectionIntoViewEvent(SelectionRegion aRegion,
                                                   aHorizontal, aFlags);
   refreshDriver->AddEarlyRunner(mScrollEvent.get());
   return NS_OK;
-}
-
-void Selection::ScrollIntoView(int16_t aRegion, bool aIsSynchronous,
-                               int16_t aVPercent, int16_t aHPercent,
-                               ErrorResult& aRv) {
-  int32_t flags = aIsSynchronous ? Selection::SCROLL_SYNCHRONOUS : 0;
-  // -1 means nearest in this API.
-  const auto v =
-      aVPercent == -1 ? WhereToScroll::Nearest : WhereToScroll(aVPercent);
-  const auto h =
-      aHPercent == -1 ? WhereToScroll::Nearest : WhereToScroll(aHPercent);
-  nsresult rv = ScrollIntoView(aRegion, ScrollAxis(v), ScrollAxis(h), flags);
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
-  }
 }
 
 nsresult Selection::ScrollIntoView(SelectionRegion aRegion,

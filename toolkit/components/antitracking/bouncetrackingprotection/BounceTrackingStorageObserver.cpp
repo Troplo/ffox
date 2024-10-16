@@ -18,21 +18,25 @@
 
 namespace mozilla {
 
-NS_IMPL_ISUPPORTS(BounceTrackingStorageObserver, nsIObserver);
+NS_IMPL_ISUPPORTS(BounceTrackingStorageObserver, nsIObserver,
+                  nsISupportsWeakReference);
 
 nsresult BounceTrackingStorageObserver::Init() {
   MOZ_ASSERT(XRE_IsParentProcess());
 
-  MOZ_LOG(gBounceTrackingProtectionLog, LogLevel::Debug, ("%s", __FUNCTION__));
+  MOZ_LOG(gBounceTrackingProtectionLog, LogLevel::Debug,
+          ("BounceTrackingStorageObserver::%s", __FUNCTION__));
 
   // Add observers to listen for cookie changes.
   nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();
   NS_ENSURE_TRUE(observerService, NS_ERROR_FAILURE);
 
-  nsresult rv = observerService->AddObserver(this, "cookie-changed", false);
+  // Passing ownsWeak=true so we don't have to unregister the observer when
+  // BounceTrackingStorageObserver gets destroyed.
+  nsresult rv = observerService->AddObserver(this, "cookie-changed", true);
   NS_ENSURE_SUCCESS(rv, rv);
-  return observerService->AddObserver(this, "private-cookie-changed", false);
+  return observerService->AddObserver(this, "private-cookie-changed", true);
 }
 
 // nsIObserver
@@ -194,11 +198,12 @@ nsresult BounceTrackingStorageObserver::OnInitialStorageAccess(
       topWindowContext->GetBrowsingContext();
   NS_ENSURE_TRUE(browsingContext, NS_ERROR_FAILURE);
 
-  nsresult rv = NS_OK;
+  dom::BrowsingContextWebProgress* webProgress =
+      browsingContext->Top()->Canonical()->GetWebProgress();
+  NS_ENSURE_TRUE(webProgress, NS_ERROR_FAILURE);
+
   RefPtr<BounceTrackingState> bounceTrackingState =
-      BounceTrackingState::GetOrCreate(
-          browsingContext->Top()->Canonical()->GetWebProgress(), rv);
-  NS_ENSURE_SUCCESS(rv, rv);
+      webProgress->GetBounceTrackingState();
 
   // We may not always get a BounceTrackingState, e.g. if the feature is
   // disabled or we don't keep track of bounce tracking for the given

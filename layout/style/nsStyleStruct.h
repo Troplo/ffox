@@ -501,8 +501,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleBorder {
   mozilla::StyleBorderImageWidth mBorderImageWidth;
   mozilla::StyleNonNegativeLengthOrNumberRect mBorderImageOutset;
   mozilla::StyleBorderImageSlice mBorderImageSlice;  // factor, percent
-  mozilla::StyleBorderImageRepeat mBorderImageRepeatH;
-  mozilla::StyleBorderImageRepeat mBorderImageRepeatV;
+  mozilla::StyleBorderImageRepeat mBorderImageRepeat;
   mozilla::StyleFloatEdge mFloatEdge;
   mozilla::StyleBoxDecorationBreak mBoxDecorationBreak;
 
@@ -734,10 +733,10 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
   // 'auto' or a `<dashed-ident>` referencing an anchor positioning anchor
   // element.
   mozilla::StylePositionAnchor mPositionAnchor;
+  mozilla::StylePositionArea mPositionArea;
   mozilla::StylePositionVisibility mPositionVisibility;
-  mozilla::StylePositionTryOptions mPositionTryOptions;
+  mozilla::StylePositionTryFallbacks mPositionTryFallbacks;
   mozilla::StylePositionTryOrder mPositionTryOrder;
-  mozilla::StyleInsetArea mInsetArea;
 
   mozilla::StyleFlexBasis mFlexBasis;
   StyleImplicitGridTracks mGridAutoColumns;
@@ -801,7 +800,7 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStylePosition {
     if (aCoord.IsLengthPercentage()) {
       return aCoord.AsLengthPercentage().HasPercent();
     }
-    return aCoord.IsFitContent() || aCoord.IsMozAvailable();
+    return aCoord.IsFitContent() || aCoord.BehavesLikeStretchOnInlineAxis();
   }
 
   template <typename SizeOrMaxSize>
@@ -1132,7 +1131,7 @@ struct StyleAnimation {
     return mTimingFunction;
   }
   const StyleTime& GetDelay() const { return mDelay; }
-  const StyleTime& GetDuration() const { return mDuration; }
+  const StyleAnimationDuration& GetDuration() const { return mDuration; }
   nsAtom* GetName() const { return mName._0.AsAtom(); }
   StyleAnimationDirection GetDirection() const { return mDirection; }
   StyleAnimationFillMode GetFillMode() const { return mFillMode; }
@@ -1149,7 +1148,7 @@ struct StyleAnimation {
  private:
   StyleComputedTimingFunction mTimingFunction{
       StyleComputedTimingFunction::Keyword(StyleTimingKeyword::Ease)};
-  StyleTime mDuration{0.0f};
+  StyleAnimationDuration mDuration = StyleAnimationDuration::Auto();
   StyleTime mDelay{0.0f};
   StyleAnimationName mName;
   StyleAnimationDirection mDirection = StyleAnimationDirection::Normal;
@@ -1157,14 +1156,14 @@ struct StyleAnimation {
   StyleAnimationPlayState mPlayState = StyleAnimationPlayState::Running;
   StyleAnimationIterationCount mIterationCount{1.0f};
   StyleAnimationComposition mComposition = StyleAnimationComposition::Replace;
-  StyleAnimationTimeline mTimeline{StyleAnimationTimeline::Auto()};
+  StyleAnimationTimeline mTimeline = StyleAnimationTimeline::Auto();
 };
 
 struct StyleScrollTimeline {
   StyleScrollTimeline() = default;
   explicit StyleScrollTimeline(const StyleScrollTimeline& aCopy) = default;
 
-  nsAtom* GetName() const { return mName._0.AsAtom(); }
+  nsAtom* GetName() const { return mName.AsAtom(); }
   StyleScrollAxis GetAxis() const { return mAxis; }
 
   bool operator==(const StyleScrollTimeline& aOther) const {
@@ -1175,7 +1174,7 @@ struct StyleScrollTimeline {
   }
 
  private:
-  StyleScrollTimelineName mName;
+  StyleTimelineName mName;
   StyleScrollAxis mAxis = StyleScrollAxis::Block;
 };
 
@@ -1183,7 +1182,7 @@ struct StyleViewTimeline {
   StyleViewTimeline() = default;
   explicit StyleViewTimeline(const StyleViewTimeline& aCopy) = default;
 
-  nsAtom* GetName() const { return mName._0.AsAtom(); }
+  nsAtom* GetName() const { return mName.AsAtom(); }
   StyleScrollAxis GetAxis() const { return mAxis; }
   const StyleViewTimelineInset& GetInset() const { return mInset; }
 
@@ -1196,7 +1195,7 @@ struct StyleViewTimeline {
   }
 
  private:
-  StyleScrollTimelineName mName;
+  StyleTimelineName mName;
   StyleScrollAxis mAxis = StyleScrollAxis::Block;
   StyleViewTimelineInset mInset;
 };
@@ -1665,7 +1664,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUIReset {
   const mozilla::StyleTime& GetAnimationDelay(uint32_t aIndex) const {
     return mAnimations[aIndex % mAnimationDelayCount].GetDelay();
   }
-  const mozilla::StyleTime& GetAnimationDuration(uint32_t aIndex) const {
+  const mozilla::StyleAnimationDuration& GetAnimationDuration(
+      uint32_t aIndex) const {
     return mAnimations[aIndex % mAnimationDurationCount].GetDuration();
   }
   mozilla::StyleAnimationDirection GetAnimationDirection(
@@ -1739,6 +1739,8 @@ struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUIReset {
   uint32_t mViewTimelineInsetCount;
 
   mozilla::StyleFieldSizing mFieldSizing;
+
+  mozilla::StyleViewTransitionName mViewTransitionName;
 };
 
 struct MOZ_NEEDS_MEMMOVABLE_MEMBERS nsStyleUI {

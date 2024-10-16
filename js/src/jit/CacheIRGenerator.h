@@ -709,6 +709,7 @@ class MOZ_RAII InlinableNativeIRGenerator {
   AttachDecision tryAttachMathRound();
   AttachDecision tryAttachMathSqrt();
   AttachDecision tryAttachMathFRound();
+  AttachDecision tryAttachMathF16Round();
   AttachDecision tryAttachMathHypot();
   AttachDecision tryAttachMathATan2();
   AttachDecision tryAttachMathFunction(UnaryMathFunction fun);
@@ -754,6 +755,7 @@ class MOZ_RAII InlinableNativeIRGenerator {
   AttachDecision tryAttachObjectIsPrototypeOf();
   AttachDecision tryAttachObjectKeys();
   AttachDecision tryAttachObjectToString();
+  AttachDecision tryAttachBigInt();
   AttachDecision tryAttachBigIntAsIntN();
   AttachDecision tryAttachBigIntAsUintN();
   AttachDecision tryAttachSetHas();

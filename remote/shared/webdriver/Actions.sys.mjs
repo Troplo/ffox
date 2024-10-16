@@ -412,7 +412,10 @@ class PointerInputSource extends InputSource {
    *     True if |button| is in set of pressed buttons.
    */
   isPressed(button) {
-    lazy.assert.positiveInteger(button);
+    lazy.assert.positiveInteger(
+      button,
+      lazy.pprint`Expected "button" to be a positive integer, got ${button}`
+    );
     return this.pressed.has(button);
   }
 
@@ -426,7 +429,10 @@ class PointerInputSource extends InputSource {
    *     Set of pressed buttons.
    */
   press(button) {
-    lazy.assert.positiveInteger(button);
+    lazy.assert.positiveInteger(
+      button,
+      lazy.pprint`Expected "button" to be a positive integer, got ${button}`
+    );
     this.pressed.add(button);
   }
 
@@ -440,7 +446,10 @@ class PointerInputSource extends InputSource {
    *     True if |button| was present before removals, false otherwise.
    */
   release(button) {
-    lazy.assert.positiveInteger(button);
+    lazy.assert.positiveInteger(
+      button,
+      lazy.pprint`Expected "button" to be a positive integer, got ${button}`
+    );
     return this.pressed.delete(button);
   }
 
@@ -757,15 +766,23 @@ class KeyAction extends Action {
   static fromJSON(id, actionItem) {
     const { value } = actionItem;
 
-    // TODO countGraphemes
-    // TODO key.value could be a single code point like "\uE012"
-    // (see rawKey) or "grapheme cluster"
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=1496323
-
     lazy.assert.string(
       value,
       'Expected "value" to be a string that represents single code point ' +
         lazy.pprint`or grapheme cluster, got ${value}`
+    );
+
+    let segmenter = new Intl.Segmenter();
+    lazy.assert.that(v => {
+      let graphemeIterator = segmenter.segment(v)[Symbol.iterator]();
+      // We should have exactly one grapheme cluster, so the first iterator
+      // value must be defined, but the second one must be undefined
+      return (
+        graphemeIterator.next().value !== undefined &&
+        graphemeIterator.next().value === undefined
+      );
+    }, `Expected "value" to be a string that represents single code point or grapheme cluster, got "${value}"`)(
+      value
     );
 
     return new this(id, { value });

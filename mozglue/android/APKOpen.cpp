@@ -21,7 +21,6 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <zlib.h>
 #include "dlfcn.h"
 #include "APKOpen.h"
 #include <sys/time.h>
@@ -36,6 +35,7 @@
 #include "mozilla/arm.h"
 #include "mozilla/Bootstrap.h"
 #include "mozilla/Printf.h"
+#include "mozilla/ProcessType.h"
 #include "mozilla/Sprintf.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Try.h"
@@ -393,12 +393,19 @@ Java_org_mozilla_gecko_mozglue_GeckoLoader_nativeRun(
     ElfLoader::Singleton.ExpectShutdown(true);
 #endif
   } else {
+    if (argc < 2) {
+      FreeArgv(argv, argc);
+      return;
+    }
+
+    SetGeckoProcessType(argv[--argc]);
+    SetGeckoChildID(argv[--argc]);
+
     gBootstrap->XRE_SetAndroidChildFds(jenv,
                                        {prefsFd, prefMapFd, ipcFd, crashFd});
-    gBootstrap->XRE_SetProcessType(argv[argc - 1]);
 
     XREChildData childData;
-    gBootstrap->XRE_InitChildProcess(argc - 1, argv, &childData);
+    gBootstrap->XRE_InitChildProcess(argc, argv, &childData);
   }
 
 #ifdef MOZ_WIDGET_ANDROID
@@ -414,6 +421,12 @@ extern "C" APKOPEN_EXPORT mozglueresult ChildProcessInit(int argc,
                                                          char* argv[]) {
   EnsureBaseProfilerInitialized();
 
+  if (argc < 2) {
+    return FAILURE;
+  }
+  SetGeckoProcessType(argv[--argc]);
+  SetGeckoChildID(argv[--argc]);
+
   if (loadNSSLibs() != SUCCESS) {
     return FAILURE;
   }
@@ -423,8 +436,6 @@ extern "C" APKOPEN_EXPORT mozglueresult ChildProcessInit(int argc,
   if (loadGeckoLibs().isErr()) {
     return FAILURE;
   }
-
-  gBootstrap->XRE_SetProcessType(argv[--argc]);
 
   XREChildData childData;
   return NS_FAILED(gBootstrap->XRE_InitChildProcess(argc, argv, &childData));

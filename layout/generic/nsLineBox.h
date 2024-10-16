@@ -275,9 +275,9 @@ class nsLineBox final : public nsLineLink {
   }
 
   // mCarriedOutBEndMargin value
-  nsCollapsingMargin GetCarriedOutBEndMargin() const;
+  mozilla::CollapsingMargin GetCarriedOutBEndMargin() const;
   // Returns true if the margin changed
-  bool SetCarriedOutBEndMargin(nsCollapsingMargin aValue);
+  bool SetCarriedOutBEndMargin(mozilla::CollapsingMargin aValue);
 
   // mFloats
   bool HasFloats() const {
@@ -538,7 +538,7 @@ class nsLineBox final : public nsLineLink {
 
   struct ExtraBlockData : public ExtraData {
     explicit ExtraBlockData(const nsRect& aBounds) : ExtraData(aBounds) {}
-    nsCollapsingMargin mCarriedOutBEndMargin;
+    mozilla::CollapsingMargin mCarriedOutBEndMargin;
   };
 
   struct ExtraInlineData : public ExtraData {
@@ -621,6 +621,11 @@ class nsLineList_iterator {
 
   inline iterator_self_type& operator=(const iterator_self_type& aOther);
   inline iterator_self_type& operator=(const iterator_reverse_type& aOther);
+
+  iterator_self_type& SetPosition(pointer p) {
+    mCurrent = p;
+    return *this;
+  }
 
   iterator_self_type& operator++() {
     mCurrent = mCurrent->_mNext;
@@ -1309,11 +1314,18 @@ class nsLineList {
 
   // returns iterator pointing to after the element
   iterator erase(iterator position)
-  // NOTE: leaves dangling next/prev pointers
+  // NOTE: leaves dangling next/prev pointers (except in DEBUG build)
   {
     position->_mPrev->_mNext = position->_mNext;
     position->_mNext->_mPrev = position->_mPrev;
+#ifdef DEBUG
+    nsLineLink* dead = position;
+    iterator next = ++position;
+    memset(dead, 0, sizeof(*dead));
+    return next;
+#else
     return ++position;
+#endif
   }
 
   void swap(self_type& y) {

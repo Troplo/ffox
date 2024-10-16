@@ -260,7 +260,7 @@ export class GeckoViewNavigation extends GeckoViewModule {
         //
         // csp is only present if we have a referring document, null otherwise.
         this.browser.fixupAndLoadURIString(uri, {
-          flags: navFlags,
+          loadFlags: navFlags,
           referrerInfo,
           triggeringPrincipal,
           headers: additionalHeaders,
@@ -556,7 +556,8 @@ export class GeckoViewNavigation extends GeckoViewModule {
     if (
       where === Ci.nsIBrowserDOMWindow.OPEN_NEWWINDOW ||
       where === Ci.nsIBrowserDOMWindow.OPEN_NEWTAB ||
-      where === Ci.nsIBrowserDOMWindow.OPEN_NEWTAB_BACKGROUND
+      where === Ci.nsIBrowserDOMWindow.OPEN_NEWTAB_BACKGROUND ||
+      where === Ci.nsIBrowserDOMWindow.OPEN_NEWTAB_FOREGROUND
     ) {
       browser = this.handleNewSession(uri, openWindowInfo, where, flags, name);
     }

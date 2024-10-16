@@ -1651,13 +1651,8 @@ void DocumentLoadListener::SerializeRedirectData(
 }
 
 static bool IsFirstLoadInWindow(nsIChannel* aChannel) {
-  if (nsCOMPtr<nsIPropertyBag2> props = do_QueryInterface(aChannel)) {
-    bool tmp = false;
-    nsresult rv =
-        props->GetPropertyAsBool(u"docshell.newWindowTarget"_ns, &tmp);
-    return NS_SUCCEEDED(rv) && tmp;
-  }
-  return false;
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
+  return loadInfo->GetIsNewWindowTarget();
 }
 
 // Get where the document loaded by this nsIChannel should be rendered. This
@@ -1692,8 +1687,9 @@ static int32_t GetWhereToOpen(nsIChannel* aChannel, bool aIsDocumentLoad) {
       where == nsIBrowserDOMWindow::OPEN_NEWTAB) {
     return where;
   }
-  // NOTE: nsIBrowserDOMWindow::OPEN_NEWTAB_BACKGROUND is not allowed as a pref
-  //       value.
+  // NOTE: nsIBrowserDOMWindow::OPEN_NEWTAB_BACKGROUND and
+  //       nsIBrowserDOMWindow::OPEN_NEWTAB_FOREGROUND are not allowed as pref
+  //       values.
   return nsIBrowserDOMWindow::OPEN_NEWTAB;
 }
 
@@ -1786,6 +1782,7 @@ static RefPtr<dom::BrowsingContextCallbackReceivedPromise> SwitchToNewTab(
     CanonicalBrowsingContext* aLoadingBrowsingContext, int32_t aWhere) {
   MOZ_ASSERT(aWhere == nsIBrowserDOMWindow::OPEN_NEWTAB ||
                  aWhere == nsIBrowserDOMWindow::OPEN_NEWTAB_BACKGROUND ||
+                 aWhere == nsIBrowserDOMWindow::OPEN_NEWTAB_FOREGROUND ||
                  aWhere == nsIBrowserDOMWindow::OPEN_NEWWINDOW,
              "Unsupported open location");
 
@@ -2362,15 +2359,9 @@ bool DocumentLoadListener::DocShellWillDisplayContent(nsresult aStatus) {
 
   auto* loadingContext = GetLoadingBrowsingContext();
 
-  bool isInitialDocument = true;
-  if (WindowGlobalParent* currentWindow =
-          loadingContext->GetCurrentWindowGlobal()) {
-    isInitialDocument = currentWindow->IsInitialDocument();
-  }
-
   nsresult rv = nsDocShell::FilterStatusForErrorPage(
       aStatus, mChannel, mLoadStateLoadType, loadingContext->IsTop(),
-      loadingContext->GetUseErrorPages(), isInitialDocument, nullptr);
+      loadingContext->GetUseErrorPages(), nullptr);
 
   if (NS_SUCCEEDED(rv)) {
     MOZ_LOG(gProcessIsolationLog, LogLevel::Verbose,
@@ -2676,11 +2667,7 @@ DocumentLoadListener::OnStartRequest(nsIRequest* aRequest) {
   }
 
   if (httpChannel) {
-    uint32_t responseStatus = 0;
-    nsAutoCString protocol;
-    Unused << httpChannel->GetResponseStatus(&responseStatus);
-    Unused << httpChannel->GetProtocolVersion(protocol);
-    mEarlyHintsService.FinalResponse(responseStatus, protocol);
+    mEarlyHintsService.Reset();
   } else {
     mEarlyHintsService.Cancel(
         "DocumentLoadListener::OnStartRequest: no httpChannel"_ns);

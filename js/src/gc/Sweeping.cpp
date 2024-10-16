@@ -143,7 +143,7 @@ inline size_t Arena::finalize(JS::GCContext* gcx, AllocKind thingKind,
   if constexpr (std::is_same_v<T, JSObject> || std::is_same_v<T, JSString> ||
                 std::is_same_v<T, JS::BigInt>) {
     if (isNewlyCreated_) {
-      zone->pretenuring.updateCellCountsInNewlyCreatedArenas(
+      zone()->pretenuring.updateCellCountsInNewlyCreatedArenas(
           nmarked + nfinalized, nmarked);
     }
   }
@@ -444,8 +444,7 @@ void GCRuntime::waitBackgroundSweepEnd() {
 void GCRuntime::startBackgroundFree() {
   AutoLockHelperThreadState lock;
 
-  if (lifoBlocksToFree.ref().isEmpty() &&
-      buffersToFreeAfterMinorGC.ref().empty()) {
+  if (!hasBuffersForBackgroundFree()) {
     return;
   }
 
@@ -463,11 +462,15 @@ void BackgroundFreeTask::run(AutoLockHelperThreadState& lock) {
 
 void GCRuntime::freeFromBackgroundThread(AutoLockHelperThreadState& lock) {
   do {
-    LifoAlloc lifoBlocks(JSContext::TEMP_LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
+    LifoAlloc lifoBlocks(JSContext::TEMP_LIFO_ALLOC_PRIMARY_CHUNK_SIZE,
+                         js::BackgroundMallocArena);
     lifoBlocks.transferFrom(&lifoBlocksToFree.ref());
 
     Nursery::BufferSet buffers;
     std::swap(buffers, buffersToFreeAfterMinorGC.ref());
+
+    Nursery::StringBufferVector stringBuffers;
+    std::swap(stringBuffers, stringBuffersToReleaseAfterMinorGC.ref());
 
     AutoUnlockHelperThreadState unlock(lock);
 
@@ -480,8 +483,11 @@ void GCRuntime::freeFromBackgroundThread(AutoLockHelperThreadState& lock) {
       // are assumed to be short lived.
       gcx->freeUntracked(r.front());
     }
-  } while (!lifoBlocksToFree.ref().isEmpty() ||
-           !buffersToFreeAfterMinorGC.ref().empty());
+
+    for (auto* buffer : stringBuffers) {
+      buffer->Release();
+    }
+  } while (hasBuffersForBackgroundFree());
 }
 
 void GCRuntime::waitBackgroundFreeEnd() { freeTask.join(); }
@@ -560,23 +566,32 @@ IncrementalProgress GCRuntime::markWeakReferencesInCurrentGroup(
 
 IncrementalProgress GCRuntime::markGrayRoots(SliceBudget& budget,
                                              gcstats::PhaseKind phase) {
-  MOZ_ASSERT(marker().markColor() == MarkColor::Gray);
+  MOZ_ASSERT(marker().markColor() == MarkColor::Black);
 
   gcstats::AutoPhase ap(stats(), phase);
 
-  AutoUpdateLiveCompartments updateLive(this);
-  marker().setRootMarkingMode(true);
-  auto guard =
-      mozilla::MakeScopeExit([this]() { marker().setRootMarkingMode(false); });
+  {
+    AutoSetMarkColor setColorGray(marker(), MarkColor::Gray);
 
-  IncrementalProgress result =
-      traceEmbeddingGrayRoots(marker().tracer(), budget);
-  if (result == NotFinished) {
-    return NotFinished;
+    AutoUpdateLiveCompartments updateLive(this);
+    marker().setRootMarkingMode(true);
+    auto guard = mozilla::MakeScopeExit(
+        [this]() { marker().setRootMarkingMode(false); });
+
+    IncrementalProgress result =
+        traceEmbeddingGrayRoots(marker().tracer(), budget);
+    if (result == NotFinished) {
+      return NotFinished;
+    }
+
+    Compartment::traceIncomingCrossCompartmentEdgesForZoneGC(
+        marker().tracer(), Compartment::GrayEdges);
   }
 
+  // Also mark any incoming cross compartment edges that were originally gray
+  // but have been marked black by a barrier.
   Compartment::traceIncomingCrossCompartmentEdgesForZoneGC(
-      marker().tracer(), Compartment::GrayEdges);
+      marker().tracer(), Compartment::BlackEdges);
 
   return Finished;
 }
@@ -1138,8 +1153,6 @@ IncrementalProgress GCRuntime::markGrayRootsInCurrentGroup(
     JS::GCContext* gcx, SliceBudget& budget) {
   gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::MARK);
 
-  AutoSetMarkColor setColorGray(marker(), MarkColor::Gray);
-
   // Check that the zone state is set correctly for the current sweep group as
   // that determines what gets marked.
   MOZ_ASSERT(atomsZone()->wasGCStarted() ==
@@ -1200,10 +1213,11 @@ IncrementalProgress GCRuntime::endMarkingSweepGroup(JS::GCContext* gcx,
 // Causes the given WeakCache to be swept when run.
 class ImmediateSweepWeakCacheTask : public GCParallelTask {
   Zone* zone;
-  WeakCacheBase& cache;
+  JS::detail::WeakCacheBase& cache;
 
  public:
-  ImmediateSweepWeakCacheTask(GCRuntime* gc, Zone* zone, WeakCacheBase& wc)
+  ImmediateSweepWeakCacheTask(GCRuntime* gc, Zone* zone,
+                              JS::detail::WeakCacheBase& wc)
       : GCParallelTask(gc, gcstats::PhaseKind::SWEEP_WEAK_CACHES),
         zone(zone),
         cache(wc) {}
@@ -1219,7 +1233,7 @@ class ImmediateSweepWeakCacheTask : public GCParallelTask {
     AutoUnlockHelperThreadState unlock(lock);
     AutoSetThreadIsSweeping threadIsSweeping(zone);
     SweepingTracer trc(gc->rt);
-    cache.traceWeak(&trc, WeakCacheBase::LockStoreBuffer);
+    cache.traceWeak(&trc, JS::detail::WeakCacheBase::LockStoreBuffer);
   }
 };
 
@@ -1444,14 +1458,14 @@ using WeakCacheTaskVector =
 template <typename Functor>
 static inline bool IterateWeakCaches(JSRuntime* rt, Functor f) {
   for (SweepGroupZonesIter zone(rt); !zone.done(); zone.next()) {
-    for (WeakCacheBase* cache : zone->weakCaches()) {
+    for (JS::detail::WeakCacheBase* cache : zone->weakCaches()) {
       if (!f(cache, zone.get())) {
         return false;
       }
     }
   }
 
-  for (WeakCacheBase* cache : rt->weakCaches()) {
+  for (JS::detail::WeakCacheBase* cache : rt->weakCaches()) {
     if (!f(cache, nullptr)) {
       return false;
     }
@@ -1468,18 +1482,19 @@ static bool PrepareWeakCacheTasks(JSRuntime* rt,
   MOZ_ASSERT(immediateTasks->empty());
 
   GCRuntime* gc = &rt->gc;
-  bool ok = IterateWeakCaches(rt, [&](WeakCacheBase* cache, Zone* zone) {
-    if (cache->empty()) {
-      return true;
-    }
+  bool ok =
+      IterateWeakCaches(rt, [&](JS::detail::WeakCacheBase* cache, Zone* zone) {
+        if (cache->empty()) {
+          return true;
+        }
 
-    // Caches that support incremental sweeping will be swept later.
-    if (zone && cache->setIncrementalBarrierTracer(&gc->sweepingTracer)) {
-      return true;
-    }
+        // Caches that support incremental sweeping will be swept later.
+        if (zone && cache->setIncrementalBarrierTracer(&gc->sweepingTracer)) {
+          return true;
+        }
 
-    return immediateTasks->emplaceBack(gc, zone, *cache);
-  });
+        return immediateTasks->emplaceBack(gc, zone, *cache);
+      });
 
   if (!ok) {
     immediateTasks->clearAndFree();
@@ -1492,11 +1507,11 @@ static void SweepAllWeakCachesOnMainThread(JSRuntime* rt) {
   // If we ran out of memory, do all the work on the main thread.
   gcstats::AutoPhase ap(rt->gc.stats(), gcstats::PhaseKind::SWEEP_WEAK_CACHES);
   SweepingTracer trc(rt);
-  IterateWeakCaches(rt, [&](WeakCacheBase* cache, Zone* zone) {
+  IterateWeakCaches(rt, [&](JS::detail::WeakCacheBase* cache, Zone* zone) {
     if (cache->needsIncrementalBarrier()) {
       cache->setIncrementalBarrierTracer(nullptr);
     }
-    cache->traceWeak(&trc, WeakCacheBase::LockStoreBuffer);
+    cache->traceWeak(&trc, JS::detail::WeakCacheBase::LockStoreBuffer);
     return true;
   });
 }
@@ -1836,14 +1851,14 @@ template <typename T>
 static bool SweepArenaList(JS::GCContext* gcx, Arena** arenasToSweep,
                            SliceBudget& sliceBudget) {
   while (Arena* arena = *arenasToSweep) {
-    MOZ_ASSERT(arena->zone->isGCSweeping());
+    MOZ_ASSERT(arena->zone()->isGCSweeping());
 
     for (ArenaCellIterUnderGC cell(arena); !cell.done(); cell.next()) {
       SweepThing(gcx, cell.as<T>());
     }
 
     Arena* next = arena->next;
-    MOZ_ASSERT_IF(next, next->zone == arena->zone);
+    MOZ_ASSERT_IF(next, next->zone() == arena->zone());
     *arenasToSweep = next;
 
     AllocKind kind = MapTypeToAllocKind<T>::kind;
@@ -1899,11 +1914,12 @@ static size_t IncrementalSweepWeakCache(GCRuntime* gc,
                                         const WeakCacheToSweep& item) {
   AutoSetThreadIsSweeping threadIsSweeping(item.zone);
 
-  WeakCacheBase* cache = item.cache;
+  JS::detail::WeakCacheBase* cache = item.cache;
   MOZ_ASSERT(cache->needsIncrementalBarrier());
 
   SweepingTracer trc(gc->rt);
-  size_t steps = cache->traceWeak(&trc, WeakCacheBase::LockStoreBuffer);
+  size_t steps =
+      cache->traceWeak(&trc, JS::detail::WeakCacheBase::LockStoreBuffer);
   cache->setIncrementalBarrierTracer(nullptr);
 
   return steps;
@@ -2362,7 +2378,8 @@ void GCRuntime::prepareForSweepSlice(JS::GCReason reason) {
 }
 
 IncrementalProgress GCRuntime::performSweepActions(SliceBudget& budget) {
-  MOZ_ASSERT(!storeBuffer().mayHavePointersToDeadCells());
+  MOZ_ASSERT_IF(storeBuffer().isEnabled(),
+                !storeBuffer().mayHavePointersToDeadCells());
 
   AutoMajorGCProfilerEntry s(this);
   gcstats::AutoPhase ap(stats(), gcstats::PhaseKind::SWEEP);

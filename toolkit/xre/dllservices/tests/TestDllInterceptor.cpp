@@ -76,7 +76,7 @@ struct payload {
 };
 
 extern "C" __declspec(dllexport) __declspec(noinline) payload
-    rotatePayload(payload p) {
+rotatePayload(payload p) {
   UINT64 tmp = p.a;
   p.a = p.b;
   p.b = p.c;
@@ -88,7 +88,7 @@ extern "C" __declspec(dllexport) __declspec(noinline) payload
 // We cannot use rotatePayload for that purpose because our detour cannot hook
 // a function detoured already.  Please keep this function always unhooked.
 extern "C" __declspec(dllexport) __declspec(noinline) payload
-    payloadNotHooked(payload p) {
+payloadNotHooked(payload p) {
   // Do something different from rotatePayload to avoid ICF.
   p.a ^= p.b;
   p.b ^= p.c;
@@ -830,6 +830,7 @@ struct TestCase {
     TestCase("OpcodeFF", NoStubAddressCheck),
     TestCase("IndirectCall", NoStubAddressCheck),
     TestCase("MovImm64", NoStubAddressCheck),
+    TestCase("RexCmpRipRelativeBytePtr", NoStubAddressCheck),
 #    elif defined(_M_IX86)
     // Skip the stub address check as we always generate a trampoline for x86.
     TestCase("PushRet", NoStubAddressCheck,
@@ -1356,6 +1357,39 @@ bool TestDynamicCodePolicy() {
   return true;
 }
 
+#if defined(_M_X64)
+constexpr unsigned char kTestValue = 0xcc;
+
+bool TestIsEqualToGlobalValue() {
+  gGlobalValue = kTestValue;
+  if (!IsEqualToGlobalValue(kTestValue)) {
+    printf(
+        "TEST-UNEXPECTED-FAIL | WindowsDllInterceptor | "
+        "Obtained wrong result from IsEqualToGlobalValue (value=0x%02x, "
+        "expected: true).\n",
+        kTestValue);
+    fflush(stdout);
+    return false;
+  }
+  for (int value = 0; value <= 255; ++value) {
+    if (value != kTestValue && IsEqualToGlobalValue(value)) {
+      printf(
+          "TEST-UNEXPECTED-FAIL | WindowsDllInterceptor | "
+          "Obtained wrong result from IsEqualToGlobalValue (value=0x%02x, "
+          "expected: false).\n",
+          value);
+      fflush(stdout);
+      return false;
+    }
+  }
+  printf(
+      "TEST-PASS | WindowsDllInterceptor | "
+      "Successfully passed TestIsEqualToGlobalValue.\n");
+  fflush(stdout);
+  return true;
+}
+#endif
+
 extern "C" int wmain(int argc, wchar_t* argv[]) {
   LARGE_INTEGER start;
   QueryPerformanceCounter(&start);
@@ -1458,6 +1492,14 @@ extern "C" int wmain(int argc, wchar_t* argv[]) {
       TestAssemblyFunctions<ShortInterceptor>() &&
 #endif
       TestAssemblyFunctions<WindowsDllInterceptor>() &&
+#if defined(_M_X64)
+      // Check that the test passes before hooking ...
+      TestIsEqualToGlobalValue() &&
+      TEST_HOOK_PARAMS("TestDllInterceptor.exe", IsEqualToGlobalValue, Equals,
+                       true, kTestValue) &&
+      // ... and also after hooking.
+      TestIsEqualToGlobalValue() &&
+#endif
 #ifdef _M_IX86
       // We keep this test to hook complex code on x86. (Bug 850957)
       TEST_HOOK("ntdll.dll", NtFlushBuffersFile, NotEquals, 0) &&

@@ -42,8 +42,6 @@ class ABIArgIterBase;
 
 namespace wasm {
 
-using mozilla::EnumeratedArray;
-
 struct CodeMetadata;
 struct TableDesc;
 struct V128;
@@ -273,7 +271,7 @@ WASM_DECLARE_CACHEABLE_POD(TrapSite);
 WASM_DECLARE_POD_VECTOR(TrapSite, TrapSiteVector)
 
 struct TrapSiteVectorArray
-    : EnumeratedArray<Trap, TrapSiteVector, size_t(Trap::Limit)> {
+    : mozilla::EnumeratedArray<Trap, TrapSiteVector, size_t(Trap::Limit)> {
   bool empty() const;
   void clear();
   void swap(TrapSiteVectorArray& rhs);
@@ -294,6 +292,31 @@ struct CallFarJump {
 WASM_DECLARE_CACHEABLE_POD(CallFarJump);
 
 using CallFarJumpVector = Vector<CallFarJump, 0, SystemAllocPolicy>;
+
+class CallRefMetricsPatch {
+ private:
+  // The offset of where to patch in the offset of the CallRefMetrics.
+  uint32_t offsetOfOffsetPatch_;
+  static constexpr uint32_t NO_OFFSET = UINT32_MAX;
+
+  WASM_CHECK_CACHEABLE_POD(offsetOfOffsetPatch_);
+
+ public:
+  explicit CallRefMetricsPatch() : offsetOfOffsetPatch_(NO_OFFSET) {}
+
+  bool hasOffsetOfOffsetPatch() const {
+    return offsetOfOffsetPatch_ != NO_OFFSET;
+  }
+  uint32_t offsetOfOffsetPatch() const { return offsetOfOffsetPatch_; }
+  void setOffset(uint32_t indexOffset) {
+    MOZ_ASSERT(!hasOffsetOfOffsetPatch());
+    MOZ_ASSERT(indexOffset != NO_OFFSET);
+    offsetOfOffsetPatch_ = indexOffset;
+  }
+};
+
+using CallRefMetricsPatchVector =
+    Vector<CallRefMetricsPatch, 0, SystemAllocPolicy>;
 
 // On trap, the bytecode offset to be reported in callstacks is saved.
 
@@ -346,6 +369,17 @@ struct CallableOffsets : Offsets {
 
 WASM_DECLARE_CACHEABLE_POD(CallableOffsets);
 
+struct ImportOffsets : CallableOffsets {
+  MOZ_IMPLICIT ImportOffsets() : afterFallbackCheck(0) {}
+
+  // The entry point after initial prologue check.
+  uint32_t afterFallbackCheck;
+
+  WASM_CHECK_CACHEABLE_POD_WITH_PARENT(CallableOffsets, afterFallbackCheck);
+};
+
+WASM_DECLARE_CACHEABLE_POD(ImportOffsets);
+
 struct FuncOffsets : CallableOffsets {
   MOZ_IMPLICIT FuncOffsets() : uncheckedCallEntry(0), tierEntry(0) {}
 
@@ -380,16 +414,17 @@ using FuncOffsetsVector = Vector<FuncOffsets, 0, SystemAllocPolicy>;
 class CodeRange {
  public:
   enum Kind {
-    Function,          // function definition
-    InterpEntry,       // calls into wasm from C++
-    JitEntry,          // calls into wasm from jit code
-    ImportInterpExit,  // slow-path calling from wasm into C++ interp
-    ImportJitExit,     // fast-path calling from wasm into jit code
-    BuiltinThunk,      // fast-path calling from wasm into a C++ native
-    TrapExit,          // calls C++ to report and jumps to throw stub
-    DebugTrap,         // calls C++ to handle debug event
-    FarJumpIsland,     // inserted to connect otherwise out-of-range insns
-    Throw              // special stack-unwinding stub jumped to by other stubs
+    Function,           // function definition
+    InterpEntry,        // calls into wasm from C++
+    JitEntry,           // calls into wasm from jit code
+    ImportInterpExit,   // slow-path calling from wasm into C++ interp
+    ImportJitExit,      // fast-path calling from wasm into jit code
+    BuiltinThunk,       // fast-path calling from wasm into a C++ native
+    TrapExit,           // calls C++ to report and jumps to throw stub
+    DebugStub,          // calls C++ to handle debug event
+    RequestTierUpStub,  // calls C++ to request tier-2 compilation
+    FarJumpIsland,      // inserted to connect otherwise out-of-range insns
+    Throw               // special stack-unwinding stub jumped to by other stubs
   };
 
  private:
@@ -402,11 +437,11 @@ class CodeRange {
       uint32_t funcIndex_;
       union {
         struct {
-          uint32_t lineOrBytecode_;
           uint16_t beginToUncheckedCallEntry_;
           uint16_t beginToTierEntry_;
           bool hasUnwindInfo_;
         } func;
+        uint16_t jitExitEntry_;
       };
     };
     Trap trap_;
@@ -414,7 +449,6 @@ class CodeRange {
   Kind kind_ : 8;
 
   WASM_CHECK_CACHEABLE_POD(begin_, ret_, end_, u.funcIndex_,
-                           u.func.lineOrBytecode_,
                            u.func.beginToUncheckedCallEntry_,
                            u.func.beginToTierEntry_, u.func.hasUnwindInfo_,
                            u.trap_, kind_);
@@ -425,8 +459,8 @@ class CodeRange {
   CodeRange(Kind kind, uint32_t funcIndex, Offsets offsets);
   CodeRange(Kind kind, CallableOffsets offsets);
   CodeRange(Kind kind, uint32_t funcIndex, CallableOffsets);
-  CodeRange(uint32_t funcIndex, uint32_t lineOrBytecode, FuncOffsets offsets,
-            bool hasUnwindInfo);
+  CodeRange(Kind kind, uint32_t funcIndex, ImportOffsets offsets);
+  CodeRange(uint32_t funcIndex, FuncOffsets offsets, bool hasUnwindInfo);
 
   void offsetBy(uint32_t offset) {
     begin_ += offset;
@@ -453,15 +487,17 @@ class CodeRange {
   bool isImportInterpExit() const { return kind() == ImportInterpExit; }
   bool isImportJitExit() const { return kind() == ImportJitExit; }
   bool isTrapExit() const { return kind() == TrapExit; }
-  bool isDebugTrap() const { return kind() == DebugTrap; }
+  bool isDebugStub() const { return kind() == DebugStub; }
+  bool isRequestTierUpStub() const { return kind() == RequestTierUpStub; }
   bool isThunk() const { return kind() == FarJumpIsland; }
 
-  // Functions, import exits, trap exits and JitEntry stubs have standard
+  // Functions, import exits, debug stubs and JitEntry stubs have standard
   // callable prologues and epilogues. Asynchronous frame iteration needs to
   // know the offset of the return instruction to calculate the frame pointer.
 
   bool hasReturn() const {
-    return isFunction() || isImportExit() || isDebugTrap() || isJitEntry();
+    return isFunction() || isImportExit() || isDebugStub() ||
+           isRequestTierUpStub() || isJitEntry();
   }
   uint32_t ret() const {
     MOZ_ASSERT(hasReturn());
@@ -508,13 +544,13 @@ class CodeRange {
     MOZ_ASSERT(isFunction());
     return begin_ + u.func.beginToTierEntry_;
   }
-  uint32_t funcLineOrBytecode() const {
-    MOZ_ASSERT(isFunction());
-    return u.func.lineOrBytecode_;
-  }
   bool funcHasUnwindInfo() const {
     MOZ_ASSERT(isFunction());
     return u.func.hasUnwindInfo_;
+  }
+  uint32_t importJitExitEntry() const {
+    MOZ_ASSERT(isImportJitExit());
+    return begin_ + u.jitExitEntry_;
   }
 
   // A sorted array of CodeRanges can be looked up via BinarySearch and
@@ -567,7 +603,8 @@ class CallSiteDesc {
     LeaveFrame,     // call to a leave frame handler
     CollapseFrame,  // call to a leave frame handler during tail call
     StackSwitch,    // stack switch point
-    Breakpoint      // call to instruction breakpoint
+    Breakpoint,     // call to instruction breakpoint
+    RequestTierUp   // call to request tier-2 compilation of this function
   };
   CallSiteDesc() : lineOrBytecode_(0), kind_(0) {}
   explicit CallSiteDesc(Kind kind) : lineOrBytecode_(0), kind_(kind) {
@@ -948,8 +985,8 @@ class CalleeDesc {
     } import;
     struct {
       uint32_t instanceDataOffset_;
-      uint32_t minLength_;
-      Maybe<uint32_t> maxLength_;
+      uint64_t minLength_;
+      mozilla::Maybe<uint64_t> maxLength_;
       CallIndirectId callIndirectId_;
     } table;
     SymbolicAddress builtin_;
@@ -993,7 +1030,7 @@ class CalleeDesc {
     MOZ_ASSERT(which_ == WasmTable);
     return u.table.minLength_;
   }
-  Maybe<uint32_t> wasmTableMaxLength() const {
+  mozilla::Maybe<uint32_t> wasmTableMaxLength() const {
     MOZ_ASSERT(which_ == WasmTable);
     return u.table.maxLength_;
   }

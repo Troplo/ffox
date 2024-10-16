@@ -109,11 +109,6 @@ using namespace mozilla::ipc;
 
 namespace mozilla::dom {
 
-// Counts the number of registered ServiceWorkers, and the number that
-// handle Fetch, for reporting in Telemetry
-uint32_t gServiceWorkersRegistered = 0;
-uint32_t gServiceWorkersRegisteredFetch = 0;
-
 static_assert(
     nsIHttpChannelInternal::REDIRECT_MODE_FOLLOW ==
         static_cast<uint32_t>(RequestRedirect::Follow),
@@ -564,9 +559,6 @@ RefPtr<GenericErrorResultPromise> ServiceWorkerManager::StartControllingClient(
             aRegistrationInfo->StartControllingClient();
           }
 
-          Telemetry::Accumulate(Telemetry::SERVICE_WORKER_CONTROLLED_DOCUMENTS,
-                                1);
-
           // Always check to see if we failed to actually control the client. In
           // that case remove the client from our list of controlled clients.
           return promise->Then(
@@ -600,9 +592,6 @@ RefPtr<GenericErrorResultPromise> ServiceWorkerManager::StartControllingClient(
         clientHandle->OnDetach()->Then(
             GetMainThreadSerialEventTarget(), __func__,
             [self, aClientInfo] { self->StopControllingClient(aClientInfo); });
-
-        Telemetry::Accumulate(Telemetry::SERVICE_WORKER_CONTROLLED_DOCUMENTS,
-                              1);
 
         // Always check to see if we failed to actually control the client.  In
         // that case removed the client from our list of controlled clients.
@@ -834,6 +823,8 @@ ServiceWorkerManager::RegisterForTest(nsIPrincipal* aPrincipal,
 RefPtr<ServiceWorkerRegistrationPromise> ServiceWorkerManager::Register(
     const ClientInfo& aClientInfo, const nsACString& aScopeURL,
     const nsACString& aScriptURL, ServiceWorkerUpdateViaCache aUpdateViaCache) {
+  AUTO_PROFILER_MARKER_TEXT("SWM Register", DOM, {}, ""_ns);
+
   nsCOMPtr<nsIURI> scopeURI;
   nsresult rv = NS_NewURI(getter_AddRefs(scopeURI), aScopeURL);
   if (NS_FAILED(rv)) {
@@ -1445,7 +1436,7 @@ already_AddRefed<ServiceWorkerManager> ServiceWorkerManager::GetInstance() {
 
 void ServiceWorkerManager::ReportToAllClients(
     const nsCString& aScope, const nsString& aMessage,
-    const nsString& aFilename, const nsString& aLine, uint32_t aLineNumber,
+    const nsCString& aFilename, const nsString& aLine, uint32_t aLineNumber,
     uint32_t aColumnNumber, uint32_t aFlags) {
   ConsoleUtils::ReportForServiceWorkerScope(
       NS_ConvertUTF8toUTF16(aScope), aMessage, aFilename, aLineNumber,
@@ -1456,7 +1447,7 @@ void ServiceWorkerManager::ReportToAllClients(
 void ServiceWorkerManager::LocalizeAndReportToAllClients(
     const nsCString& aScope, const char* aStringKey,
     const nsTArray<nsString>& aParamArray, uint32_t aFlags,
-    const nsString& aFilename, const nsString& aLine, uint32_t aLineNumber,
+    const nsCString& aFilename, const nsString& aLine, uint32_t aLineNumber,
     uint32_t aColumnNumber) {
   RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
   if (!swm) {
@@ -1477,8 +1468,8 @@ void ServiceWorkerManager::LocalizeAndReportToAllClients(
 
 void ServiceWorkerManager::HandleError(
     JSContext* aCx, nsIPrincipal* aPrincipal, const nsCString& aScope,
-    const nsString& aWorkerURL, const nsString& aMessage,
-    const nsString& aFilename, const nsString& aLine, uint32_t aLineNumber,
+    const nsCString& aWorkerURL, const nsString& aMessage,
+    const nsCString& aFilename, const nsString& aLine, uint32_t aLineNumber,
     uint32_t aColumnNumber, uint32_t aFlags, JSExnType aExnType) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aPrincipal);
@@ -1585,21 +1576,9 @@ void ServiceWorkerManager::LoadRegistration(
 void ServiceWorkerManager::LoadRegistrations(
     const nsTArray<ServiceWorkerRegistrationData>& aRegistrations) {
   MOZ_ASSERT(NS_IsMainThread());
-  uint32_t fetch = 0;
   for (uint32_t i = 0, len = aRegistrations.Length(); i < len; ++i) {
     LoadRegistration(aRegistrations[i]);
-    if (aRegistrations[i].currentWorkerHandlesFetch()) {
-      fetch++;
-    }
   }
-  gServiceWorkersRegistered = aRegistrations.Length();
-  gServiceWorkersRegisteredFetch = fetch;
-  Telemetry::ScalarSet(Telemetry::ScalarID::SERVICEWORKER_REGISTRATIONS,
-                       u"All"_ns, gServiceWorkersRegistered);
-  Telemetry::ScalarSet(Telemetry::ScalarID::SERVICEWORKER_REGISTRATIONS,
-                       u"Fetch"_ns, gServiceWorkersRegisteredFetch);
-  LOG(("LoadRegistrations: %u, fetch %u\n", gServiceWorkersRegistered,
-       gServiceWorkersRegisteredFetch));
 }
 
 void ServiceWorkerManager::StoreRegistration(

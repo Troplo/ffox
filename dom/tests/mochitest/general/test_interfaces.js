@@ -73,7 +73,7 @@ let wasmGlobalInterfaces = [
   { name: "Function", insecureContext: true, nightly: true },
   { name: "Exception", insecureContext: true },
   { name: "Tag", insecureContext: true },
-  { name: "JSTag", insecureContext: true, earlyBetaOrEarlier: true },
+  { name: "JSTag", insecureContext: true },
   { name: "compile", insecureContext: true },
   { name: "compileStreaming", insecureContext: true },
   { name: "instantiate", insecureContext: true },
@@ -106,6 +106,7 @@ let ecmaGlobals = [
   { name: "Int8Array", insecureContext: true },
   { name: "InternalError", insecureContext: true },
   { name: "Intl", insecureContext: true },
+  { name: "Iterator", insecureContext: true },
   { name: "JSON", insecureContext: true },
   { name: "Map", insecureContext: true },
   { name: "Math", insecureContext: true },
@@ -184,15 +185,15 @@ let interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "AudioContext", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "AudioData", insecureContext: true, nightly: true },
+  { name: "AudioData", insecureContext: true, nightlyAndroid: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "AudioDecoder", nightly: true },
+  { name: "AudioDecoder", nightlyAndroid: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "AudioBufferSourceNode", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "AudioDestinationNode", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "AudioEncoder", nightly: true },
+  { name: "AudioEncoder", nightlyAndroid: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "AudioListener", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -414,9 +415,9 @@ let interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "ElementInternals", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "EncodedAudioChunk", insecureContext: true, nightly: true },
+  { name: "EncodedAudioChunk", insecureContext: true, nightlyAndroid: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "EncodedVideoChunk", insecureContext: true, nightly: true },
+  { name: "EncodedVideoChunk", insecureContext: true, nightlyAndroid: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "ErrorEvent", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -463,6 +464,8 @@ let interfaceNamesInGlobalScope = [
   { name: "FontFaceSet", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "FontFaceSetLoadEvent", insecureContext: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "FragmentDirective", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "GainNode", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -770,6 +773,12 @@ let interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "ImageData", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "ImageDecoder", nightly: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "ImageTrack", nightly: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "ImageTrackList", nightly: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "InputEvent", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   {
@@ -898,6 +907,24 @@ let interfaceNamesInGlobalScope = [
   { name: "MutationRecord", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "NamedNodeMap", insecureContext: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "NavigateEvent", insecureContext: true, disabled: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "Navigation", insecureContext: true, disabled: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "NavigationActivation", insecureContext: true, disabled: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  {
+    name: "NavigationCurrentEntryChangeEvent",
+    insecureContext: true,
+    disabled: true,
+  },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "NavigationDestination", insecureContext: true, disabled: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "NavigationHistoryEntry", insecureContext: true, disabled: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "NavigationTransition", insecureContext: true, disabled: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   "NavigationPreloadManager",
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1433,13 +1460,13 @@ let interfaceNamesInGlobalScope = [
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "ValidityState", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "VideoColorSpace", insecureContext: true, nightly: true },
+  { name: "VideoColorSpace", insecureContext: true, nightlyAndroid: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "VideoDecoder", nightly: true },
+  { name: "VideoDecoder", nightlyAndroid: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "VideoEncoder", nightly: true },
+  { name: "VideoEncoder", nightlyAndroid: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
-  { name: "VideoFrame", insecureContext: true, nightly: true },
+  { name: "VideoFrame", insecureContext: true, nightlyAndroid: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "VideoPlaybackQuality", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
@@ -1678,6 +1705,8 @@ let interfaceNamesInGlobalScope = [
   { name: "onclick", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "onclose", insecureContext: true },
+  // IMPORTANT: Do not change this list without review from a DOM peer!
+  { name: "oncontentvisibilityautostatechange", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!
   { name: "oncontextlost", insecureContext: true },
   // IMPORTANT: Do not change this list without review from a DOM peer!

@@ -43,6 +43,7 @@
 #include "jsapi.h"
 #include "js/ArrayBuffer.h"
 #include "js/ContextOptions.h"
+#include "js/experimental/LoggingInterface.h"
 #include "js/HelperThreadAPI.h"
 #include "js/Initialization.h"
 #include "js/MemoryMetrics.h"
@@ -986,6 +987,12 @@ static void ReloadPrefsCallback(const char* pref, void* aXpccx) {
       StaticPrefs::
           javascript_options_experimental_regexp_duplicate_named_groups());
 
+#ifdef NIGHTLY_BUILD
+  JS_SetGlobalJitCompilerOption(
+      cx, JSJITCOMPILER_REGEXP_MODIFIERS,
+      StaticPrefs::javascript_options_experimental_regexp_modifiers());
+#endif
+
   // Set options not shared with workers.
   contextOptions
       .setThrowOnDebuggeeWouldRun(Preferences::GetBool(
@@ -1131,7 +1138,8 @@ class HelperThreadTaskHandler : public Task {
 
 #ifdef MOZ_COLLECTING_RUNNABLE_TELEMETRY
   bool GetName(nsACString& aName) override {
-    aName.AssignLiteral("HelperThreadTask");
+    const char* taskName = JS::GetHelperThreadTaskName(mTask);
+    aName.AssignLiteral(taskName, strlen(taskName));
     return true;
   }
 #endif
@@ -1154,11 +1162,36 @@ static bool CreateSelfHostedSharedMemory(JSContext* aCx,
   return true;
 }
 
+static JS::OpaqueLogger GetLoggerByName(const char* name) {
+  LogModule* tmp = LogModule::Get(name);
+  return static_cast<JS::OpaqueLogger>(tmp);
+}
+
+MOZ_FORMAT_PRINTF(3, 0)
+static void LogPrintVA(JS::OpaqueLogger aLogger, mozilla::LogLevel level,
+                       const char* aFmt, va_list ap) {
+  LogModule* logmod = static_cast<LogModule*>(aLogger);
+
+  logmod->Printv(level, aFmt, ap);
+}
+
+static AtomicLogLevel& GetLevelRef(JS::OpaqueLogger aLogger) {
+  LogModule* logmod = static_cast<LogModule*>(aLogger);
+  return logmod->LevelRef();
+}
+
+static JS::LoggingInterface loggingInterface = {GetLoggerByName, LogPrintVA,
+                                                GetLevelRef};
+
 nsresult XPCJSContext::Initialize() {
   if (StaticPrefs::javascript_options_external_thread_pool_DoNotUseDirectly()) {
     size_t threadCount = TaskController::GetPoolThreadCount();
     size_t stackSize = TaskController::GetThreadStackSize();
     SetHelperThreadTaskCallback(&DispatchOffThreadTask, threadCount, stackSize);
+  }
+
+  if (!JS::SetLoggingInterface(loggingInterface)) {
+    MOZ_CRASH("Failed to install logging interface");
   }
 
   nsresult rv =

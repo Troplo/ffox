@@ -18,14 +18,15 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
-#include "absl/memory/memory.h"
 #include "absl/types/optional.h"
+#include "api/audio_codecs/audio_codec_pair_id.h"
 #include "api/audio_options.h"
 #include "api/crypto/crypto_options.h"
 #include "api/crypto/frame_decryptor_interface.h"
 #include "api/crypto/frame_encryptor_interface.h"
 #include "api/dtmf_sender_interface.h"
 #include "api/environment/environment_factory.h"
+#include "api/make_ref_counted.h"
 #include "api/media_stream_interface.h"
 #include "api/rtc_error.h"
 #include "api/rtc_event_log/rtc_event_log.h"
@@ -51,7 +52,6 @@
 #include "p2p/base/p2p_constants.h"
 #include "pc/audio_rtp_receiver.h"
 #include "pc/audio_track.h"
-#include "pc/channel.h"
 #include "pc/dtls_srtp_transport.h"
 #include "pc/local_audio_source.h"
 #include "pc/media_stream.h"
@@ -63,6 +63,7 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/gunit.h"
 #include "rtc_base/thread.h"
+#include "rtc_base/unique_id_generator.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
 #include "test/run_loop.h"
@@ -174,7 +175,7 @@ class RtpSenderReceiverTest
   // Needed to use DTMF sender.
   void AddDtmfCodec() {
     cricket::AudioSenderParameter params;
-    const cricket::AudioCodec kTelephoneEventCodec =
+    const cricket::Codec kTelephoneEventCodec =
         cricket::CreateAudioCodec(106, "telephone-event", 8000, 1);
     params.codecs.push_back(kTelephoneEventCodec);
     voice_media_send_channel()->SetSenderParameters(params);

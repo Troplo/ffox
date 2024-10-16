@@ -1055,6 +1055,7 @@ class GeckoEngineSessionTest {
         )
         engineSession.settings.historyTrackingDelegate = historyTrackingDelegate
         engineSession.appRedirectUrl = emptyPageUrl
+        engineSession.initialLoad = false
 
         class MockHistoryList(
             items: List<GeckoSession.HistoryDelegate.HistoryItem>,
@@ -1857,15 +1858,15 @@ class GeckoEngineSessionTest {
             geckoSessionProvider = geckoSessionProvider,
         ).settings
 
-        expectException(UnsupportedSettingException::class) {
+        expectException<UnsupportedSettingException> {
             settings.javascriptEnabled = true
         }
 
-        expectException(UnsupportedSettingException::class) {
+        expectException<UnsupportedSettingException> {
             settings.domStorageEnabled = false
         }
 
-        expectException(UnsupportedSettingException::class) {
+        expectException<UnsupportedSettingException> {
             settings.trackingProtectionPolicy = TrackingProtectionPolicy.strict()
         }
     }

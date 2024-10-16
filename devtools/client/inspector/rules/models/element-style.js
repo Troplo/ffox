@@ -418,7 +418,10 @@ class ElementStyle {
             !computedProp.textProp.invisible
           ) {
             if (!isPropInStartingStyle) {
-              variables.set(computedProp.name, computedProp.value);
+              variables.set(computedProp.name, {
+                declarationValue: computedProp.value,
+                computedValue: computedProp.textProp.getVariableComputedValue(),
+              });
             } else {
               startingStyleVariables.set(computedProp.name, computedProp.value);
             }
@@ -571,12 +574,7 @@ class ElementStyle {
       // longer matches the node. This strict check avoids accidentally causing
       // declarations to be overridden in the remaining matching rules.
       const isStyleRule =
-        rule.pseudoElement === "" &&
-        // @backward-compat { version 128 } When 128 hits release, we can remove the
-        // ternary and only check rule.matchedSelectorIndexes.length.
-        (rule.domRule.hasMatchedSelectorIndexesTrait
-          ? !!rule.matchedSelectorIndexes.length
-          : !!rule.matchedDesugaredSelectors.length);
+        rule.pseudoElement === "" && rule.matchedSelectorIndexes.length;
 
       // Style rules for pseudo-elements must always be considered, regardless if their
       // selector matches the node. As a convenience, declarations in rules for
@@ -942,7 +940,9 @@ class ElementStyle {
     if (variables?.has(name)) {
       // XXX Check what to do in case the value doesn't match the registered property syntax.
       // Will be handled in Bug 1866712
-      data.value = variables.get(name);
+      const { declarationValue, computedValue } = variables.get(name);
+      data.value = declarationValue;
+      data.computedValue = computedValue;
     }
     if (startingStyleVariables?.has(name)) {
       data.startingStyle = startingStyleVariables.get(name);
@@ -964,7 +964,14 @@ class ElementStyle {
    *                              value if the property is not defined)
    */
   getAllCustomProperties(pseudo = "") {
-    let customProperties = this.variablesMap.get(pseudo);
+    const customProperties = new Map();
+    for (const [
+      key,
+      { computedValue, declarationValue },
+    ] of this.variablesMap.get(pseudo)) {
+      customProperties.set(key, computedValue ?? declarationValue);
+    }
+
     const startingStyleCustomProperties =
       this.startingStyleVariablesMap.get(pseudo);
 
@@ -980,19 +987,11 @@ class ElementStyle {
       return customProperties;
     }
 
-    let newMapCreated = false;
-
     if (startingStyleCustomProperties) {
       for (const [name, value] of startingStyleCustomProperties) {
         // Only set the starting style property if it's not defined (i.e. not in the "main"
         // variable map)
         if (!customProperties.has(name)) {
-          // Since we want to return starting style variables, we need to create a new Map
-          // to not modify the one in the main map.
-          if (!newMapCreated) {
-            customProperties = new Map(customProperties);
-            newMapCreated = true;
-          }
           customProperties.set(name, value);
         }
       }
@@ -1002,12 +1001,6 @@ class ElementStyle {
       for (const [name, propertyDefinition] of registeredPropertiesMap) {
         // Only set the registered property if it's not defined (i.e. not in the variable map)
         if (!customProperties.has(name)) {
-          // Since we want to return registered property, we need to create a new Map
-          // to not modify the one in the variable map.
-          if (!newMapCreated) {
-            customProperties = new Map(customProperties);
-            newMapCreated = true;
-          }
           customProperties.set(name, propertyDefinition.initialValue);
         }
       }

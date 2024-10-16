@@ -22,9 +22,6 @@
 #include "wasm/WasmTypeDef.h"
 #include "wasm/WasmValType.h"
 
-using js::wasm::StorageType;
-using mozilla::CheckedUint32;
-
 namespace js::wasm {
 
 // For trailer blocks whose owning Wasm{Struct,Array}Objects make it into the
@@ -89,8 +86,8 @@ class WasmGcObject : public JSObject {
   // single contiguous area of memory:
   //
   // * If the object in question is a WasmStructObject, it is the value of
-  //   `wasm::StructField::offset` for the relevant field, without regard to
-  //   the inline/outline split.
+  //   `wasm::StructType::fieldOffset()` for the relevant field, without regard
+  //   to the inline/outline split.
   //
   // * If the object in question is a WasmArrayObject, then
   //   - u32 == UINT32_MAX (0xFFFF'FFFF) means the "length" property
@@ -110,7 +107,7 @@ class WasmGcObject : public JSObject {
   [[nodiscard]] static bool lookUpProperty(JSContext* cx,
                                            Handle<WasmGcObject*> obj, jsid id,
                                            PropOffset* offset,
-                                           StorageType* type);
+                                           wasm::StorageType* type);
 
  public:
   [[nodiscard]] static bool loadValue(JSContext* cx, Handle<WasmGcObject*> obj,
@@ -209,10 +206,10 @@ class WasmArrayObject : public WasmGcObject,
   //
   // This logic is mirrored in WasmArrayObject::maxInlineElementsForElemSize and
   // MacroAssembler::wasmNewArrayObject.
-  static CheckedUint32 calcStorageBytesChecked(uint32_t elemSize,
-                                               uint32_t numElements) {
+  static mozilla::CheckedUint32 calcStorageBytesChecked(uint32_t elemSize,
+                                                        uint32_t numElements) {
     static_assert(sizeof(WasmArrayObject) % gc::CellAlignBytes == 0);
-    CheckedUint32 storageBytes = elemSize;
+    mozilla::CheckedUint32 storageBytes = elemSize;
     storageBytes *= numElements;
     storageBytes += sizeof(WasmArrayObject::DataHeader);
     // Round total allocation up to gc::CellAlignBytes
@@ -220,8 +217,13 @@ class WasmArrayObject : public WasmGcObject,
     storageBytes += gc::CellAlignBytes - (storageBytes % gc::CellAlignBytes);
     return storageBytes;
   }
-  static uint32_t calcStorageBytes(uint32_t elemSize, uint32_t numElements) {
-    CheckedUint32 storageBytes = calcStorageBytesChecked(elemSize, numElements);
+  // Calculate the byte length of the array's data storage, without checking for
+  // overflow. This includes the data header, data, and any extra space for
+  // alignment with GC sizes.
+  static uint32_t calcStorageBytesUnchecked(uint32_t elemSize,
+                                            uint32_t numElements) {
+    mozilla::CheckedUint32 storageBytes =
+        calcStorageBytesChecked(elemSize, numElements);
     MOZ_ASSERT(storageBytes.isValid());
     return storageBytes.value();
   }
@@ -398,14 +400,14 @@ class WasmStructObject : public WasmGcObject,
   // Given the offset of a field, produce the offset in `inlineData` or
   // `*outlineData_` to use, plus a bool indicating which area it is.
   // `fieldType` is for assertional purposes only.
-  static inline void fieldOffsetToAreaAndOffset(StorageType fieldType,
+  static inline void fieldOffsetToAreaAndOffset(wasm::StorageType fieldType,
                                                 uint32_t fieldOffset,
                                                 bool* areaIsOutline,
                                                 uint32_t* areaOffset);
 
   // Given the offset of a field, return its actual address.  `fieldType` is
   // for assertional purposes only.
-  inline uint8_t* fieldOffsetToAddress(StorageType fieldType,
+  inline uint8_t* fieldOffsetToAddress(wasm::StorageType fieldType,
                                        uint32_t fieldOffset);
 
   // Gets JS Value of the structure field.
@@ -478,10 +480,9 @@ inline bool WasmStructObject::requiresOutlineBytes(uint32_t totalBytes) {
 }
 
 /*static*/
-inline void WasmStructObject::fieldOffsetToAreaAndOffset(StorageType fieldType,
-                                                         uint32_t fieldOffset,
-                                                         bool* areaIsOutline,
-                                                         uint32_t* areaOffset) {
+inline void WasmStructObject::fieldOffsetToAreaAndOffset(
+    wasm::StorageType fieldType, uint32_t fieldOffset, bool* areaIsOutline,
+    uint32_t* areaOffset) {
   if (fieldOffset < WasmStructObject_MaxInlineBytes) {
     *areaIsOutline = false;
     *areaOffset = fieldOffset;
@@ -496,8 +497,8 @@ inline void WasmStructObject::fieldOffsetToAreaAndOffset(StorageType fieldType,
       ((fieldOffset + fieldType.size() - 1) < WasmStructObject_MaxInlineBytes));
 }
 
-inline uint8_t* WasmStructObject::fieldOffsetToAddress(StorageType fieldType,
-                                                       uint32_t fieldOffset) {
+inline uint8_t* WasmStructObject::fieldOffsetToAddress(
+    wasm::StorageType fieldType, uint32_t fieldOffset) {
   bool areaIsOutline;
   uint32_t areaOffset;
   fieldOffsetToAreaAndOffset(fieldType, fieldOffset, &areaIsOutline,

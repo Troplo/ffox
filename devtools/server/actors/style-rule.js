@@ -293,8 +293,6 @@ class StyleRuleActor extends Actor {
         // Indicates whether StyleRuleActor implements and can use the setRuleText method.
         // It cannot use it if the stylesheet was programmatically mutated via the CSSOM.
         canSetRuleText: this.canSetRuleText,
-        // @backward-compat { version 128 } Can be removed when 128 hits release.
-        hasMatchedSelectorIndexes: true,
       },
     };
 
@@ -434,6 +432,7 @@ class StyleRuleActor extends Actor {
 
         if (SharedCssLogic.isCssVariable(decl.name)) {
           decl.isCustomProperty = true;
+          decl.computedValue = style.getPropertyValue(decl.name);
 
           // If the variable is a registered property, we check if the variable is
           // invalid at computed-value time (e.g. if the declaration value matches

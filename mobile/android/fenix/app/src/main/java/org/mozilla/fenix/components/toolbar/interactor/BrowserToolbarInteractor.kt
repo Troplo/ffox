@@ -5,6 +5,7 @@
 package org.mozilla.fenix.components.toolbar.interactor
 
 import mozilla.components.ui.tabcounter.TabCounterMenu
+import org.mozilla.fenix.components.menu.MenuAccessPoint
 import org.mozilla.fenix.components.toolbar.BrowserToolbarController
 import org.mozilla.fenix.components.toolbar.BrowserToolbarMenuController
 import org.mozilla.fenix.components.toolbar.ToolbarMenu
@@ -58,6 +59,20 @@ interface BrowserToolbarInteractor {
      * Opens a new tab. Called when the user taps on the New Tab button.
      */
     fun onNewTabButtonClicked()
+
+    /**
+     * Called when the user long presses on the New Tab button.
+     */
+    fun onNewTabButtonLongClicked()
+
+    /**
+     * Opens the menu. Called when the user clicks the menu action button in the toolbar.
+     *
+     * @param accessPoint The [MenuAccessPoint] that was used to navigate to the menu dialog.
+     * @param customTabSessionId The ID of the custom tab session if navigating from
+     * an external access point, and null otherwise.
+     */
+    fun onMenuButtonClicked(accessPoint: MenuAccessPoint, customTabSessionId: String? = null)
 }
 
 /**
@@ -131,5 +146,13 @@ class DefaultBrowserToolbarInteractor(
 
     override fun onNewTabButtonClicked() {
         browserToolbarController.handleNewTabButtonClick()
+    }
+
+    override fun onNewTabButtonLongClicked() {
+        browserToolbarController.handleNewTabButtonLongClick()
+    }
+
+    override fun onMenuButtonClicked(accessPoint: MenuAccessPoint, customTabSessionId: String?) {
+        browserToolbarController.handleMenuButtonClicked(accessPoint, customTabSessionId)
     }
 }

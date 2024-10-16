@@ -6,8 +6,11 @@
 #define frontend_UsingEmitter_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/Maybe.h"
 
-#include "frontend/BytecodeOffset.h"
+#include "frontend/TryEmitter.h"
+#include "vm/CompletionKind.h"
+#include "vm/UsingHint.h"
 
 namespace js::frontend {
 
@@ -18,21 +21,31 @@ class MOZ_STACK_CLASS UsingEmitter {
  private:
   BytecodeEmitter* bce_;
 
-  int depthAtDisposables_ = -1;
-
-  BytecodeOffset disposableStart_ = BytecodeOffset::invalidOffset();
+  mozilla::Maybe<TryEmitter> tryEmitter_;
 
   // TODO: add state transition graph and state
   // management for this emitter. (Bug 1904346)
 
- public:
-  enum Kind { Sync, Async };
+  bool hasAwaitUsing_ = false;
 
+  [[nodiscard]] bool emitThrowIfException();
+
+  [[nodiscard]] bool emitGetDisposeMethod(UsingHint hint);
+
+  [[nodiscard]] bool emitCreateDisposableResource(UsingHint hint);
+
+  [[nodiscard]] bool emitTakeDisposeCapability();
+
+  [[nodiscard]] bool emitDisposeLoop(
+      EmitterScope& es,
+      CompletionKind initialCompletion = CompletionKind::Normal);
+
+ public:
   explicit UsingEmitter(BytecodeEmitter* bce);
 
   [[nodiscard]] bool prepareForDisposableScopeBody();
 
-  [[nodiscard]] bool prepareForAssignment(Kind kind);
+  [[nodiscard]] bool prepareForAssignment(UsingHint hint);
 
   [[nodiscard]] bool prepareForForOfLoopIteration();
 

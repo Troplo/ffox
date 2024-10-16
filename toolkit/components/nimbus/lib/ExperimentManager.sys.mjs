@@ -11,6 +11,7 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   ClientEnvironment: "resource://normandy/lib/ClientEnvironment.sys.mjs",
+  ClientID: "resource://gre/modules/ClientID.sys.mjs",
   ExperimentStore: "resource://nimbus/lib/ExperimentStore.sys.mjs",
   FirstStartup: "resource://gre/modules/FirstStartup.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
@@ -412,25 +413,56 @@ export class _ExperimentManager {
   }
 
   /**
-   * Bucket configuration specifies a specific percentage of clients that can
-   * be enrolled.
-   * @param {BucketConfig} bucketConfig
-   * @returns {Promise<boolean>}
+   * Determine userId based on bucketConfig.randomizationUnit;
+   * either "normandy_id" or "group_id".
+   *
+   * @param {object} bucketConfig
+   *
    */
-  isInBucketAllocation(bucketConfig) {
-    if (!bucketConfig) {
-      lazy.log.debug("Cannot enroll if recipe bucketConfig is not set.");
-      return false;
-    }
-
+  async getUserId(bucketConfig) {
     let id;
     if (bucketConfig.randomizationUnit === "normandy_id") {
       id = lazy.ClientEnvironment.userId;
+    } else if (bucketConfig.randomizationUnit === "group_id") {
+      id = await lazy.ClientID.getProfileGroupID();
     } else {
       // Others not currently supported.
       lazy.log.debug(
         `Invalid randomizationUnit: ${bucketConfig.randomizationUnit}`
       );
+    }
+    return id;
+  }
+
+  /**
+   * Determine if this client falls into the bucketing specified in bucketConfig
+   *
+   * @param {object} bucketConfig
+   * @param {string} bucketConfig.randomizationUnit
+   *                 The randomization unit to use for bucketing. This must be
+   *                 either "normandy_id" or "group_id".
+   * @param {number} bucketConfig.start
+   *                 The start of the bucketing range (inclusive).
+   * @param {number} bucketConfig.count
+   *                 The number of buckets in the range.
+   * @param {number} bucketConfig.total
+   *                 The total number of buckets.
+   * @param {string} bucketConfig.namespace
+   *                 A namespace used to seed the RNG used in the sampling
+   *                 algorithm. Given an otherwise identical bucketConfig with
+   *                 different namespaces, the client will fall into different a
+   *                 different bucket.
+   * @returns {Promise<boolean>}
+   *          Whether or not the client falls into the bucketing range.
+   */
+  async isInBucketAllocation(bucketConfig) {
+    if (!bucketConfig) {
+      lazy.log.debug("Cannot enroll if recipe bucketConfig is not set.");
+      return false;
+    }
+
+    const id = await this.getUserId(bucketConfig);
+    if (!id) {
       return false;
     }
 
@@ -454,7 +486,7 @@ export class _ExperimentManager {
    * @memberof _ExperimentManager
    */
   async enroll(recipe, source, { reenroll = false } = {}) {
-    let { slug, branches } = recipe;
+    let { slug, branches, bucketConfig } = recipe;
 
     const enrollment = this.store.get(slug);
 
@@ -469,7 +501,8 @@ export class _ExperimentManager {
     let storeLookupByFeature = recipe.isRollout
       ? this.store.getRolloutForFeature.bind(this.store)
       : this.store.hasExperimentForFeature.bind(this.store);
-    const branch = await this.chooseBranch(slug, branches);
+    const userId = await this.getUserId(bucketConfig);
+    const branch = await this.chooseBranch(slug, branches, userId);
     const features = featuresCompat(branch);
     for (let feature of features) {
       if (storeLookupByFeature(feature?.featureId)) {
@@ -975,6 +1008,7 @@ export class _ExperimentManager {
    *
    * @param {string} slug
    * @param {Branch[]} branches
+   * @param {string} userId
    * @returns {Promise<Branch>}
    * @memberof _ExperimentManager
    */

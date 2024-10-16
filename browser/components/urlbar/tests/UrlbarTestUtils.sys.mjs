@@ -11,7 +11,6 @@ import {
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
-  AddonTestUtils: "resource://testing-common/AddonTestUtils.sys.mjs",
   BrowserTestUtils: "resource://testing-common/BrowserTestUtils.sys.mjs",
   BrowserUIUtils: "resource:///modules/BrowserUIUtils.sys.mjs",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
@@ -134,6 +133,8 @@ export var UrlbarTestUtils = {
    *        your test waits for the query to finish. However, this behavior
    *        isn't always desired, for example if your test intentionally blurs
    *        the input before the query finishes. In that case, pass false.
+   * @returns {Promise}
+   *   The promise for the last query context.
    */
   async promiseAutocompleteResultPopup({
     window,
@@ -339,6 +340,8 @@ export var UrlbarTestUtils = {
    *   array. If it's in a submenu, set this to an array where each element i is
    *   a selector that can be used to get the i'th menu item that opens a
    *   submenu.
+   * @returns {DOMElement}
+   *   Returns the menu item element.
    */
   async openResultMenuAndGetItem({
     window,
@@ -829,19 +832,20 @@ export var UrlbarTestUtils = {
       "gURLBar.searchMode should exist as expected"
     );
 
+    let results = window.gURLBar.querySelector(".urlbarView-results");
     if (
       window.gURLBar.searchMode?.source &&
       window.gURLBar.searchMode.source !== UrlbarUtils.RESULT_SOURCE.SEARCH
     ) {
       this.Assert.equal(
-        window.gURLBar.getAttribute("searchmodesource"),
+        results.getAttribute("searchmodesource"),
         UrlbarUtils.getResultSourceName(window.gURLBar.searchMode.source),
-        "gURLBar has proper searchmodesource attribute"
+        "Urlbar results have proper searchmodesource attribute"
       );
     } else {
       this.Assert.ok(
-        !window.gURLBar.hasAttribute("searchmodesource"),
-        "gURLBar does not have searchmodesource attribute"
+        !results.hasAttribute("searchmodesource"),
+        "Urlbar results does not have searchmodesource attribute"
       );
     }
 
@@ -1069,7 +1073,7 @@ export var UrlbarTestUtils = {
     }
 
     // Also remove emphasis markers if present.
-    if (lazy.UrlbarPrefs.get("trimHttps")) {
+    if (lazy.UrlbarPrefs.getScotchBonnetPref("trimHttps")) {
       sanitizedURL = sanitizedURL.replace(/^<?https:\/\/>?/, "");
     } else {
       sanitizedURL = sanitizedURL.replace(/^<?http:\/\/>?/, "");
@@ -1086,7 +1090,7 @@ export var UrlbarTestUtils = {
    */
   getTrimmedProtocolWithSlashes() {
     if (Services.prefs.getBoolPref("browser.urlbar.trimURLs")) {
-      return Services.prefs.getBoolPref("browser.urlbar.trimHttps")
+      return lazy.UrlbarPrefs.getScotchBonnetPref("trimHttps")
         ? "https://"
         : "http://"; // eslint-disable-this-line @microsoft/sdl/no-insecure-url
     }
@@ -1241,16 +1245,6 @@ export var UrlbarTestUtils = {
     Cc["@mozilla.org/satchel/form-history-startup;1"]
       .getService(Ci.nsIObserver)
       .observe(null, "profile-after-change", null);
-
-    // This is necessary because UrlbarMuxerUnifiedComplete.sort calls
-    // Services.search.parseSubmissionURL, so we need engines.
-    try {
-      await lazy.AddonTestUtils.promiseStartupManager();
-    } catch (error) {
-      if (!error.message.includes("already started")) {
-        throw error;
-      }
-    }
   },
 
   /**
@@ -1394,7 +1388,8 @@ export var UrlbarTestUtils = {
     this.Assert.ok(lazy.BrowserTestUtils.isVisible(button));
     await this.EventUtils.promiseElementReadyForUserInput(button, win);
     this.EventUtils.synthesizeMouseAtCenter(button, {}, win);
-    return promiseMenuOpen;
+    await promiseMenuOpen;
+    return popup;
   },
 
   searchModeSwitcherPopupClosed(win) {
@@ -1523,10 +1518,6 @@ class TestProvider extends UrlbarProvider {
    *   {@link UrlbarView.#selectElement} method is called.
    * @param {Function} [options.onEngagement]
    *   If given, a function that will be called when engagement.
-   * @param {Function} [options.onLegacyEngagement]
-   *   If given, a function that will be called when engagement.
-   *   onLegacyEngagement() is implemented for those who rely on the
-   *   older implementation of onEngagement()
    * @param {Function} [options.onAbandonment]
    *   If given, a function that will be called when abandonment.
    * @param {Function} [options.onImpression]
@@ -1550,7 +1541,6 @@ class TestProvider extends UrlbarProvider {
     onAbandonment = null,
     onImpression = null,
     onSearchSessionEnd = null,
-    onLegacyEngagement = null,
     delayResultsPromise = null,
   } = {}) {
     if (delayResultsPromise && addTimeout) {
@@ -1588,10 +1578,6 @@ class TestProvider extends UrlbarProvider {
 
     if (onSearchSessionEnd) {
       this.onSearchSessionEnd = onSearchSessionEnd.bind(this);
-    }
-
-    if (onLegacyEngagement) {
-      this.onLegacyEngagement = onLegacyEngagement.bind(this);
     }
   }
 

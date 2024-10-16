@@ -53,8 +53,6 @@ using namespace js;
 
 using mozilla::Atomic;
 using mozilla::DebugOnly;
-using mozilla::NegativeInfinity;
-using mozilla::PositiveInfinity;
 
 /* static */ MOZ_THREAD_LOCAL(JSContext*) js::TlsContext;
 /* static */
@@ -798,8 +796,8 @@ JS_PUBLIC_API void JS::DisableRecordingAllocations(JSContext* cx) {
   cx->runtime()->stopRecordingAllocations();
 }
 
-JS_PUBLIC_API void js::gc::RegisterWeakCache(JSRuntime* rt,
-                                             gc::WeakCacheBase* cachep) {
+JS_PUBLIC_API void JS::shadow::RegisterWeakCache(
+    JSRuntime* rt, detail::WeakCacheBase* cachep) {
   rt->registerWeakCache(cachep);
 }
 

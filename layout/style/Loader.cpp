@@ -815,7 +815,8 @@ nsresult SheetLoadData::VerifySheetReadyToParse(
     nsCOMPtr<nsIURI> referrer = ReferrerInfo()->GetOriginalReferrer();
     nsContentUtils::ReportToConsole(
         errorFlag, "CSS Loader"_ns, mLoader->mDocument,
-        nsContentUtils::eCSS_PROPERTIES, errorMessage, strings, referrer);
+        nsContentUtils::eCSS_PROPERTIES, errorMessage, strings,
+        SourceLocation(referrer.get()));
 
     if (errorFlag == nsIScriptError::errorFlag) {
       LOG_WARN(
@@ -1866,15 +1867,7 @@ Result<Loader::LoadSheetResult, nsresult> Loader::LoadInlineStyle(
     return LoaderPrincipal();
   }();
 
-  // We only cache sheets if in shadow trees, since regular document sheets are
-  // likely to be unique.
-  const bool isWorthCaching =
-      StaticPrefs::layout_css_inline_style_caching_always_enabled() ||
-      aInfo.mContent->IsInShadowTree();
-  RefPtr<StyleSheet> sheet;
-  if (isWorthCaching) {
-    sheet = LookupInlineSheetInCache(aBuffer, sheetPrincipal);
-  }
+  RefPtr<StyleSheet> sheet = LookupInlineSheetInCache(aBuffer, sheetPrincipal);
   const bool isSheetFromCache = !!sheet;
   if (!isSheetFromCache) {
     sheet = MakeRefPtr<StyleSheet>(eAuthorSheetFeatures, aInfo.mCORSMode,
@@ -1918,9 +1911,7 @@ Result<Loader::LoadSheetResult, nsresult> Loader::LoadInlineStyle(
                                                       true));
     completed = ParseSheet(utf8, holder, AllowAsyncParse::No);
     if (completed == Completed::Yes) {
-      if (isWorthCaching) {
-        mInlineSheets.InsertOrUpdate(aBuffer, std::move(sheet));
-      }
+      mInlineSheets.InsertOrUpdate(aBuffer, std::move(sheet));
     } else {
       data->mMustNotify = true;
     }
@@ -2382,19 +2373,7 @@ nsIPrincipal* Loader::PartitionedPrincipal() const {
 }
 
 bool Loader::ShouldBypassCache() const {
-  if (!mDocument) {
-    return false;
-  }
-  RefPtr<nsILoadGroup> lg = mDocument->GetDocumentLoadGroup();
-  if (!lg) {
-    return false;
-  }
-  nsLoadFlags flags;
-  if (NS_FAILED(lg->GetLoadFlags(&flags))) {
-    return false;
-  }
-  return flags & (nsIRequest::LOAD_BYPASS_CACHE |
-                  nsICachingChannel::LOAD_BYPASS_LOCAL_CACHE);
+  return mDocument && nsContentUtils::ShouldBypassSubResourceCache(mDocument);
 }
 
 void Loader::BlockOnload() {

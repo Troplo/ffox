@@ -35,9 +35,6 @@
 namespace js {
 namespace wasm {
 
-using mozilla::CheckedInt32;
-using mozilla::MallocSizeOf;
-
 class RecGroup;
 
 //=========================================================================
@@ -255,10 +252,13 @@ class FuncType {
 // structure types that the module knows about.  It is created from the sparse
 // array of types in the ModuleMetadata when the Module is created.
 
-struct StructField {
+struct FieldType {
   StorageType type;
-  uint32_t offset;
   bool isMutable;
+
+  FieldType() : isMutable(false) {}
+  FieldType(StorageType type, bool isMutable)
+      : type(type), isMutable(isMutable) {}
 
   HashNumber hash(const RecGroup* recGroup) const {
     HashNumber hn = 0;
@@ -267,10 +267,18 @@ struct StructField {
     return hn;
   }
 
+  // Matches two field types for isorecursive equality. See
+  // "Matching type definitions" in WasmValType.h for more background.
+  static bool matches(const RecGroup* lhsRecGroup, const FieldType& lhs,
+                      const RecGroup* rhsRecGroup, const FieldType& rhs) {
+    return lhs.isMutable == rhs.isMutable &&
+           lhs.type.forMatch(lhsRecGroup) == rhs.type.forMatch(rhsRecGroup);
+  }
+
   // Checks if two struct fields are compatible in a given subtyping
   // relationship.
-  static bool canBeSubTypeOf(const StructField& subType,
-                             const StructField& superType) {
+  static bool canBeSubTypeOf(const FieldType& subType,
+                             const FieldType& superType) {
     // Mutable fields are invariant w.r.t. field types
     if (subType.isMutable && superType.isMutable) {
       return subType.type == superType.type;
@@ -285,34 +293,29 @@ struct StructField {
   }
 };
 
-using StructFieldVector = Vector<StructField, 0, SystemAllocPolicy>;
+using FieldTypeVector = Vector<FieldType, 0, SystemAllocPolicy>;
 
+using FieldOffsetVector = Vector<uint32_t, 2, SystemAllocPolicy>;
 using InlineTraceOffsetVector = Vector<uint32_t, 2, SystemAllocPolicy>;
 using OutlineTraceOffsetVector = Vector<uint32_t, 0, SystemAllocPolicy>;
 
 class StructType {
  public:
-  StructFieldVector fields_;  // Field type, offset, and mutability
-  uint32_t size_;             // The size of the type in bytes.
+  FieldTypeVector fields_;  // Field type and mutability
+
+  uint32_t size_;  // The size of the type in bytes.
+  FieldOffsetVector fieldOffsets_;
   InlineTraceOffsetVector inlineTraceOffsets_;
   OutlineTraceOffsetVector outlineTraceOffsets_;
 
  public:
   StructType() : size_(0) {}
 
-  explicit StructType(StructFieldVector&& fields)
+  explicit StructType(FieldTypeVector&& fields)
       : fields_(std::move(fields)), size_(0) {}
 
   StructType(StructType&&) = default;
   StructType& operator=(StructType&&) = default;
-
-  [[nodiscard]] bool clone(const StructType& src) {
-    if (!fields_.appendAll(src.fields_)) {
-      return false;
-    }
-    size_ = src.size_;
-    return true;
-  }
 
   [[nodiscard]] bool init();
 
@@ -325,9 +328,13 @@ class StructType {
     return true;
   }
 
+  uint32_t fieldOffset(uint32_t fieldIndex) const {
+    return fieldOffsets_[fieldIndex];
+  }
+
   HashNumber hash(const RecGroup* recGroup) const {
     HashNumber hn = 0;
-    for (const StructField& field : fields_) {
+    for (const FieldType& field : fields_) {
       hn = mozilla::AddToHash(hn, field.hash(recGroup));
     }
     return hn;
@@ -341,11 +348,9 @@ class StructType {
       return false;
     }
     for (uint32_t i = 0; i < lhs.fields_.length(); i++) {
-      const StructField& lhsField = lhs.fields_[i];
-      const StructField& rhsField = rhs.fields_[i];
-      if (lhsField.isMutable != rhsField.isMutable ||
-          lhsField.type.forMatch(lhsRecGroup) !=
-              rhsField.type.forMatch(rhsRecGroup)) {
+      const FieldType& lhsField = lhs.fields_[i];
+      const FieldType& rhsField = rhs.fields_[i];
+      if (!FieldType::matches(lhsRecGroup, lhsField, rhsRecGroup, rhsField)) {
         return false;
       }
     }
@@ -363,8 +368,8 @@ class StructType {
 
     // Every field that is in both superType and subType must be compatible
     for (uint32_t i = 0; i < superType.fields_.length(); i++) {
-      if (!StructField::canBeSubTypeOf(subType.fields_[i],
-                                       superType.fields_[i])) {
+      if (!FieldType::canBeSubTypeOf(subType.fields_[i],
+                                     superType.fields_[i])) {
         return false;
       }
     }
@@ -396,16 +401,16 @@ using StructTypeVector = Vector<StructType, 0, SystemAllocPolicy>;
 // Given that, it follows from (3) that all fields fall completely within
 // either the inline or outline areas; no field crosses the boundary.
 class StructLayout {
-  CheckedInt32 sizeSoFar = 0;
+  mozilla::CheckedInt32 sizeSoFar = 0;
   uint32_t structAlignment = 1;
 
  public:
   // The field adders return the offset of the the field.
-  CheckedInt32 addField(StorageType type);
+  mozilla::CheckedInt32 addField(StorageType type);
 
   // The close method rounds up the structure size to the appropriate
   // alignment and returns that size.
-  CheckedInt32 close();
+  mozilla::CheckedInt32 close();
 };
 
 //=========================================================================
@@ -414,14 +419,12 @@ class StructLayout {
 class ArrayType {
  public:
   // The kind of value stored in this array
-  StorageType elementType_;
-  // Whether this array is mutable or not
-  bool isMutable_;
+  FieldType fieldType_;
 
  public:
-  ArrayType() : isMutable_(false) {}
+  ArrayType() = default;
   ArrayType(StorageType elementType, bool isMutable)
-      : elementType_(elementType), isMutable_(isMutable) {}
+      : fieldType_(FieldType(elementType, isMutable)) {}
 
   ArrayType(const ArrayType&) = default;
   ArrayType& operator=(const ArrayType&) = default;
@@ -429,45 +432,26 @@ class ArrayType {
   ArrayType(ArrayType&&) = default;
   ArrayType& operator=(ArrayType&&) = default;
 
-  [[nodiscard]] bool clone(const ArrayType& src) {
-    elementType_ = src.elementType_;
-    isMutable_ = src.isMutable_;
-    return true;
-  }
-
-  bool isDefaultable() const { return elementType_.isDefaultable(); }
+  StorageType elementType() const { return fieldType_.type; }
+  bool isMutable() const { return fieldType_.isMutable; }
+  bool isDefaultable() const { return elementType().isDefaultable(); }
 
   HashNumber hash(const RecGroup* recGroup) const {
-    HashNumber hn = 0;
-    hn = mozilla::AddToHash(hn, elementType_.forMatch(recGroup).hash());
-    hn = mozilla::AddToHash(hn, HashNumber(isMutable_));
-    return hn;
+    return fieldType_.hash(recGroup);
   }
 
   // Matches two array types for isorecursive equality. See
   // "Matching type definitions" in WasmValType.h for more background.
   static bool matches(const RecGroup* lhsRecGroup, const ArrayType& lhs,
                       const RecGroup* rhsRecGroup, const ArrayType& rhs) {
-    return lhs.isMutable_ == rhs.isMutable_ &&
-           lhs.elementType_.forMatch(lhsRecGroup) ==
-               rhs.elementType_.forMatch(rhsRecGroup);
+    return FieldType::matches(lhsRecGroup, lhs.fieldType_, rhsRecGroup,
+                              rhs.fieldType_);
   }
 
   // Checks if two arrays are compatible in a given subtyping relationship.
   static bool canBeSubTypeOf(const ArrayType& subType,
                              const ArrayType& superType) {
-    // Mutable fields are invariant w.r.t. field types
-    if (subType.isMutable_ && superType.isMutable_) {
-      return subType.elementType_ == superType.elementType_;
-    }
-
-    // Immutable fields are covariant w.r.t. field types
-    if (!subType.isMutable_ && !superType.isMutable_) {
-      return StorageType::isSubTypeOf(subType.elementType_,
-                                      superType.elementType_);
-    }
-
-    return true;
+    return FieldType::canBeSubTypeOf(subType.fieldType_, superType.fieldType_);
   }
 
   size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
@@ -844,7 +828,7 @@ class TypeDef {
     const SuperTypeVector* subSTV = subTypeDef->superTypeVector();
     const SuperTypeVector* superSTV = superTypeDef->superTypeVector();
 
-    // During construction of a recursion group, the super type vector may not
+    // During construction of a recursion group, the super type vectors may not
     // have been computed yet, in which case we need to fall back to a linear
     // search.
     if (!subSTV || !superSTV) {
@@ -857,8 +841,12 @@ class TypeDef {
       return false;
     }
 
-    // The supertype vector does exist.  So check it points back here.
+    // The supertype vectors do exist. Check that they point to the right
+    // places.
+    MOZ_ASSERT(subSTV);
+    MOZ_ASSERT(superSTV);
     MOZ_ASSERT(subSTV->typeDef() == subTypeDef);
+    MOZ_ASSERT(superSTV->typeDef() == superTypeDef);
 
     // We need to check if `superTypeDef` is one of `subTypeDef`s super types
     // by checking in `subTypeDef`s super type vector. We can use the static
@@ -868,9 +856,6 @@ class TypeDef {
     if (subTypingDepth >= subSTV->length()) {
       return false;
     }
-
-    MOZ_ASSERT(superSTV);
-    MOZ_ASSERT(superSTV->typeDef() == superTypeDef);
 
     return subSTV->type(subTypingDepth) == superSTV;
   }
@@ -1008,7 +993,7 @@ class RecGroup : public AtomicRefCounted<RecGroup> {
         }
         case TypeDefKind::Array: {
           const ArrayType& arrayType = typeDef.arrayType();
-          visitStorageType(arrayType.elementType_);
+          visitStorageType(arrayType.elementType());
           break;
         }
         case TypeDefKind::None: {
@@ -1101,7 +1086,6 @@ using SharedRecGroupVector = Vector<SharedRecGroup, 0, SystemAllocPolicy>;
 // A type context holds the recursion groups and corresponding type definitions
 // defined in a module.
 class TypeContext : public AtomicRefCounted<TypeContext> {
-  FeatureArgs features_;
   // The pending recursion group that is currently being constructed
   MutableRecGroup pendingRecGroup_;
   // An in-order list of all the recursion groups defined in this module
@@ -1116,10 +1100,9 @@ class TypeContext : public AtomicRefCounted<TypeContext> {
 
  public:
   TypeContext() = default;
-  explicit TypeContext(const FeatureArgs& features) : features_(features) {}
   ~TypeContext();
 
-  size_t sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const {
+  size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
     return types_.sizeOfExcludingThis(mallocSizeOf) +
            moduleIndices_.shallowSizeOfExcludingThis(mallocSizeOf);
   }

@@ -238,11 +238,18 @@ impl<'a, T> GpuBufferWriter<'a, T> where T: Texel {
     /// Push a reference to a render task in to the writer. Once the render
     /// task graph is resolved, this will be patched with the UV rect of the task
     pub fn push_render_task(&mut self, task_id: RenderTaskId) {
-        self.deferred.push(DeferredBlock {
-            task_id,
-            index: self.buffer.len(),
-        });
-        self.buffer.push(T::default());
+        match task_id {
+            RenderTaskId::INVALID => {
+                self.buffer.push(T::default());
+            }
+            task_id => {
+                self.deferred.push(DeferredBlock {
+                    task_id,
+                    index: self.buffer.len(),
+                });
+                self.buffer.push(T::default());
+            }
+        }
     }
 
     /// Close this writer, returning the GPU address of this set of block(s).
@@ -352,11 +359,11 @@ impl<T> GpuBufferBuilderImpl<T> where T: Texel + std::convert::From<DeviceIntRec
                     DeviceIntRect::new(
                         DeviceIntPoint::new(
                             target_rect.min.x + (top_left.x * size.width as f32).round() as i32,
-                            target_rect.min.y + (top_left.y * size.width as f32).round() as i32,
+                            target_rect.min.y + (top_left.y * size.height as f32).round() as i32,
                         ),
                         DeviceIntPoint::new(
                             target_rect.min.x + (bottom_right.x * size.width as f32).round() as i32,
-                            target_rect.min.y + (bottom_right.x * size.width as f32).round() as i32,
+                            target_rect.min.y + (bottom_right.y * size.height as f32).round() as i32,
                         ),
                     )
                 }

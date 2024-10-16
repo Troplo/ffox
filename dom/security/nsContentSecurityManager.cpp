@@ -27,6 +27,7 @@
 #include "nsNetUtil.h"
 #include "nsReadableUtils.h"
 #include "nsSandboxFlags.h"
+#include "nsScriptSecurityManager.h"
 #include "nsIXPConnect.h"
 
 #include "mozilla/BasePrincipal.h"
@@ -810,17 +811,13 @@ void nsContentSecurityManager::MeasureUnexpectedPrivilegedLoads(
   nsAutoCString uriString;
   if (aFinalURI) {
     aFinalURI->GetAsciiSpec(uriString);
-  } else {
-    uriString.AssignLiteral("");
   }
   FilenameTypeAndDetails fileNameTypeAndDetails =
-      nsContentSecurityUtils::FilenameToFilenameType(
-          NS_ConvertUTF8toUTF16(uriString), true);
+      nsContentSecurityUtils::FilenameToFilenameType(uriString, true);
 
   nsCString loggedFileDetails = "unknown"_ns;
   if (fileNameTypeAndDetails.second.isSome()) {
-    loggedFileDetails.Assign(
-        NS_ConvertUTF16toUTF8(fileNameTypeAndDetails.second.value()));
+    loggedFileDetails.Assign(fileNameTypeAndDetails.second.value());
   }
   // sanitize remoteType because it may contain sensitive
   // info, like URLs. e.g. `webIsolated=https://example.com`
@@ -1131,7 +1128,7 @@ nsresult nsContentSecurityManager::CheckChannelHasProtocolSecurityFlag(
   NS_ENSURE_SUCCESS(rv, rv);
 
   uint32_t securityFlagsSet = 0;
-  if (flags & nsIProtocolHandler::WEBEXT_URI_WEB_ACCESSIBLE) {
+  if (flags & nsIProtocolHandler::URI_IS_WEBEXTENSION_RESOURCE) {
     securityFlagsSet += 1;
   }
   if (flags & nsIProtocolHandler::URI_LOADABLE_BY_ANYONE) {
@@ -1431,6 +1428,9 @@ nsresult nsContentSecurityManager::doContentSecurityCheck(
   rv = CheckAllowLoadByTriggeringRemoteType(aChannel);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  rv = CheckForIncoherentResultPrincipal(aChannel);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   // if dealing with a redirected channel then we have already installed
   // streamlistener and redirect proxies and so we are done.
   if (loadInfo->GetInitialSecurityCheckDone()) {
@@ -1711,5 +1711,68 @@ nsContentSecurityManager::PerformSecurityCheck(
   NS_ENSURE_SUCCESS(rv, rv);
 
   inAndOutListener.forget(outStreamListener);
+  return NS_OK;
+}
+
+nsresult nsContentSecurityManager::CheckForIncoherentResultPrincipal(
+    nsIChannel* aChannel) {
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
+  ExtContentPolicyType contentPolicyType =
+      loadInfo->GetExternalContentPolicyType();
+  if (contentPolicyType != ExtContentPolicyType::TYPE_DOCUMENT &&
+      contentPolicyType != ExtContentPolicyType::TYPE_SUBDOCUMENT &&
+      contentPolicyType != ExtContentPolicyType::TYPE_OBJECT) {
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIPrincipal> resultOrPrecursor;
+  nsresult rv = nsScriptSecurityManager::GetScriptSecurityManager()
+                    ->GetChannelResultPrincipalIfNotSandboxed(
+                        aChannel, getter_AddRefs(resultOrPrecursor));
+  NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_STATE(resultOrPrecursor);
+
+  if (nsCOMPtr<nsIPrincipal> precursor =
+          resultOrPrecursor->GetPrecursorPrincipal()) {
+    resultOrPrecursor = precursor;
+  }
+
+  if (!resultOrPrecursor->GetIsContentPrincipal()) {
+    return NS_OK;
+  }
+
+  nsAutoCString resultSiteOriginNoSuffix;
+  rv = resultOrPrecursor->GetSiteOriginNoSuffix(resultSiteOriginNoSuffix);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIURI> resultSiteOriginURI;
+  NS_NewURI(getter_AddRefs(resultSiteOriginURI), resultSiteOriginNoSuffix);
+  NS_ENSURE_STATE(resultSiteOriginURI);
+
+  nsCOMPtr<nsIURI> channelURI;
+  aChannel->GetURI(getter_AddRefs(channelURI));
+  NS_ENSURE_STATE(channelURI);
+
+  nsCOMPtr<nsIPrincipal> channelUriPrincipal =
+      BasePrincipal::CreateContentPrincipal(channelURI, {});
+  NS_ENSURE_STATE(channelUriPrincipal);
+
+  nsAutoCString channelUriSiteOrigin;
+  rv = channelUriPrincipal->GetSiteOriginNoSuffix(channelUriSiteOrigin);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCOMPtr<nsIURI> channelSiteOriginURI;
+  NS_NewURI(getter_AddRefs(channelSiteOriginURI), channelUriSiteOrigin);
+  NS_ENSURE_STATE(channelSiteOriginURI);
+
+  if (nsScriptSecurityManager::IsHttpOrHttpsAndCrossOrigin(
+          resultSiteOriginURI, channelSiteOriginURI) ||
+      (!net::SchemeIsHTTP(resultSiteOriginURI) &&
+       !net::SchemeIsHTTPS(resultSiteOriginURI) &&
+       (net::SchemeIsHTTP(channelSiteOriginURI) ||
+        net::SchemeIsHTTPS(channelSiteOriginURI)))) {
+    return NS_ERROR_CONTENT_BLOCKED;
+  }
+
   return NS_OK;
 }

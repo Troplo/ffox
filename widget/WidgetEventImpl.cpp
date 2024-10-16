@@ -12,6 +12,7 @@
 #include "TextEvents.h"
 #include "TouchEvents.h"
 
+#include "mozilla/EventForwards.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/InternalMutationEvent.h"
 #include "mozilla/Maybe.h"
@@ -72,22 +73,105 @@ bool IsPointerEventMessage(EventMessage aMessage) {
     case ePointerLeave:
     case ePointerGotCapture:
     case ePointerLostCapture:
-      return true;
     case ePointerClick:
     case ePointerAuxClick:
     case eContextMenu:
-      return StaticPrefs::
-          dom_w3c_pointer_events_dispatch_click_as_pointer_event();
+      return true;
     default:
       return false;
   }
 }
 
 bool IsPointerEventMessageOriginallyMouseEventMessage(EventMessage aMessage) {
-  return StaticPrefs::
-             dom_w3c_pointer_events_dispatch_click_as_pointer_event() &&
-         (aMessage == ePointerClick || aMessage == ePointerAuxClick ||
-          aMessage == eContextMenu);
+  return aMessage == ePointerClick || aMessage == ePointerAuxClick ||
+         aMessage == eContextMenu;
+}
+
+bool IsForbiddenDispatchingToNonElementContent(EventMessage aMessage) {
+  switch (aMessage) {
+    // Keyboard event target should be an Element node
+    case eKeyDown:
+    case eKeyUp:
+    case eKeyPress:
+    // Mouse event target should be an Element node
+    case eMouseMove:
+    case eMouseUp:
+    case eMouseDown:
+    case eMouseEnterIntoWidget:
+    case eMouseExitFromWidget:
+    case eMouseDoubleClick:
+    case eMouseActivate:
+    case eMouseOver:
+    case eMouseOut:
+    case eMouseHitTest:
+    case eMouseEnter:
+    case eMouseLeave:
+    case eMouseTouchDrag:
+    case eMouseLongTap:
+    case eMouseExploreByTouch:
+    // Pointer event target should be an Element node
+    case ePointerClick:
+    case ePointerAuxClick:
+    case ePointerMove:
+    case ePointerUp:
+    case ePointerDown:
+    case ePointerOver:
+    case ePointerOut:
+    case ePointerEnter:
+    case ePointerLeave:
+    case ePointerCancel:
+    case ePointerGotCapture:
+    case ePointerLostCapture:
+    case eContextMenu:
+    // Drag event target should be an Element node
+    case eDragEnter:
+    case eDragOver:
+    case eDragExit:
+    case eDrag:
+    case eDragEnd:
+    case eDragStart:
+    case eDrop:
+    case eDragLeave:
+    // case mouse wheel related message target should be an Element node
+    case eLegacyMouseLineOrPageScroll:
+    case eLegacyMousePixelScroll:
+    case eWheel:
+    // Composition event message target should be an Element node
+    case eCompositionStart:
+    case eCompositionEnd:
+    case eCompositionUpdate:
+    case eCompositionChange:
+    case eCompositionCommitAsIs:
+    case eCompositionCommit:
+    case eCompositionCommitRequestHandled:
+    // Gesture event target should be an Element node
+    case eSwipeGestureMayStart:
+    case eSwipeGestureStart:
+    case eSwipeGestureUpdate:
+    case eSwipeGestureEnd:
+    case eSwipeGesture:
+    case eMagnifyGestureStart:
+    case eMagnifyGestureUpdate:
+    case eMagnifyGesture:
+    case eRotateGestureStart:
+    case eRotateGestureUpdate:
+    case eRotateGesture:
+    case eTapGesture:
+    case ePressTapGesture:
+    case eEdgeUIStarted:
+    case eEdgeUICanceled:
+    case eEdgeUICompleted:
+    // Touch event target should be an Element node
+    case eTouchStart:
+    case eTouchMove:
+    case eTouchEnd:
+    case eTouchCancel:
+    case eTouchPointerCancel:
+      return true;
+
+    default:
+      return false;
+  }
 }
 
 const char* ToChar(EventClassID aEventClassID) {
@@ -578,6 +662,17 @@ bool WidgetEvent::AllowFlushingPendingNotifications() const {
   return AsQueryContentEvent()->mNeedsToFlushLayout;
 }
 
+bool WidgetEvent::ShouldIgnoreCapturingContent() const {
+  MOZ_ASSERT(IsUsingCoordinates());
+
+  if (MOZ_UNLIKELY(!IsTrusted())) {
+    return false;
+  }
+  return mClass == eMouseEventClass || mClass == ePointerEventClass
+             ? AsMouseEvent()->mIgnoreCapturingContent
+             : false;
+}
+
 /******************************************************************************
  * mozilla::WidgetEvent
  *
@@ -692,6 +787,151 @@ Modifier WidgetInputEvent::AccelModifier() {
 }
 
 /******************************************************************************
+ * mozilla::WidgetPointerHelper (MouseEvents.h)
+ ******************************************************************************/
+
+// static
+int32_t WidgetPointerHelper::GetValidTiltValue(int32_t aTilt) {
+  if (MOZ_LIKELY(aTilt >= -90 && aTilt <= 90)) {
+    return aTilt;
+  }
+  while (aTilt > 90) {
+    aTilt -= 180;
+  }
+  while (aTilt < -90) {
+    aTilt += 180;
+  }
+  MOZ_ASSERT(aTilt >= -90 && aTilt <= 90);
+  return aTilt;
+}
+
+// static
+double WidgetPointerHelper::GetValidAltitudeAngle(double aAltitudeAngle) {
+  if (MOZ_LIKELY(aAltitudeAngle >= 0.0 && aAltitudeAngle <= kHalfPi)) {
+    return aAltitudeAngle;
+  }
+  while (aAltitudeAngle > kHalfPi) {
+    aAltitudeAngle -= kHalfPi;
+  }
+  while (aAltitudeAngle < 0.0) {
+    aAltitudeAngle += kHalfPi;
+  }
+  MOZ_ASSERT(aAltitudeAngle >= 0.0 && aAltitudeAngle <= kHalfPi);
+  return aAltitudeAngle;
+}
+
+// static
+double WidgetPointerHelper::GetValidAzimuthAngle(double aAzimuthAngle) {
+  if (MOZ_LIKELY(aAzimuthAngle >= 0.0 && aAzimuthAngle <= kDoublePi)) {
+    return aAzimuthAngle;
+  }
+  while (aAzimuthAngle > kDoublePi) {
+    aAzimuthAngle -= kDoublePi;
+  }
+  while (aAzimuthAngle < 0.0) {
+    aAzimuthAngle += kDoublePi;
+  }
+  MOZ_ASSERT(aAzimuthAngle >= 0.0 && aAzimuthAngle <= kDoublePi);
+  return aAzimuthAngle;
+}
+
+// static
+double WidgetPointerHelper::ComputeAltitudeAngle(int32_t aTiltX,
+                                                 int32_t aTiltY) {
+  // https://w3c.github.io/pointerevents/#converting-between-tiltx-tilty-and-altitudeangle-azimuthangle
+  aTiltX = GetValidTiltValue(aTiltX);
+  aTiltY = GetValidTiltValue(aTiltY);
+  if (std::abs(aTiltX) == 90 || std::abs(aTiltY) == 90) {
+    return 0.0;
+  }
+  const double tiltXRadians = kPi / 180.0 * aTiltX;
+  const double tiltYRadians = kPi / 180.0 * aTiltY;
+  if (!aTiltX) {
+    return kHalfPi - std::abs(tiltYRadians);
+  }
+  if (!aTiltY) {
+    return kHalfPi - std::abs(tiltXRadians);
+  }
+  return std::atan(1.0 / std::sqrt(std::pow(std::tan(tiltXRadians), 2) +
+                                   std::pow(std::tan(tiltYRadians), 2)));
+}
+
+// static
+double WidgetPointerHelper::ComputeAzimuthAngle(int32_t aTiltX,
+                                                int32_t aTiltY) {
+  // https://w3c.github.io/pointerevents/#converting-between-tiltx-tilty-and-altitudeangle-azimuthangle
+  aTiltX = GetValidTiltValue(aTiltX);
+  aTiltY = GetValidTiltValue(aTiltY);
+  if (!aTiltX) {
+    if (aTiltY > 0) {
+      return kHalfPi;
+    }
+    return aTiltY < 0 ? 3.0 * kHalfPi : 0.0;
+  }
+
+  if (!aTiltY) {
+    return aTiltX < 0 ? kPi : 0.0;
+  }
+
+  if (std::abs(aTiltX) == 90 || std::abs(aTiltY) == 90) {
+    return 0.0;
+  }
+
+  const double tiltXRadians = kPi / 180.0 * aTiltX;
+  const double tiltYRadians = kPi / 180.0 * aTiltY;
+  const double azimuthAngle =
+      std::atan2(std::tan(tiltYRadians), std::tan(tiltXRadians));
+  return azimuthAngle < 0 ? azimuthAngle + kDoublePi : azimuthAngle;
+}
+
+// static
+double WidgetPointerHelper::ComputeTiltX(double aAltitudeAngle,
+                                         double aAzimuthAngle) {
+  // https://w3c.github.io/pointerevents/#converting-between-tiltx-tilty-and-altitudeangle-azimuthangle
+  aAltitudeAngle = GetValidAltitudeAngle(aAltitudeAngle);
+  aAzimuthAngle = GetValidAzimuthAngle(aAzimuthAngle);
+  if (aAltitudeAngle == 0.0) {
+    if ((aAzimuthAngle >= 0.0 && aAzimuthAngle < kHalfPi) ||
+        (aAzimuthAngle > 3 * kHalfPi && aAzimuthAngle <= kDoublePi)) {
+      return 90;  // pi / 2 * 180 / pi
+    }
+    if (aAzimuthAngle > kHalfPi && aAzimuthAngle < 3 * kHalfPi) {
+      return -90;  // -1 * pi / 2 * 180 / pi
+    }
+    MOZ_ASSERT(aAzimuthAngle == kHalfPi || aAzimuthAngle == 3 * kHalfPi);
+    return 0.0;
+  }
+
+  constexpr double radToDeg = 180.0 / kPi;
+  return std::floor(
+      std::atan(std::cos(aAzimuthAngle) / std::tan(aAltitudeAngle)) * radToDeg +
+      0.5);
+}
+
+// static
+double WidgetPointerHelper::ComputeTiltY(double aAltitudeAngle,
+                                         double aAzimuthAngle) {
+  // https://w3c.github.io/pointerevents/#converting-between-tiltx-tilty-and-altitudeangle-azimuthangle
+  aAltitudeAngle = GetValidAltitudeAngle(aAltitudeAngle);
+  aAzimuthAngle = GetValidAzimuthAngle(aAzimuthAngle);
+  if (aAltitudeAngle == 0.0) {
+    if (aAzimuthAngle > 0.0 && aAzimuthAngle < kPi) {
+      return 90;  // pi / 2 * 180 / pi
+    }
+    if (aAzimuthAngle > kPi && aAzimuthAngle < kDoublePi) {
+      return -90;  // -1 * pi / 2 * 180 / pi
+    }
+    MOZ_ASSERT(aAzimuthAngle == 0.0 || aAzimuthAngle == kPi ||
+               aAzimuthAngle == kDoublePi);
+    return 0.0;
+  }
+  constexpr double radToDeg = 180.0 / kPi;
+  return std::floor(
+      std::atan(std::sin(aAzimuthAngle) / std::tan(aAltitudeAngle)) * radToDeg +
+      0.5);
+}
+
+/******************************************************************************
  * mozilla::WidgetMouseEventBase (MouseEvents.h)
  ******************************************************************************/
 
@@ -725,7 +965,11 @@ void WidgetMouseEvent::AssertContextMenuEventButtonConsistency() const {
     return;
   }
 
-  if (mContextMenuTrigger == eNormal) {
+  if (mInputSource == dom::MouseEvent_Binding::MOZ_SOURCE_TOUCH) {
+    NS_WARNING_ASSERTION(mButton == MouseButton::ePrimary,
+                         "eContextMenu events by touch trigger should use "
+                         "primary mouse button / touch contact");
+  } else if (mContextMenuTrigger == eNormal) {
     NS_WARNING_ASSERTION(mButton == MouseButton::eSecondary,
                          "eContextMenu events with eNormal trigger should use "
                          "secondary mouse button");

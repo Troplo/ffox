@@ -8,6 +8,8 @@ import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
@@ -33,49 +35,56 @@ import org.mozilla.fenix.theme.Theme
  *
  * @param tabCount The number of tabs to display in the tab counter.
  * @param isPrivateMode Whether the browser is in private mode.
- * @param isFeltPrivateBrowsingEnabled Whether the felt private browsing feature is enabled.
  * @param onClick Invoked when the tab counter is clicked.
- * @param menu Optional menu to show when the tab counter is long clicked.
+ * @param menu Optional lazy menu to show when the tab counter is long clicked.
  * @param onLongPress Optional callback for when the tab counter is long clicked.
  */
 @Composable
 fun ToolbarTabCounterButton(
     tabCount: Int,
     isPrivateMode: Boolean,
-    isFeltPrivateBrowsingEnabled: Boolean,
     onClick: () -> Unit,
-    menu: TabCounterMenu? = null,
+    menu: Lazy<TabCounterMenu>? = null,
     onLongPress: () -> Unit = {},
 ) {
-    AndroidView(
-        factory = { context ->
-            TabCounter(context).apply {
-                setOnClickListener {
-                    onClick()
-                }
-
-                menu?.let { menu ->
-                    setOnLongClickListener {
-                        onLongPress()
-                        menu.menuController.show(anchor = it)
-                        true
+    IconButton(
+        onClick = onClick, // This ensures the 48dp touch target for clicks.
+    ) {
+        AndroidView(
+            factory = { context ->
+                TabCounter(context).apply {
+                    setOnClickListener {
+                        onClick() // This ensures clicks in the 34dp touch target are caught.
                     }
+
+                    setOnLongClickListener {
+                        menu?.value?.let { menu ->
+                            onLongPress()
+                            menu.menuController.show(anchor = it)
+                            true
+                        } ?: false
+                    }
+
+                    contentDescription = context.getString(R.string.mozac_feature_tabs_toolbar_tabs_button)
+
+                    toggleCounterMask(isPrivateMode)
+                    setBackgroundResource(
+                        context.theme.resolveAttribute(
+                            android.R.attr.selectableItemBackgroundBorderless,
+                        ),
+                    )
                 }
-
-                contentDescription = context.getString(R.string.mozac_feature_tabs_toolbar_tabs_button)
-
-                toggleCounterMask(isFeltPrivateBrowsingEnabled && isPrivateMode)
-                setBackgroundResource(
-                    context.theme.resolveAttribute(
-                        android.R.attr.selectableItemBackgroundBorderless,
-                    ),
-                )
-            }
-        },
-        update = { tabCounter ->
-            tabCounter.setCount(tabCount)
-        },
-    )
+            },
+            // The IconButton composable has a 48dp size and it's own ripple with a 24dp radius.
+            // The TabCounter view has it's own inherent ripple that has a bigger radius
+            // so based on manual testing we set a size of 34dp for this View which would
+            // ensure it's ripple matches the composable one. Otherwise there is a visible mismatch.
+            modifier = Modifier.size(34.dp),
+            update = { tabCounter ->
+                tabCounter.setCount(tabCount)
+            },
+        )
+    }
 }
 
 @Suppress("MagicNumber")
@@ -91,7 +100,6 @@ private fun ToolbarTabCounterButtonPreview() {
             ToolbarTabCounterButton(
                 tabCount = 5,
                 isPrivateMode = false,
-                isFeltPrivateBrowsingEnabled = false,
                 onClick = {},
             )
         }
@@ -111,7 +119,6 @@ private fun ToolbarTabCounterButtonWithFeltPrivacyPreview() {
             ToolbarTabCounterButton(
                 tabCount = 5,
                 isPrivateMode = true,
-                isFeltPrivateBrowsingEnabled = true,
                 onClick = {},
             )
         }

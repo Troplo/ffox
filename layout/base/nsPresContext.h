@@ -401,7 +401,7 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
    * Set the currently visible area. The units for r are standard
    * nscoord units (as scaled by the device context).
    */
-  void SetVisibleArea(const nsRect& r);
+  void SetVisibleArea(const nsRect& aRect);
 
   nsSize GetSizeForViewportUnits() const { return mSizeForViewportUnits; }
 
@@ -411,27 +411,39 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
   MOZ_CAN_RUN_SCRIPT
   void SetDynamicToolbarMaxHeight(mozilla::ScreenIntCoord aHeight);
 
-  mozilla::ScreenIntCoord GetDynamicToolbarMaxHeight() const {
-    MOZ_ASSERT(IsRootContentDocumentCrossProcess());
-    return mDynamicToolbarMaxHeight;
-  }
-
   /**
    * Returns true if we are using the dynamic toolbar.
    */
-  bool HasDynamicToolbar() const {
-    MOZ_ASSERT(IsRootContentDocumentCrossProcess());
-    return mDynamicToolbarMaxHeight > 0;
-  }
+  bool HasDynamicToolbar() const { return GetDynamicToolbarMaxHeight() > 0; }
 
   /*
    * |aOffset| must be offset from the bottom edge of the ICB and it's negative.
    */
   void UpdateDynamicToolbarOffset(mozilla::ScreenIntCoord aOffset);
+
+  mozilla::ScreenIntCoord GetDynamicToolbarMaxHeight() const {
+    MOZ_ASSERT_IF(mDynamicToolbarMaxHeight > 0,
+                  IsRootContentDocumentCrossProcess());
+    return mDynamicToolbarMaxHeight;
+  }
+
+  nscoord GetDynamicToolbarMaxHeightInAppUnits() const;
+
   mozilla::ScreenIntCoord GetDynamicToolbarHeight() const {
-    MOZ_ASSERT(IsRootContentDocumentCrossProcess());
+    MOZ_ASSERT_IF(mDynamicToolbarHeight > 0,
+                  IsRootContentDocumentCrossProcess());
     return mDynamicToolbarHeight;
   }
+
+  void UpdateKeyboardHeight(mozilla::ScreenIntCoord aHeight);
+
+  mozilla::ScreenIntCoord GetKeyboardHeight() const { return mKeyboardHeight; }
+
+  /**
+   * Returns the maximum height of the dynamic toolbar if the toolbar state is
+   * `DynamicToolbarState::Collapsed`, otherwise returns zero.
+   */
+  nscoord GetBimodalDynamicToolbarHeightInAppUnits() const;
 
   /**
    * Returns the state of the dynamic toolbar.
@@ -540,6 +552,7 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
   void SetFullZoom(float aZoom);
   void SetOverrideDPPX(float);
   void SetInRDMPane(bool aInRDMPane);
+  void UpdateTopInnerSizeForRFP();
 
  public:
   float GetFullZoom() { return mFullZoom; }
@@ -1032,7 +1045,6 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
   void NotifyNonBlankPaint();
   void NotifyContentfulPaint();
   void NotifyPaintStatusReset();
-  void NotifyDOMContentFlushed();
 
   bool HasEverBuiltInvisibleText() const { return mHasEverBuiltInvisibleText; }
   void SetBuiltInvisibleText() { mHasEverBuiltInvisibleText = true; }
@@ -1219,6 +1231,8 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
   // The maximum height of the dynamic toolbar on mobile.
   mozilla::ScreenIntCoord mDynamicToolbarMaxHeight;
   mozilla::ScreenIntCoord mDynamicToolbarHeight;
+  // The software keyboard height.
+  mozilla::ScreenIntCoord mKeyboardHeight;
   // Safe area insets support
   mozilla::ScreenIntMargin mSafeAreaInsets;
   nsSize mPageSize;

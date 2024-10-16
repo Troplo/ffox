@@ -78,7 +78,12 @@ android {
             minifyEnabled !project.hasProperty("disableOptimization")
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             matchingFallbacks = ['release']
-            buildConfigField "String", "VCS_HASH", "\"${Config.getVcsHash()}\""
+
+            if (gradle.ext.vcsHashFileContent) {
+                buildConfigField "String", "VCS_HASH", "\"hg-${gradle.ext.vcsHashFileContent}\""
+            } else {
+                buildConfigField "String", "VCS_HASH", "\"${Config.vcsHash}\""
+            }
 
             if (gradle.hasProperty("localProperties.autosignReleaseWithDebugKey")) {
                 println ("All builds will be automatically signed with the debug key")
@@ -228,6 +233,7 @@ tasks.withType(KotlinCompile).configureEach {
 // -------------------------------------------------------------------------------------------------
 // Generate Kotlin code for the Focus Glean metrics.
 // -------------------------------------------------------------------------------------------------
+ext.gleanNamespace = "mozilla.telemetry.glean"
 apply plugin: "org.mozilla.telemetry.glean-gradle-plugin"
 apply plugin: "org.mozilla.appservices.nimbus-gradle-plugin"
 
@@ -273,6 +279,7 @@ dependencies {
     implementation platform(ComponentsDependencies.androidx_compose_bom)
     androidTestImplementation platform(ComponentsDependencies.androidx_compose_bom)
 
+    implementation ComponentsDependencies.androidx_activity
     implementation ComponentsDependencies.androidx_appcompat
     implementation ComponentsDependencies.androidx_browser
     implementation ComponentsDependencies.androidx_cardview
@@ -293,7 +300,7 @@ dependencies {
     implementation ComponentsDependencies.androidx_recyclerview
     implementation ComponentsDependencies.androidx_savedstate
     implementation FocusDependencies.androidx_splashscreen
-    implementation FocusDependencies.androidx_transition
+    implementation ComponentsDependencies.androidx_transition
     implementation ComponentsDependencies.androidx_work_runtime
     implementation ComponentsDependencies.androidx_datastore_preferences
 
@@ -341,9 +348,6 @@ dependencies {
     implementation project(':lib-auth')
     implementation project(':lib-publicsuffixlist')
 
-    implementation project(':service-glean'), {
-        exclude group: 'org.mozilla.telemetry', module: 'glean-native'
-    }
     implementation project(':service-location')
     implementation project(':service-nimbus')
 
@@ -363,6 +367,11 @@ dependencies {
     implementation project(':support-webextensions')
     implementation project(':support-locale')
     implementation project(':compose-cfr')
+
+    implementation project(":service-glean")
+    implementation ComponentsDependencies.mozilla_glean, {
+        exclude group: 'org.mozilla.telemetry', module: 'glean-native'
+    }
 
     implementation ComponentsDependencies.kotlin_coroutines
     debugImplementation ComponentsDependencies.leakcanary

@@ -196,6 +196,7 @@ struct LoadInfoArgs
   bool                        originTrialCoepCredentiallessEnabledForTopLevel;
   nullable nsIURI             unstrippedURI;
   InterceptionInfoArg?        interceptionInfo;
+  bool                        isNewWindowTarget;
 };
 
 /**
@@ -637,6 +638,18 @@ union GIOChannelCreationArgs
 {
   GIOChannelOpenArgs;      // For AsyncOpen: the common case.
   GIOChannelConnectArgs;   // Used for redirected-to channels
+};
+
+//-----------------------------------------------------------------------------
+// Data IPDL structs
+//-----------------------------------------------------------------------------
+
+struct DataChannelInfo
+{
+  nullable nsIURI        uri;
+  uint32_t               loadFlags;
+  LoadInfoArgs           loadInfo;
+  nsCString              contentType;
 };
 
 struct RemoteStreamInfo {

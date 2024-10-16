@@ -256,7 +256,6 @@ class GeckoEngineSession(
                 // See https://github.com/mozilla-mobile/android-components/issues/12276
                 val fileName = DownloadUtils.guessFileName(
                     disposition,
-                    destinationDirectory = null,
                     url = url,
                     mimeType = contentType,
                 )
@@ -1120,10 +1119,13 @@ class GeckoEngineSession(
                 return
             }
 
-            appRedirectUrl?.let {
-                if (url == appRedirectUrl) {
-                    goBack(false)
-                    return
+            // if it is an initial load then we can't go back. We should update the URL.
+            if (!initialLoad) {
+                appRedirectUrl?.let {
+                    if (url == appRedirectUrl) {
+                        goBack(false)
+                        return
+                    }
                 }
             }
 
@@ -1513,7 +1515,6 @@ class GeckoEngineSession(
                 val url = uri
                 val fileName = DownloadUtils.guessFileName(
                     contentDisposition,
-                    destinationDirectory = null,
                     url = url,
                     mimeType = contentType,
                 )

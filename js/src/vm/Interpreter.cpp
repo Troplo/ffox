@@ -41,13 +41,12 @@
 #include "js/Printer.h"
 #include "proxy/DeadObjectProxy.h"
 #include "util/CheckedArithmetic.h"
-#include "util/StringBuffer.h"
+#include "util/StringBuilder.h"
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/BigIntType.h"
 #include "vm/BytecodeUtil.h"  // JSDVG_SEARCH_STACK
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-#  include "vm/DisposeJumpKind.h"
 #  include "vm/ErrorObject.h"
 #endif
 #include "vm/EqualityOperations.h"  // js::StrictlyEqual
@@ -85,7 +84,6 @@
 #include "vm/EnvironmentObject-inl.h"
 #include "vm/GeckoProfiler-inl.h"
 #include "vm/JSScript-inl.h"
-#include "vm/List-inl.h"
 #include "vm/NativeObject-inl.h"
 #include "vm/ObjectOperations-inl.h"
 #include "vm/PlainObject-inl.h"  // js::CopyInitializerObject, js::CreateThis
@@ -96,8 +94,6 @@ using namespace js;
 
 using mozilla::DebugOnly;
 using mozilla::NumberEqualsInt32;
-
-using js::jit::JitScript;
 
 template <bool Eq>
 static MOZ_ALWAYS_INLINE bool LooseEqualityOp(JSContext* cx,
@@ -1165,15 +1161,6 @@ static void SettleOnTryNote(JSContext* cx, const TryNote* tn,
   // Unwind the environment to the beginning of the JSOp::Try.
   UnwindEnvironment(cx, ei, UnwindEnvironmentToTryPc(regs.fp()->script(), tn));
 
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-  if (tn->kind() == TryNoteKind::Using) {
-    regs.pc = regs.fp()->script()->offsetToPC(tn->start);
-    regs.sp = regs.spForStackDepth(tn->stackDepth);
-    MOZ_ASSERT(JSOp(*regs.pc) == JSOp::TryUsing);
-    return;
-  }
-#endif
-
   // Set pc to the first bytecode after the the try note to point
   // to the beginning of catch or finally.
   regs.pc = regs.fp()->script()->offsetToPC(tn->start + tn->length);
@@ -1269,17 +1256,6 @@ static HandleErrorContinuation ProcessTryNotes(JSContext* cx,
         }
         break;
       }
-
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-      case TryNoteKind::Using: {
-        SettleOnTryNote(cx, tn, ei, regs);
-        Rooted<JSObject*> env(cx, regs.fp()->environmentChain());
-        if (!DisposeDisposablesOnScopeLeave(cx, env)) {
-          return ErrorReturnContinuation;
-        }
-        break;
-      }
-#endif
 
       case TryNoteKind::ForOf:
       case TryNoteKind::Loop:
@@ -1668,6 +1644,58 @@ void js::ReportInNotObjectError(JSContext* cx, HandleValue lref,
 
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
 
+enum SyncDisposalClosureSlots {
+  SyncDisposalClosureSlot_MethodSlot = 0,
+};
+
+// TODO: the following methods are to varying degrees
+// shared between the interpreter, DisposableStack/AsyncDisposableStack,
+// jit, etc. find a way to better organise these in one place. (bug 1913999)
+
+// Explicit Resource Management Proposal
+// 7.5.6 GetDisposeMethod ( V, hint )
+// https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-getdisposemethod
+// Steps 1.b.ii.1.a-f
+static bool SyncDisposalClosure(JSContext* cx, unsigned argc, JS::Value* vp) {
+  JS::CallArgs args = CallArgsFromVp(argc, vp);
+
+  JS::Rooted<JSFunction*> callee(cx, &args.callee().as<JSFunction>());
+
+  JS::Rooted<JS::Value> method(
+      cx, callee->getExtendedSlot(SyncDisposalClosureSlot_MethodSlot));
+
+  // Step 1.b.ii.1.a. Let O be the this value.
+  JS::Rooted<JS::Value> O(cx, args.thisv());
+
+  // Step 1.b.ii.1.b. Let promiseCapability be !
+  // NewPromiseCapability(%Promise%).
+  JSObject* createPromise = JS::NewPromiseObject(cx, nullptr);
+  if (!createPromise) {
+    return false;
+  }
+  JS::Rooted<PromiseObject*> promiseCapability(
+      cx, &createPromise->as<PromiseObject>());
+
+  // Step 1.b.ii.1.c. Let result be Completion(Call(method, O)).
+  JS::Rooted<JS::Value> rval(cx);
+  bool result = Call(cx, method, O, &rval);
+
+  // Step 1.b.ii.1.d. IfAbruptRejectPromise(result, promiseCapability).
+  if (!result) {
+    return AbruptRejectPromise(cx, args, promiseCapability, nullptr);
+  }
+
+  // Step 1.b.ii.1.e. Perform ? Call(promiseCapability.[[Resolve]], undefined, «
+  // undefined »).
+  if (!JS::ResolvePromise(cx, promiseCapability, JS::UndefinedHandleValue)) {
+    return false;
+  }
+
+  // Step 1.b.ii.1.f. Return promiseCapability.[[Promise]].
+  args.rval().set(JS::ObjectValue(*promiseCapability));
+  return true;
+}
+
 // Explicit Resource Management Proposal
 // GetDisposeMethod ( V, hint )
 // https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-getdisposemethod
@@ -1675,8 +1703,60 @@ bool js::GetDisposeMethod(JSContext* cx, JS::Handle<JS::Value> objVal,
                           UsingHint hint,
                           JS::MutableHandle<JS::Value> disposeMethod) {
   switch (hint) {
-    case UsingHint::Async:
-      MOZ_CRASH("Async hint is not yet supported");
+    case UsingHint::Async: {
+      // Step 1. If hint is async-dispose, then
+      // Step 1.a. Let method be ? GetMethod(V, @@asyncDispose).
+      // GetMethod throws TypeError if method is not callable
+      // this is handled below at the end of the function.
+      JS::Rooted<JS::PropertyKey> idAsync(
+          cx, PropertyKey::Symbol(cx->wellKnownSymbols().asyncDispose));
+      JS::Rooted<JSObject*> obj(cx, &objVal.toObject());
+
+      if (!GetProperty(cx, obj, obj, idAsync, disposeMethod)) {
+        return false;
+      }
+
+      // Step 1.b. If method is undefined, then
+      // GetMethod returns undefined if the function is null but
+      // since we do not do the conversion here we check for
+      // null or undefined here.
+      if (disposeMethod.isNullOrUndefined()) {
+        // Step 1.b.i. Set method to ? GetMethod(V, @@dispose).
+        JS::Rooted<JS::PropertyKey> idSync(
+            cx, PropertyKey::Symbol(cx->wellKnownSymbols().dispose));
+        JS::Rooted<JS::Value> syncDisposeMethod(cx);
+        if (!GetProperty(cx, obj, obj, idSync, &syncDisposeMethod)) {
+          return false;
+        }
+
+        if (!syncDisposeMethod.isNullOrUndefined()) {
+          // Step 1.b.ii. If method is not undefined, then
+          if (!IsCallable(syncDisposeMethod)) {
+            JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                      JSMSG_DISPOSE_NOT_CALLABLE);
+            return false;
+          }
+
+          // Step 1.b.ii.1. Let closure be a new Abstract Closure with no
+          // parameters that captures method and performs the following steps
+          // when called:
+          // Steps 1.b.ii.1.a-f: See SyncDisposalClosure
+          // Step 1.b.ii.3. Return CreateBuiltinFunction(closure, 0, "", « »).
+          JS::Handle<PropertyName*> funName = cx->names().empty_;
+          JSFunction* asyncWrapper = NewNativeFunction(
+              cx, SyncDisposalClosure, 0, funName,
+              gc::AllocKind::FUNCTION_EXTENDED, GenericObject);
+          if (!asyncWrapper) {
+            return false;
+          }
+          asyncWrapper->initExtendedSlot(SyncDisposalClosureSlot_MethodSlot,
+                                         syncDisposeMethod);
+          disposeMethod.set(JS::ObjectValue(*asyncWrapper));
+        }
+      }
+
+      break;
+    }
 
     case UsingHint::Sync: {
       // Step 2. Else,
@@ -1689,51 +1769,66 @@ bool js::GetDisposeMethod(JSContext* cx, JS::Handle<JS::Value> objVal,
         return false;
       }
 
-      // CreateDisposableResource ( V, hint [ , method ] )
-      // https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-createdisposableresource
-      //
-      // Step 1.b.iii. If method is undefined, throw a TypeError exception.
-      if (disposeMethod.isNullOrUndefined() || !IsCallable(disposeMethod)) {
-        JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
-                                  JSMSG_NO_DISPOSE_IN_USING);
-        return false;
-      }
-
-      return true;
+      break;
     }
     default:
       MOZ_CRASH("Invalid UsingHint");
   }
+
+  // CreateDisposableResource ( V, hint [ , method ] )
+  // https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-createdisposableresource
+  //
+  // Step 1.b.iii. If method is undefined, throw a TypeError exception.
+  if (disposeMethod.isNullOrUndefined() || !IsCallable(disposeMethod)) {
+    JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                              JSMSG_DISPOSE_NOT_CALLABLE);
+    return false;
+  }
+
+  return true;
 }
 
 // Explicit Resource Management Proposal
 // CreateDisposableResource ( V, hint [ , method ] )
 // https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-createdisposableresource
-bool js::CreateDisposableResource(JSContext* cx, JS::Handle<JS::Value> obj,
-                                  UsingHint hint,
-                                  JS::MutableHandle<JS::Value> result) {
+bool js::CreateDisposableResource(
+    JSContext* cx, JS::Handle<JS::Value> obj, UsingHint hint,
+    JS::Handle<mozilla::Maybe<JS::Value>> methodVal,
+    JS::MutableHandle<JS::Value> result) {
   // Step 1. If method is not present, then
-  // (implicit)
-  // Step 1.a. If V is either null or undefined, then
   JS::Rooted<JS::Value> method(cx);
   JS::Rooted<JS::Value> object(cx);
-  if (obj.isNullOrUndefined()) {
-    // Step 1.a.i. Set V to undefined.
-    // Step 1.a.ii. Set method to undefined.
-    object.setUndefined();
-    method.setUndefined();
-  } else {
-    // Step 1.b. Else,
-    // Step 1.b.i. If V is not an Object, throw a TypeError exception.
-    if (!obj.isObject()) {
-      return ThrowCheckIsObject(cx, CheckIsObjectKind::Disposable);
+  if (!methodVal.isSome()) {
+    // Step 1.a. If V is either null or undefined, then
+    if (obj.isNullOrUndefined()) {
+      // Step 1.a.i. Set V to undefined.
+      // Step 1.a.ii. Set method to undefined.
+      object.setUndefined();
+      method.setUndefined();
+    } else {
+      // Step 1.b. Else,
+      // Step 1.b.i. If V is not an Object, throw a TypeError exception.
+      if (!obj.isObject()) {
+        return ThrowCheckIsObject(cx, CheckIsObjectKind::Disposable);
+      }
+
+      // Step 1.b.ii. Set method to ? GetDisposeMethod(V, hint).
+      // Step 1.b.iii. If method is undefined, throw a TypeError exception.
+      object.set(obj);
+      if (!GetDisposeMethod(cx, object, hint, &method)) {
+        return false;
+      }
     }
-    // Step 1.b.ii. Set method to ? GetDisposeMethod(V, hint).
-    // Step 1.b.iii. If method is undefined, throw a TypeError exception.
-    object.set(obj);
-    if (!GetDisposeMethod(cx, object, hint, &method)) {
+  } else {
+    // Step 2. Else,
+    // Step 2.a. If IsCallable(method) is false, throw a TypeError exception.
+    if (!IsCallable(*methodVal)) {
+      JS_ReportErrorNumberASCII(cx, GetErrorMessage, nullptr,
+                                JSMSG_DISPOSE_NOT_CALLABLE);
       return false;
     }
+    object.set(obj);
+    method.set(*methodVal);
   }
 
   // Step 3. Return the
@@ -1790,118 +1885,76 @@ ErrorObject* js::CreateSuppressedError(JSContext* cx,
 }
 
 // Explicit Resource Management Proposal
-// DisposeResources ( disposeCapability, completion )
-// https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-disposeresources
-bool js::DisposeDisposablesOnScopeLeave(JSContext* cx,
-                                        JS::Handle<JSObject*> env) {
-  if (!env->is<LexicalEnvironmentObject>() &&
-      !env->is<ModuleEnvironmentObject>()) {
-    return true;
-  }
+// 7.5.4 AddDisposableResource ( disposeCapability, V, hint [ , method ] )
+// https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-adddisposableresource
+bool js::AddDisposableResource(
+    JSContext* cx, JS::Handle<ArrayObject*> disposeCapability,
+    JS::Handle<JS::Value> val, UsingHint hint,
+    JS::Handle<mozilla::Maybe<JS::Value>> methodVal) {
+  JS::Rooted<JS::Value> resource(cx);
 
-  Value maybeDisposables =
-      env->is<LexicalEnvironmentObject>()
-          ? env->as<LexicalEnvironmentObject>().getDisposables()
-          : env->as<ModuleEnvironmentObject>().getDisposables();
-
-  MOZ_ASSERT(maybeDisposables.isObject() || maybeDisposables.isUndefined());
-
-  if (maybeDisposables.isObject()) {
-    JS::Rooted<ListObject*> disposables(
-        cx, &maybeDisposables.toObject().as<ListObject>());
-
-    uint32_t index = disposables->length();
-
-    // hadError and latestException correspond to the completion value.
-    bool hadError = false;
-    JS::Rooted<JS::Value> latestException(cx);
-
-    if (cx->isExceptionPending()) {
-      hadError = true;
-      if (!cx->getPendingException(&latestException)) {
-        return false;
-      }
-      cx->clearPendingException();
+  // Step 1. If method is not present, then
+  if (!methodVal.isSome()) {
+    // Step 1.a. If V is either null or undefined and hint is sync-dispose,
+    // return unused.
+    if (val.isNullOrUndefined() && hint == UsingHint::Sync) {
+      return true;
     }
 
-    // Step 3. For each element resource of
-    // disposeCapability.[[DisposableResourceStack]], in reverse list order, do
-    while (index) {
-      --index;
-      Value val = disposables->get(index);
-
-      MOZ_ASSERT(val.isObject());
-
-      JS::Rooted<DisposableRecordObject*> resource(
-          cx, &val.toObject().as<DisposableRecordObject>());
-
-      // Step 3.a. Let value be resource.[[ResourceValue]].
-      JS::Rooted<JS::Value> value(cx, resource->getObject());
-
-      // Step 3.b. Let hint be resource.[[Hint]].
-      // TODO: Implementation of async-dispose, implicitly sync-dispose for now
-      // (Bug 1906534).
-      // Step 3.c. Let method be resource.[[DisposeMethod]].
-      JS::Rooted<JS::Value> method(cx, resource->getMethod());
-
-      // Step 3.e. If method is not undefined, then
-      if (method.isUndefined()) {
-        continue;
-      }
-
-      // Step 3.e.i. Let result be Completion(Call(method, value)).
-      JS::Rooted<JS::Value> rval(cx);
-      if (!Call(cx, method, value, &rval)) {
-        // Step 3.e.iii. If result is a throw completion, then
-        if (hadError) {
-          // Step 3.e.iii.1.a. Set result to result.[[Value]].
-          JS::Rooted<JS::Value> result(cx);
-          if (!cx->getPendingException(&result)) {
-            return false;
-          }
-          cx->clearPendingException();
-
-          // Step 3.e.iii.1.b. Let suppressed be completion.[[Value]].
-          JS::Rooted<JS::Value> suppressed(cx, latestException);
-
-          // Steps 3.e.iii.1.c-e.
-          ErrorObject* errorObj = CreateSuppressedError(cx, result, suppressed);
-          if (!errorObj) {
-            return false;
-          }
-          // Step 3.e.iii.1.f. Set completion to ThrowCompletion(error).
-          latestException.set(ObjectValue(*errorObj));
-        } else {
-          // Step 3.e.iii.2. Else,
-          // Step 3.e.iii.2.a. Set completion to result.
-          hadError = true;
-          if (cx->isExceptionPending()) {
-            if (!cx->getPendingException(&latestException)) {
-              return false;
-            }
-            cx->clearPendingException();
-          }
-        }
-      }
+    // Step 1.c. Let resource be ? CreateDisposableResource(V, hint).
+    if (!CreateDisposableResource(cx, val, hint, methodVal, &resource)) {
+      return false;
     }
+  } else {
+    // Step 2. Else,
+    // Step 2.a. Assert: V is undefined.
+    MOZ_ASSERT(val.isUndefined());
 
-    // Step 6. Set disposeCapability.[[DisposableResourceStack]] to a new empty
-    // List.
-    if (env->is<LexicalEnvironmentObject>()) {
-      env->as<LexicalEnvironmentObject>().clearDisposables();
-    } else {
-      env->as<ModuleEnvironmentObject>().clearDisposables();
-    }
-
-    // Step 7. Return ? completion.
-    if (hadError) {
-      cx->setPendingException(latestException, ShouldCaptureStack::Maybe);
+    // Step 2.b. Let resource be ? CreateDisposableResource(undefined, hint,
+    // method).
+    if (!CreateDisposableResource(cx, val, hint, methodVal, &resource)) {
       return false;
     }
   }
 
-  // Step 7. Return ? completion.
-  return true;
+  // Step 3. Append resource to disposeCapability.[[DisposableResourceStack]].
+  return NewbornArrayPush(cx, disposeCapability, resource);
+}
+
+// Explicit Resource Management Proposal
+// 7.5.4 AddDisposableResource ( disposeCapability, V, hint [ , method ] )
+// https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-adddisposableresource
+// Step 3
+bool js::AddDisposableResourceToCapability(
+    JSContext* cx, JS::Handle<ArrayObject*> disposeCapability,
+    JS::Handle<JS::Value> val, JS::Handle<JS::Value> method,
+    JS::Handle<JS::Value> needsClosure, UsingHint hint) {
+  JS::Rooted<JS::Value> disposeMethod(cx);
+
+  bool needsClosureBool = needsClosure.toBoolean();
+  if (needsClosureBool) {
+    JS::Handle<PropertyName*> funName = cx->names().empty_;
+    JSFunction* asyncWrapper =
+        NewNativeFunction(cx, SyncDisposalClosure, 0, funName,
+                          gc::AllocKind::FUNCTION_EXTENDED, GenericObject);
+
+    if (!asyncWrapper) {
+      return false;
+    }
+    asyncWrapper->initExtendedSlot(SyncDisposalClosureSlot_MethodSlot, method);
+    disposeMethod.set(JS::ObjectValue(*asyncWrapper));
+  } else {
+    disposeMethod.set(method);
+  }
+
+  DisposableRecordObject* disposableRecord =
+      DisposableRecordObject::create(cx, val, disposeMethod, hint);
+  if (!disposableRecord) {
+    return false;
+  }
+
+  return NewbornArrayPush(cx, disposeCapability,
+                          JS::ObjectValue(*disposableRecord));
 }
 #endif
 
@@ -2071,14 +2124,20 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
    * correctness pitfalls due to incorrect compilation of destructor calls
    * around computed gotos.
    */
-  RootedValue rootValue0(cx), rootValue1(cx);
-  RootedObject rootObject0(cx), rootObject1(cx);
-  RootedFunction rootFunction0(cx);
-  Rooted<JSAtom*> rootAtom0(cx);
-  Rooted<PropertyName*> rootName0(cx);
-  RootedId rootId0(cx);
-  RootedScript rootScript0(cx);
-  Rooted<Scope*> rootScope0(cx);
+  RootedTuple<Value, Value, JSObject*, JSObject*, JSFunction*, JSAtom*,
+              PropertyName*, PropertyKey, JSScript*, Scope*>
+      roots(cx);
+  RootedField<Value, 0> rootValue0(roots);
+  RootedField<Value, 1> rootValue1(roots);
+  RootedField<JSObject*, 2> rootObject0(roots);
+  RootedField<JSObject*, 3> rootObject1(roots);
+  RootedField<JSFunction*> rootFunction0(roots);
+  RootedField<JSAtom*> rootAtom0(roots);
+  RootedField<PropertyName*> rootName0(roots);
+  RootedField<PropertyKey> rootId0(roots);
+  RootedField<JSScript*> rootScript0(roots);
+  RootedField<Scope*> rootScope0(roots);
+
   DebugOnly<uint32_t> blockDepth;
 
   /* State communicated between non-local jumps: */
@@ -2146,9 +2205,6 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
     CASE(Try)
     CASE(NopDestructuring)
     CASE(NopIsAssignOp)
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-    CASE(TryUsing)
-#endif
     CASE(TryDestructuring) {
       MOZ_ASSERT(GetBytecodeLength(REGS.pc) == 1);
       ADVANCE_AND_DISPATCH(1);
@@ -2259,49 +2315,62 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
       ReservedRooted<JSObject*> env(&rootObject0,
                                     REGS.fp()->environmentChain());
 
-      ReservedRooted<Value> val(&rootValue0, REGS.sp[-1]);
+      ReservedRooted<JS::Value> needsClosure(&rootValue0);
+      POP_COPY_TO(needsClosure);
 
-      ReservedRooted<Value> recordVal(&rootValue1);
+      ReservedRooted<JS::Value> method(&rootValue1);
+      POP_COPY_TO(method);
 
-      if (!CreateDisposableResource(cx, val, UsingHint::Sync, &recordVal)) {
+      JS::Rooted<JS::Value> val(cx);
+      POP_COPY_TO(val);
+
+      UsingHint hint = UsingHint(GET_UINT8(REGS.pc));
+      JS::Rooted<ArrayObject*> disposableCapability(cx);
+
+      disposableCapability =
+          env->as<DisposableEnvironmentObject>().getOrCreateDisposeCapability(
+              cx);
+
+      if (!disposableCapability) {
         goto error;
       }
 
-      if (env->is<LexicalEnvironmentObject>()) {
-        if (!env->as<LexicalEnvironmentObject>().addDisposableObject(
-                cx, recordVal)) {
-          goto error;
-        }
-      } else if (env->is<ModuleEnvironmentObject>()) {
-        if (!env->as<ModuleEnvironmentObject>().addDisposableObject(
-                cx, recordVal)) {
-          goto error;
-        }
+      if (!AddDisposableResourceToCapability(cx, disposableCapability, val,
+                                             method, needsClosure, hint)) {
+        goto error;
       }
     }
     END_CASE(AddDisposable)
 
-    CASE(DisposeDisposables) {
+    CASE(TakeDisposeCapability) {
       ReservedRooted<JSObject*> env(&rootObject0,
                                     REGS.fp()->environmentChain());
-      DisposeJumpKind jumpKind = DisposeJumpKind(GET_UINT8(REGS.pc));
-      bool ok = DisposeDisposablesOnScopeLeave(cx, env);
-      if (jumpKind == DisposeJumpKind::JumpOnError) {
-        if (!ok) {
-          goto error;
-        }
+      JS::Value maybeDisposables =
+          env->as<DisposableEnvironmentObject>().getDisposables();
+
+      MOZ_ASSERT(maybeDisposables.isObject() || maybeDisposables.isUndefined());
+
+      if (maybeDisposables.isUndefined()) {
+        PUSH_UNDEFINED();
       } else {
-        MOZ_ASSERT(jumpKind == DisposeJumpKind::NoJumpOnError);
-        // The NoJumpOnError mode for this bytecode is used
-        // in the special case of For-of iterator close when there
-        // is an exception during the loop. Hence, if we reach this
-        // point in the execution we must have an exception
-        // pending and the bytecode following this must handle the
-        // exception.
-        MOZ_ASSERT(!ok, "NoJumpOnError used without a pending exception");
+        PUSH_OBJECT(maybeDisposables.toObject());
+        env->as<DisposableEnvironmentObject>().clearDisposables();
       }
     }
-    END_CASE(DisposeDisposables)
+    END_CASE(TakeDisposeCapability)
+
+    CASE(CreateSuppressedError) {
+      ReservedRooted<JS::Value> error(&rootValue0);
+      ReservedRooted<JS::Value> suppressed(&rootValue1);
+      POP_COPY_TO(suppressed);
+      POP_COPY_TO(error);
+      ErrorObject* errorObj = CreateSuppressedError(cx, error, suppressed);
+      if (!errorObj) {
+        goto error;
+      }
+      PUSH_OBJECT(*errorObj);
+    }
+    END_CASE(CreateSuppressedError)
 #endif
 
     CASE(Return) {
@@ -3312,7 +3381,7 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
       HandleValue arr = REGS.stackHandleAt(-1 - construct);
       MutableHandleValue ret = REGS.stackHandleAt(-3 - construct);
 
-      RootedValue& newTarget = rootValue0;
+      ReservedRooted<Value> newTarget(&rootValue0);
       if (construct) {
         newTarget = REGS.sp[-1];
       } else {

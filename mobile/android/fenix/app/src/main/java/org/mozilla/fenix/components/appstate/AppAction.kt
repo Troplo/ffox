@@ -5,6 +5,8 @@
 package org.mozilla.fenix.components.appstate
 
 import mozilla.components.browser.state.state.TabSessionState
+import mozilla.components.concept.storage.BookmarkNode
+import mozilla.components.concept.sync.TabData
 import mozilla.components.feature.tab.collections.TabCollection
 import mozilla.components.feature.top.sites.TopSite
 import mozilla.components.lib.crash.Crash.NativeCodeCrash
@@ -75,6 +77,11 @@ sealed class AppAction : Action {
     data class RemoveRecentTab(val recentTab: RecentTab) : AppAction()
 
     /**
+     * The orientation of the application has changed.
+     */
+    data class OrientationChange(val orientation: OrientationMode) : AppAction()
+
+    /**
      * The list of bookmarks displayed on the home screen has changed.
      */
     data class BookmarksChange(val bookmarks: List<Bookmark>) : AppAction()
@@ -138,6 +145,11 @@ sealed class AppAction : Action {
     object RemoveCollectionsPlaceholder : AppAction()
 
     /**
+     * Action dispatched when the user has authenticated with their account.
+     */
+    data object UserAccountAuthenticated : AppAction()
+
+    /**
      * Updates the [RecentSyncedTabState] with the given [state].
      */
     data class RecentSyncedTabStateChange(val state: RecentSyncedTabState) : AppAction()
@@ -154,6 +166,21 @@ sealed class AppAction : Action {
      * @property tab The tab that has been selected.
      */
     data class SelectedTabChanged(val tab: TabSessionState) : AppAction()
+
+    /**
+     * Action dispatched when the browser is deleting its data and quitting.
+     */
+    data object DeleteAndQuitStarted : AppAction()
+
+    /**
+     * Action dispatched when open in firefox action is selected from custom tab.
+     */
+    data object OpenInFirefoxStarted : AppAction()
+
+    /**
+     * Action dispatched when open in firefox action is completed.
+     */
+    data object OpenInFirefoxFinished : AppAction()
 
     /**
      * [Action]s related to interactions with the Messaging Framework.
@@ -368,8 +395,71 @@ sealed class AppAction : Action {
          * [BookmarkAction] dispatched when a bookmark is added.
          *
          * @property guidToEdit The guid of the newly added bookmark or null.
+         * @property parentNode The [BookmarkNode] representing the folder the bookmark was added to, if any.
          */
-        data class BookmarkAdded(val guidToEdit: String?) : BookmarkAction()
+        data class BookmarkAdded(
+            val guidToEdit: String?,
+            val parentNode: BookmarkNode?,
+        ) : BookmarkAction()
+
+        /**
+         * [BookmarkAction] dispatched when a bookmark is removed.
+         *
+         * @property title The title of the bookmark that was removed.
+         */
+        data class BookmarkDeleted(val title: String?) : BookmarkAction()
+    }
+
+    /**
+     * [AppAction]s related to shortcuts.
+     */
+    sealed class ShortcutAction : AppAction() {
+        /**
+         * [ShortcutAction] dispatched when a shortcut is added.
+         */
+        data object ShortcutAdded : ShortcutAction()
+
+        /**
+         * [ShortcutAction] dispatched when a shortcut is removed.
+         */
+        data object ShortcutRemoved : ShortcutAction()
+    }
+
+    /**
+     * [AppAction]s related to the share feature.
+     */
+    sealed class ShareAction : AppAction() {
+        /**
+         * [ShareAction] dispatched when sharing to an application failed.
+         */
+        data object ShareToAppFailed : ShareAction()
+
+        /**
+         * [ShareAction] dispatched when sharing tabs to other connected devices was successful.
+         *
+         * @property destination List of device IDs with which tabs were shared.
+         * @property tabs List of tabs that were shared.
+         */
+        data class SharedTabsSuccessfully(
+            val destination: List<String>,
+            val tabs: List<TabData>,
+        ) : ShareAction()
+
+        /**
+         * [ShareAction] dispatched when sharing tabs to other connected devices failed.
+         *
+         * @property destination List of device IDs with which tabs were tried to be shared.
+         * @property tabs List of tabs that were tried to be shared.
+         */
+        data class ShareTabsFailed(
+            val destination: List<String>,
+            val tabs: List<TabData>,
+        ) : ShareAction()
+
+        /**
+         * [ShareAction] dispatched when a link is copied to the clipboard.
+         */
+        data object CopyLinkToClipboard : ShareAction()
     }
 
     /**
@@ -391,5 +481,53 @@ sealed class AppAction : Action {
          * [SnackbarAction] dispatched to reset the [AppState.snackbarState] to its default state.
          */
         data object Reset : SnackbarAction()
+    }
+
+    /**
+     * [AppAction]s related to the find in page feature.
+     */
+    sealed class FindInPageAction : AppAction() {
+
+        /**
+         * [FindInPageAction] dispatched for launching the find in page feature.
+         */
+        data object FindInPageStarted : FindInPageAction()
+
+        /**
+         * [FindInPageAction] dispatched when find in page feature is shown.
+         */
+        data object FindInPageShown : FindInPageAction()
+
+        /**
+         * [FindInPageAction] dispatched when find in page feature is dismissed.
+         */
+        data object FindInPageDismissed : FindInPageAction()
+    }
+
+    /**
+     * [AppAction]s related to the reader view feature.
+     */
+    sealed class ReaderViewAction : AppAction() {
+
+        /**
+         * [ReaderViewAction] dispatched when reader view should be shown.
+         */
+        data object ReaderViewStarted : ReaderViewAction()
+
+        /**
+         * [ReaderViewAction] dispatched when reader view controls should be shown.
+         */
+        data object ReaderViewControlsShown : ReaderViewAction()
+
+        /**
+         * [ReaderViewAction] dispatched when reader view is dismissed.
+         */
+        data object ReaderViewDismissed : ReaderViewAction()
+
+        /**
+         * [ReaderViewAction] dispatched to reset the [AppState.readerViewState] to its default
+         * state.
+         */
+        data object Reset : ReaderViewAction()
     }
 }

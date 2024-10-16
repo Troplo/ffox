@@ -430,7 +430,7 @@ fn execute_to_js(
             };
             Ok(Box::new(JSNode::Raw(format!("instantiate(`{}`)", text))))
         }
-        wast::WastExecute::Get { module, global } => {
+        wast::WastExecute::Get { module, global, .. } => {
             let instanceish = module
                 .map(|x| format!("`{}`", escape_template_name_string(x.name())))
                 .unwrap_or_else(|| format!("${}", current_instance.unwrap()));
@@ -470,14 +470,14 @@ fn f64_needs_bits(a: f64) -> bool {
     return a.is_nan();
 }
 
-fn f32x4_needs_bits(a: &[wast::token::Float32; 4]) -> bool {
+fn f32x4_needs_bits(a: &[wast::token::F32; 4]) -> bool {
     a.iter().any(|x| {
         let as_f32 = f32::from_bits(x.bits);
         f32_needs_bits(as_f32)
     })
 }
 
-fn f64x2_needs_bits(a: &[wast::token::Float64; 2]) -> bool {
+fn f64x2_needs_bits(a: &[wast::token::F64; 2]) -> bool {
     a.iter().any(|x| {
         let as_f64 = f64::from_bits(x.bits);
         f64_needs_bits(as_f64)
@@ -508,7 +508,7 @@ fn f64_to_js_value(val: f64) -> String {
     }
 }
 
-fn float32_to_js_value(val: &wast::token::Float32) -> String {
+fn float32_to_js_value(val: &wast::token::F32) -> String {
     let as_f32 = f32::from_bits(val.bits);
     if f32_needs_bits(as_f32) {
         format!(
@@ -521,7 +521,7 @@ fn float32_to_js_value(val: &wast::token::Float32) -> String {
     }
 }
 
-fn float64_to_js_value(val: &wast::token::Float64) -> String {
+fn float64_to_js_value(val: &wast::token::F64) -> String {
     let as_f64 = f64::from_bits(val.bits);
     if f64_needs_bits(as_f64) {
         format!(
@@ -534,7 +534,7 @@ fn float64_to_js_value(val: &wast::token::Float64) -> String {
     }
 }
 
-fn f32_pattern_to_js_value(pattern: &wast::core::NanPattern<wast::token::Float32>) -> String {
+fn f32_pattern_to_js_value(pattern: &wast::core::NanPattern<wast::token::F32>) -> String {
     use wast::core::NanPattern::*;
     match pattern {
         CanonicalNan => format!("`canonical_nan`"),
@@ -543,7 +543,7 @@ fn f32_pattern_to_js_value(pattern: &wast::core::NanPattern<wast::token::Float32
     }
 }
 
-fn f64_pattern_to_js_value(pattern: &wast::core::NanPattern<wast::token::Float64>) -> String {
+fn f64_pattern_to_js_value(pattern: &wast::core::NanPattern<wast::token::F64>) -> String {
     use wast::core::NanPattern::*;
     match pattern {
         CanonicalNan => format!("`canonical_nan`"),
@@ -560,17 +560,25 @@ fn return_value_to_js_value(v: &wast::core::WastRetCore<'_>) -> Result<String> {
         F32(x) => f32_pattern_to_js_value(x),
         F64(x) => f64_pattern_to_js_value(x),
         RefNull(x) => match x {
-            Some(wast::core::HeapType::Any) => format!("value('anyref', null)"),
-            Some(wast::core::HeapType::Exn) => format!("value('exnref', null)"),
-            Some(wast::core::HeapType::Eq) => format!("value('eqref', null)"),
-            Some(wast::core::HeapType::Array) => format!("value('arrayref', null)"),
-            Some(wast::core::HeapType::Struct) => format!("value('structref', null)"),
-            Some(wast::core::HeapType::I31) => format!("value('i31ref', null)"),
-            Some(wast::core::HeapType::None) => format!("value('nullref', null)"),
-            Some(wast::core::HeapType::Func) => format!("value('anyfunc', null)"),
-            Some(wast::core::HeapType::NoFunc) => format!("value('nullfuncref', null)"),
-            Some(wast::core::HeapType::Extern) => format!("value('externref', null)"),
-            Some(wast::core::HeapType::NoExtern) => format!("value('nullexternref', null)"),
+            Some(wast::core::HeapType::Abstract { shared: false, ty }) => {
+                match ty {
+                    wast::core::AbstractHeapType::Any => format!("value('anyref', null)"),
+                    wast::core::AbstractHeapType::Exn => format!("value('exnref', null)"),
+                    wast::core::AbstractHeapType::Eq => format!("value('eqref', null)"),
+                    wast::core::AbstractHeapType::Array => format!("value('arrayref', null)"),
+                    wast::core::AbstractHeapType::Struct => format!("value('structref', null)"),
+                    wast::core::AbstractHeapType::I31 => format!("value('i31ref', null)"),
+                    wast::core::AbstractHeapType::None => format!("value('nullref', null)"),
+                    wast::core::AbstractHeapType::Func => format!("value('anyfunc', null)"),
+                    wast::core::AbstractHeapType::NoFunc => format!("value('nullfuncref', null)"),
+                    wast::core::AbstractHeapType::Extern => format!("value('externref', null)"),
+                    wast::core::AbstractHeapType::NoExtern => format!("value('nullexternref', null)"),
+                    other => bail!(
+                        "couldn't convert ref.null {:?} to a js assertion value",
+                        other
+                    ),
+                }
+            }
             None => "null".to_string(),
             other => bail!(
                 "couldn't convert ref.null {:?} to a js assertion value",

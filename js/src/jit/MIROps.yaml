@@ -581,6 +581,9 @@
 - name: ToFloat32
   gen_boilerplate: false
 
+- name: ToFloat16
+  gen_boilerplate: false
+
 # Converts a uint32 to a double (coming from wasm).
 - name: WasmUnsignedToDouble
   operands:
@@ -632,6 +635,28 @@
   result_type: WasmAnyRef
   congruent_to: if_operands_equal
   alias_set: none
+
+- name: WasmAnyRefIsJSString
+  operands:
+    input: WasmAnyRef
+  type_policy: none
+  result_type: Int32
+  congruent_to: if_operands_equal
+  alias_set: none
+  movable: true
+  clone: true
+
+- name: WasmTrapIfAnyRefIsNotJSString
+  operands:
+    input: WasmAnyRef
+  arguments:
+    trap: wasm::Trap
+    bytecodeOffset: wasm::BytecodeOffset
+  type_policy: none
+  congruent_to: if_operands_equal
+  alias_set: none
+  guard: true
+  clone: true
 
 - name: WasmNewI31Ref
   operands:
@@ -698,6 +723,15 @@
 
 - name: TruncateBigIntToInt64
   gen_boilerplate: false
+
+- name: Int32ToBigInt
+  operands:
+    input: Int32
+  result_type: BigInt
+  movable: true
+  congruent_to: if_operands_equal
+  alias_set: none
+  can_recover: true
 
 - name: Int64ToBigInt
   gen_boilerplate: false
@@ -3254,6 +3288,15 @@
   movable: true
   congruent_to: if_operands_equal
   folds_to: custom
+  type_policy: none
+  alias_set: none
+
+- name: WasmClampTable64Index
+  operands:
+    input: Int64
+  result_type: Int32
+  movable: true
+  congruent_to: if_operands_equal
   type_policy: none
   alias_set: none
 

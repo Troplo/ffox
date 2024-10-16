@@ -24,7 +24,7 @@
 #include "media/base/media_engine.h"
 #include "pc/legacy_stats_collector_interface.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/helpers.h"
+#include "rtc_base/crypto_random.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/trace_event.h"
 
@@ -506,7 +506,7 @@ void RtpSenderBase::SetSsrc(uint32_t ssrc) {
     SetFrameEncryptor(frame_encryptor_);
   }
   if (frame_transformer_) {
-    SetEncoderToPacketizerFrameTransformer(frame_transformer_);
+    SetFrameTransformer(frame_transformer_);
   }
   if (encoder_selector_) {
     SetEncoderSelectorOnChannel();
@@ -580,7 +580,7 @@ RTCError RtpSenderBase::DisableEncodingLayers(
   return result;
 }
 
-void RtpSenderBase::SetEncoderToPacketizerFrameTransformer(
+void RtpSenderBase::SetFrameTransformer(
     rtc::scoped_refptr<FrameTransformerInterface> frame_transformer) {
   RTC_DCHECK_RUN_ON(signaling_thread_);
   frame_transformer_ = std::move(frame_transformer);

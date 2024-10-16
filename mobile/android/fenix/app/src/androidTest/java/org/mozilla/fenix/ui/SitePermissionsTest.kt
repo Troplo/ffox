@@ -11,8 +11,8 @@ import android.media.AudioManager
 import android.os.Build
 import androidx.core.net.toUri
 import androidx.test.rule.GrantPermissionRule
+import mozilla.components.support.ktx.util.PromptAbuserDetector
 import org.junit.Assume.assumeTrue
-import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.customannotations.SmokeTest
@@ -23,6 +23,7 @@ import org.mozilla.fenix.helpers.MatcherHelper.itemWithResId
 import org.mozilla.fenix.helpers.MockLocationUpdatesRule
 import org.mozilla.fenix.helpers.RetryTestRule
 import org.mozilla.fenix.helpers.TestAssetHelper
+import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeLong
 import org.mozilla.fenix.helpers.TestHelper.appContext
 import org.mozilla.fenix.helpers.TestSetup
 import org.mozilla.fenix.ui.robots.browserScreen
@@ -33,7 +34,6 @@ import org.mozilla.fenix.ui.robots.navigationToolbar
  *  Tests for verifying site permissions prompts & functionality
  *
  */
-@Ignore("https://bugzilla.mozilla.org/show_bug.cgi?id=1903828")
 class SitePermissionsTest : TestSetup() {
     /* Test page created and handled by the Mozilla mobile test-eng team */
     private val testPage = "https://mozilla-mobile.github.io/testapp/permissions"
@@ -63,7 +63,17 @@ class SitePermissionsTest : TestSetup() {
     @get: Rule
     val retryTestRule = RetryTestRule(3)
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2334295
+    override fun setUp() {
+        super.setUp()
+        PromptAbuserDetector.validationsEnabled = false
+    }
+
+    override fun tearDown() {
+        super.tearDown()
+        PromptAbuserDetector.validationsEnabled = true
+    }
+
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2334295
     @SmokeTest
     @Test
     fun audioVideoPermissionWithoutRememberingTheDecisionTest() {
@@ -71,7 +81,7 @@ class SitePermissionsTest : TestSetup() {
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.toUri()) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartAudioVideoButton {
             verifyAudioVideoPermissionPrompt(testPageSubstring)
         }.clickPagePermissionButton(false) {
@@ -82,7 +92,7 @@ class SitePermissionsTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2334294
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2334294
     @Test
     fun blockAudioVideoPermissionRememberingTheDecisionTest() {
         assumeTrue(cameraManager.cameraIdList.isNotEmpty())
@@ -90,7 +100,7 @@ class SitePermissionsTest : TestSetup() {
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.toUri()) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartAudioVideoButton {
             verifyAudioVideoPermissionPrompt(testPageSubstring)
             selectRememberPermissionDecision()
@@ -98,14 +108,14 @@ class SitePermissionsTest : TestSetup() {
             verifyPageContent("Camera and Microphone not allowed")
         }.openThreeDotMenu {
         }.refreshPage {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartAudioVideoButton { }
         browserScreen {
             verifyPageContent("Camera and Microphone not allowed")
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/251388
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/251388
     @Test
     fun allowAudioVideoPermissionRememberingTheDecisionTest() {
         assumeTrue(cameraManager.cameraIdList.isNotEmpty())
@@ -113,7 +123,7 @@ class SitePermissionsTest : TestSetup() {
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.toUri()) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartAudioVideoButton {
             verifyAudioVideoPermissionPrompt(testPageSubstring)
             selectRememberPermissionDecision()
@@ -121,21 +131,21 @@ class SitePermissionsTest : TestSetup() {
             verifyPageContent("Camera and Microphone allowed")
         }.openThreeDotMenu {
         }.refreshPage {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartAudioVideoButton { }
         browserScreen {
             verifyPageContent("Camera and Microphone allowed")
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2334189
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2334189
     @Test
     fun microphonePermissionWithoutRememberingTheDecisionTest() {
         assumeTrue(micManager.microphones.isNotEmpty())
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.toUri()) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartMicrophoneButton {
             verifyMicrophonePermissionPrompt(testPageSubstring)
         }.clickPagePermissionButton(false) {
@@ -146,14 +156,14 @@ class SitePermissionsTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2334190
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2334190
     @Test
     fun blockMicrophonePermissionRememberingTheDecisionTest() {
         assumeTrue(micManager.microphones.isNotEmpty())
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.toUri()) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartMicrophoneButton {
             verifyMicrophonePermissionPrompt(testPageSubstring)
             selectRememberPermissionDecision()
@@ -161,21 +171,21 @@ class SitePermissionsTest : TestSetup() {
             verifyPageContent("Microphone not allowed")
         }.openThreeDotMenu {
         }.refreshPage {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartMicrophoneButton { }
         browserScreen {
             verifyPageContent("Microphone not allowed")
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/251387
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/251387
     @Test
     fun allowMicrophonePermissionRememberingTheDecisionTest() {
         assumeTrue(micManager.microphones.isNotEmpty())
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.toUri()) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartMicrophoneButton {
             verifyMicrophonePermissionPrompt(testPageSubstring)
             selectRememberPermissionDecision()
@@ -183,21 +193,21 @@ class SitePermissionsTest : TestSetup() {
             verifyPageContent("Microphone allowed")
         }.openThreeDotMenu {
         }.refreshPage {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartMicrophoneButton { }
         browserScreen {
             verifyPageContent("Microphone allowed")
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2334076
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2334076
     @Test
     fun cameraPermissionWithoutRememberingDecisionTest() {
         assumeTrue(cameraManager.cameraIdList.isNotEmpty())
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.toUri()) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartCameraButton {
             verifyCameraPermissionPrompt(testPageSubstring)
         }.clickPagePermissionButton(false) {
@@ -208,14 +218,14 @@ class SitePermissionsTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2334077
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2334077
     @Test
     fun blockCameraPermissionRememberingTheDecisionTest() {
         assumeTrue(cameraManager.cameraIdList.isNotEmpty())
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.toUri()) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartCameraButton {
             verifyCameraPermissionPrompt(testPageSubstring)
             selectRememberPermissionDecision()
@@ -223,21 +233,21 @@ class SitePermissionsTest : TestSetup() {
             verifyPageContent("Camera not allowed")
         }.openThreeDotMenu {
         }.refreshPage {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartCameraButton { }
         browserScreen {
             verifyPageContent("Camera not allowed")
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/251386
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/251386
     @Test
     fun allowCameraPermissionRememberingTheDecisionTest() {
         assumeTrue(cameraManager.cameraIdList.isNotEmpty())
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.toUri()) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartCameraButton {
             verifyCameraPermissionPrompt(testPageSubstring)
             selectRememberPermissionDecision()
@@ -245,14 +255,14 @@ class SitePermissionsTest : TestSetup() {
             verifyPageContent("Camera allowed")
         }.openThreeDotMenu {
         }.refreshPage {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickStartCameraButton { }
         browserScreen {
             verifyPageContent("Camera allowed")
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2334074
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2334074
     @SmokeTest
     @Test
     fun blockNotificationsPermissionTest() {
@@ -264,13 +274,13 @@ class SitePermissionsTest : TestSetup() {
             verifyPageContent("Notifications not allowed")
         }.openThreeDotMenu {
         }.refreshPage {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.clickOpenNotificationButton {
             verifyNotificationsPermissionPrompt(testPageSubstring, true)
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/251380
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/251380
     @Test
     fun allowNotificationsPermissionTest() {
         navigationToolbar {
@@ -282,7 +292,7 @@ class SitePermissionsTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/251385
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/251385
     @SmokeTest
     @Test
     fun allowLocationPermissionsTest() {
@@ -298,7 +308,7 @@ class SitePermissionsTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2334075
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2334075
     @Test
     fun blockLocationPermissionsTest() {
         navigationToolbar {
@@ -310,7 +320,7 @@ class SitePermissionsTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2121537
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2121537
     @SmokeTest
     @Test
     fun fileUploadPermissionTest() {

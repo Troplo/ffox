@@ -161,7 +161,7 @@ ElementEditor.prototype = {
     this.elt.appendChild(open);
 
     this.tag = this.doc.createElement("span");
-    this.tag.classList.add("tag", "theme-fg-color3");
+    this.tag.classList.add("tag", "force-color-on-flash");
     this.tag.setAttribute("tabindex", "-1");
     this.tag.textContent = this.node.displayName;
     open.appendChild(this.tag);
@@ -194,6 +194,7 @@ ElementEditor.prototype = {
     this.newAttr.editMode = editableField({
       element: this.newAttr,
       multiline: true,
+      inputClass: "newattr-input",
       maxWidth: () => getAutocompleteMaxWidth(this.newAttr, this.container.elt),
       trigger: "dblclick",
       stopOnReturn: true,
@@ -234,7 +235,7 @@ ElementEditor.prototype = {
     this.elt.appendChild(close);
 
     this.closeTag = this.doc.createElement("span");
-    this.closeTag.classList.add("tag", "theme-fg-color3");
+    this.closeTag.classList.add("tag");
     this.closeTag.textContent = this.node.displayName;
     close.appendChild(this.closeTag);
 
@@ -699,9 +700,9 @@ ElementEditor.prototype = {
    *   " ",
    *   dom.span(
    *     { className: "editable", tabIndex: 0 },
-   *     dom.span({ className: "attr-name theme-fg-color1" }, attribute.name),
+   *     dom.span({ className: "attr-name" }, attribute.name),
    *     '="',
-   *     dom.span({ className: "attr-value theme-fg-color2" }, attribute.value),
+   *     dom.span({ className: "attr-value" }, attribute.value),
    *     '"'
    *   )
    */
@@ -720,16 +721,14 @@ ElementEditor.prototype = {
     attr.appendChild(inner);
 
     const name = this.doc.createElement("span");
-    name.classList.add("attr-name");
-    name.classList.add("theme-fg-color1");
+    name.classList.add("attr-name", "force-color-on-flash");
     name.textContent = attribute.name;
     inner.appendChild(name);
 
     inner.appendChild(this.doc.createTextNode('="'));
 
     const val = this.doc.createElement("span");
-    val.classList.add("attr-value");
-    val.classList.add("theme-fg-color2");
+    val.classList.add("attr-value", "force-color-on-flash");
     inner.appendChild(val);
 
     inner.appendChild(this.doc.createTextNode('"'));
@@ -1167,22 +1166,54 @@ ElementEditor.prototype = {
   /**
    * Called when the tag name editor has is done editing.
    */
-  onTagEdit(newTagName, isCommit) {
-    if (
-      !isCommit ||
-      newTagName.toLowerCase() === this.node.tagName.toLowerCase() ||
-      !("editTagName" in this.markup.walker)
-    ) {
+  async onTagEdit(inputValue, isCommit) {
+    if (!isCommit) {
+      return;
+    }
+
+    inputValue = inputValue.trim();
+    const spaceIndex = inputValue.indexOf(" ");
+    const newTagName =
+      spaceIndex === -1 ? inputValue : inputValue.substring(0, spaceIndex);
+
+    const shouldUpdateTagName =
+      newTagName.toLowerCase() !== this.node.tagName.toLowerCase();
+
+    // If there is content after the tagName, we could have attributes that we need to set
+    // Changing the tag name removes the node, so set the attributes first, then they
+    // will be copied in `editTagName`
+    const newAttributes =
+      spaceIndex === -1 ? null : inputValue.substring(spaceIndex + 1).trim();
+    if (newAttributes?.length) {
+      const doMods = this._startModifyingAttributes();
+      const undoMods = this._startModifyingAttributes();
+      this._applyAttributes(newAttributes, null, doMods, undoMods);
+      // if the tagName will be changed, a new node will be created, and we don't handle
+      // undo for this, so we can directly set the attributes.
+      if (shouldUpdateTagName) {
+        await doMods.apply();
+        undoMods.destroy();
+      } else {
+        this.container.undo.do(
+          () => doMods.apply(),
+          () => undoMods.apply()
+        );
+      }
+    }
+
+    if (!shouldUpdateTagName) {
       return;
     }
 
     // Changing the tagName removes the node. Make sure the replacing node gets
     // selected afterwards.
     this.markup.reselectOnRemoved(this.node, "edittagname");
-    this.node.walkerFront.editTagName(this.node, newTagName).catch(() => {
+    try {
+      await this.node.walkerFront.editTagName(this.node, newTagName);
+    } catch (e) {
       // Failed to edit the tag name, cancel the reselection.
       this.markup.cancelReselectOnRemoved();
-    });
+    }
   },
 
   destroy() {

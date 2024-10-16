@@ -864,7 +864,7 @@ tls13_EncryptClientHello(sslSocket *ss, SECItem *aadItem, const sslBuffer *chInn
     PRINT_BUF(50, (ss, "ciphertext from ECH Encrypt", chCt->data, chCt->len));
 #else
     /* Fake a tag. */
-    SECITEM_AllocItem(NULL, chCt, chPt.len + TLS13_ECH_AEAD_TAG_LEN);
+    chCt = SECITEM_AllocItem(NULL, NULL, chPt.len + TLS13_ECH_AEAD_TAG_LEN);
     if (!chCt) {
         goto loser;
     }
@@ -936,6 +936,9 @@ tls13_CopyChPreamble(sslSocket *ss, sslReader *reader, const SECItem *explicitSi
 
     /* legacy_session_id */
     rv = sslRead_ReadVariable(reader, 1, &tmpReadBuf);
+    if (rv != SECSuccess) {
+        return SECFailure;
+    }
     if (explicitSid) {
         /* Encoded SID should be empty when copying from CHOuter. */
         if (tmpReadBuf.len > 0) {
@@ -2172,6 +2175,9 @@ tls13_MaybeGreaseEch(sslSocket *ss, const sslBuffer *preamble, sslBuffer *buf)
         goto loser; /* Code set */
     }
     rv = tls13_PadChInner(&encodedCh, ss->ssl3.hs.greaseEchSize, strlen(ss->url));
+    if (rv != SECSuccess) {
+        goto loser; /* Code set */
+    }
 
     payloadLen = encodedCh.len;
     payloadLen += TLS13_ECH_AEAD_TAG_LEN; /* Aead tag */

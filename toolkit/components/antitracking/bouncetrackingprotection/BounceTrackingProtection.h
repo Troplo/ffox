@@ -4,11 +4,15 @@
 #ifndef mozilla_BounceTrackingProtection_h__
 #define mozilla_BounceTrackingProtection_h__
 
+#include "BounceTrackingStorageObserver.h"
 #include "mozilla/Logging.h"
 #include "mozilla/MozPromise.h"
 #include "nsIBounceTrackingProtection.h"
+#include "nsIBTPRemoteExceptionList.h"
 #include "mozilla/Maybe.h"
 #include "nsIObserver.h"
+#include "nsWeakReference.h"
+#include "nsTHashSet.h"
 
 class nsIPrincipal;
 class nsITimer;
@@ -30,8 +34,9 @@ using ClearDataMozPromise = MozPromise<nsCString, uint32_t, true>;
 
 extern LazyLogModule gBounceTrackingProtectionLog;
 
-class BounceTrackingProtection final : public nsIObserver,
-                                       public nsIBounceTrackingProtection {
+class BounceTrackingProtection final : public nsIBounceTrackingProtection,
+                                       public nsIObserver,
+                                       public nsSupportsWeakReference {
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
   NS_DECL_NSIBOUNCETRACKINGPROTECTION
@@ -75,6 +80,18 @@ class BounceTrackingProtection final : public nsIObserver,
   // Initializes the singleton instance of BounceTrackingProtection.
   [[nodiscard]] nsresult Init();
 
+  // Listens for feature pref changes and enables / disables BTP.
+  static void OnPrefChange(const char* aPref, void* aData);
+
+  // Called by OnPrefChange when the mode pref changes.
+  // isStartup indicates whether this is the initial mode change after startup.
+  nsresult OnModeChange(bool aIsStartup);
+
+  // Schedules or cancels the periodic bounce tracker purging. If this method is
+  // called while purging is already scheduled it will cancel the existing timer
+  // and then start a new timer.
+  nsresult UpdateBounceTrackingPurgeTimer(bool aShouldEnable);
+
   // Keeps track of whether the feature is enabled based on pref state.
   // Initialized on first call of GetSingleton.
   static Maybe<bool> sFeatureIsEnabled;
@@ -82,8 +99,20 @@ class BounceTrackingProtection final : public nsIObserver,
   // Timer which periodically runs PurgeBounceTrackers.
   nsCOMPtr<nsITimer> mBounceTrackingPurgeTimer;
 
+  // Used to notify BounceTrackingState of storage and cookie access.
+  RefPtr<BounceTrackingStorageObserver> mStorageObserver;
+
   // Storage for user agent globals.
   RefPtr<BounceTrackingProtectionStorage> mStorage;
+
+  // Interface to remote settings exception list.
+  nsCOMPtr<nsIBTPRemoteExceptionList> mRemoteExceptionList;
+
+  // In-memory copy of the remote settings exception list.
+  nsTHashSet<nsCStringHashKey> mRemoteSiteHostExceptions;
+
+  // Lazily initializes the remote exception list.
+  RefPtr<GenericPromise> EnsureRemoteExceptionListService();
 
   // Clear state for classified bounce trackers. To be called on an interval.
   using PurgeBounceTrackersMozPromise =
@@ -110,6 +139,13 @@ class BounceTrackingProtection final : public nsIObserver,
   // is important so we don't purge data for sites the user has interacted with
   // before the feature was enabled.
   [[nodiscard]] nsresult MaybeMigrateUserInteractionPermissions();
+
+  // Log a warning about the classification of a site as a bounce tracker. The
+  // message is logged to the devtools console aBounceTrackingState is
+  // associated with.
+  [[nodiscard]] static nsresult LogBounceTrackersClassifiedToWebConsole(
+      BounceTrackingState* aBounceTrackingState,
+      const nsTArray<nsCString>& aSiteHosts);
 };
 
 }  // namespace mozilla

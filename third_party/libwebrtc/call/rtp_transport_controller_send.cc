@@ -85,14 +85,18 @@ RtpTransportControllerSend::RtpTransportControllerSend(
       controller_factory_override_(config.network_controller_factory),
       controller_factory_fallback_(
           std::make_unique<GoogCcNetworkControllerFactory>(
-              config.network_state_predictor_factory)),
+              GoogCcFactoryConfig{.network_state_predictor_factory =
+                                      config.network_state_predictor_factory})),
       process_interval_(controller_factory_fallback_->GetProcessInterval()),
       last_report_block_time_(
           Timestamp::Millis(env_.clock().TimeInMilliseconds())),
+      initial_config_(env_),
       reset_feedback_on_route_change_(
           !env_.field_trials().IsEnabled("WebRTC-Bwe-NoFeedbackReset")),
       add_pacing_to_cwin_(env_.field_trials().IsEnabled(
           "WebRTC-AddPacingToCongestionWindowPushback")),
+      reset_bwe_on_adapter_id_change_(
+          env_.field_trials().IsEnabled("WebRTC-Bwe-ResetOnAdapterIdChange")),
       relay_bandwidth_cap_("relay_cap", DataRate::PlusInfinity()),
       transport_overhead_bytes_per_packet_(0),
       network_available_(false),
@@ -104,8 +108,6 @@ RtpTransportControllerSend::RtpTransportControllerSend(
       env_.field_trials().Lookup("WebRTC-Bwe-NetworkRouteConstraints"));
   initial_config_.constraints =
       ConvertConstraints(config.bitrate_config, &env_.clock());
-  initial_config_.event_log = &env_.event_log();
-  initial_config_.key_value_config = &env_.field_trials();
   RTC_DCHECK(config.bitrate_config.start_bitrate_bps > 0);
 
   pacer_.SetPacingRates(
@@ -262,6 +264,12 @@ void RtpTransportControllerSend::ReconfigureBandwidthEstimation(
   RTC_DCHECK_RUN_ON(&sequence_checker_);
   bwe_settings_ = settings;
 
+  streams_config_.enable_repeated_initial_probing =
+      bwe_settings_.allow_probe_without_media;
+  bool allow_probe_without_media = bwe_settings_.allow_probe_without_media &&
+                                   packet_router_.SupportsRtxPayloadPadding();
+  pacer_.SetAllowProbeWithoutMediaPacket(allow_probe_without_media);
+
   if (controller_) {
     // Recreate the controller and handler.
     control_handler_ = nullptr;
@@ -275,9 +283,6 @@ void RtpTransportControllerSend::ReconfigureBandwidthEstimation(
       UpdateNetworkAvailability();
     }
   }
-  pacer_.SetAllowProbeWithoutMediaPacket(
-      bwe_settings_.allow_probe_without_media &&
-      packet_router_.SupportsRtxPayloadPadding());
 }
 
 void RtpTransportControllerSend::RegisterTargetTransferRateObserver(
@@ -292,18 +297,23 @@ void RtpTransportControllerSend::RegisterTargetTransferRateObserver(
 bool RtpTransportControllerSend::IsRelevantRouteChange(
     const rtc::NetworkRoute& old_route,
     const rtc::NetworkRoute& new_route) const {
-  // TODO(bugs.webrtc.org/11438): Experiment with using more information/
-  // other conditions.
   bool connected_changed = old_route.connected != new_route.connected;
-  bool route_ids_changed =
-      old_route.local.network_id() != new_route.local.network_id() ||
-      old_route.remote.network_id() != new_route.remote.network_id();
-  if (relay_bandwidth_cap_->IsFinite()) {
-    bool relaying_changed = IsRelayed(old_route) != IsRelayed(new_route);
-    return connected_changed || route_ids_changed || relaying_changed;
+  bool route_ids_changed = false;
+  bool relaying_changed = false;
+
+  if (reset_bwe_on_adapter_id_change_) {
+    route_ids_changed =
+        old_route.local.adapter_id() != new_route.local.adapter_id() ||
+        old_route.remote.adapter_id() != new_route.remote.adapter_id();
   } else {
-    return connected_changed || route_ids_changed;
+    route_ids_changed =
+        old_route.local.network_id() != new_route.local.network_id() ||
+        old_route.remote.network_id() != new_route.remote.network_id();
   }
+  if (relay_bandwidth_cap_->IsFinite()) {
+    relaying_changed = IsRelayed(old_route) != IsRelayed(new_route);
+  }
+  return connected_changed || route_ids_changed || relaying_changed;
 }
 
 void RtpTransportControllerSend::OnNetworkRouteChanged(

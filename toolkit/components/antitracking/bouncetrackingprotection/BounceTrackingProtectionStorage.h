@@ -41,7 +41,7 @@ class BounceTrackingProtectionStorage final : public nsIObserver,
  public:
   BounceTrackingProtectionStorage()
       : mMonitor("mozilla::BounceTrackingProtectionStorage::mMonitor"),
-        mPendingWrites(0){};
+        mPendingWrites(0) {};
 
   // Initialises the storage including the on-disk database.
   [[nodiscard]] nsresult Init();
@@ -63,6 +63,10 @@ class BounceTrackingProtectionStorage final : public nsIObserver,
   // The enum values match the database type field. Updating them requires a DB
   // migration.
   enum class EntryType : uint8_t { BounceTracker = 0, UserActivation = 1 };
+
+  // Clear all user activation or bounce tracker entries.
+  [[nodiscard]] nsresult ClearByType(
+      BounceTrackingProtectionStorage::EntryType aType);
 
   // Clear all state for a given site host. If aOriginAttributes is passed, only
   // entries for that OA will be deleted.
@@ -145,6 +149,13 @@ class BounceTrackingProtectionStorage final : public nsIObserver,
       Maybe<PRTime> aTo,
       Maybe<BounceTrackingProtectionStorage::EntryType> aEntryType = Nothing{});
 
+  // Delete all entries of a specific type.
+  // aOriginAttributes can be passed
+  [[nodiscard]] nsresult DeleteDataByType(
+      mozIStorageConnection* aDatabaseConnection,
+      const Maybe<OriginAttributes>& aOriginAttributes,
+      BounceTrackingProtectionStorage::EntryType aEntryType);
+
   // Delete all entries matching the given OriginAttributesPattern. Worker
   // thread only.
   [[nodiscard]] static nsresult DeleteDataByOriginAttributesPattern(
@@ -194,6 +205,12 @@ class BounceTrackingProtectionStorage final : public nsIObserver,
   [[nodiscard]] nsresult DeleteDBEntriesInTimeRange(
       OriginAttributes* aOriginAttributes, PRTime aFrom,
       Maybe<PRTime> aTo = Nothing{}, Maybe<EntryType> aEntryType = Nothing{});
+
+  // Delete all DB entries matching the given type.
+  // If aOriginAttributes is passed it acts as an additional filter.
+  [[nodiscard]] nsresult DeleteDBEntriesByType(
+      OriginAttributes* aOriginAttributes,
+      BounceTrackingProtectionStorage::EntryType aEntryType);
 
   // Deletes all DB entries matching the given OriginAttributesPattern.
   [[nodiscard]] nsresult DeleteDBEntriesByOriginAttributesPattern(

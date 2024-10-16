@@ -12,6 +12,9 @@
 #include "builtin/AtomicsObject.h"
 #include "builtin/BigInt.h"
 #include "builtin/DataViewObject.h"
+#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+#  include "builtin/DisposableStackObject.h"
+#endif
 #ifdef JS_HAS_INTL_API
 #  include "builtin/intl/Collator.h"
 #  include "builtin/intl/DateTimeFormat.h"
@@ -106,11 +109,7 @@ JS_PUBLIC_API const JSClass* js::ProtoKeyToClass(JSProtoKey key) {
 }
 
 static bool IsIteratorHelpersEnabled() {
-#ifdef NIGHTLY_BUILD
   return JS::Prefs::experimental_iterator_helpers();
-#else
-  return false;
-#endif
 }
 
 static bool IsAsyncIteratorHelpersEnabled() {
@@ -141,6 +140,7 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
     case JSProto_AggregateError:
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
     case JSProto_SuppressedError:
+    case JSProto_DisposableStack:
 #endif
     case JSProto_EvalError:
     case JSProto_RangeError:

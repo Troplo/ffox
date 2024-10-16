@@ -574,6 +574,7 @@ pub struct PrimitiveTemplate {
 impl PatternBuilder for PrimitiveTemplate {
     fn build(
         &self,
+        _sub_rect: Option<DeviceRect>,
         ctx: &PatternBuilderContext,
         _state: &mut PatternBuilderState,
     ) -> crate::pattern::Pattern {
@@ -584,6 +585,24 @@ impl PatternBuilder for PrimitiveTemplate {
                 Pattern::color(color)
             }
         }
+    }
+
+    fn get_base_color(
+        &self,
+        ctx: &PatternBuilderContext,
+    ) -> ColorF {
+        match self.kind {
+            PrimitiveTemplateKind::Clear => ColorF::BLACK,
+            PrimitiveTemplateKind::Rectangle { ref color, .. } => {
+                ctx.scene_properties.resolve_color(color)
+            }
+        }
+    }
+
+    fn use_shared_pattern(
+        &self,
+    ) -> bool {
+        true
     }
 }
 
@@ -1471,6 +1490,14 @@ impl PrimitiveStore {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.pictures.clear();
+        self.text_runs.clear();
+        self.images.clear();
+        self.color_bindings.clear();
+        self.linear_gradients.clear();
+    }
+
     pub fn get_stats(&self) -> PrimitiveStoreStats {
         PrimitiveStoreStats {
             picture_count: self.pictures.len(),
@@ -1486,6 +1513,12 @@ impl PrimitiveStore {
         use crate::print_tree::PrintTree;
         let mut pt = PrintTree::new("picture tree");
         self.pictures[root.0].print(&self.pictures, root, &mut pt);
+    }
+}
+
+impl Default for PrimitiveStore {
+    fn default() -> Self {
+        PrimitiveStore::new(&PrimitiveStoreStats::empty())
     }
 }
 

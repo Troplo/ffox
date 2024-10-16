@@ -23,8 +23,8 @@ NS_IMPL_ISUPPORTS(BackstagePass, nsIXPCScriptable, nsIGlobalObject,
                   nsISupportsWeakReference)
 
 BackstagePass::BackstagePass()
-    : mPrincipal(nsContentUtils::GetSystemPrincipal()), mWrapper(nullptr) {}
-
+    : mPrincipal(nsContentUtils::GetSystemPrincipal()),
+      mWrapper(nullptr){}
 // XXX(nika): It appears we don't have support for mayresolve hooks in
 // nsIXPCScriptable, and I don't really want to add it because I'd rather just
 // kill nsIXPCScriptable alltogether, so we don't use it here.
@@ -42,7 +42,8 @@ BackstagePass::BackstagePass()
    XPC_SCRIPTABLE_DONT_REFLECT_INTERFACE_NAMES)
 #include "xpc_map_end.h" /* This will #undef the above */
 
-JSObject* BackstagePass::GetGlobalJSObject() {
+          JSObject
+          * BackstagePass::GetGlobalJSObject() {
   if (mWrapper) {
     return mWrapper->GetFlatJSObject();
   }
@@ -103,6 +104,12 @@ BackstagePass::Resolve(nsIXPConnectWrappedNative* wrapper, JSContext* cx,
       return NS_ERROR_FAILURE;
     }
     *resolvedp = true;
+  } else if (id == xpccx->GetStringID(XPCJSContext::IDX_LOCKS)) {
+    *_retval = xpc::SandboxCreateLocks(cx, obj);
+    if (!*_retval) {
+      return NS_ERROR_FAILURE;
+    }
+    *resolvedp = true;
   }
 
   return NS_OK;
@@ -120,7 +127,8 @@ BackstagePass::NewEnumerate(nsIXPConnectWrappedNative* wrapper, JSContext* cx,
       !properties.append(xpccx->GetStringID(XPCJSContext::IDX_CRYPTO)) ||
       !properties.append(xpccx->GetStringID(XPCJSContext::IDX_INDEXEDDB)) ||
       !properties.append(
-          xpccx->GetStringID(XPCJSContext::IDX_STRUCTUREDCLONE))) {
+          xpccx->GetStringID(XPCJSContext::IDX_STRUCTUREDCLONE)) ||
+      !properties.append(xpccx->GetStringID(XPCJSContext::IDX_LOCKS))) {
     return NS_ERROR_FAILURE;
   }
 

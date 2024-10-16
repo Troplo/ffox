@@ -69,6 +69,9 @@ class RTC_EXPORT SimulcastEncoderAdapter : public VideoEncoder {
 
   EncoderInfo GetEncoderInfo() const override;
 
+ protected:
+  void DestroyStoredEncoders();
+
  private:
   class EncoderContext {
    public:
@@ -146,8 +149,6 @@ class RTC_EXPORT SimulcastEncoderAdapter : public VideoEncoder {
 
   bool Initialized() const;
 
-  void DestroyStoredEncoders();
-
   // This method creates encoder. May reuse previously created encoders from
   // `cached_encoder_contexts_`. It's const because it's used from
   // const GetEncoderInfo().
@@ -189,7 +190,6 @@ class RTC_EXPORT SimulcastEncoderAdapter : public VideoEncoder {
   // GetEncoderInfo(), which is const.
   mutable std::list<std::unique_ptr<EncoderContext>> cached_encoder_contexts_;
 
-  const absl::optional<unsigned int> experimental_boosted_screenshare_qp_;
   const bool boost_base_layer_quality_;
   const bool prefer_temporal_support_on_base_layer_;
   const bool per_layer_pli_;

@@ -47,8 +47,22 @@ import {
   actionTypes as at,
 } from "resource://activity-stream/common/Actions.mjs";
 
+const REGION_TOPICS_CONFIG =
+  "browser.newtabpage.activity-stream.discoverystream.topicSelection.region-topics-config";
+const LOCALE_TOPICS_CONFIG =
+  "browser.newtabpage.activity-stream.discoverystream.topicSelection.locale-topics-config";
+
+const REGION_TOPIC_LABEL_CONFIG =
+  "browser.newtabpage.activity-stream.discoverystream.topicLabels.region-topic-label-config";
+const LOCALE_TOPIC_LABEL_CONFIG =
+  "browser.newtabpage.activity-stream.discoverystream.topicLabels.locale-topic-label-config";
 const REGION_BASIC_CONFIG =
   "browser.newtabpage.activity-stream.discoverystream.region-basic-config";
+
+const REGION_THUMBS_CONFIG =
+  "browser.newtabpage.activity-stream.discoverystream.thumbsUpDown.region-thumbs-config";
+const LOCALE_THUMBS_CONFIG =
+  "browser.newtabpage.activity-stream.discoverystream.thumbsUpDown.locale-thumbs-config";
 
 // Determine if spocs should be shown for a geo/locale
 function showSpocs({ geo }) {
@@ -72,6 +86,54 @@ function showWeather({ geo, locale }) {
     .map(s => s.trim())
     .filter(item => item);
   return weatherGeo.includes(geo) && weatherLocale.includes(locale);
+}
+
+function showTopicsSelection({ geo, locale }) {
+  const topicsGeoString =
+    Services.prefs.getStringPref(REGION_TOPICS_CONFIG) || "";
+  const topicsLocaleString =
+    Services.prefs.getStringPref(LOCALE_TOPICS_CONFIG) || "";
+  const topicsGeo = topicsGeoString
+    .split(",")
+    .map(s => s.trim())
+    .filter(item => item);
+  const topicsLocale = topicsLocaleString
+    .split(",")
+    .map(s => s.trim())
+    .filter(item => item);
+  return topicsGeo.includes(geo) && topicsLocale.includes(locale);
+}
+
+function showTopicLabels({ geo, locale }) {
+  const geoString =
+    Services.prefs.getStringPref(REGION_TOPIC_LABEL_CONFIG) || "";
+  const localeString =
+    Services.prefs.getStringPref(LOCALE_TOPIC_LABEL_CONFIG) || "";
+  const topicLabelGeo = geoString
+    .split(",")
+    .map(s => s.trim())
+    .filter(item => item);
+  const topicLabelLocale = localeString
+    .split(",")
+    .map(s => s.trim())
+    .filter(item => item);
+  return topicLabelGeo.includes(geo) && topicLabelLocale.includes(locale);
+}
+
+function showThumbsUpDown({ geo, locale }) {
+  const thumbsUpDownGeoString =
+    Services.prefs.getStringPref(REGION_THUMBS_CONFIG) || "";
+  const thumbsUpDownLocaleString =
+    Services.prefs.getStringPref(LOCALE_THUMBS_CONFIG) || "";
+  const thumbsUpDownGeo = thumbsUpDownGeoString
+    .split(",")
+    .map(s => s.trim())
+    .filter(item => item);
+  const thumbsUpDownLocale = thumbsUpDownLocaleString
+    .split(",")
+    .map(s => s.trim())
+    .filter(item => item);
+  return thumbsUpDownGeo.includes(geo) && thumbsUpDownLocale.includes(locale);
 }
 
 // Configure default Activity Stream prefs with a plain `value` or a `getValue`
@@ -309,6 +371,27 @@ export const PREFS_CONFIG = new Map([
     },
   ],
   [
+    "newtabLayouts.variant-a",
+    {
+      title: "Boolean flag to turn layout variant A on and off",
+      value: false,
+    },
+  ],
+  [
+    "newtabLayouts.variant-b",
+    {
+      title: "Boolean flag to turn layout variant B on and off",
+      value: false,
+    },
+  ],
+  [
+    "discoverystream.spoc-positions",
+    {
+      title: "CSV string of spoc position indexes on newtab Pocket grid",
+      value: "1,5,7,11,18,20",
+    },
+  ],
+  [
     "newtabWallpapers.highlightEnabled",
     {
       title: "Boolean flag to show the highlight about the Wallpaper feature",
@@ -469,7 +552,8 @@ export const PREFS_CONFIG = new Map([
     "discoverystream.thumbsUpDown.enabled",
     {
       title: "Allow users to give thumbs up/down on recommended stories",
-      value: false,
+      // pref is dynamic
+      getValue: showThumbsUpDown,
     },
   ],
   [
@@ -530,7 +614,82 @@ export const PREFS_CONFIG = new Map([
     "discoverystream.topicSelection.enabled",
     {
       title: "Enables topic selection for discovery stream",
+      // pref is dynamic
+      getValue: showTopicsSelection,
+    },
+  ],
+  [
+    "discoverystream.topicSelection.topics",
+    {
+      title: "Topics available",
+      value:
+        "business, arts, food, health, finance, government, sports, tech, travel, education-science, society",
+    },
+  ],
+  [
+    "discoverystream.topicSelection.selectedTopics",
+    {
+      title: "Selected topics",
+      value: "",
+    },
+  ],
+  [
+    "discoverystream.topicSelection.suggestedTopics",
+    {
+      title: "Suggested topics to choose during onboarding for topic selection",
+      value: "business, arts, government",
+    },
+  ],
+  [
+    "discoverystream.topicSelection.hasBeenUpdatedPreviously",
+    {
+      title: "Returns true only if the user has previously selected topics",
       value: false,
+    },
+  ],
+  [
+    "discoverystream.topicSelection.onboarding.displayCount",
+    {
+      title: "amount of times that topic selection onboarding has been shown",
+      value: 0,
+    },
+  ],
+  [
+    "discoverystream.topicSelection.onboarding.maybeDisplay",
+    {
+      title:
+        "Whether the onboarding should be shown, based on previous interactions",
+      value: true,
+    },
+  ],
+  [
+    "discoverystream.topicSelection.onboarding.lastDisplayed",
+    {
+      title:
+        "time in ms that onboarding was last shown (stored as string due to contraits of prefs)",
+      value: "",
+    },
+  ],
+  [
+    "discoverystream.topicSelection.onboarding.displayTimeout",
+    {
+      title: "time in ms that the onboarding show be shown next",
+      value: 0,
+    },
+  ],
+  [
+    "discoverystream.topicSelection.onboarding.enabled",
+    {
+      title: "enabled onboarding experience for topic selection onboarding",
+      value: false,
+    },
+  ],
+  [
+    "discoverystream.topicLabels.enabled",
+    {
+      title: "Enables topic labels for discovery stream",
+      // pref is dynamic
+      getValue: showTopicLabels,
     },
   ],
   [
@@ -538,6 +697,33 @@ export const PREFS_CONFIG = new Map([
     {
       title: "Control whether a user wants recent saves visible on Newtab",
       value: true,
+    },
+  ],
+  [
+    "discoverystream.spocs.cacheTimeout",
+    {
+      title: "Set sponsored content cache timeout in minutes.",
+    },
+  ],
+  [
+    "discoverystream.spocs.startupCache.enabled",
+    {
+      title: "Controls if spocs should be included in startup cache.",
+      value: true,
+    },
+  ],
+  [
+    "support.url",
+    {
+      title: "Link to HNT's support page",
+      getValue: () => {
+        // Services.urlFormatter completes the in-product SUMO page URL:
+        // https://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/new-tab
+        const baseUrl = Services.urlFormatter.formatURLPref(
+          "app.support.baseURL"
+        );
+        return `${baseUrl}new-tab`;
+      },
     },
   ],
 ]);

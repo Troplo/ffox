@@ -40,6 +40,8 @@ const kPrefProtonToolbarVersion = "browser.proton.toolbar.version";
 const kPrefHomeButtonUsed = "browser.engagement.home-button.has-used";
 const kPrefLibraryButtonUsed = "browser.engagement.library-button.has-used";
 const kPrefSidebarButtonUsed = "browser.engagement.sidebar-button.has-used";
+const kPrefSidebarRevampEnabled = "sidebar.revamp";
+const kPrefSidebarVerticalTabsEnabled = "sidebar.verticalTabs";
 
 const kExpectedWindowURL = AppConstants.BROWSER_CHROME_URL;
 
@@ -192,6 +194,44 @@ XPCOMUtils.defineLazyPreferenceGetter(
   false
 );
 
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "sidebarRevampEnabled",
+  "sidebar.revamp",
+  false,
+  (pref, oldVal, newVal) => {
+    if (!newVal) {
+      return;
+    }
+    let navbarPlacements = CustomizableUI.getWidgetIdsInArea(
+      CustomizableUI.AREA_NAVBAR
+    );
+    if (!navbarPlacements.includes("sidebar-button")) {
+      // Find a spot for the sidebar-button.
+      // If any of the home, reload or fwd button are in there, we'll place next that.
+      let position;
+      for (let widgetId of [
+        "home-button",
+        "stop-reload-button",
+        "forward-button",
+      ]) {
+        position = navbarPlacements.indexOf(widgetId);
+        if (position > -1) {
+          position += 1;
+          break;
+        }
+      }
+      // Its not currently possible to move the forward-button out of the navbar, but we'll
+      // ensure the insert position is at least 0 just in case
+      CustomizableUI.addWidgetToArea(
+        "sidebar-button",
+        CustomizableUI.AREA_NAVBAR,
+        Math.max(0, position)
+      );
+    }
+  }
+);
+
 ChromeUtils.defineLazyGetter(lazy, "log", () => {
   let { ConsoleAPI } = ChromeUtils.importESModule(
     "resource://gre/modules/Console.sys.mjs"
@@ -249,7 +289,7 @@ var CustomizableUIInternal = {
       Services.policies.isAllowed("removeHomeButtonByDefault")
         ? null
         : "home-button",
-      Services.prefs.getBoolPref("sidebar.revamp") ? "sidebar-button" : null,
+      lazy.sidebarRevampEnabled ? "sidebar-button" : null,
       "spring",
       "urlbar-container",
       "spring",
@@ -310,6 +350,8 @@ var CustomizableUIInternal = {
     SearchWidgetTracker.init();
 
     Services.obs.addObserver(this, "browser-set-toolbar-visibility");
+
+    Services.prefs.addObserver(kPrefSidebarVerticalTabsEnabled, this);
   },
 
   onEnabled(addon) {
@@ -1178,6 +1220,10 @@ var CustomizableUIInternal = {
           continue;
         }
 
+        if (!inPrivateWindow && widget?.hideInNonPrivateBrowsing) {
+          continue;
+        }
+
         this.ensureButtonContextMenu(node, aAreaNode);
 
         // This needs updating in case we're resetting / undoing a reset.
@@ -1410,12 +1456,21 @@ var CustomizableUIInternal = {
     let showInPrivateBrowsing = gPalette.has(aWidgetId)
       ? gPalette.get(aWidgetId).showInPrivateBrowsing
       : true;
+    let hideInNonPrivateBrowsing =
+      gPalette.get(aWidgetId)?.hideInNonPrivateBrowsing ?? false;
 
     for (let areaNode of areaNodes) {
       let window = areaNode.ownerGlobal;
       if (
         !showInPrivateBrowsing &&
         lazy.PrivateBrowsingUtils.isWindowPrivate(window)
+      ) {
+        continue;
+      }
+
+      if (
+        hideInNonPrivateBrowsing &&
+        !lazy.PrivateBrowsingUtils.isWindowPrivate(window)
       ) {
         continue;
       }
@@ -1597,10 +1652,19 @@ var CustomizableUIInternal = {
     let showInPrivateBrowsing = gPalette.has(aWidgetId)
       ? gPalette.get(aWidgetId).showInPrivateBrowsing
       : true;
+    let hideInNonPrivateBrowsing =
+      gPalette.get(aWidgetId)?.hideInNonPrivateBrowsing ?? false;
 
     if (
       !showInPrivateBrowsing &&
       lazy.PrivateBrowsingUtils.isWindowPrivate(window)
+    ) {
+      return;
+    }
+
+    if (
+      hideInNonPrivateBrowsing &&
+      !lazy.PrivateBrowsingUtils.isWindowPrivate(window)
     ) {
       return;
     }
@@ -1863,6 +1927,12 @@ var CustomizableUIInternal = {
     if (
       !aWidget.showInPrivateBrowsing &&
       lazy.PrivateBrowsingUtils.isWindowPrivate(aDocument.defaultView)
+    ) {
+      return null;
+    }
+    if (
+      aWidget.hideInNonPrivateBrowsing &&
+      !lazy.PrivateBrowsingUtils.isWindowPrivate(aDocument.defaultView)
     ) {
       return null;
     }
@@ -2364,7 +2434,10 @@ var CustomizableUIInternal = {
     // gPalette.
     for (let [id, widget] of gPalette) {
       if (!widget.currentArea) {
-        if (widget.showInPrivateBrowsing || !isWindowPrivate) {
+        if (
+          (isWindowPrivate && widget.showInPrivateBrowsing) ||
+          (!isWindowPrivate && !widget.hideInNonPrivateBrowsing)
+        ) {
           widgets.add(id);
         }
       }
@@ -2991,6 +3064,7 @@ var CustomizableUIInternal = {
       tooltiptext: null,
       l10nId: null,
       showInPrivateBrowsing: true,
+      hideInNonPrivateBrowsing: false,
       _introducedInVersion: -1,
       _introducedByPref: null,
       keepBroadcastAttributesWhenCustomizing: false,
@@ -3033,6 +3107,7 @@ var CustomizableUIInternal = {
     const kOptBoolProps = [
       "removable",
       "showInPrivateBrowsing",
+      "hideInNonPrivateBrowsing",
       "overflows",
       "tabSpecific",
       "locationSpecific",
@@ -3567,7 +3642,12 @@ var CustomizableUIInternal = {
     // that are present. This avoids including items that don't exist (e.g. ids
     // of add-on items that the user has uninstalled).
     let orderedPlacements = CustomizableUI.getWidgetIdsInArea(container.id);
-    return orderedPlacements.filter(w => currentWidgets.has(w));
+    return orderedPlacements.filter(w => {
+      return (
+        currentWidgets.has(w) ||
+        this.getWidgetProvider(w) == CustomizableUI.PROVIDER_API
+      );
+    });
   },
 
   get inDefaultState() {
@@ -3725,10 +3805,54 @@ var CustomizableUIInternal = {
     }
   },
 
+  widgetIsLikelyVisible(aWidgetId, window) {
+    let placement = this.getPlacementOfWidget(aWidgetId);
+
+    if (!placement) {
+      return false;
+    }
+
+    switch (placement.area) {
+      case CustomizableUI.AREA_NAVBAR:
+        return true;
+      case CustomizableUI.AREA_MENUBAR:
+        return !this.getCollapsedToolbarIds(window).has(
+          CustomizableUI.AREA_MENUBAR
+        );
+      case CustomizableUI.AREA_TABSTRIP:
+        return !CustomizableUI.verticalTabsEnabled;
+      case CustomizableUI.AREA_BOOKMARKS:
+        return (
+          Services.prefs.getCharPref(
+            "browser.toolbars.bookmarks.visibility"
+          ) === "always"
+        );
+      default:
+        return false;
+    }
+  },
+
   observe(aSubject, aTopic, aData) {
     if (aTopic == "browser-set-toolbar-visibility") {
       let [toolbar, visibility] = JSON.parse(aData);
       CustomizableUI.setToolbarVisibility(toolbar, visibility == "true");
+    }
+
+    if (
+      aTopic === "nsPref:changed" &&
+      aData === kPrefSidebarVerticalTabsEnabled
+    ) {
+      let sidebarRevampEnabled = Services.prefs.getBoolPref(
+        kPrefSidebarRevampEnabled,
+        false
+      );
+      let verticalTabsEnabled = Services.prefs.getBoolPref(
+        kPrefSidebarVerticalTabsEnabled,
+        false
+      );
+      if (verticalTabsEnabled && !sidebarRevampEnabled) {
+        Services.prefs.setBoolPref(kPrefSidebarRevampEnabled, true);
+      }
     }
   },
 };
@@ -4209,6 +4333,8 @@ export var CustomizableUI = {
    *                  as the "$shortcut" variable to the fluent message.
    * - showInPrivateBrowsing: whether to show the widget in private browsing
    *                          mode (optional, default: true)
+   * - hideInNonPrivateBrowsing: whether to hide the widget in non private
+   *                             browsing mode windows (optional, default: false)
    * - tabSpecific:      If true, closes the panel if the tab changes.
    * - locationSpecific: If true, closes the panel if the location changes.
    *                     This is similar to tabSpecific, but also if the location
@@ -4263,6 +4389,8 @@ export var CustomizableUI = {
    * - tooltiptext:   for API-provided widgets, the tooltip of the widget;
    * - showInPrivateBrowsing: for API-provided widgets, whether the widget is
    *                          visible in private browsing;
+   * - hideInNonPrivateBrowsing: for API-provided widgets, whether the widget is
+   *                             hidden in non-private browsing;
    *
    * Single window wrappers obtained through forWindow(someWindow) or from the
    * instances array have the following properties
@@ -4576,6 +4704,27 @@ export var CustomizableUI = {
   },
 
   /**
+   * Checks if a widget is likely visible in a given window.
+   *
+   * This method returns true when a widget is:
+   *  - Not pinned to the overflow menu
+   *  - Not in a collapsed toolbar (e.g. bookmarks toolbar, menu bar)
+   *  - Not in the customization palette
+   *
+   * Note: A widget that is moved into the overflow menu due to
+   *       the window being small might be considered visible by
+   *       this method, because a widget's placement does not
+   *       change when it overflows into the overflow menu.
+   *
+   * @param aWidgetId the widget ID to check.
+   * @param {Window} window The browser window to check for widget visibility.
+   * @returns {Boolean} whether the given widget is likely visible or not.
+   */
+  widgetIsLikelyVisible(aWidgetId, window) {
+    return CustomizableUIInternal.widgetIsLikelyVisible(aWidgetId, window);
+  },
+
+  /**
    * DEPRECATED! Use fluent instead.
    *
    * Get a localized property off a (widget?) object.
@@ -4817,12 +4966,7 @@ export var CustomizableUI = {
         let item = menuChild;
         if (!item.hasAttribute("onclick")) {
           subviewItem.addEventListener("click", event => {
-            const ClickEventConstructor = Services.prefs.getBoolPref(
-              "dom.w3c_pointer_events.dispatch_click_as_pointer_event"
-            )
-              ? doc.ownerGlobal.PointerEvent
-              : doc.ownerGlobal.MouseEvent;
-            let newEvent = new ClickEventConstructor("click", event);
+            let newEvent = new doc.ownerGlobal.PointerEvent("click", event);
 
             // Telemetry should only pay attention to the original event.
             lazy.BrowserUsageTelemetry.ignoreEvent(newEvent);
@@ -4969,6 +5113,7 @@ function WidgetGroupWrapper(aWidget) {
     "label",
     "tooltiptext",
     "showInPrivateBrowsing",
+    "hideInNonPrivateBrowsing",
     "viewId",
     "disallowSubView",
     "webExtension",
@@ -5465,6 +5610,7 @@ class OverflowableToolbar {
 
     if (!this.#initialized) {
       Services.obs.removeObserver(this, "browser-delayed-startup-finished");
+      Services.prefs.removeObserver(kPrefSidebarVerticalTabsEnabled, this);
       return;
     }
 

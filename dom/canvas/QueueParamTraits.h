@@ -13,7 +13,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/IntegerRange.h"
 #include "mozilla/ipc/ProtocolUtils.h"
-#include "mozilla/ipc/SharedMemoryBasic.h"
+#include "mozilla/ipc/SharedMemory.h"
 #include "mozilla/Logging.h"
 #include "mozilla/TimeStamp.h"
 #include "nsExceptionHandler.h"
@@ -275,7 +275,7 @@ struct QueueParamTraits_IsEnumCase {
   static bool Read(ConsumerView& aConsumerView, T* aArg) {
     auto shadow = std::underlying_type_t<T>{};
     aConsumerView.ReadParam(&shadow);
-    const auto e = AsValidEnum<T>(shadow);
+    const auto e = AsEnumCase<T>(shadow);
     if (!e) return false;
     *aArg = *e;
     return true;

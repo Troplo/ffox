@@ -455,17 +455,15 @@ bool nsFrameMessageManager::GetParamsForMessage(JSContext* aCx,
   nsCOMPtr<nsIConsoleService> console(
       do_GetService(NS_CONSOLESERVICE_CONTRACTID));
   if (console) {
-    nsAutoString filename;
-    uint32_t lineno = 0, column = 1;
-    nsJSUtils::GetCallingLocation(aCx, filename, &lineno, &column);
+    auto location = JSCallingLocation::Get(aCx);
     nsCOMPtr<nsIScriptError> error(
         do_CreateInstance(NS_SCRIPTERROR_CONTRACTID));
     error->Init(
         u"Sending message that cannot be cloned. Are "
         "you trying to send an XPCOM object?"_ns,
-        filename, u""_ns, lineno, column, nsIScriptError::warningFlag,
-        "chrome javascript"_ns, false /* from private window */,
-        true /* from chrome context */);
+        location.FileName(), location.mLine, location.mColumn,
+        nsIScriptError::warningFlag, "chrome javascript"_ns,
+        false /* from private window */, true /* from chrome context */);
     console->LogMessage(error);
   }
 
@@ -543,21 +541,9 @@ void nsFrameMessageManager::SendSyncMessage(JSContext* aCx,
 
   nsTArray<StructuredCloneData> retval;
 
-  TimeStamp start = TimeStamp::Now();
   sSendingSyncMessage = true;
   bool ok = mCallback->DoSendBlockingMessage(aMessageName, data, &retval);
   sSendingSyncMessage = false;
-
-  uint32_t latencyMs = round((TimeStamp::Now() - start).ToMilliseconds());
-  if (latencyMs >= kMinTelemetrySyncMessageManagerLatencyMs) {
-    NS_ConvertUTF16toUTF8 messageName(aMessageName);
-    // NOTE: We need to strip digit characters from the message name in order to
-    // avoid a large number of buckets due to generated names from addons (such
-    // as "ublock:sb:{N}"). See bug 1348113 comment 10.
-    messageName.StripTaggedASCII(ASCIIMask::Mask0to9());
-    Telemetry::Accumulate(Telemetry::IPC_SYNC_MESSAGE_MANAGER_LATENCY_MS,
-                          messageName, latencyMs);
-  }
 
   if (!ok) {
     return;
@@ -807,17 +793,16 @@ void nsFrameMessageManager::ReceiveMessage(
         data->Write(cx, rval, aError);
         if (NS_WARN_IF(aError.Failed())) {
           aRetVal->RemoveLastElement();
-          nsString msg =
-              aMessage + nsLiteralString(
-                             u": message reply cannot be cloned. Are "
-                             "you trying to send an XPCOM object?");
+          nsString msg = aMessage +
+                         u": message reply cannot be cloned. Are "
+                         "you trying to send an XPCOM object?"_ns;
 
           nsCOMPtr<nsIConsoleService> console(
               do_GetService(NS_CONSOLESERVICE_CONTRACTID));
           if (console) {
             nsCOMPtr<nsIScriptError> error(
                 do_CreateInstance(NS_SCRIPTERROR_CONTRACTID));
-            error->Init(msg, u""_ns, u""_ns, 0, 0, nsIScriptError::warningFlag,
+            error->Init(msg, ""_ns, 0, 0, nsIScriptError::warningFlag,
                         "chrome javascript"_ns, false /* from private window */,
                         true /* from chrome context */);
             console->LogMessage(error);
@@ -1636,8 +1621,6 @@ nsSameProcessAsyncMessageBase::nsSameProcessAsyncMessageBase()
 nsresult nsSameProcessAsyncMessageBase::Init(const nsAString& aMessage,
                                              StructuredCloneData& aData) {
   if (!mData.Copy(aData)) {
-    Telemetry::Accumulate(Telemetry::IPC_SAME_PROCESS_MESSAGE_COPY_OOM_KB,
-                          aData.DataLength());
     return NS_ERROR_OUT_OF_MEMORY;
   }
 

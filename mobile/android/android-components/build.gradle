@@ -335,7 +335,8 @@ tasks.register("ktlint", JavaExec) {
     description = "Check Kotlin code style."
     classpath = configurations.ktlint
     mainClass.set("com.pinterest.ktlint.Main")
-    args "components/**/*.kt" , "samples/**/*.kt", "!**/build/**/*.kt", "buildSrc/**/*.kt", "--baseline=ktlint-baseline.xml"
+    args "components/**/*.kt" , "samples/**/*.kt", "!**/build/**/*.kt", "buildSrc/**/*.kt", "--baseline=ktlint-baseline.xml",
+        "--reporter=json,output=build/reports/ktlint/ktlint.json", "--reporter=plain"
 }
 
 tasks.register("ktlintFormat", JavaExec) {
@@ -352,11 +353,4 @@ tasks.register("listRepositories") {
         println "Repositories:"
         project.repositories.each { println "Name: " + it.name + "; url: " + it.url }
    }
-}
-
-tasks.register("testToolsDir", Exec) {
-    group = "verification"
-    description = "Run tests in the tools/ directory."
-    workingDir = "tools"
-    commandLine = ["python3", "test_list_compatible_dependency_versions.py"]
 }

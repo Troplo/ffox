@@ -94,8 +94,15 @@ public class TranslationsController {
     }
 
     /**
-     * Returns the preferred languages of the user in the following order: 1. App languages 2. Web
-     * requested languages 3. OS language
+     * Returns the preferred languages of the user in the following order:
+     *
+     * <p>1. Most recent target languages
+     *
+     * <p>2. Web requested languages
+     *
+     * <p>3. App languages
+     *
+     * <p>4. OS language
      *
      * @return a GeckoResult with a user's preferred language(s) or null or an exception
      */
@@ -1086,29 +1093,6 @@ public class TranslationsController {
 
       /** If the DOM has began visibly changing to the translated text. */
       public final @NonNull Boolean hasVisibleChange;
-
-      /**
-       * This constructor is deprecated, please use the [TranslationState] with [hasVisibleChange]
-       * parameter. This constructor will be removed in bug 1895275. Translation State constructor.
-       *
-       * @param requestedTranslationPair the language pair to translate
-       * @param error if an error occurred
-       * @param detectedLanguages detected language
-       * @param isEngineReady if the engine is ready for translations
-       */
-      @Deprecated
-      @DeprecationSchedule(version = 130, id = "translation-state-deprecated-constructor")
-      public TranslationState(
-          final @Nullable TranslationPair requestedTranslationPair,
-          final @Nullable String error,
-          final @Nullable DetectedLanguages detectedLanguages,
-          final @NonNull Boolean isEngineReady) {
-        this.requestedTranslationPair = requestedTranslationPair;
-        this.error = error;
-        this.detectedLanguages = detectedLanguages;
-        this.isEngineReady = isEngineReady;
-        this.hasVisibleChange = false;
-      }
 
       /**
        * Translation State constructor.

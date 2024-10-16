@@ -129,6 +129,7 @@ bool js::jit::CanInlineNativeCrossRealm(InlinableNative native) {
     case InlinableNative::MathPow:
     case InlinableNative::MathImul:
     case InlinableNative::MathFRound:
+    case InlinableNative::MathF16Round:
     case InlinableNative::MathTrunc:
     case InlinableNative::MathSign:
     case InlinableNative::MathSin:
@@ -255,6 +256,7 @@ bool js::jit::CanInlineNativeCrossRealm(InlinableNative native) {
     case InlinableNative::AtomicsOr:
     case InlinableNative::AtomicsXor:
     case InlinableNative::AtomicsIsLockFree:
+    case InlinableNative::BigInt:
     case InlinableNative::BigIntAsIntN:
     case InlinableNative::BigIntAsUintN:
     case InlinableNative::DataViewGetInt8:
@@ -263,6 +265,7 @@ bool js::jit::CanInlineNativeCrossRealm(InlinableNative native) {
     case InlinableNative::DataViewGetUint16:
     case InlinableNative::DataViewGetInt32:
     case InlinableNative::DataViewGetUint32:
+    case InlinableNative::DataViewGetFloat16:
     case InlinableNative::DataViewGetFloat32:
     case InlinableNative::DataViewGetFloat64:
     case InlinableNative::DataViewGetBigInt64:
@@ -273,6 +276,7 @@ bool js::jit::CanInlineNativeCrossRealm(InlinableNative native) {
     case InlinableNative::DataViewSetUint16:
     case InlinableNative::DataViewSetInt32:
     case InlinableNative::DataViewSetUint32:
+    case InlinableNative::DataViewSetFloat16:
     case InlinableNative::DataViewSetFloat32:
     case InlinableNative::DataViewSetFloat64:
     case InlinableNative::DataViewSetBigInt64:

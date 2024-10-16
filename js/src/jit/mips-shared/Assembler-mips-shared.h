@@ -683,10 +683,6 @@ class Operand {
   }
 };
 
-inline Imm32 Imm64::firstHalf() const { return low(); }
-
-inline Imm32 Imm64::secondHalf() const { return hi(); }
-
 static constexpr int32_t SliceSize = 1024;
 typedef js::jit::AssemblerBuffer<SliceSize, Instruction> MIPSBuffer;
 
@@ -1235,6 +1231,8 @@ class AssemblerMIPSShared : public AssemblerShared {
   }
   static bool SupportsUnalignedAccesses() { return true; }
   static bool SupportsFastUnalignedFPAccesses() { return false; }
+  static bool SupportsFloat64To16() { return false; }
+  static bool SupportsFloat32To16() { return false; }
 
   static bool HasRoundInstruction(RoundingMode mode) { return false; }
 

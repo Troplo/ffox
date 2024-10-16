@@ -170,9 +170,9 @@ void SVGImageFrame::DidSetComputedStyle(ComputedStyle* aOldStyle) {
   // TODO(heycam): We should handle aspect-ratio, like nsImageFrame does.
 }
 
-bool SVGImageFrame::IsSVGTransformed(gfx::Matrix* aOwnTransform,
-                                     gfx::Matrix* aFromParentTransform) const {
-  return SVGUtils::IsSVGTransformed(this, aOwnTransform, aFromParentTransform);
+bool SVGImageFrame::DoGetParentSVGTransforms(
+    gfx::Matrix* aFromParentTransform) const {
+  return SVGUtils::GetParentSVGTransforms(this, aFromParentTransform);
 }
 
 //----------------------------------------------------------------------
@@ -188,6 +188,17 @@ nsresult SVGImageFrame::AttributeChanged(int32_t aNameSpaceID,
       // recomposite.
       InvalidateFrame();
       return NS_OK;
+    }
+  }
+  if (aModType == dom::MutationEvent_Binding::REMOVAL &&
+      (aNameSpaceID == kNameSpaceID_None ||
+       aNameSpaceID == kNameSpaceID_XLink) &&
+      aAttribute == nsGkAtoms::href) {
+    auto* element = static_cast<SVGImageElement*>(GetContent());
+    if (aNameSpaceID == kNameSpaceID_None ||
+        !element->mStringAttributes[SVGImageElement::HREF].IsExplicitlySet()) {
+      mImageContainer = nullptr;
+      InvalidateFrame();
     }
   }
 

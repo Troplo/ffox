@@ -76,6 +76,7 @@ include "mozilla/dom/BindingIPCUtils.h";
 include "mozilla/dom/CSPMessageUtils.h";
 include "mozilla/dom/DocShellMessageUtils.h";
 include "mozilla/dom/FeaturePolicyUtils.h";
+include "mozilla/dom/GeolocationIPCUtils.h";
 include "mozilla/dom/MediaSessionIPCUtils.h";
 include "mozilla/dom/PageLoadEventUtils.h";
 include "mozilla/dom/ReferrerInfoUtils.h";
@@ -84,6 +85,7 @@ include "mozilla/ipc/ByteBufUtils.h";
 include "mozilla/ipc/TransportSecurityInfoUtils.h";
 include "mozilla/ipc/URIUtils.h";
 include "mozilla/net/NeckoMessageUtils.h";
+include "mozilla/widget/WidgetMessageUtils.h";
 include "mozilla/PermissionDelegateIPCUtils.h";
 
 [RefCounted] using class nsIDOMGeoPosition from "nsGeoPositionIPCSerialiser.h";
@@ -116,6 +118,8 @@ using mozilla::Telemetry::ScalarAction from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::KeyedScalarAction from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::DynamicScalarDefinition from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::ChildEventData from "mozilla/TelemetryComms.h";
+using mozilla::dom::geolocation::SystemGeolocationPermissionBehavior from "mozilla/dom/GeolocationIPCUtils.h";
+using mozilla::dom::geolocation::GeolocationPermissionStatus from "mozilla/dom/GeolocationIPCUtils.h";
 
 #if defined(XP_WIN)
 [MoveOnly] using mozilla::UntrustedModulesData from "mozilla/UntrustedModulesData.h";
@@ -163,6 +167,7 @@ using mozilla::PerfStats::MetricMask from "mozilla/PerfStats.h";
 using nsIDNSService::ResolverMode from "nsIDNSService.h";
 using mozilla::dom::UserActivation::Modifiers from "mozilla/dom/UserActivation.h";
 using mozilla::dom::PrivateAttributionImpressionType from "mozilla/dom/PrivateAttributionIPCUtils.h";
+using nsIClipboard::ClipboardType from "nsIClipboard.h";
 
 union ChromeRegistryItem
 {
@@ -665,6 +670,9 @@ child:
     async ClearStyleSheetCache(nullable nsIPrincipal? aForPrincipal,
                                nsCString? aBaseDomain);
 
+    async ClearScriptCache(nullable nsIPrincipal? aForPrincipal,
+                           nsCString? aBaseDomain);
+
     async SetOffline(bool offline);
     async SetConnectivity(bool connectivity);
     async SetCaptivePortalState(int32_t aState);
@@ -1130,7 +1138,8 @@ parent:
                           nullable nsIPrincipal redirectPrincipal,
                           MaybeDiscardedBrowsingContext browsingContext,
                           bool wasExternallyTriggered,
-                          bool hasValidUserGestureActivation);
+                          bool hasValidUserGestureActivation,
+                          bool newWindowTarget);
     async ExtProtocolChannelConnectParent(uint64_t registrarId);
 
     sync SyncMessage(nsString aMessage, ClonedMessageData aData)
@@ -1178,8 +1187,6 @@ parent:
     //
     // Pass true for aForceSave to always save this content to disk, regardless of
     // nsIMIMEInfo and other such influences.
-    // Pass true for aShouldCloseWindow to specify that aContext was opened specifically
-    // for this load, and should be closed once we've handled it.
     async PExternalHelperApp(nullable nsIURI uri,
                              LoadInfoArgs loadInfoArgs,
                              nsCString aMimeContentType,
@@ -1190,8 +1197,7 @@ parent:
                              int64_t aContentLength,
                              bool aWasFileChannel,
                              nullable nsIURI aReferrer,
-                             MaybeDiscardedBrowsingContext aContext,
-                             bool aShouldCloseWindow);
+                             MaybeDiscardedBrowsingContext aContext);
 
     async PHandlerService();
 
@@ -1200,39 +1206,39 @@ parent:
     async SetGeolocationHigherAccuracy(bool enable);
 
     async ConsoleMessage(nsString message);
-    async ScriptErrorWithStack(nsString message, nsString sourceName, nsString sourceLine,
+    async ScriptErrorWithStack(nsString message, nsCString sourceName,
                                uint32_t lineNumber, uint32_t colNumber, uint32_t flags,
                                nsCString category, bool isFromPrivateWindow,
                                bool isFromChromeContext, ClonedMessageData stack);
 
     // Places the items within dataTransfer on the clipboard.
     async SetClipboard(IPCTransferable aTransferable,
-                       int32_t aWhichClipboard, MaybeDiscardedWindowContext aRequestingWindowContext);
+                       ClipboardType aWhichClipboard, MaybeDiscardedWindowContext aRequestingWindowContext);
 
     // Given a list of supported types, returns the clipboard data for the
     // first type that matches.
     // aRequestingWindowContext is the window that is requesting the clipboard,
     // which is used for content analysis.
-    sync GetClipboard(nsCString[] aTypes, int32_t aWhichClipboard,
+    sync GetClipboard(nsCString[] aTypes, ClipboardType aWhichClipboard,
                       MaybeDiscardedWindowContext aRequestingWindowContext)
         returns (IPCTransferableDataOrError transferableDataOrError);
 
     // Requests getting data from clipboard.
-    async GetClipboardDataSnapshot(nsCString[] aTypes, int32_t aWhichClipboard,
+    async GetClipboardDataSnapshot(nsCString[] aTypes, ClipboardType aWhichClipboard,
                                    MaybeDiscardedWindowContext aRequestingWindowContext,
                                    nsIPrincipal aRequestingPrincipal)
         returns (ClipboardReadRequestOrError aClipboardReadRequestOrError);
 
     // Requests getting data from clipboard.
-    sync GetClipboardDataSnapshotSync(nsCString[] aTypes, int32_t aWhichClipboard,
+    sync GetClipboardDataSnapshotSync(nsCString[] aTypes, ClipboardType aWhichClipboard,
                                       MaybeDiscardedWindowContext aRequestingWindowContext)
         returns (ClipboardReadRequestOrError aClipboardReadRequestOrError);
 
     // Clears the clipboard.
-    async EmptyClipboard(int32_t aWhichClipboard);
+    async EmptyClipboard(ClipboardType aWhichClipboard);
 
     // Returns true if data of one of the specified types is on the clipboard.
-    sync ClipboardHasType(nsCString[] aTypes, int32_t aWhichClipboard)
+    sync ClipboardHasType(nsCString[] aTypes, ClipboardType aWhichClipboard)
         returns (bool hasType);
 
     /**
@@ -1245,7 +1251,7 @@ parent:
      *         to possibly bypass Content Analysis if a set clipboard and get clipboard
      *         operation are done on the same page.
      */
-    async PClipboardWriteRequest(int32_t aClipboardType, MaybeDiscardedWindowContext aSettingWindowContext);
+    async PClipboardWriteRequest(ClipboardType aClipboardType, MaybeDiscardedWindowContext aSettingWindowContext);
 
     sync GetIconForExtension(nsCString aFileExt, uint32_t aIconSize)
         returns (uint8_t[] bits);
@@ -1796,7 +1802,7 @@ parent:
                     bool aUserActivation) returns(int32_t? requestedIndex);
 
     async BlobURLDataRequest(nsCString aBlobURL,
-                             nullable nsIPrincipal aTriggeringPrincipal,
+                             nsIPrincipal aTriggeringPrincipal,
                              nullable nsIPrincipal aLoadingPrincipal,
                              OriginAttributes aOriginAttributes,
                              uint64_t aInnerWindowId,
@@ -1822,7 +1828,7 @@ parent:
     [LazySend] async CleanupPendingLoadState(uint64_t aLoadIdentifier);
 
 both:
-    async ScriptError(nsString message, nsString sourceName, nsString sourceLine,
+    async ScriptError(nsString message, nsCString sourceName,
                       uint32_t lineNumber, uint32_t colNumber, uint32_t flags,
                       nsCString category, bool isFromPrivateWindow, uint64_t innerWindowId,
                       bool isFromChromeContext);
@@ -1965,6 +1971,15 @@ parent:
     // implementation in ContentParent::RecvGetSystemIcon for details.
     async GetSystemIcon(nullable nsIURI aURI) returns (nsresult aResult, ByteBuf? aData);
 
+    // Returns the status of the geolocation permission on this system.
+    // May not be accurate if the information is not known.
+    async GetSystemGeolocationPermissionBehavior() returns (SystemGeolocationPermissionBehavior permission);
+
+    // Opens system geolocation settings and posts a modal dialog dialog
+    // to the tab that requested geolocation.  Returns permission status
+    // after user has granted or canceled permission.
+    async RequestGeolocationPermissionFromUser(MaybeDiscardedBrowsingContext aBrowsingContext) returns (GeolocationPermissionStatus aStatus);
+
 #ifdef FUZZING_SNAPSHOT
     // Used by the child process to signal that it is ready to start fuzzing.
     // This can in particular be used to wait for a particular event in a
@@ -1976,9 +1991,9 @@ parent:
                          PrivateAttributionImpressionType aType,
                          uint32_t aIndex, nsString aAd, nsCString aTargetHost);
 
-  async AttributionConversion(nsCString aSourceHost, nsString aTask,
+  async AttributionConversion(nsCString aTargetHost, nsString aTask,
                               uint32_t aHistogramSize,
-                              uint32_t? aLoopbackDays,
+                              uint32_t? aLookbackDays,
                               PrivateAttributionImpressionType? aImpressionType,
                               nsString[] aAds,
                               nsCString[] aImpressionSourceHosts);

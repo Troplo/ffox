@@ -34,6 +34,8 @@ import {
   isSourceMapIgnoreListEnabled,
   isSourceOnSourceMapIgnoreList,
   isMapScopesEnabled,
+  getSelectedTraceIndex,
+  getShouldScrollToSelectedLocation,
 } from "../../selectors/index";
 
 // Redux actions
@@ -122,6 +124,7 @@ class Editor extends PureComponent {
       highlightedLineRange: PropTypes.object,
       isSourceOnIgnoreList: PropTypes.bool,
       mapScopesEnabled: PropTypes.bool,
+      shouldScrollToSelectedLocation: PropTypes.bool,
     };
   }
 
@@ -138,38 +141,25 @@ class Editor extends PureComponent {
   UNSAFE_componentWillReceiveProps(nextProps) {
     let { editor } = this.state;
 
-    if (!editor && nextProps.selectedSource) {
+    if (!editor) {
+      // See Bug 1913061
+      if (!nextProps.selectedSource) {
+        return;
+      }
       editor = this.setupEditor();
     }
-
-    const shouldUpdateText =
-      nextProps.selectedSource !== this.props.selectedSource ||
-      nextProps.selectedSourceTextContent?.value !==
-        this.props.selectedSourceTextContent?.value ||
-      nextProps.symbols !== this.props.symbols;
-
-    const shouldScroll =
-      nextProps.selectedLocation &&
-      this.shouldScrollToLocation(nextProps, editor);
 
     if (!features.codemirrorNext) {
       const shouldUpdateSize =
         nextProps.startPanelSize !== this.props.startPanelSize ||
         nextProps.endPanelSize !== this.props.endPanelSize;
 
-      if (shouldUpdateText || shouldUpdateSize || shouldScroll) {
-        startOperation();
-        if (shouldUpdateText) {
-          this.setText(nextProps, editor);
-        }
-        if (shouldUpdateSize) {
-          editor.codeMirror.setSize();
-        }
-        if (shouldScroll) {
-          this.scrollToLocation(nextProps, editor);
-        }
-        endOperation();
+      startOperation();
+      if (shouldUpdateSize) {
+        editor.codeMirror.setSize();
       }
+      this.setTextContent(nextProps, editor);
+      endOperation();
 
       if (this.props.selectedSource != nextProps.selectedSource) {
         this.props.updateViewport();
@@ -178,21 +168,39 @@ class Editor extends PureComponent {
       }
     } else {
       // For codemirror 6
-      // eslint-disable-next-line no-lonely-if
-      if (shouldUpdateText) {
-        this.setText(nextProps, editor);
-      }
-
-      if (shouldScroll) {
-        this.scrollToLocation(nextProps, editor);
-      }
+      this.setTextContent(nextProps, editor);
     }
   }
 
-  onEditorUpdated = v => {
-    if (v.docChanged || v.geometryChanged) {
-      resizeToggleButton(v.view.dom.querySelector(".cm-gutters").clientWidth);
+  async setTextContent(nextProps, editor) {
+    const shouldUpdateText =
+      nextProps.selectedSource !== this.props.selectedSource ||
+      nextProps.selectedSourceTextContent?.value !==
+        this.props.selectedSourceTextContent?.value ||
+      nextProps.symbols !== this.props.symbols;
+
+    const shouldScroll =
+      nextProps.selectedLocation &&
+      nextProps.shouldScrollToSelectedLocation &&
+      this.shouldScrollToLocation(nextProps);
+
+    if (shouldUpdateText) {
+      await this.setText(nextProps, editor);
+    }
+
+    if (shouldScroll) {
+      this.scrollToLocation(nextProps, editor);
+    }
+  }
+
+  onEditorUpdated = viewUpdate => {
+    if (viewUpdate.docChanged || viewUpdate.geometryChanged) {
+      resizeToggleButton(
+        viewUpdate.view.dom.querySelector(".cm-gutters").clientWidth
+      );
       this.props.updateViewport();
+    } else if (viewUpdate.selectionSet) {
+      this.onCursorChange();
     }
   };
 
@@ -229,9 +237,8 @@ class Editor extends PureComponent {
       const codeMirrorWrapper = codeMirror.getWrapperElement();
       // Set code editor wrapper to be focusable
       codeMirrorWrapper.tabIndex = 0;
-      codeMirrorWrapper.addEventListener("keydown", e => this.onKeyDown(e));
       codeMirrorWrapper.addEventListener("click", e => this.onClick(e));
-      codeMirrorWrapper.addEventListener("mouseover", onMouseOver(codeMirror));
+      codeMirrorWrapper.addEventListener("mouseover", onMouseOver(editor));
       codeMirrorWrapper.addEventListener("contextmenu", event =>
         this.openMenu(event)
       );
@@ -365,8 +372,8 @@ class Editor extends PureComponent {
 
         const lines = [];
         for (const range of blackboxedRanges[selectedSource.url]) {
-          for (let i = range.start.line; i <= range.end.line; i++) {
-            lines.push(i);
+          for (let line = range.start.line; line <= range.end.line; line++) {
+            lines.push({ line });
           }
         }
 
@@ -410,11 +417,11 @@ class Editor extends PureComponent {
       return null;
     }
 
-    const selectionCursor = editor.getSelectionCursor().from;
+    const selectionCursor = editor.getSelectionCursor();
     return {
-      line: toSourceLine(selectedSource.id, selectionCursor.line),
+      line: toSourceLine(selectedSource.id, selectionCursor.from.line),
       // Add one to column for correct position in editor.
-      column: selectionCursor.ch + 1,
+      column: selectionCursor.from.ch + 1,
     };
   }
 
@@ -471,23 +478,6 @@ class Editor extends PureComponent {
   }
 
   onEditorScroll = debounce(this.props.updateViewport, 75);
-
-  onKeyDown(e) {
-    const { codeMirror } = this.state.editor;
-    const { key, target } = e;
-    const codeWrapper = codeMirror.getWrapperElement();
-    const textArea = codeWrapper.querySelector("textArea");
-
-    if (key === "Escape" && target == textArea) {
-      e.stopPropagation();
-      e.preventDefault();
-      codeWrapper.focus();
-    } else if (key === "Enter" && target == codeWrapper) {
-      e.preventDefault();
-      // Focus into editor's text area
-      textArea.focus();
-    }
-  }
 
   /*
    * The default Esc command is overridden in the CodeMirror keymap to allow
@@ -597,15 +587,14 @@ class Editor extends PureComponent {
    * CodeMirror event handler, called whenever the cursor moves
    * for user-driven or programatic reasons.
    */
-  onCursorChange = event => {
-    const { line, ch } = event.doc.getCursor();
+  onCursorChange = () => {
+    const { editor } = this.state;
+    const selectionCursor = editor.getSelectionCursor();
+    const { line, ch } = selectionCursor.to;
     this.props.selectLocation(
       createLocation({
         source: this.props.selectedSource,
-        // CodeMirror cursor location is all 0-based.
-        // Whereast in DevTools frontend and backend,
-        // only colunm is 0-based, the line is 1 based.
-        line: line + 1,
+        line: toSourceLine(this.props.selectedSource.id, line),
         column: ch,
       }),
       {
@@ -615,6 +604,9 @@ class Editor extends PureComponent {
 
         // Avoid highlighting the selected line
         highlight: false,
+
+        // Avoid scrolling to the selected line, it's already visible
+        scroll: false,
       }
     );
   };
@@ -741,7 +733,7 @@ class Editor extends PureComponent {
     editor.scrollTo(line, column);
   }
 
-  setText(props, editor) {
+  async setText(props, editor) {
     const { selectedSource, selectedSourceTextContent, symbols } = props;
 
     if (!editor) {
@@ -779,7 +771,10 @@ class Editor extends PureComponent {
         symbols
       );
     } else {
-      editor.setText(selectedSourceTextContent.value.value);
+      await editor.setText(
+        selectedSourceTextContent.value.value,
+        selectedSource.id
+      );
     }
   }
 
@@ -853,6 +848,7 @@ class Editor extends PureComponent {
       selectedSource,
       conditionalPanelLocation,
       isPaused,
+      isTraceSelected,
       inlinePreviewEnabled,
       highlightedLineRange,
       blackboxedRanges,
@@ -898,7 +894,7 @@ class Editor extends PureComponent {
               selectedSource,
             })
           : null,
-        isPaused &&
+        (isPaused || isTraceSelected) &&
           inlinePreviewEnabled &&
           (!selectedSource.isOriginal ||
             selectedSource.isPrettyPrinted ||
@@ -966,7 +962,7 @@ class Editor extends PureComponent {
       React.createElement(ColumnBreakpoints, {
         editor,
       }),
-      isPaused &&
+      (isPaused || isTraceSelected) &&
         inlinePreviewEnabled &&
         (!selectedSource.isOriginal ||
           (selectedSource.isOriginal && selectedSource.isPrettyPrinted) ||
@@ -1034,6 +1030,7 @@ const mapStateToProps = state => {
     conditionalPanelLocation: getConditionalPanelLocation(state),
     symbols: getSymbols(state, selectedLocation),
     isPaused: getIsCurrentThreadPaused(state),
+    isTraceSelected: getSelectedTraceIndex(state) != null,
     skipPausing: getSkipPausing(state),
     inlinePreviewEnabled: getInlinePreview(state),
     blackboxedRanges: getBlackBoxRanges(state),
@@ -1042,6 +1039,7 @@ const mapStateToProps = state => {
     mapScopesEnabled: selectedSource?.isOriginal
       ? isMapScopesEnabled(state)
       : null,
+    shouldScrollToSelectedLocation: getShouldScrollToSelectedLocation(state),
   };
 };
 

@@ -60,7 +60,7 @@ static const LABELS_AVIF_YUV_COLOR_SPACE gColorSpaceLabel[] = {
     LABELS_AVIF_YUV_COLOR_SPACE::BT601, LABELS_AVIF_YUV_COLOR_SPACE::BT709,
     LABELS_AVIF_YUV_COLOR_SPACE::BT2020, LABELS_AVIF_YUV_COLOR_SPACE::identity};
 
-static MaybeIntSize GetImageSize(const Mp4parseAvifInfo& aInfo) {
+static Maybe<IntSize> GetImageSize(const Mp4parseAvifInfo& aInfo) {
   // Note this does not take cropping via CleanAperture (clap) into account
   const struct Mp4parseImageSpatialExtents* ispe = aInfo.spatial_extents;
 
@@ -1632,7 +1632,7 @@ nsAVIFDecoder::DecodeResult nsAVIFDecoder::DoDecodeInternal(
     orientation = Orientation{};
   }
 
-  MaybeIntSize ispeImageSize = GetImageSize(parsedInfo);
+  Maybe<IntSize> ispeImageSize = GetImageSize(parsedInfo);
 
   bool sendDecodeTelemetry = IsMetadataDecode();
   if (ispeImageSize.isSome()) {
@@ -1906,29 +1906,28 @@ nsAVIFDecoder::DecodeResult nsAVIFDecoder::DoDecodeInternal(
     return AsVariant(NonDecoderResult::OutOfMemory);
   }
 
+  PremultFunc premultOp = nullptr;
   if (decodedData->mAlpha) {
     const auto wantPremultiply =
         !bool(GetSurfaceFlags() & SurfaceFlags::NO_PREMULTIPLY_ALPHA);
     const bool& hasPremultiply = decodedData->mAlpha->mPremultiplied;
 
-    PremultFunc premultOp = nullptr;
     if (wantPremultiply && !hasPremultiply) {
       premultOp = libyuv::ARGBAttenuate;
     } else if (!wantPremultiply && hasPremultiply) {
       premultOp = libyuv::ARGBUnattenuate;
     }
+  }
 
+  MOZ_LOG(sAVIFLog, LogLevel::Debug,
+          ("[this=%p] calling gfx::ConvertYCbCrToRGB32 premultOp: %p", this,
+           premultOp));
+  nsresult result = gfx::ConvertYCbCrToRGB32(*decodedData, format, rgbBuf.get(),
+                                             rgbStride.value(), premultOp);
+  if (!NS_SUCCEEDED(result)) {
     MOZ_LOG(sAVIFLog, LogLevel::Debug,
-            ("[this=%p] calling gfx::ConvertYCbCrAToARGB premultOp: %p", this,
-             premultOp));
-    gfx::ConvertYCbCrAToARGB(*decodedData, *decodedData->mAlpha, format,
-                             rgbSize, rgbBuf.get(), rgbStride.value(),
-                             premultOp);
-  } else {
-    MOZ_LOG(sAVIFLog, LogLevel::Debug,
-            ("[this=%p] calling gfx::ConvertYCbCrToRGB", this));
-    gfx::ConvertYCbCrToRGB(*decodedData, format, rgbSize, rgbBuf.get(),
-                           rgbStride.value());
+            ("[this=%p] ConvertYCbCrToRGB32 failure", this));
+    return AsVariant(NonDecoderResult::ConvertYCbCrFailure);
   }
 
   MOZ_LOG(sAVIFLog, LogLevel::Debug,
@@ -2215,6 +2214,12 @@ void nsAVIFDecoder::RecordDecodeResultTelemetry(
         AccumulateCategorical(LABELS_AVIF_DECODE_RESULT::no_samples);
         mozilla::glean::avif::decode_result
             .EnumGet(glean::avif::DecodeResultLabel::eNoSamples)
+            .Add();
+        return;
+      case NonDecoderResult::ConvertYCbCrFailure:
+        AccumulateCategorical(LABELS_AVIF_DECODE_RESULT::ConvertYCbCr_failure);
+        mozilla::glean::avif::decode_result
+            .EnumGet(glean::avif::DecodeResultLabel::eConvertycbcrFailure)
             .Add();
         return;
     }

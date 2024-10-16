@@ -42,6 +42,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.fenix.GleanMetrics.Events
+import org.mozilla.fenix.GleanMetrics.NavigationBar
 import org.mozilla.fenix.GleanMetrics.ReaderMode
 import org.mozilla.fenix.GleanMetrics.Translations
 import org.mozilla.fenix.HomeActivity
@@ -53,6 +54,7 @@ import org.mozilla.fenix.browser.browsingmode.SimpleBrowsingModeManager
 import org.mozilla.fenix.browser.readermode.ReaderModeController
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.AppAction.SnackbarAction
+import org.mozilla.fenix.components.menu.MenuAccessPoint
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.helpers.FenixRobolectricTestRunner
@@ -481,6 +483,11 @@ class DefaultBrowserToolbarControllerTest {
                 BrowserFragmentDirections.actionGlobalHome(focusOnAddressBar = true),
             )
         }
+
+        assertNotNull(NavigationBar.browserNewTabTapped.testGetValue())
+        val recordedEvents = NavigationBar.browserNewTabTapped.testGetValue()!!
+        assertEquals(1, recordedEvents.size)
+        assertEquals(null, recordedEvents.single().extra)
     }
 
     @Test
@@ -498,6 +505,51 @@ class DefaultBrowserToolbarControllerTest {
 
             navController.navigate(
                 BrowserFragmentDirections.actionGlobalHome(focusOnAddressBar = true),
+            )
+        }
+    }
+
+    @Test
+    fun `WHEN new tab button is long clicked THEN record the telemetry event`() {
+        val controller = createController()
+        controller.handleNewTabButtonLongClick()
+
+        assertNotNull(NavigationBar.browserNewTabLongTapped.testGetValue())
+        val recordedEvents = NavigationBar.browserNewTabLongTapped.testGetValue()!!
+        assertEquals(1, recordedEvents.size)
+        assertEquals(null, recordedEvents.single().extra)
+    }
+
+    @Test
+    fun `GIVEN that the menu access point is not a custom tab WHEN menu button is clicked THEN handle menu navigation`() {
+        val controller = createController()
+        val accessPoint = MenuAccessPoint.Browser
+
+        controller.handleMenuButtonClicked(accessPoint)
+
+        verify {
+            navController.navigate(
+                BrowserFragmentDirections.actionGlobalMenuDialogFragment(
+                    accesspoint = accessPoint,
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `GIVEN that the menu access point is a custom tab WHEN menu button is clicked THEN handle menu navigation`() {
+        val controller = createController()
+        val accessPoint = MenuAccessPoint.External
+        val customTabSessionId = "1"
+
+        controller.handleMenuButtonClicked(accessPoint, customTabSessionId)
+
+        verify {
+            navController.navigate(
+                BrowserFragmentDirections.actionGlobalMenuDialogFragment(
+                    accesspoint = accessPoint,
+                    customTabSessionId = customTabSessionId,
+                ),
             )
         }
     }

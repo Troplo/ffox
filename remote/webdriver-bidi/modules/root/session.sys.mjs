@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { Module } from "chrome://remote/content/shared/messagehandler/Module.sys.mjs";
+import { RootBiDiModule } from "chrome://remote/content/webdriver-bidi/modules/RootBiDiModule.sys.mjs";
 
 const lazy = {};
 
@@ -13,12 +13,13 @@ ChromeUtils.defineESModuleGetters(lazy, {
   error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
   getWebDriverSessionById:
     "chrome://remote/content/shared/webdriver/Session.sys.mjs",
+  pprint: "chrome://remote/content/shared/Format.sys.mjs",
   RootMessageHandler:
     "chrome://remote/content/shared/messagehandler/RootMessageHandler.sys.mjs",
   TabManager: "chrome://remote/content/shared/TabManager.sys.mjs",
 });
 
-class SessionModule extends Module {
+class SessionModule extends RootBiDiModule {
   #browsingContextIdEventMap;
   #globalEventSet;
 
@@ -134,16 +135,18 @@ class SessionModule extends Module {
   #assertNonEmptyArrayWithStrings(array, variableName) {
     lazy.assert.array(
       array,
-      `Expected "${variableName}" to be an array, got ${array}`
+      `Expected "${variableName}" to be an array, ` + lazy.pprint`got ${array}`
     );
     lazy.assert.that(
       array => !!array.length,
-      `Expected "${variableName}" array to have at least one item`
+      `Expected "${variableName}" array to have at least one item, ` +
+        lazy.pprint`got ${array}`
     )(array);
     array.forEach(item => {
       lazy.assert.string(
         item,
-        `Expected elements of "${variableName}" to be a string, got ${item}`
+        `Expected elements of "${variableName}" to be a string, ` +
+          lazy.pprint`got ${item}`
       );
     });
   }

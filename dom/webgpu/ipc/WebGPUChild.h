@@ -40,7 +40,8 @@ struct PipelineCreationContext {
 };
 
 struct DeviceRequest {
-  RawId mId = 0;
+  RawId mDeviceId = 0;
+  RawId mQueueId = 0;
   RefPtr<DevicePromise> mPromise;
   // Note: we could put `ffi::WGPULimits` in here as well,
   //  but we don't want to #include ffi stuff in this header
@@ -60,8 +61,8 @@ class WebGPUChild final : public PWebGPUChild, public SupportsWeakPtr {
 
   RefPtr<AdapterPromise> InstanceRequestAdapter(
       const dom::GPURequestAdapterOptions& aOptions);
-  Maybe<DeviceRequest> AdapterRequestDevice(RawId aSelfId,
-                                            const ffi::WGPUDeviceDescriptor&);
+  Maybe<DeviceRequest> AdapterRequestDevice(
+      RawId aSelfId, const ffi::WGPUFfiDeviceDescriptor&);
   RawId RenderBundleEncoderFinish(ffi::WGPURenderBundleEncoder& aEncoder,
                                   RawId aDeviceId,
                                   const dom::GPURenderBundleDescriptor& aDesc);

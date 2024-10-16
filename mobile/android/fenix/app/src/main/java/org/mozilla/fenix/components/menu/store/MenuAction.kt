@@ -4,6 +4,7 @@
 
 package org.mozilla.fenix.components.menu.store
 
+import android.app.PendingIntent
 import mozilla.components.feature.addons.Addon
 import mozilla.components.lib.state.Action
 import mozilla.components.service.fxa.manager.AccountState
@@ -26,6 +27,16 @@ sealed class MenuAction : Action {
      * [MenuAction] dispatched when a bookmark is to be added.
      */
     data object AddBookmark : MenuAction()
+
+    /**
+     * [MenuAction] dispatched when reader view should be toggled active or dismiss.
+     */
+    data object ToggleReaderView : MenuAction()
+
+    /**
+     * [MenuAction] dispatched when reader view customization controls should be displayed.
+     */
+    data object CustomizeReaderView : MenuAction()
 
     /**
      * [MenuAction] dispatched when a bookmark state is updated.
@@ -57,6 +68,31 @@ sealed class MenuAction : Action {
     data object DeleteBrowsingDataAndQuit : MenuAction()
 
     /**
+     * [MenuAction] dispatched when a site is to be opened in an external app.
+     */
+    data object OpenInApp : MenuAction()
+
+    /**
+     * [MenuAction] dispatched when a custom tab is to be opened in the browser.
+     */
+    data object OpenInFirefox : MenuAction()
+
+    /**
+     * [MenuAction] dispatched to launch find in page feature for the current site.
+     */
+    data object FindInPage : MenuAction()
+
+    /**
+     * [MenuAction] dispatched to show the menu CFR.
+     */
+    data object ShowCFR : MenuAction()
+
+    /**
+     * [MenuAction] dispatched when the menu CFR is dismissed.
+     */
+    data object DismissCFR : MenuAction()
+
+    /**
      * [MenuAction] dispatched when the extension state is updated.
      *
      * @property recommendedAddons The recommended [Addon]s to suggest.
@@ -71,6 +107,27 @@ sealed class MenuAction : Action {
      * @property addon The [Addon] to install.
      */
     data class InstallAddon(val addon: Addon) : MenuAction()
+
+    /**
+     * [MenuAction] dispatched when a custom item is tapped in the custom tab menu.
+     *
+     * @property intent The [PendingIntent] from the custom menu item.
+     * @property url The [String] URL of the current custom tab.
+     */
+    data class CustomMenuItemAction(
+        val intent: PendingIntent,
+        val url: String?,
+    ) : MenuAction()
+
+    /**
+     * [MenuAction] dispatched when requesting to switch to the desktop version of the current page.
+     */
+    data object RequestDesktopSite : MenuAction()
+
+    /**
+     * [MenuAction] dispatched when requesting to switch to the mobile version of the current page.
+     */
+    data object RequestMobileSite : MenuAction()
 
     /**
      * [MenuAction] dispatched when a navigation event occurs for a specific destination.
@@ -186,6 +243,11 @@ sealed class MenuAction : Action {
          * [Navigate] action dispatched when navigating to the AMO page.
          */
         data object DiscoverMoreExtensions : Navigate()
+
+        /**
+         * [Navigate] action dispatched when navigating to the SUMO page for installing add-ons.
+         */
+        data object ExtensionsLearnMore : Navigate()
 
         /**
          * [Navigate] action dispatched when navigating to the new tab.

@@ -10,7 +10,9 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/HTMLMediaElement.h"
+#include "mozilla/dom/VideoFrameProvider.h"
 #include "mozilla/StaticPrefs_media.h"
+#include "ImageTypes.h"
 #include "Units.h"
 
 namespace mozilla {
@@ -188,6 +190,29 @@ class HTMLVideoElement final : public HTMLMediaElement {
   // SetVisualCloneTarget() instead.
   RefPtr<HTMLVideoElement> mVisualCloneSource;
 
+ private:
+  void ResetState() override;
+
+  bool HasPendingCallbacks() const final {
+    return !mVideoFrameRequestManager.IsEmpty();
+  }
+
+  VideoFrameRequestManager mVideoFrameRequestManager;
+  layers::ContainerFrameID mLastPresentedFrameID =
+      layers::kContainerFrameID_Invalid;
+
+ public:
+  uint32_t RequestVideoFrameCallback(VideoFrameRequestCallback& aCallback,
+                                     ErrorResult& aRv);
+  void CancelVideoFrameCallback(uint32_t aHandle);
+  void TakeVideoFrameRequestCallbacks(const TimeStamp& aNowTime,
+                                      const Maybe<TimeStamp>& aNextTickTime,
+                                      VideoFrameCallbackMetadata& aMd,
+                                      nsTArray<VideoFrameRequest>& aCallbacks);
+  bool IsVideoFrameCallbackCancelled(uint32_t aHandle);
+  void FinishedVideoFrameRequestCallbacks();
+
+ private:
   static void MapAttributesIntoRule(MappedDeclarationsBuilder&);
 
   static bool IsVideoStatsEnabled();

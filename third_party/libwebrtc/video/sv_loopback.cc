@@ -20,6 +20,7 @@
 #include "api/test/simulated_network.h"
 #include "api/test/video_quality_test_fixture.h"
 #include "api/transport/bitrate_settings.h"
+#include "api/units/data_rate.h"
 #include "api/video_codecs/video_codec.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
@@ -584,7 +585,7 @@ void Loopback() {
   BuiltInNetworkBehaviorConfig pipe_config;
   pipe_config.loss_percent = LossPercent();
   pipe_config.avg_burst_loss_length = AvgBurstLossLength();
-  pipe_config.link_capacity_kbps = LinkCapacityKbps();
+  pipe_config.link_capacity = DataRate::KilobitsPerSec(LinkCapacityKbps());
   pipe_config.queue_length_packets = QueueSize();
   pipe_config.queue_delay_ms = AvgPropagationDelayMs();
   pipe_config.delay_standard_deviation_ms = StdPropagationDelayMs();
@@ -664,13 +665,15 @@ void Loopback() {
     params.ss[screenshare_idx].infer_streams = true;
   }
 
+  VideoQualityTest fixture(nullptr);
+
   std::vector<std::string> stream_descriptors;
   stream_descriptors.push_back(ScreenshareStream0());
   stream_descriptors.push_back(ScreenshareStream1());
   std::vector<std::string> SL_descriptors;
   SL_descriptors.push_back(ScreenshareSL0());
   SL_descriptors.push_back(ScreenshareSL1());
-  VideoQualityTest::FillScalabilitySettings(
+  fixture.FillScalabilitySettings(
       &params, screenshare_idx, stream_descriptors, ScreenshareNumStreams(),
       ScreenshareSelectedStream(), ScreenshareNumSpatialLayers(),
       ScreenshareSelectedSL(), ScreenshareInterLayerPred(), SL_descriptors);
@@ -681,16 +684,15 @@ void Loopback() {
   SL_descriptors.clear();
   SL_descriptors.push_back(VideoSL0());
   SL_descriptors.push_back(VideoSL1());
-  VideoQualityTest::FillScalabilitySettings(
-      &params, camera_idx, stream_descriptors, VideoNumStreams(),
-      VideoSelectedStream(), VideoNumSpatialLayers(), VideoSelectedSL(),
-      VideoInterLayerPred(), SL_descriptors);
+  fixture.FillScalabilitySettings(&params, camera_idx, stream_descriptors,
+                                  VideoNumStreams(), VideoSelectedStream(),
+                                  VideoNumSpatialLayers(), VideoSelectedSL(),
+                                  VideoInterLayerPred(), SL_descriptors);
 
-  auto fixture = std::make_unique<VideoQualityTest>(nullptr);
   if (DurationSecs()) {
-    fixture->RunWithAnalyzer(params);
+    fixture.RunWithAnalyzer(params);
   } else {
-    fixture->RunWithRenderers(params);
+    fixture.RunWithRenderers(params);
   }
 }
 }  // namespace webrtc

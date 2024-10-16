@@ -37,7 +37,7 @@ use style::font_face::{self, FontFaceSourceFormat, FontFaceSourceListComponent, 
 use style::gecko::arc_types::{
     LockedCounterStyleRule, LockedCssRules, LockedDeclarationBlock, LockedFontFaceRule,
     LockedImportRule, LockedKeyframe, LockedKeyframesRule, LockedMediaList, LockedPageRule,
-    LockedStyleRule,
+    LockedPositionTryRule, LockedStyleRule,
 };
 use style::gecko::data::{
     AuthorStyles, GeckoStyleSheet, PerDocumentStyleData, PerDocumentStyleDataImpl,
@@ -136,8 +136,9 @@ use style::stylesheets::{
     CssRules, CssRulesHelpers, DocumentRule, FontFaceRule, FontFeatureValuesRule,
     FontPaletteValuesRule, ImportRule, KeyframesRule, LayerBlockRule, LayerStatementRule,
     MarginRule, MediaRule, NamespaceRule, Origin, OriginSet, PagePseudoClassFlags, PageRule,
-    PropertyRule, SanitizationData, SanitizationKind, ScopeRule, StartingStyleRule, StyleRule,
-    StylesheetContents, StylesheetLoader as StyleStylesheetLoader, SupportsRule, UrlExtraData,
+    PositionTryRule, PropertyRule, SanitizationData, SanitizationKind, ScopeRule,
+    StartingStyleRule, StyleRule, StylesheetContents, StylesheetLoader as StyleStylesheetLoader,
+    SupportsRule, UrlExtraData,
 };
 use style::stylist::{add_size_of_ua_cache, AuthorStylesEnabled, RuleInclusion, Stylist};
 use style::thread_state;
@@ -937,10 +938,9 @@ pub unsafe extern "C" fn Servo_AnimationValue_Transform(
 
 #[no_mangle]
 pub unsafe extern "C" fn Servo_AnimationValue_OffsetPath(
-    p: &computed::motion::OffsetPath,
+    p: &computed::OffsetPath,
 ) -> Strong<AnimationValue> {
-    use style::values::animated::ToAnimatedValue;
-    Arc::new(AnimationValue::OffsetPath(p.clone().to_animated_value())).into()
+    Arc::new(AnimationValue::OffsetPath(std::mem::transmute(p.clone()))).into()
 }
 
 #[no_mangle]
@@ -2089,16 +2089,11 @@ pub extern "C" fn Servo_StyleSheet_GetRules(sheet: &StylesheetContents) -> Stron
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_StyleSheet_Clone(
-    contents: &StylesheetContents,
-    reference_sheet: *const DomStyleSheet,
-) -> Strong<StylesheetContents> {
-    use style::shared_lock::{DeepCloneParams, DeepCloneWithLock};
+pub extern "C" fn Servo_StyleSheet_Clone(contents: &StylesheetContents) -> Strong<StylesheetContents> {
+    use style::shared_lock::DeepCloneWithLock;
     let global_style_data = &*GLOBAL_STYLE_DATA;
     let guard = global_style_data.shared_lock.read();
-    let params = DeepCloneParams { reference_sheet };
-
-    Arc::new(contents.deep_clone_with_lock(&global_style_data.shared_lock, &guard, &params)).into()
+    Arc::new(contents.deep_clone_with_lock(&global_style_data.shared_lock, &guard)).into()
 }
 
 #[no_mangle]
@@ -2210,6 +2205,16 @@ where
         let mut guard = lock.write();
         func(raw.write_with(&mut guard))
     })
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_CssRules_GetRuleCount(rules: &LockedCssRules) -> usize {
+    read_locked_arc(rules, |rules| rules.0.len())
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_CssRules_GetRuleTypeAt(rules: &LockedCssRules, index: usize) -> CssRuleType {
+    read_locked_arc(rules, |rules| rules.0[index].rule_type())
 }
 
 #[no_mangle]
@@ -2571,6 +2576,13 @@ impl_group_rule_funcs! { (StartingStyle, StartingStyleRule, StartingStyleRule),
     debug: Servo_StartingStyleRule_Debug,
     to_css: Servo_StartingStyleRule_GetCssText,
     changed: Servo_StyleSet_StartingStyleRuleChanged,
+}
+
+impl_basic_rule_funcs! { (PositionTry, PositionTryRule, Locked<PositionTryRule>),
+    getter: Servo_CssRules_GetPositionTryRuleAt,
+    debug: Servo_PositionTryRule_Debug,
+    to_css: Servo_PositionTryRule_GetCssText,
+    changed: Servo_StyleSet_PositionTryRuleChanged,
 }
 
 #[no_mangle]
@@ -4036,6 +4048,31 @@ counter_style_descriptors! {
         eCSSCounterDesc_UNKNOWN,
         eCSSCounterDesc_COUNT,
     ]
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn Servo_PositionTryRule_GetName(
+    rule: &LockedPositionTryRule,
+    result: &mut nsACString,
+) {
+    read_locked_arc(rule, |rule: &PositionTryRule| rule.name.to_css(&mut CssWriter::new(result)).unwrap());
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_PositionTryRule_GetStyle(
+    rule: &LockedPositionTryRule,
+) -> Strong<LockedDeclarationBlock> {
+    read_locked_arc(rule, |rule: &PositionTryRule| rule.block.clone().into())
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_PositionTryRule_SetStyle(
+    rule: &LockedPositionTryRule,
+    declarations: &LockedDeclarationBlock,
+) {
+    write_locked_arc(rule, |rule: &mut PositionTryRule| {
+        rule.block = unsafe { Arc::from_raw_addrefed(declarations) };
+    })
 }
 
 #[no_mangle]
@@ -5659,6 +5696,24 @@ pub extern "C" fn Servo_DeclarationBlock_SetLengthValue(
 }
 
 #[no_mangle]
+pub extern "C" fn Servo_DeclarationBlock_SetTransform(
+    declarations: &LockedDeclarationBlock,
+    property: nsCSSPropertyID,
+    ops: &nsTArray<computed::TransformOperation>,
+) {
+    use style::values::generics::transform::GenericTransform;
+    use style::properties::PropertyDeclaration;
+    let long = get_longhand_from_id!(property);
+    let v = GenericTransform(ops.iter().map(ToComputedValue::from_computed_value).collect());
+    let prop = match_wrap_declared! { long,
+        Transform => v,
+    };
+    write_locked_arc(declarations, |decls: &mut PropertyDeclarationBlock| {
+        decls.push(prop, Importance::Normal);
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn Servo_DeclarationBlock_SetPathValue(
     declarations: &LockedDeclarationBlock,
     property: nsCSSPropertyID,
@@ -6494,7 +6549,7 @@ pub extern "C" fn Servo_GetComputedKeyframeValues(
 
             let declarations = unsafe { &*property.mServoDeclarationBlock.mRawPtr };
             let guard = declarations.read_with(&guard);
-            let iter = guard.to_animation_value_iter(&mut context, &default_values);
+            let iter = guard.to_animation_value_iter(&mut context, style, &default_values);
 
             for value in iter {
                 maybe_append_animation_value(value.id(), Some(value.clone()));
@@ -6537,7 +6592,7 @@ pub extern "C" fn Servo_GetAnimationValues(
     let guard = global_style_data.shared_lock.read();
 
     let guard = declarations.read_with(&guard);
-    let iter = guard.to_animation_value_iter(&mut context, &default_values);
+    let iter = guard.to_animation_value_iter(&mut context, style, &default_values);
     animation_values.extend(iter.map(|v| structs::RefPtr::from_arc(Arc::new(v))));
 }
 
@@ -6588,7 +6643,7 @@ pub extern "C" fn Servo_AnimationValue_Compute(
         .next()
     {
         Some((decl, imp)) if imp == Importance::Normal => {
-            let animation = AnimationValue::from_declaration(decl, &mut context, default_values);
+            let animation = AnimationValue::from_declaration(decl, &mut context, style, default_values);
             animation.map_or(Strong::null(), |value| Arc::new(value).into())
         },
         _ => Strong::null(),
@@ -9299,6 +9354,7 @@ pub unsafe extern "C" fn Servo_Value_Matches_Syntax(
         AllowComputationallyDependent,
         SpecifiedValue,
     };
+    use crate::style::properties::CSSWideKeyword;
 
     // Attempt to consume a syntax definition from syntax.
     let syntax = unsafe { syntax.as_str_unchecked() };
@@ -9310,6 +9366,12 @@ pub unsafe extern "C" fn Servo_Value_Matches_Syntax(
     let mut input = ParserInput::new(css_text);
     let mut input = Parser::new(&mut input);
     input.skip_whitespace();
+
+    // Consider CSS-wide keywords to match any syntax.
+    if input.try_parse(CSSWideKeyword::parse).is_ok() {
+        return true;
+    }
+
     let url_data = unsafe { UrlExtraData::from_ptr_ref(&extra_data) };
 
     SpecifiedValue::parse(

@@ -168,6 +168,7 @@ static const char sIntPrefs[][45] = {
     "ui.contextMenuOffsetHorizontal",
     "ui.tooltipOffsetVertical",
     "ui.GtkCSDAvailable",
+    "ui.GtkCSDTransparencyAvailable",
     "ui.GtkCSDMinimizeButton",
     "ui.GtkCSDMaximizeButton",
     "ui.GtkCSDCloseButton",
@@ -1548,6 +1549,11 @@ void LookAndFeel::NativeInit() { nsLookAndFeel::GetInstance()->NativeInit(); }
 // static
 void LookAndFeel::SetData(widget::FullLookAndFeel&& aTables) {
   nsLookAndFeel::GetInstance()->SetDataImpl(std::move(aTables));
+}
+
+// static
+nsresult LookAndFeel::GetKeyboardLayout(nsACString& aLayout) {
+  return nsLookAndFeel::GetInstance()->GetKeyboardLayoutImpl(aLayout);
 }
 
 }  // namespace mozilla

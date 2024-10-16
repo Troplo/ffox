@@ -278,6 +278,7 @@ BrowserChild::BrowserChild(ContentChild* aManager, const TabId& aTabId,
       mLayersId{0},
       mEffectsInfo{EffectsInfo::FullyHidden()},
       mDynamicToolbarMaxHeight(0),
+      mKeyboardHeight(0),
       mUniqueId(aTabId),
       mDidFakeShow(false),
       mTriedBrowserInit(false),
@@ -1237,6 +1238,23 @@ mozilla::ipc::IPCResult BrowserChild::RecvDynamicToolbarOffsetChanged(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult BrowserChild::RecvKeyboardHeightChanged(
+    const ScreenIntCoord& aHeight) {
+#if defined(MOZ_WIDGET_ANDROID)
+  mKeyboardHeight = aHeight;
+
+  RefPtr<Document> document = GetTopLevelDocument();
+  if (!document) {
+    return IPC_OK();
+  }
+
+  if (nsPresContext* presContext = document->GetPresContext()) {
+    presContext->UpdateKeyboardHeight(aHeight);
+  }
+#endif
+  return IPC_OK();
+}
+
 mozilla::ipc::IPCResult BrowserChild::RecvSuppressDisplayport(
     const bool& aEnabled) {
   if (RefPtr<PresShell> presShell = GetTopLevelPresShell()) {
@@ -1921,20 +1939,20 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealDragEvent(
   }
 
   DispatchWidgetEventViaAPZ(localEvent);
-
-  if (aEvent.mMessage == eDragLeave || aEvent.mMessage == eDragExit) {
-    // If session is still active, remove its target.
-    dragSession = GetDragSession();
-    if (dragSession) {
-      static_cast<nsDragSessionProxy*>(dragSession.get())
-          ->SetDragTarget(nullptr);
-    }
-  }
   return IPC_OK();
 }
 
-static already_AddRefed<DataTransfer> ConvertToDataTransfer(
-    nsTArray<IPCTransferableData>&& aTransferables, EventMessage aMessage) {
+already_AddRefed<DataTransfer> BrowserChild::ConvertToDataTransfer(
+    nsIPrincipal* aPrincipal, nsTArray<IPCTransferableData>&& aTransferables,
+    EventMessage aMessage) {
+  // The extension process should grant access to a protected DataTransfer if
+  // the principal permits it (and dom.events.datatransfer.protected.enabled is
+  // false).  Otherwise, protected DataTransfer access should only be given to
+  // the system.
+  if (!aPrincipal || Manager()->GetRemoteType() != EXTENSION_REMOTE_TYPE) {
+    aPrincipal = nsContentUtils::GetSystemPrincipal();
+  }
+
   // Check if we are receiving any file objects. If we are we will want
   // to hide any of the other objects coming in from content.
   bool hasFiles = false;
@@ -1949,7 +1967,7 @@ static already_AddRefed<DataTransfer> ConvertToDataTransfer(
   }
   // Add the entries from the IPC to the new DataTransfer
   RefPtr<DataTransfer> dataTransfer =
-      new DataTransfer(nullptr, aMessage, false, -1);
+      new DataTransfer(nullptr, aMessage, false, Nothing());
   for (uint32_t i = 0; i < aTransferables.Length(); ++i) {
     auto& items = aTransferables[i].items();
     for (uint32_t j = 0; j < items.Length(); ++j) {
@@ -1967,8 +1985,7 @@ static already_AddRefed<DataTransfer> ConvertToDataTransfer(
           hasFiles && item.data().type() !=
                           IPCTransferableDataType::TIPCTransferableDataBlob;
       dataTransfer->SetDataWithPrincipalFromOtherProcess(
-          NS_ConvertUTF8toUTF16(item.flavor()), variant, i,
-          nsContentUtils::GetSystemPrincipal(), hidden);
+          NS_ConvertUTF8toUTF16(item.flavor()), variant, i, aPrincipal, hidden);
     }
   }
   return dataTransfer.forget();
@@ -1977,7 +1994,8 @@ static already_AddRefed<DataTransfer> ConvertToDataTransfer(
 mozilla::ipc::IPCResult BrowserChild::RecvInvokeChildDragSession(
     const MaybeDiscarded<WindowContext>& aSourceWindowContext,
     const MaybeDiscarded<WindowContext>& aSourceTopWindowContext,
-    nsTArray<IPCTransferableData>&& aTransferables, const uint32_t& aAction) {
+    nsIPrincipal* aPrincipal, nsTArray<IPCTransferableData>&& aTransferables,
+    const uint32_t& aAction) {
   if (nsCOMPtr<nsIDragService> dragService =
           do_GetService("@mozilla.org/widget/dragservice;1")) {
     nsIWidget* widget = WebWidget();
@@ -1987,9 +2005,8 @@ mozilla::ipc::IPCResult BrowserChild::RecvInvokeChildDragSession(
       session->SetSourceTopWindowContext(
           aSourceTopWindowContext.GetMaybeDiscarded());
       session->SetDragAction(aAction);
-
-      RefPtr<DataTransfer> dataTransfer =
-          ConvertToDataTransfer(std::move(aTransferables), eDragStart);
+      RefPtr<DataTransfer> dataTransfer = ConvertToDataTransfer(
+          aPrincipal, std::move(aTransferables), eDragStart);
       session->SetDataTransfer(dataTransfer);
     }
   }
@@ -1997,11 +2014,11 @@ mozilla::ipc::IPCResult BrowserChild::RecvInvokeChildDragSession(
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvUpdateDragSession(
-    nsTArray<IPCTransferableData>&& aTransferables,
+    nsIPrincipal* aPrincipal, nsTArray<IPCTransferableData>&& aTransferables,
     EventMessage aEventMessage) {
   if (RefPtr<nsIDragSession> session = GetDragSession()) {
-    nsCOMPtr<DataTransfer> dataTransfer =
-        ConvertToDataTransfer(std::move(aTransferables), aEventMessage);
+    nsCOMPtr<DataTransfer> dataTransfer = ConvertToDataTransfer(
+        aPrincipal, std::move(aTransferables), aEventMessage);
     session->SetDataTransfer(dataTransfer);
   }
   return IPC_OK();
@@ -2257,6 +2274,27 @@ mozilla::ipc::IPCResult BrowserChild::RecvInsertText(
 mozilla::ipc::IPCResult BrowserChild::RecvNormalPriorityInsertText(
     const nsAString& aStringToInsert) {
   return RecvInsertText(aStringToInsert);
+}
+
+mozilla::ipc::IPCResult BrowserChild::RecvReplaceText(
+    const nsString& aReplaceSrcString, const nsString& aStringToInsert,
+    uint32_t aOffset, bool aPreventSetSelection) {
+  // Use normal event path to reach focused document.
+  WidgetContentCommandEvent localEvent(true, eContentCommandReplaceText,
+                                       mPuppetWidget);
+  localEvent.mString = Some(aStringToInsert);
+  localEvent.mSelection.mReplaceSrcString = aReplaceSrcString;
+  localEvent.mSelection.mOffset = aOffset;
+  localEvent.mSelection.mPreventSetSelection = aPreventSetSelection;
+  DispatchWidgetEventViaAPZ(localEvent);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult BrowserChild::RecvNormalPriorityReplaceText(
+    const nsString& aReplaceSrcString, const nsString& aStringToInsert,
+    uint32_t aOffset, bool aPreventSetSelection) {
+  return RecvReplaceText(aReplaceSrcString, aStringToInsert, aOffset,
+                         aPreventSetSelection);
 }
 
 mozilla::ipc::IPCResult BrowserChild::RecvPasteTransferable(
@@ -2695,7 +2733,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvRenderLayers(const bool& aEnabled) {
     root->SchedulePaint();
   }
 
-  Telemetry::AutoTimer<Telemetry::TABCHILD_PAINT_TIME> timer;
   // If we need to repaint, let's do that right away. No sense waiting until
   // we get back to the event loop again. We suppress the display port so
   // that we only paint what's visible. This ensures that the tab we're

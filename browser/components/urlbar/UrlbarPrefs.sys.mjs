@@ -15,6 +15,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   Region: "resource://gre/modules/Region.sys.mjs",
   TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.sys.mjs",
   UrlbarUtils: "resource:///modules/UrlbarUtils.sys.mjs",
+  CustomizableUI: "resource:///modules/CustomizableUI.sys.mjs",
 });
 
 const PREF_URLBAR_BRANCH = "browser.urlbar.";
@@ -127,6 +128,21 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // amount of time in milliseconds for them to respond before timing out.
   ["extension.omnibox.timeout", 3000],
 
+  // Feature gate pref for Fakespot suggestions in the urlbar.
+  ["fakespot.featureGate", false],
+
+  // The minimum prefix length of a Fakespot keyword the user must type to
+  // trigger the suggestion. 0 means the min length should be taken from Nimbus.
+  ["fakespot.minKeywordLength", 4],
+
+  // The number of times the user has clicked the "Show less frequently" command
+  // for Fakespot suggestions.
+  ["fakespot.showLessFrequentlyCount", 0],
+
+  // The index of Fakespot results within the Firefox Suggest section. A
+  // negative index is relative to the end of the section.
+  ["fakespot.suggestedIndex", -1],
+
   // When true, `javascript:` URLs are not included in search results.
   ["filter.javascript", true],
 
@@ -196,6 +212,13 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // Whether quick suggest results can be shown in position specified in the
   // suggestions.
   ["quicksuggest.allowPositionInSuggestions", true],
+
+  // When non-zero, this is the character-count threshold (inclusive) for
+  // showing AMP suggestions as top picks. If an AMP suggestion is triggered by
+  // a keyword at least this many characters long, it will be shown as a top
+  // pick. Full keywords will also show AMP suggestions as top picks even if
+  // they have fewer characters than this threshold.
+  ["quicksuggest.ampTopPickCharThreshold", 0],
 
   // JSON'ed array of blocked quick suggest URL digests.
   ["quicksuggest.blockedDigests", ""],
@@ -323,6 +346,9 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // grouped release.
   ["scotchBonnet.enableOverride", false],
 
+  // Feature gate pref for search restrict keywords being shown in the urlbar.
+  ["searchRestrictKeywords.featureGate", false],
+
   // Hidden pref. Disables checks that prevent search tips being shown, thus
   // showing them every time the newtab page or the default search engine
   // homepage is opened.
@@ -335,6 +361,7 @@ const PREF_URLBAR_DEFAULTS = new Map([
   ["shortcuts.bookmarks", true],
   ["shortcuts.tabs", true],
   ["shortcuts.history", true],
+  ["shortcuts.actions", false],
 
   // Boolean to determine if the providers defined in `exposureResults`
   // should be displayed in search results. This can be set by a
@@ -375,6 +402,10 @@ const PREF_URLBAR_DEFAULTS = new Map([
 
   // Whether results will include search engines (e.g. tab-to-search).
   ["suggest.engines", true],
+
+  // If `browser.urlbar.fakespot.featureGate` is true, this controls whether
+  // Fakespot suggestions are turned on.
+  ["suggest.fakespot", true],
 
   // Whether results will include the user's history.
   ["suggest.history", true],
@@ -505,7 +536,6 @@ const PREF_OTHER_DEFAULTS = new Map([
   ["browser.fixup.dns_first_for_single_words", false],
   ["browser.search.suggest.enabled", true],
   ["browser.search.suggest.enabled.private", false],
-  ["browser.search.widget.inNavBar", false],
   ["keyword.enabled", true],
   ["security.insecure_connection_text.enabled", false],
   ["ui.popup.disable_autohide", false],
@@ -517,6 +547,7 @@ const PREF_OTHER_DEFAULTS = new Map([
 const NIMBUS_DEFAULTS = {
   addonsShowLessFrequentlyCap: 0,
   experimentType: "",
+  fakespotMinKeywordLength: null,
   pocketShowLessFrequentlyCap: 0,
   pocketSuggestIndex: null,
   quickSuggestRemoteSettingsDataType: "data",
@@ -599,6 +630,10 @@ function makeResultGroups({ showSearchSuggestionsFirst }) {
           { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_BOOKMARK_KEYWORD },
           { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_AUTOFILL },
           { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE },
+          {
+            group:
+              lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_RESTRICT_KEYWORD_AUTOFILL,
+          },
           { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_HISTORY_URL },
           { group: lazy.UrlbarUtils.RESULT_GROUP.HEURISTIC_FALLBACK },
         ],
@@ -665,6 +700,10 @@ function makeResultGroups({ showSearchSuggestionsFirst }) {
                 // only added for queries starting with "about:".
                 flex: 2,
                 group: lazy.UrlbarUtils.RESULT_GROUP.ABOUT_PAGES,
+              },
+              {
+                flex: 99,
+                group: lazy.UrlbarUtils.RESULT_GROUP.RESTRICT_SEARCH_KEYWORD,
               },
             ],
           },
@@ -1506,6 +1545,9 @@ class Preferences {
    */
   _getPrefValue(pref) {
     switch (pref) {
+      case "shortcuts.actions": {
+        return this.get("scotchBonnet.enableOverride") || this._readPref(pref);
+      }
       case "defaultBehavior": {
         let val = 0;
         for (let type of Object.keys(SUGGEST_PREF_TO_BEHAVIOR)) {
@@ -1543,6 +1585,12 @@ class Preferences {
         }
         return new Set(value);
       }
+      case "exposureResults":
+        return new Set(
+          this._readPref(pref)
+            .split(",")
+            .map(s => s.trim())
+        );
     }
     return this._readPref(pref);
   }
@@ -1666,7 +1714,7 @@ class Preferences {
     return (
       this.get("showSearchTermsFeatureGate") &&
       this.get("showSearchTerms.enabled") &&
-      !this.get("browser.search.widget.inNavBar")
+      !lazy.CustomizableUI.getPlacementOfWidget("search-container")
     );
   }
 

@@ -12,8 +12,10 @@ import { CustomizeMenu } from "content-src/components/CustomizeMenu/CustomizeMen
 import React from "react";
 import { Search } from "content-src/components/Search/Search";
 import { Sections } from "content-src/components/Sections/Sections";
+import { Logo } from "content-src/components/Logo/Logo";
 import { Weather } from "content-src/components/Weather/Weather";
 import { Notifications } from "content-src/components/Notifications/Notifications";
+import { TopicSelection } from "content-src/components/DiscoveryStreamComponents/TopicSelection/TopicSelection";
 import { WallpaperFeatureHighlight } from "../DiscoveryStreamComponents/FeatureHighlight/WallpaperFeatureHighlight";
 
 const VISIBLE = "visible";
@@ -120,6 +122,8 @@ export class BaseContent extends React.PureComponent {
     this.updateWallpaper = this.updateWallpaper.bind(this);
     this.prefersDarkQuery = null;
     this.handleColorModeChange = this.handleColorModeChange.bind(this);
+    this.shouldDisplayTopicSelectionModal =
+      this.shouldDisplayTopicSelectionModal.bind(this);
     this.state = {
       fixedSearch: false,
       firstVisibleTimestamp: null,
@@ -140,10 +144,12 @@ export class BaseContent extends React.PureComponent {
     global.addEventListener("keydown", this.handleOnKeyDown);
     if (this.props.document.visibilityState === VISIBLE) {
       this.setFirstVisibleTimestamp();
+      this.shouldDisplayTopicSelectionModal();
     } else {
       this._onVisibilityChange = () => {
         if (this.props.document.visibilityState === VISIBLE) {
           this.setFirstVisibleTimestamp();
+          this.shouldDisplayTopicSelectionModal();
           this.props.document.removeEventListener(
             VISIBILITY_CHANGE_EVENT,
             this._onVisibilityChange
@@ -383,17 +389,65 @@ export class BaseContent extends React.PureComponent {
     return 0.2125 * r + 0.7154 * g + 0.0721 * b <= 110;
   }
 
+  shouldDisplayTopicSelectionModal() {
+    const prefs = this.props.Prefs.values;
+    const pocketEnabled =
+      prefs["feeds.section.topstories"] && prefs["feeds.system.topstories"];
+    const topicSelectionOnboardingEnabled =
+      prefs["discoverystream.topicSelection.onboarding.enabled"] &&
+      pocketEnabled;
+    const maybeShowModal =
+      prefs["discoverystream.topicSelection.onboarding.maybeDisplay"];
+    const displayTimeout =
+      prefs["discoverystream.topicSelection.onboarding.displayTimeout"];
+    const lastDisplayed =
+      prefs["discoverystream.topicSelection.onboarding.lastDisplayed"];
+    const displayCount =
+      prefs["discoverystream.topicSelection.onboarding.displayCount"];
+
+    if (
+      !maybeShowModal ||
+      !prefs["discoverystream.topicSelection.enabled"] ||
+      !topicSelectionOnboardingEnabled
+    ) {
+      return;
+    }
+
+    const day = 24 * 60 * 60 * 1000;
+    const now = new Date().getTime();
+
+    const timeoutOccured = now - parseFloat(lastDisplayed) > displayTimeout;
+    if (displayCount < 3) {
+      if (displayCount === 0 || timeoutOccured) {
+        this.props.dispatch(
+          ac.BroadcastToContent({ type: at.TOPIC_SELECTION_SPOTLIGHT_OPEN })
+        );
+        this.setPref(
+          "discoverystream.topicSelection.onboarding.displayTimeout",
+          day
+        );
+      }
+    }
+  }
+
   render() {
     const { props } = this;
-    const { App } = props;
+    const { App, DiscoveryStream } = props;
     const { initialized, customizeMenuVisible } = App;
     const prefs = props.Prefs.values;
+
+    const layoutsVariantAEnabled = prefs["newtabLayouts.variant-a"];
+    const layoutsVariantBEnabled = prefs["newtabLayouts.variant-b"];
+    const layoutsVariantAorB = layoutsVariantAEnabled || layoutsVariantBEnabled;
 
     const activeWallpaper =
       prefs[`newtabWallpapers.wallpaper-${this.state.colorMode}`];
     const wallpapersEnabled = prefs["newtabWallpapers.enabled"];
     const wallpapersV2Enabled = prefs["newtabWallpapers.v2.enabled"];
     const weatherEnabled = prefs.showWeather;
+    const { showTopicSelection } = DiscoveryStream;
+    const mayShowTopicSelection =
+      showTopicSelection && prefs["discoverystream.topicSelection.enabled"];
 
     const { pocketConfig } = prefs;
 
@@ -433,13 +487,18 @@ export class BaseContent extends React.PureComponent {
     const mayHaveSponsoredStories = prefs["system.showSponsored"];
     const mayHaveWeather = prefs["system.showWeather"];
     const { mayHaveSponsoredTopSites } = prefs;
+    const supportUrl = prefs["support.url"];
 
     const hasThumbsUpDownLayout =
       prefs["discoverystream.thumbsUpDown.searchTopsitesCompact"];
+    const hasThumbsUpDown = prefs["discoverystream.thumbsUpDown.enabled"];
 
     const featureClassName = [
       weatherEnabled && mayHaveWeather && "has-weather", // Show is weather is enabled/visible
       prefs.showSearch ? "has-search" : "no-search",
+      layoutsVariantAEnabled ? "layout-variant-a" : "", // Layout experiment variant A
+      layoutsVariantBEnabled ? "layout-variant-b" : "", // Layout experiment variant B
+      pocketEnabled ? "has-recommended-stories" : "no-recommended-stories",
     ]
       .filter(v => v)
       .join(" ");
@@ -453,8 +512,13 @@ export class BaseContent extends React.PureComponent {
         !noSectionsEnabled &&
         "fixed-search",
       prefs.showSearch && noSectionsEnabled && "only-search",
+      prefs["feeds.topsites"] &&
+        !pocketEnabled &&
+        !prefs.showSearch &&
+        "only-topsites",
+      noSectionsEnabled && "no-sections",
       prefs["logowordmark.alwaysVisible"] && "visible-logo",
-      hasThumbsUpDownLayout && "thumbs-ui-compact",
+      hasThumbsUpDownLayout && hasThumbsUpDown && "thumbs-ui-compact",
     ]
       .filter(v => v)
       .join(" ");
@@ -512,6 +576,10 @@ export class BaseContent extends React.PureComponent {
                 </ErrorBoundary>
               </div>
             )}
+            {/* Bug 1914055: Show logo regardless if search is enabled */}
+            {!prefs.showSearch && layoutsVariantAorB && !noSectionsEnabled && (
+              <Logo />
+            )}
             <div className={`body-wrapper${initialized ? " on" : ""}`}>
               {isDiscoveryStream ? (
                 <ErrorBoundary className="borderless-error">
@@ -535,6 +603,10 @@ export class BaseContent extends React.PureComponent {
               </ErrorBoundary>
             )}
           </aside>
+          {/* Only show the modal on currently visible pages (not preloaded) */}
+          {mayShowTopicSelection && pocketEnabled && (
+            <TopicSelection supportUrl={supportUrl} />
+          )}
         </div>
       </div>
     );

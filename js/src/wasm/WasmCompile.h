@@ -29,6 +29,8 @@ class OptimizedEncodingListener;
 namespace js {
 namespace wasm {
 
+class Code;
+
 // Return a uint32_t which captures the observed properties of the CPU that
 // affect compilation. If code compiled now is to be serialized and executed
 // later, the ObservedCPUFeatures() must be ensured to be the same.
@@ -53,9 +55,14 @@ SharedModule CompileBuffer(const CompileArgs& args,
 
 // Attempt to compile the second tier of the given wasm::Module.
 
-bool CompileTier2(const CompileArgs& args, const Bytes& bytecode,
-                  const Module& module, UniqueChars* error,
-                  UniqueCharsVector* warnings, Atomic<bool>* cancelled);
+bool CompileCompleteTier2(const Bytes& bytecode, const Module& module,
+                          UniqueChars* error, UniqueCharsVector* warnings,
+                          mozilla::Atomic<bool>* cancelled);
+
+// Attempt to compile the second tier for the given functions of a wasm::Module.
+
+bool CompilePartialTier2(const Code& code, uint32_t funcIndex,
+                         UniqueChars* error);
 
 // Compile the given WebAssembly module which has been broken into three
 // partitions:
@@ -80,7 +87,7 @@ using ExclusiveBytesPtr = ExclusiveWaitableData<const uint8_t*>;
 struct StreamEndData {
   bool reached;
   const Bytes* tailBytes;
-  Tier2Listener tier2Listener;
+  CompleteTier2Listener completeTier2Listener;
 
   StreamEndData() : reached(false) {}
 };
@@ -90,8 +97,8 @@ SharedModule CompileStreaming(const CompileArgs& args, const Bytes& envBytes,
                               const Bytes& codeBytes,
                               const ExclusiveBytesPtr& codeBytesEnd,
                               const ExclusiveStreamEndData& streamEnd,
-                              const Atomic<bool>& cancelled, UniqueChars* error,
-                              UniqueCharsVector* warnings);
+                              const mozilla::Atomic<bool>& cancelled,
+                              UniqueChars* error, UniqueCharsVector* warnings);
 
 // What to print out from dumping a function from Ion.
 enum class IonDumpContents {

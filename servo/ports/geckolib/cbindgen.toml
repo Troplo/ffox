@@ -88,12 +88,14 @@ exclude = [
 include = [
   "AnchorName",
   "AnchorScope",
+  "AnimationName",
   "AnimationTimeline",
   "AnimationIterationCount",
   "AnimationDirection",
   "AnimationFillMode",
   "AnimationPlayState",
   "AnimationComposition",
+  "AnimationDuration",
   "Appearance",
   "Au",
   "BreakBetween",
@@ -109,8 +111,6 @@ include = [
   "FontVariantEastAsian",
   "FontVariantLigatures",
   "FontVariantNumeric",
-  "InsetArea",
-  "InsetAreaKeyword",
   "ComputedFontStretchRange",
   "ComputedFontStyleDescriptor",
   "ComputedFontWeightRange",
@@ -123,7 +123,9 @@ include = [
   "DisplayMode",
   "Platform",
   "PositionAnchor",
-  "PositionTryOptions",
+  "PositionArea",
+  "PositionAreaKeyword",
+  "PositionTryFallbacks",
   "PositionTryOrder",
   "PositionVisibility",
   "GtkThemeFamily",
@@ -157,7 +159,7 @@ include = [
   "ScrollSnapStop",
   "ScrollSnapStrictness",
   "ScrollSnapType",
-  "ScrollTimelineName",
+  "TimelineName",
   "TransitionBehavior",
   "ViewTimelineInset",
   "OverflowAnchor",
@@ -187,6 +189,8 @@ include = [
   "BackgroundSize",
   "BaselineSource",
   "BorderImageSlice",
+  "BorderImageRepeat",
+  "BorderImageRepeatKeyword",
   "BorderSpacing",
   "BorderRadius",
   "ColorScheme",
@@ -311,6 +315,7 @@ include = [
   "XTextScale",
   "Zoom",
   "TransitionProperty",
+  "ViewTransitionName",
 ]
 item_types = ["enums", "structs", "unions", "typedefs", "functions", "constants"]
 renaming_overrides_prefixing = true
@@ -360,7 +365,6 @@ renaming_overrides_prefixing = true
 "Keyframe" = "Keyframe"
 "nsChangeHint" = "nsChangeHint"
 "ServoElementSnapshotTable" = "ServoElementSnapshotTable"
-"Keyframe" = "Keyframe"
 "ComputedKeyframeValues" = "ComputedKeyframeValues"
 "OriginFlags" = "OriginFlags"
 "ServoTraversalFlags" = "ServoTraversalFlags"
@@ -478,6 +482,7 @@ renaming_overrides_prefixing = true
   inline float ToPercentage() const;
   inline bool HasPercent() const;
   inline bool HasLengthAndPercentage() const;
+  inline bool BehavesLikeStretchOnInlineAxis() const;
   inline bool BehavesLikeInitialValueOnBlockAxis() const;
 """
 
@@ -492,6 +497,7 @@ renaming_overrides_prefixing = true
   inline float ToPercentage() const;
   inline bool HasPercent() const;
   inline bool HasLengthAndPercentage() const;
+  inline bool BehavesLikeStretchOnInlineAxis() const;
   inline bool BehavesLikeInitialValueOnBlockAxis() const;
 """
 
@@ -972,11 +978,6 @@ renaming_overrides_prefixing = true
   bool IsNamedFamily(const nsAString&) const;
 """
 
-"TimelineOrKeyframesName" = """
- public:
-  inline nsAtom* AsAtom() const;
-"""
-
 "FontWeight" = """
  SERVO_FIXED_POINT_HELPERS(StyleFontWeight, uint16_t, StyleFONT_WEIGHT_FRACTION_BITS);
  bool IsNormal() const { return *this == NORMAL; }
@@ -1018,9 +1019,20 @@ renaming_overrides_prefixing = true
   StyleAnimationName() : _0(nsGkAtoms::_empty) {}
 """
 
+"TimelineName" = """
+ public:
+  StyleTimelineName() : _0(nsGkAtoms::_empty) {}
+  nsAtom* AsAtom() const { return _0.AsAtom(); }
+"""
+
 "GenericViewTimelineInset" = """
  public:
   inline StyleGenericViewTimelineInset();
+"""
+
+"ViewTransitionName" = """
+ public:
+  StyleViewTransitionName() : _0(nsGkAtoms::_empty) {}
 """
 
 "Time" = """

@@ -204,6 +204,7 @@ interface nsIPrintSettings;
   [PutForwards=href, LegacyUnforgeable, CrossOriginReadable,
    CrossOriginWritable] readonly attribute Location location;
   [Throws] readonly attribute History history;
+  [Func="Navigation::IsAPIEnabled"] readonly attribute Navigation navigation;
   readonly attribute CustomElementRegistry customElements;
   [Replaceable, Throws] readonly attribute BarProp locationbar;
   [Replaceable, Throws] readonly attribute BarProp menubar;
@@ -234,7 +235,7 @@ interface nsIPrintSettings;
 
   // the user agent
   readonly attribute Navigator navigator;
-  [Pref="dom.window.clientinformation.enabled", BinaryName="Navigator"]
+  [Replaceable, Pref="dom.window.clientinformation.enabled", BinaryName="Navigator"]
   readonly attribute Navigator clientInformation;
 
   [Replaceable] readonly attribute External external;

@@ -464,6 +464,13 @@ class ContentParent final : public PContentParent,
    */
   void KillHard(const char* aReason);
 
+  /**
+   * Get a unique identifier for this child process. This ID is unique across
+   * all types of child processes.
+   *
+   * NOTE: The `ContentParentId` wrapper type is a historical artifact from when
+   * the ID was only specific to content processes.
+   */
   ContentParentId ChildID() const { return mChildID; }
 
   /**
@@ -500,7 +507,7 @@ class ContentParent final : public PContentParent,
       uint32_t aIndex, const nsAString& aAd, const nsACString& aTargetHost);
   mozilla::ipc::IPCResult RecvAttributionConversion(
       const nsACString& aHost, const nsAString& aTask, uint32_t aHistogramSize,
-      const Maybe<uint32_t>& aLoopbackDays,
+      const Maybe<uint32_t>& aLookbackDays,
       const Maybe<PrivateAttributionImpressionType>& aImpressionType,
       const nsTArray<nsString>& aAds, const nsTArray<nsCString>& aSourceHosts);
 
@@ -906,8 +913,7 @@ class ContentParent final : public PContentParent,
       const uint32_t& aContentDispositionHint,
       const nsAString& aContentDispositionFilename, const bool& aForceSave,
       const int64_t& aContentLength, const bool& aWasFileChannel,
-      nsIURI* aReferrer, const MaybeDiscarded<BrowsingContext>& aContext,
-      const bool& aShouldCloseWindow);
+      nsIURI* aReferrer, const MaybeDiscarded<BrowsingContext>& aContext);
 
   mozilla::ipc::IPCResult RecvPExternalHelperAppConstructor(
       PExternalHelperAppParent* actor, nsIURI* uri,
@@ -916,8 +922,8 @@ class ContentParent final : public PContentParent,
       const uint32_t& aContentDispositionHint,
       const nsAString& aContentDispositionFilename, const bool& aForceSave,
       const int64_t& aContentLength, const bool& aWasFileChannel,
-      nsIURI* aReferrer, const MaybeDiscarded<BrowsingContext>& aContext,
-      const bool& aShouldCloseWindow) override;
+      nsIURI* aReferrer,
+      const MaybeDiscarded<BrowsingContext>& aContext) override;
 
   already_AddRefed<PHandlerServiceParent> AllocPHandlerServiceParent();
 
@@ -942,34 +948,39 @@ class ContentParent final : public PContentParent,
       const MaybeDiscarded<BrowsingContext>& aContext);
 
   mozilla::ipc::IPCResult RecvSetClipboard(
-      const IPCTransferable& aTransferable, const int32_t& aWhichClipboard,
+      const IPCTransferable& aTransferable,
+      const nsIClipboard::ClipboardType& aWhichClipboard,
       const MaybeDiscarded<WindowContext>& aRequestingWindowContext);
 
   mozilla::ipc::IPCResult RecvGetClipboard(
-      nsTArray<nsCString>&& aTypes, const int32_t& aWhichClipboard,
+      nsTArray<nsCString>&& aTypes,
+      const nsIClipboard::ClipboardType& aWhichClipboard,
       const MaybeDiscarded<WindowContext>& aRequestingWindowContext,
       IPCTransferableDataOrError* aTransferableDataOrError);
 
-  mozilla::ipc::IPCResult RecvEmptyClipboard(const int32_t& aWhichClipboard);
+  mozilla::ipc::IPCResult RecvEmptyClipboard(
+      const nsIClipboard::ClipboardType& aWhichClipboard);
 
-  mozilla::ipc::IPCResult RecvClipboardHasType(nsTArray<nsCString>&& aTypes,
-                                               const int32_t& aWhichClipboard,
-                                               bool* aHasType);
+  mozilla::ipc::IPCResult RecvClipboardHasType(
+      nsTArray<nsCString>&& aTypes,
+      const nsIClipboard::ClipboardType& aWhichClipboard, bool* aHasType);
 
   mozilla::ipc::IPCResult RecvGetClipboardDataSnapshot(
-      nsTArray<nsCString>&& aTypes, const int32_t& aWhichClipboard,
+      nsTArray<nsCString>&& aTypes,
+      const nsIClipboard::ClipboardType& aWhichClipboard,
       const MaybeDiscarded<WindowContext>& aRequestingWindowContext,
       mozilla::NotNull<nsIPrincipal*> aRequestingPrincipal,
       GetClipboardDataSnapshotResolver&& aResolver);
 
   mozilla::ipc::IPCResult RecvGetClipboardDataSnapshotSync(
-      nsTArray<nsCString>&& aTypes, const int32_t& aWhichClipboard,
+      nsTArray<nsCString>&& aTypes,
+      const nsIClipboard::ClipboardType& aWhichClipboard,
       const MaybeDiscarded<WindowContext>& aRequestingWindowContext,
       ClipboardReadRequestOrError* aRequestOrError);
 
   already_AddRefed<PClipboardWriteRequestParent>
   AllocPClipboardWriteRequestParent(
-      const int32_t& aClipboardType,
+      const nsIClipboard::ClipboardType& aClipboardType,
       const MaybeDiscarded<WindowContext>& aSettingWindowContext);
 
   mozilla::ipc::IPCResult RecvGetIconForExtension(const nsACString& aFileExt,
@@ -998,7 +1009,8 @@ class ContentParent final : public PContentParent,
       nsIURI* uri, nsIPrincipal* triggeringPrincipal,
       nsIPrincipal* redirectPrincipal,
       const MaybeDiscarded<BrowsingContext>& aContext,
-      bool aWasExternallyTriggered, bool aHasValidUserGestureActivation);
+      bool aWasExternallyTriggered, bool aHasValidUserGestureActivation,
+      bool aNewWindowTarget);
   mozilla::ipc::IPCResult RecvExtProtocolChannelConnectParent(
       const uint64_t& registrarId);
 
@@ -1023,30 +1035,29 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvConsoleMessage(const nsAString& aMessage);
 
   mozilla::ipc::IPCResult RecvScriptError(
-      const nsAString& aMessage, const nsAString& aSourceName,
-      const nsAString& aSourceLine, const uint32_t& aLineNumber,
-      const uint32_t& aColNumber, const uint32_t& aFlags,
-      const nsACString& aCategory, const bool& aIsFromPrivateWindow,
-      const uint64_t& aInnerWindowId, const bool& aIsFromChromeContext);
+      const nsAString& aMessage, const nsACString& aSourceName,
+      const uint32_t& aLineNumber, const uint32_t& aColNumber,
+      const uint32_t& aFlags, const nsACString& aCategory,
+      const bool& aIsFromPrivateWindow, const uint64_t& aInnerWindowId,
+      const bool& aIsFromChromeContext);
 
   mozilla::ipc::IPCResult RecvReportFrameTimingData(
       const LoadInfoArgs& loadInfoArgs, const nsAString& entryName,
       const nsAString& initiatorType, UniquePtr<PerformanceTimingData>&& aData);
 
   mozilla::ipc::IPCResult RecvScriptErrorWithStack(
-      const nsAString& aMessage, const nsAString& aSourceName,
-      const nsAString& aSourceLine, const uint32_t& aLineNumber,
-      const uint32_t& aColNumber, const uint32_t& aFlags,
-      const nsACString& aCategory, const bool& aIsFromPrivateWindow,
-      const bool& aIsFromChromeContext, const ClonedMessageData& aStack);
+      const nsAString& aMessage, const nsACString& aSourceName,
+      const uint32_t& aLineNumber, const uint32_t& aColNumber,
+      const uint32_t& aFlags, const nsACString& aCategory,
+      const bool& aIsFromPrivateWindow, const bool& aIsFromChromeContext,
+      const ClonedMessageData& aStack);
 
  private:
   mozilla::ipc::IPCResult RecvScriptErrorInternal(
-      const nsAString& aMessage, const nsAString& aSourceName,
-      const nsAString& aSourceLine, const uint32_t& aLineNumber,
-      const uint32_t& aColNumber, const uint32_t& aFlags,
-      const nsACString& aCategory, const bool& aIsFromPrivateWindow,
-      const bool& aIsFromChromeContext,
+      const nsAString& aMessage, const nsACString& aSourceName,
+      const uint32_t& aLineNumber, const uint32_t& aColNumber,
+      const uint32_t& aFlags, const nsACString& aCategory,
+      const bool& aIsFromPrivateWindow, const bool& aIsFromChromeContext,
       const ClonedMessageData* aStack = nullptr);
 
  public:
@@ -1375,6 +1386,14 @@ class ContentParent final : public PContentParent,
 
   mozilla::ipc::IPCResult RecvGetSystemIcon(nsIURI* aURI,
                                             GetSystemIconResolver&& aResolver);
+
+  mozilla::ipc::IPCResult RecvGetSystemGeolocationPermissionBehavior(
+      GetSystemGeolocationPermissionBehaviorResolver&& aResolver);
+
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY mozilla::ipc::IPCResult
+  RecvRequestGeolocationPermissionFromUser(
+      const MaybeDiscardedBrowsingContext& aBrowsingContext,
+      RequestGeolocationPermissionFromUserResolver&& aResolver);
 
 #ifdef FUZZING_SNAPSHOT
   mozilla::ipc::IPCResult RecvSignalFuzzingReady();

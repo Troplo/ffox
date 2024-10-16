@@ -1,12 +1,13 @@
 /* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
 /* vim:set ts=2 sw=2 sts=2 et: */
 
-const { XPCOMUtils } = ChromeUtils.importESModule(
-  "resource://gre/modules/XPCOMUtils.sys.mjs"
-);
-
 ChromeUtils.defineESModuleGetters(this, {
+  AddonTestUtils: "resource://testing-common/AddonTestUtils.sys.mjs",
+  clearTimeout: "resource://gre/modules/Timer.sys.mjs",
+  ExtensionTestUtils:
+    "resource://testing-common/ExtensionXPCShellUtils.sys.mjs",
   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
+  HttpServer: "resource://testing-common/httpd.sys.mjs",
   Region: "resource://gre/modules/Region.sys.mjs",
   RemoteSettings: "resource://services-settings/remote-settings.sys.mjs",
   RemoteSettingsClient:
@@ -17,40 +18,30 @@ ChromeUtils.defineESModuleGetters(this, {
   SearchTestUtils: "resource://testing-common/SearchTestUtils.sys.mjs",
   SearchUtils: "resource://gre/modules/SearchUtils.sys.mjs",
   TestUtils: "resource://testing-common/TestUtils.sys.mjs",
-  clearTimeout: "resource://gre/modules/Timer.sys.mjs",
+  updateAppInfo: "resource://testing-common/AppInfo.sys.mjs",
+  Utils: "resource://services-settings/Utils.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
   sinon: "resource://testing-common/Sinon.sys.mjs",
 });
 
-var { HttpServer } = ChromeUtils.importESModule(
-  "resource://testing-common/httpd.sys.mjs"
-);
-var { AddonTestUtils } = ChromeUtils.importESModule(
-  "resource://testing-common/AddonTestUtils.sys.mjs"
-);
-const { ExtensionTestUtils } = ChromeUtils.importESModule(
-  "resource://testing-common/ExtensionXPCShellUtils.sys.mjs"
-);
+// Expose Remote Settings utils with an explicit name.
+const RemoteSettingsUtils = Utils;
+
+// We need Services.appinfo.name set up to allow the hashes to work with a
+// consistent name.
+// Note: the name and versions here match those in ExtensionXPCShellUtils.sys.mjs.
+updateAppInfo({ name: "XPCShell", version: "48", platformVersion: "48" });
+
+// We generally also need a profile set-up, for saving search settings etc.
+do_get_profile();
 
 SearchTestUtils.init(this);
 
 const SETTINGS_FILENAME = "search.json.mozlz4";
 
-// nsSearchService.js uses Services.appinfo.name to build a salt for a hash.
-// eslint-disable-next-line mozilla/use-services
-var XULRuntime = Cc["@mozilla.org/xre/runtime;1"].getService(Ci.nsIXULRuntime);
-
 // Expand the amount of information available in error logs
 Services.prefs.setBoolPref("browser.search.log", true);
 Services.prefs.setBoolPref("browser.region.log", true);
-
-AddonTestUtils.init(this, false);
-AddonTestUtils.createAppInfo(
-  "xpcshell@tests.mozilla.org",
-  "XPCShell",
-  "42",
-  "42"
-);
 
 // Allow telemetry probes which may otherwise be disabled for some applications (e.g. Thunderbird)
 Services.prefs.setBoolPref(
@@ -334,6 +325,8 @@ async function getFileDataBuffer(filename) {
  *   The ID to use for the record. If not provided, a new UUID will be generated.
  * @param {number} [item.lastModified]
  *   The last modified time for the record. Defaults to the current time.
+ * @returns {object}
+ *   An object containing the record and attachment.
  */
 async function mockRecordWithAttachment({
   filename,

@@ -415,20 +415,13 @@ const StyleLockedDeclarationBlock* Gecko_GetUnvisitedLinkAttrDeclarationBlock(
   return attrStyles->GetServoUnvisitedLinkDecl();
 }
 
-StyleSheet* Gecko_StyleSheet_Clone(const StyleSheet* aSheet,
-                                   const StyleSheet* aNewParentSheet) {
+StyleSheet* Gecko_StyleSheet_Clone(const StyleSheet* aSheet) {
   MOZ_ASSERT(aSheet);
   MOZ_ASSERT(aSheet->GetParentSheet(), "Should only be used for @import");
-  MOZ_ASSERT(aNewParentSheet, "Wat");
-
+  // NOTE(emilio): We don't pass either the parent pointer of the stylesheet,
+  // nor fix up the child list (yet). This is fixed up in the StylesheetInner
+  // constructor.
   RefPtr<StyleSheet> newSheet = aSheet->Clone(nullptr, nullptr);
-
-  // NOTE(emilio): This code runs in the StylesheetInner constructor, which
-  // means that the inner pointer of `aNewParentSheet` still points to the old
-  // one.
-  //
-  // So we _don't_ update neither the parent pointer of the stylesheet, nor the
-  // child list (yet). This is fixed up in that same constructor.
   return static_cast<StyleSheet*>(newSheet.forget().take());
 }
 
@@ -1515,12 +1508,14 @@ bool Gecko_ErrorReportingEnabled(const StyleSheet* aSheet,
   return true;
 }
 
-void Gecko_ReportUnexpectedCSSError(
-    const uint64_t aWindowId, nsIURI* aURI, const char* message,
-    const char* param, uint32_t paramLen, const char* prefix,
-    const char* prefixParam, uint32_t prefixParamLen, const char* suffix,
-    const char* source, uint32_t sourceLen, const char* selectors,
-    uint32_t selectorsLen, uint32_t lineNumber, uint32_t colNumber) {
+void Gecko_ReportUnexpectedCSSError(const uint64_t aWindowId, nsIURI* aURI,
+                                    const char* message, const char* param,
+                                    uint32_t paramLen, const char* prefix,
+                                    const char* prefixParam,
+                                    uint32_t prefixParamLen, const char* suffix,
+                                    const char* selectors,
+                                    uint32_t selectorsLen, uint32_t lineNumber,
+                                    uint32_t colNumber) {
   MOZ_RELEASE_ASSERT(NS_IsMainThread());
 
   ErrorReporter reporter(aWindowId);
@@ -1548,10 +1543,8 @@ void Gecko_ReportUnexpectedCSSError(
   if (suffix) {
     reporter.ReportUnexpected(suffix);
   }
-  nsDependentCSubstring sourceValue(source, sourceLen);
   nsDependentCSubstring selectorsValue(selectors, selectorsLen);
-  reporter.OutputError(sourceValue, selectorsValue, lineNumber + 1, colNumber,
-                       aURI);
+  reporter.OutputError(selectorsValue, lineNumber + 1, colNumber, aURI);
 }
 
 void Gecko_ContentList_AppendAll(nsSimpleContentList* aList,

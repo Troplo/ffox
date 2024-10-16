@@ -19,6 +19,7 @@ from six import reraise
 from telemetry_harness.ping_server import PingServer
 
 CANARY_CLIENT_ID = "c0ffeec0-ffee-c0ff-eec0-ffeec0ffeec0"
+CANARY_PROFILE_GROUP_ID = "decafdec-afde-cafd-ecaf-decafdecafde"
 SERVER_ROOT = "toolkit/components/telemetry/tests/marionette/harness/www"
 UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
@@ -133,6 +134,18 @@ class Browser(object):
                   "resource://gre/modules/ClientID.sys.mjs"
                 );
                 return ClientID.getCachedClientID();
+            """
+            )
+
+    def get_profile_group_id(self):
+        """Return the group ID of the current client."""
+        with self.marionette.using_context(self.marionette.CONTEXT_CHROME):
+            return self.marionette.execute_script(
+                """\
+                const { ClientID } = ChromeUtils.importESModule(
+                  "resource://gre/modules/ClientID.sys.mjs"
+                );
+                return ClientID.getCachedProfileGroupID();
             """
             )
 
@@ -283,6 +296,7 @@ class Helpers(object):
         assert value is not None
         assert value != ""
         assert value != CANARY_CLIENT_ID
+        assert value != CANARY_PROFILE_GROUP_ID
         assert re.match(UUID_PATTERN, value) is not None
 
     def wait_for_ping(self, action_func, ping_filter):

@@ -17,6 +17,26 @@
     margin-block-start: 0;
     margin-inline-start: 0;
     z-index: 1;
+
+    // Bug 1914055 - Layout experiment: logo/search spacing
+    .layout-variant-a &,
+    .layout-variant-b & {
+      inset-inline-start: 24px;
+      inset-block-start: 24px;
+    }
+  }
+
+  // Bug 1914055 - Layout experiment: Position the weather widget absolutely
+  // across all breakpoints to keep logo margins consistent
+  .no-search.layout-variant-a &,
+  .no-search.layout-variant-b &,
+  .layout-variant-a &,
+  .layout-variant-b & {
+    position: absolute;
+    inset-inline-start: var(--space-xlarge);
+    inset-block-start: var(--space-xlarge);
+    margin-block-start: 0;
+    margin-inline-start: 0;
   }
 
   // Edge case: users with weather enabled/search disabled
@@ -51,9 +71,43 @@
   }
 }
 
+// Bug 1914055 - Layout experiment: logo/search spacing
+.layout-variant-a.has-weather.no-search,
+.layout-variant-b.has-weather.no-search {
+  .outer-wrapper {
+    padding-top: 24px;
+  }
+}
+
+.no-search.layout-variant-b,
+.layout-variant-b {
+  .weather {
+    position: absolute;
+    inset-inline-start: auto;
+    inset-inline-end: 40px;
+    inset-block-start: 40px;
+    margin-block-start: 0;
+
+    .weatherSponsorText {
+      float: inline-end;
+
+      span {
+        inset-inline-end: 0;
+      }
+    }
+
+    .context-menu {
+      inset-inline-end: 100%;
+      inset-inline-start: auto;
+      margin-inline-end: 5px;
+    }
+  }
+}
+
+
 // Edge case: users with weather enabled/search enabled
 .has-weather.has-search {
-  .outer-wrapper {
+  .outer-wrapper:not(.only-search) {
     padding-top: 0;
 
     @media (min-width: $break-point-medium) {
@@ -76,15 +130,47 @@
   }
 }
 
+// Bug 1914055 - Layout experiment: logo/search spacing
+.layout-variant-a.has-weather.has-search,
+.layout-variant-b.has-weather.has-search {
+  .outer-wrapper:not(.only-search) {
+    padding-top: 24px;
+  }
+}
+
 // Unavailable / Error State
 .weatherNotAvailable {
   font-size: var(--newtab-weather-content-font-size);
   display: flex;
   align-items: center;
   border-radius: var(--border-radius-medium);
-  padding: var(--space-small);
+  height: 52px;
+  max-width: 205px;
 
-  // Contrast fix for users who have wallpapers set
+  &:hover {
+    background-color: var(--button-background-color-ghost-hover);
+  }
+
+  &:active {
+    background-color: var(--button-background-color-ghost-active);
+  }
+
+  .icon {
+    margin-inline-start: var(--space-small);
+    min-width: var(--size-item-small);
+  }
+
+  p {
+    margin-inline-start: var(--space-small);
+  }
+
+  .weatherButtonContextMenuWrapper {
+    align-self: stretch;
+    padding-inline: var(--space-small);
+  }
+
+  // Bug 1908010 - This overwrites the design system color because of a
+  // know transparency issue with color-mix syntax when a wallpaper is set
   .lightWallpaper &,
   .darkWallpaper & {
     background-color: var(--newtab-weather-background-color);
@@ -145,7 +231,6 @@
   cursor: pointer;
 
   &:hover {
-    // TODO: Add Wallpaper Background Color Fix
     background-color: var(--button-background-color-ghost-hover);
 
     &::after {
@@ -153,7 +238,6 @@
     }
 
     &:active {
-      // TODO: Add Wallpaper Background Color Fix
       background-color: var(--button-background-color-ghost-active);
     }
   }
@@ -162,7 +246,8 @@
     outline: var(--focus-outline);
   }
 
-  // Contrast fix for users who have wallpapers set
+  // Bug 1908010 - This overwrites the design system color because of a
+  // know transparency issue with color-mix syntax when a wallpaper is set
   .lightWallpaper &,
   .darkWallpaper & {
     background-color: var(--newtab-weather-background-color);
@@ -455,7 +540,8 @@
   padding: var(--space-small);
   position: relative;
 
-  // Contrast fix for users who have wallpapers set
+  // Bug 1908010 - This overwrites the design system color because of a
+  // know transparency issue with color-mix syntax when a wallpaper is set
   .lightWallpaper &,
   .darkWallpaper & {
     background-color: var(--newtab-weather-background-color);
@@ -514,3 +600,66 @@
   }
 }
 
+// Bug 1914193 - Only show the temperature on the smallest breakpoint and
+// return to default view on medium breakpoints
+.has-weather.has-search.layout-variant-a,
+.has-weather.has-search.layout-variant-b,
+.layout-variant-a,
+.layout-variant-b  {
+  .weatherCityRow,
+  .weatherButtonContextMenuWrapper {
+    display: none;
+
+    @media(min-width: $break-point-large) {
+      display: flex;
+    }
+  }
+
+  // Edge case: Show weather icon, detailed view at a later breakpoint
+  // then the temperature and city name
+  .weatherIconCol,
+  .weatherDetailedSummaryRow {
+    display: none;
+
+    @media(min-width: $break-point-widest) {
+      display: flex;
+    }
+  }
+
+  .weatherCard {
+    min-height: 55px;
+  }
+
+  .weatherInfoLink {
+    min-width: auto;
+    max-width: none;
+
+    @media(min-width: $break-point-widest) {
+      min-width: 130px;
+      max-width: 190px;
+    }
+  }
+
+  .weatherForecastRow {
+    margin-block: var(--space-small);
+
+    @media(min-width: $break-point-large) {
+      margin-block: unset;
+    }
+  }
+
+  .weatherSponsorText {
+    position: relative;
+
+    span {
+      position: absolute;
+      white-space: nowrap;
+      inset-block-start: var(--space-small);
+
+      @media(min-width: $break-point-large) {
+        inset-block-start: unset;
+        position: relative;
+      }
+    }
+  }
+}

@@ -85,7 +85,6 @@ using mozilla::Span;
   DEFINE_NATIVE_CLASS_IMPL(CLASS)
 
 DEFINE_CLASS(ModuleRequestObject)
-DEFINE_NATIVE_CLASS(ImportAttribute)
 DEFINE_NATIVE_CLASS(ImportEntry)
 DEFINE_NATIVE_CLASS(ExportEntry)
 DEFINE_NATIVE_CLASS(RequestedModule)
@@ -282,17 +281,6 @@ bool SpanToArrayFilter(JSContext* cx, JS::Handle<JSObject*> owner,
   return true;
 }
 
-template <class T>
-bool SpanToNullableArrayFilter(JSContext* cx, JS::Handle<JSObject*> owner,
-                               Span<const typename T::Target> from,
-                               JS::MutableHandle<JS::Value> to) {
-  if (from.Length() == 0) {
-    to.setNull();
-    return true;
-  }
-  return SpanToArrayFilter<T>(cx, owner, from, to);
-}
-
 template <class T, typename RawGetterT, typename FilterT>
 bool ShellModuleNativeWrapperGetter(JSContext* cx, const JS::CallArgs& args,
                                     RawGetterT rawGetter, FilterT filter) {
@@ -305,6 +293,25 @@ bool ShellModuleNativeWrapperGetter(JSContext* cx, const JS::CallArgs& args,
   }
 
   args.rval().set(filtered);
+  return true;
+}
+
+bool ModuleTypeToString(JSContext* cx, JS::Handle<JSObject*> owner,
+                        JS::ModuleType moduleType,
+                        JS::MutableHandle<JS::Value> to) {
+  switch (moduleType) {
+    case JS::ModuleType::Unknown:
+      to.setString(cx->names().unknown);
+      break;
+    case JS::ModuleType::JavaScript:
+      to.setString(cx->names().js);
+      break;
+    case JS::ModuleType::JSON:
+      to.setString(cx->names().json);
+      break;
+  }
+
+  MOZ_ASSERT(!to.isUndefined());
   return true;
 }
 
@@ -325,23 +332,16 @@ bool ShellModuleNativeWrapperGetter(JSContext* cx, const JS::CallArgs& args,
         cx, args);                                                             \
   }
 
-DEFINE_GETTER_FUNCTIONS(ImportAttribute, key, StringOrNullValue, IdentFilter);
-DEFINE_GETTER_FUNCTIONS(ImportAttribute, value, StringOrNullValue, IdentFilter);
-
-static const JSPropertySpec ShellImportAttributeWrapper_accessors[] = {
-    JS_PSG("key", ShellImportAttributeWrapper_keyGetter, 0),
-    JS_PSG("value", ShellImportAttributeWrapper_valueGetter, 0), JS_PS_END};
-
 DEFINE_GETTER_FUNCTIONS(ModuleRequestObject, specifier, StringOrNullValue,
                         IdentFilter)
-DEFINE_NATIVE_GETTER_FUNCTIONS(
-    ModuleRequestObject, attributes,
-    SpanToNullableArrayFilter<ShellImportAttributeWrapper>);
+DEFINE_NATIVE_GETTER_FUNCTIONS(ModuleRequestObject, moduleType,
+                               ModuleTypeToString);
 
 static const JSPropertySpec ShellModuleRequestObjectWrapper_accessors[] = {
     JS_PSG("specifier", ShellModuleRequestObjectWrapper_specifierGetter, 0),
-    JS_PSG("attributes", ShellModuleRequestObjectWrapper_attributesGetter, 0),
-    JS_PS_END};
+    JS_PSG("moduleType", ShellModuleRequestObjectWrapper_moduleTypeGetter, 0),
+    JS_PS_END,
+};
 
 DEFINE_GETTER_FUNCTIONS(ImportEntry, moduleRequest, ObjectOrNullValue,
                         SingleFilter<ShellModuleRequestObjectWrapper>)
@@ -357,7 +357,8 @@ static const JSPropertySpec ShellImportEntryWrapper_accessors[] = {
     JS_PSG("localName", ShellImportEntryWrapper_localNameGetter, 0),
     JS_PSG("lineNumber", ShellImportEntryWrapper_lineNumberGetter, 0),
     JS_PSG("columnNumber", ShellImportEntryWrapper_columnNumberGetter, 0),
-    JS_PS_END};
+    JS_PS_END,
+};
 
 DEFINE_GETTER_FUNCTIONS(ExportEntry, exportName, StringOrNullValue, IdentFilter)
 DEFINE_GETTER_FUNCTIONS(ExportEntry, moduleRequest, ObjectOrNullValue,
@@ -375,7 +376,8 @@ static const JSPropertySpec ShellExportEntryWrapper_accessors[] = {
     JS_PSG("localName", ShellExportEntryWrapper_localNameGetter, 0),
     JS_PSG("lineNumber", ShellExportEntryWrapper_lineNumberGetter, 0),
     JS_PSG("columnNumber", ShellExportEntryWrapper_columnNumberGetter, 0),
-    JS_PS_END};
+    JS_PS_END,
+};
 
 DEFINE_GETTER_FUNCTIONS(RequestedModule, moduleRequest, ObjectOrNullValue,
                         SingleFilter<ShellModuleRequestObjectWrapper>)
@@ -387,7 +389,8 @@ static const JSPropertySpec ShellRequestedModuleWrapper_accessors[] = {
     JS_PSG("moduleRequest", ShellRequestedModuleWrapper_moduleRequestGetter, 0),
     JS_PSG("lineNumber", ShellRequestedModuleWrapper_lineNumberGetter, 0),
     JS_PSG("columnNumber", ShellRequestedModuleWrapper_columnNumberGetter, 0),
-    JS_PS_END};
+    JS_PS_END,
+};
 
 DEFINE_GETTER_FUNCTIONS(ModuleObject, namespace_, ObjectOrNullValue,
                         IdentFilter)
@@ -449,7 +452,8 @@ static const JSPropertySpec ShellModuleObjectWrapper_accessors[] = {
            ShellModuleObjectWrapper_asyncParentModulesGetter, 0),
     JS_PSG("pendingAsyncDependencies",
            ShellModuleObjectWrapper_maybePendingAsyncDependenciesGetter, 0),
-    JS_PS_END};
+    JS_PS_END,
+};
 
 #undef DEFINE_GETTER_FUNCTIONS
 #undef DEFINE_NATIVE_GETTER_FUNCTIONS
@@ -489,8 +493,7 @@ static const JSPropertySpec ShellModuleObjectWrapper_accessors[] = {
 
 DEFINE_CREATE(ModuleRequestObject, ShellModuleRequestObjectWrapper_accessors,
               nullptr)
-DEFINE_NATIVE_CREATE(ImportAttribute, ShellImportAttributeWrapper_accessors,
-                     nullptr)
+
 DEFINE_NATIVE_CREATE(ImportEntry, ShellImportEntryWrapper_accessors, nullptr)
 DEFINE_NATIVE_CREATE(ExportEntry, ShellExportEntryWrapper_accessors, nullptr)
 DEFINE_NATIVE_CREATE(RequestedModule, ShellRequestedModuleWrapper_accessors,

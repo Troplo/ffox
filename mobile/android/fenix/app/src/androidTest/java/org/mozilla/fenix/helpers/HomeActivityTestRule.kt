@@ -61,7 +61,9 @@ class HomeActivityTestRule(
         etpPolicy: ETPPolicy = getETPPolicy(settings),
         composeTopSitesEnabled: Boolean = false,
         isLocationPermissionEnabled: SitePermissionsRules.Action = getFeaturePermission(PhoneFeature.LOCATION, settings),
-        isNavigationToolbarEnabled: Boolean = settings.navigationToolbarEnabled,
+        isNavigationToolbarEnabled: Boolean = false,
+        isMicrosurveyEnabled: Boolean = settings.microsurveyFeatureEnabled,
+        isSetAsDefaultBrowserPromptEnabled: Boolean = settings.setAsDefaultBrowserPromptForExistingUsersEnabled,
     ) : this(initialTouchMode, launchActivity, skipOnboarding) {
         this.isHomeOnboardingDialogEnabled = isHomeOnboardingDialogEnabled
         this.isPocketEnabled = isPocketEnabled
@@ -78,6 +80,8 @@ class HomeActivityTestRule(
         this.composeTopSitesEnabled = composeTopSitesEnabled
         this.isLocationPermissionEnabled = isLocationPermissionEnabled
         this.isNavigationToolbarEnabled = isNavigationToolbarEnabled
+        this.isMicrosurveyEnabled = isMicrosurveyEnabled
+        this.isSetAsDefaultBrowserPromptEnabled = isSetAsDefaultBrowserPromptEnabled
     }
 
     /**
@@ -138,6 +142,8 @@ class HomeActivityTestRule(
             isWallpaperOnboardingEnabled = false,
             isOpenInAppBannerEnabled = false,
             composeTopSitesEnabled = composeTopSitesEnabled,
+            isMicrosurveyEnabled = false,
+            isSetAsDefaultBrowserPromptEnabled = false,
         )
     }
 }
@@ -178,7 +184,9 @@ class HomeActivityIntentTestRule internal constructor(
         etpPolicy: ETPPolicy = getETPPolicy(settings),
         composeTopSitesEnabled: Boolean = false,
         isLocationPermissionEnabled: SitePermissionsRules.Action = getFeaturePermission(PhoneFeature.LOCATION, settings),
-        isNavigationToolbarEnabled: Boolean = settings.navigationToolbarEnabled,
+        isNavigationToolbarEnabled: Boolean = false,
+        isMicrosurveyEnabled: Boolean = settings.microsurveyFeatureEnabled,
+        isSetAsDefaultBrowserPromptEnabled: Boolean = settings.setAsDefaultBrowserPromptForExistingUsersEnabled,
     ) : this(initialTouchMode, launchActivity, skipOnboarding) {
         this.isHomeOnboardingDialogEnabled = isHomeOnboardingDialogEnabled
         this.isPocketEnabled = isPocketEnabled
@@ -195,6 +203,8 @@ class HomeActivityIntentTestRule internal constructor(
         this.composeTopSitesEnabled = composeTopSitesEnabled
         this.isLocationPermissionEnabled = isLocationPermissionEnabled
         this.isNavigationToolbarEnabled = isNavigationToolbarEnabled
+        this.isMicrosurveyEnabled = isMicrosurveyEnabled
+        this.isSetAsDefaultBrowserPromptEnabled = isSetAsDefaultBrowserPromptEnabled
     }
 
     private val longTapUserPreference = getLongPressTimeout()
@@ -266,6 +276,8 @@ class HomeActivityIntentTestRule internal constructor(
         etpPolicy = getETPPolicy(settings)
         isLocationPermissionEnabled = getFeaturePermission(PhoneFeature.LOCATION, settings)
         isNavigationToolbarEnabled = settings.navigationToolbarEnabled
+        isMicrosurveyEnabled = settings.microsurveyFeatureEnabled
+        isSetAsDefaultBrowserPromptEnabled = settings.setAsDefaultBrowserPromptForExistingUsersEnabled
     }
 
     companion object {
@@ -294,6 +306,8 @@ class HomeActivityIntentTestRule internal constructor(
             isWallpaperOnboardingEnabled = false,
             isOpenInAppBannerEnabled = false,
             composeTopSitesEnabled = composeTopSitesEnabled,
+            isMicrosurveyEnabled = false,
+            isSetAsDefaultBrowserPromptEnabled = false,
         )
     }
 }

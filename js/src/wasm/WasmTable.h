@@ -37,20 +37,20 @@ namespace wasm {
 using TableAnyRefVector = GCVector<HeapPtr<AnyRef>, 0, SystemAllocPolicy>;
 
 class Table : public ShareableBase<Table> {
-  using InstanceSet =
-      WeakCache<GCHashSet<WeakHeapPtr<WasmInstanceObject*>,
-                          StableCellHasher<WeakHeapPtr<WasmInstanceObject*>>,
-                          SystemAllocPolicy>>;
+  using InstanceSet = JS::WeakCache<GCHashSet<
+      WeakHeapPtr<WasmInstanceObject*>,
+      StableCellHasher<WeakHeapPtr<WasmInstanceObject*>>, SystemAllocPolicy>>;
   using FuncRefVector = Vector<FunctionTableElem, 0, SystemAllocPolicy>;
 
   WeakHeapPtr<WasmTableObject*> maybeObject_;
   InstanceSet observers_;
   FuncRefVector functions_;    // either functions_ has data
   TableAnyRefVector objects_;  // or objects_, but not both
+  const IndexType indexType_;
   const RefType elemType_;
   const bool isAsmJS_;
   uint32_t length_;
-  const Maybe<uint32_t> maximum_;
+  const mozilla::Maybe<uint64_t> maximum_;
 
   template <class>
   friend struct js::MallocProvider;
@@ -68,6 +68,7 @@ class Table : public ShareableBase<Table> {
   ~Table();
   void trace(JSTracer* trc);
 
+  IndexType indexType() const { return indexType_; }
   RefType elemType() const { return elemType_; }
   TableRepr repr() const { return elemType_.tableRepr(); }
 
@@ -78,7 +79,7 @@ class Table : public ShareableBase<Table> {
 
   bool isFunction() const { return elemType().isFuncHierarchy(); }
   uint32_t length() const { return length_; }
-  Maybe<uint32_t> maximum() const { return maximum_; }
+  mozilla::Maybe<uint64_t> maximum() const { return maximum_; }
 
   // Raw pointer to the table for use in TableInstanceData.
   uint8_t* instanceElements() const;
@@ -129,7 +130,7 @@ class Table : public ShareableBase<Table> {
 
   // about:memory reporting:
 
-  size_t sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const;
+  size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
   size_t gcMallocBytes() const;
 };

@@ -28,10 +28,7 @@ pub enum DatagramTracking {
 
 impl From<Option<u64>> for DatagramTracking {
     fn from(v: Option<u64>) -> Self {
-        match v {
-            Some(id) => Self::Id(id),
-            None => Self::None,
-        }
+        v.map_or(Self::None, Self::Id)
     }
 }
 
@@ -50,7 +47,7 @@ struct QuicDatagram {
 }
 
 impl QuicDatagram {
-    fn tracking(&self) -> &DatagramTracking {
+    const fn tracking(&self) -> &DatagramTracking {
         &self.tracking
     }
 }
@@ -93,7 +90,7 @@ impl QuicDatagrams {
         }
     }
 
-    pub fn remote_datagram_size(&self) -> u64 {
+    pub const fn remote_datagram_size(&self) -> u64 {
         self.remote_datagram_size
     }
 
@@ -157,12 +154,15 @@ impl QuicDatagrams {
         tracking: DatagramTracking,
         stats: &mut Stats,
     ) -> Res<()> {
-        if u64::try_from(buf.len()).unwrap() > self.remote_datagram_size {
+        if u64::try_from(buf.len())? > self.remote_datagram_size {
             return Err(Error::TooMuchData);
         }
         if self.datagrams.len() == self.max_queued_outgoing_datagrams {
             self.conn_events.datagram_outcome(
-                self.datagrams.pop_front().unwrap().tracking(),
+                self.datagrams
+                    .pop_front()
+                    .ok_or(Error::InternalError)?
+                    .tracking(),
                 OutgoingDatagramOutcome::DroppedQueueFull,
             );
             stats.datagram_tx.dropped_queue_full += 1;
@@ -175,7 +175,7 @@ impl QuicDatagrams {
     }
 
     pub fn handle_datagram(&self, data: &[u8], stats: &mut Stats) -> Res<()> {
-        if self.local_datagram_size < u64::try_from(data.len()).unwrap() {
+        if self.local_datagram_size < u64::try_from(data.len())? {
             return Err(Error::ProtocolViolation);
         }
         self.conn_events

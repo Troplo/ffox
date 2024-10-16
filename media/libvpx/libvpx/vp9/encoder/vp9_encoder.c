@@ -3298,6 +3298,34 @@ static void update_ref_frames(VP9_COMP *cpi) {
   BufferPool *const pool = cm->buffer_pool;
   GF_GROUP *const gf_group = &cpi->twopass.gf_group;
 
+  if (cpi->ext_ratectrl.ready &&
+      (cpi->ext_ratectrl.funcs.rc_type & VPX_RC_GOP) != 0 &&
+      cpi->ext_ratectrl.funcs.get_gop_decision != NULL) {
+    const int this_gf_index = gf_group->index;
+    const int update_ref_idx = gf_group->update_ref_idx[this_gf_index];
+    if (gf_group->update_type[this_gf_index] == KF_UPDATE) {
+      ref_cnt_fb(pool->frame_bufs, &cm->ref_frame_map[0], cm->new_fb_idx);
+      ref_cnt_fb(pool->frame_bufs, &cm->ref_frame_map[1], cm->new_fb_idx);
+      ref_cnt_fb(pool->frame_bufs, &cm->ref_frame_map[2], cm->new_fb_idx);
+    } else if (update_ref_idx != INVALID_IDX) {
+      ref_cnt_fb(pool->frame_bufs,
+                 &cm->ref_frame_map[gf_group->update_ref_idx[this_gf_index]],
+                 cm->new_fb_idx);
+    }
+
+    const int next_gf_index = gf_group->index + 1;
+
+    // Overlay frame should ideally look at the colocated ref frame from rc lib.
+    // Here temporarily just don't update the indices.
+    if (next_gf_index < gf_group->gf_group_size) {
+      cpi->lst_fb_idx = gf_group->ext_rc_ref[next_gf_index].last_index;
+      cpi->gld_fb_idx = gf_group->ext_rc_ref[next_gf_index].golden_index;
+      cpi->alt_fb_idx = gf_group->ext_rc_ref[next_gf_index].altref_index;
+    }
+
+    return;
+  }
+
   if (cpi->rc.show_arf_as_gld) {
     int tmp = cpi->alt_fb_idx;
     cpi->alt_fb_idx = cpi->gld_fb_idx;
@@ -4098,16 +4126,14 @@ static int encode_without_recode_loop(VP9_COMP *cpi, size_t *size,
 #endif
 
   // Scene detection is always used for VBR mode or screen-content case.
-  // For other cases (e.g., CBR mode) use it for 5 <= speed < 8 for now
-  // (need to check encoding time cost for doing this for speed 8).
+  // For other cases (e.g., CBR mode) use it for 5 <= speed.
   cpi->rc.high_source_sad = 0;
   cpi->rc.hybrid_intra_scene_change = 0;
   cpi->rc.re_encode_maxq_scene_change = 0;
   if (cm->show_frame && cpi->oxcf.mode == REALTIME &&
       !cpi->disable_scene_detection_rtc_ratectrl &&
       (cpi->oxcf.rc_mode == VPX_VBR ||
-       cpi->oxcf.content == VP9E_CONTENT_SCREEN ||
-       (cpi->oxcf.speed >= 5 && cpi->oxcf.speed < 8)))
+       cpi->oxcf.content == VP9E_CONTENT_SCREEN || cpi->oxcf.speed >= 5))
     vp9_scene_detection_onepass(cpi);
 
   if (svc->spatial_layer_id == svc->first_spatial_layer_to_encode) {
@@ -5699,11 +5725,8 @@ static void encode_frame_to_data_rate(
 
   if (cpi->ext_ratectrl.ready &&
       cpi->ext_ratectrl.funcs.update_encodeframe_result != NULL) {
-    const RefCntBuffer *coded_frame_buf =
-        get_ref_cnt_buffer(cm, cm->new_fb_idx);
     vpx_codec_err_t codec_status = vp9_extrc_update_encodeframe_result(
-        &cpi->ext_ratectrl, (*size) << 3, cpi->Source, &coded_frame_buf->buf,
-        cm->bit_depth, cpi->oxcf.input_bit_depth, cm->base_qindex);
+        &cpi->ext_ratectrl, (*size) << 3, cm->base_qindex);
     if (codec_status != VPX_CODEC_OK) {
       vpx_internal_error(&cm->error, codec_status,
                          "vp9_extrc_update_encodeframe_result() failed");
@@ -6609,7 +6632,7 @@ int vp9_get_compressed_data(VP9_COMP *cpi, unsigned int *frame_flags,
 #if CONFIG_COLLECT_COMPONENT_TIMING
   start_timing(cpi, setup_tpl_stats_time);
 #endif
-  if (should_run_tpl(cpi, gf_group_index)) {
+  if (should_run_tpl(cpi, cpi->twopass.gf_group.index)) {
     vp9_init_tpl_buffer(cpi);
     vp9_estimate_tpl_qp_gop(cpi);
     vp9_setup_tpl_stats(cpi);
@@ -6983,7 +7006,6 @@ int vp9_set_size_literal(VP9_COMP *cpi, unsigned int width,
     cm->width = width;
     if (cm->width > cpi->initial_width) {
       cm->width = cpi->initial_width;
-      printf("Warning: Desired width too large, changed to %d\n", cm->width);
     }
   }
 
@@ -6991,7 +7013,6 @@ int vp9_set_size_literal(VP9_COMP *cpi, unsigned int width,
     cm->height = height;
     if (cm->height > cpi->initial_height) {
       cm->height = cpi->initial_height;
-      printf("Warning: Desired height too large, changed to %d\n", cm->height);
     }
   }
   assert(cm->width <= cpi->initial_width);

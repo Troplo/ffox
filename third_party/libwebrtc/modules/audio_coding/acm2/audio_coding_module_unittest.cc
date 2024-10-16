@@ -25,6 +25,7 @@
 #include "api/audio_codecs/opus/audio_decoder_opus.h"
 #include "api/audio_codecs/opus/audio_encoder_multi_channel_opus.h"
 #include "api/audio_codecs/opus/audio_encoder_opus.h"
+#include "api/units/timestamp.h"
 #include "modules/audio_coding/acm2/acm_receive_test.h"
 #include "modules/audio_coding/acm2/acm_send_test.h"
 #include "modules/audio_coding/codecs/cng/audio_encoder_cng.h"
@@ -209,9 +210,10 @@ class AudioCodingModuleTestOldApi : public ::testing::Test {
 
   virtual void InsertPacket() {
     const uint8_t kPayload[kPayloadSizeBytes] = {0};
-    ASSERT_EQ(0, acm_receiver_->InsertPacket(rtp_header_,
-                                             rtc::ArrayView<const uint8_t>(
-                                                 kPayload, kPayloadSizeBytes)));
+    ASSERT_EQ(0, acm_receiver_->InsertPacket(
+                     rtp_header_,
+                     rtc::ArrayView<const uint8_t>(kPayload, kPayloadSizeBytes),
+                     /*receive_time=*/Timestamp::MinusInfinity()));
     rtp_utility_->Forward(&rtp_header_);
   }
 
@@ -263,8 +265,7 @@ class AudioCodingModuleTestOldApiDeathTest
 TEST_F(AudioCodingModuleTestOldApiDeathTest, FailOnZeroDesiredFrequency) {
   AudioFrame audio_frame;
   bool muted;
-  RTC_EXPECT_DEATH(acm_receiver_->GetAudio(0, &audio_frame, &muted),
-                   "dst_sample_rate_hz");
+  RTC_EXPECT_DEATH(acm_receiver_->GetAudio(0, &audio_frame, &muted), "");
 }
 #endif
 
@@ -504,6 +505,83 @@ class AudioCodingModuleMtTestOldApi : public AudioCodingModuleTestOldApi {
 #endif
 TEST_F(AudioCodingModuleMtTestOldApi, MAYBE_DoTest) {
   EXPECT_TRUE(RunTest());
+}
+
+class AudioPacketizationCallbackMock : public AudioPacketizationCallback {
+ public:
+  MOCK_METHOD(int32_t,
+              SendData,
+              (AudioFrameType frame_type,
+               uint8_t payload_type,
+               uint32_t timestamp,
+               const uint8_t* payload_data,
+               size_t payload_len_bytes,
+               int64_t absolute_capture_timestamp_ms),
+              (override));
+};
+
+class AcmAbsoluteCaptureTimestamp : public ::testing::Test {
+ public:
+  AcmAbsoluteCaptureTimestamp() : audio_frame_(kSampleRateHz, kNumChannels) {}
+
+ protected:
+  static constexpr int kPTimeMs = 20;
+  static constexpr int kSampleRateHz = 48000;
+  static constexpr int kFrameSize = kSampleRateHz / 100;
+  static constexpr int kNumChannels = 2;
+
+  void SetUp() {
+    rtc::scoped_refptr<AudioEncoderFactory> codec_factory =
+        CreateBuiltinAudioEncoderFactory();
+    acm_ = AudioCodingModule::Create();
+    std::unique_ptr<AudioEncoder> encoder = codec_factory->MakeAudioEncoder(
+        111, SdpAudioFormat("OPUS", kSampleRateHz, kNumChannels),
+        absl::nullopt);
+    encoder->SetDtx(true);
+    encoder->SetReceiverFrameLengthRange(kPTimeMs, kPTimeMs);
+    acm_->SetEncoder(std::move(encoder));
+    acm_->RegisterTransportCallback(&transport_);
+    for (size_t k = 0; k < audio_.size(); ++k) {
+      audio_[k] = 10 * k;
+    }
+  }
+
+  const AudioFrame& GetAudioWithAbsoluteCaptureTimestamp(
+      int64_t absolute_capture_timestamp_ms) {
+    audio_frame_.ResetWithoutMuting();
+    audio_frame_.UpdateFrame(timestamp_, audio_.data(), kFrameSize,
+                             kSampleRateHz,
+                             AudioFrame::SpeechType::kNormalSpeech,
+                             AudioFrame::VADActivity::kVadActive, kNumChannels);
+    audio_frame_.set_absolute_capture_timestamp_ms(
+        absolute_capture_timestamp_ms);
+    timestamp_ += kFrameSize;
+    return audio_frame_;
+  }
+
+  std::unique_ptr<AudioCodingModule> acm_;
+  AudioPacketizationCallbackMock transport_;
+  AudioFrame audio_frame_;
+  std::array<int16_t, kFrameSize * kNumChannels> audio_;
+  uint32_t timestamp_ = 9873546;
+};
+
+TEST_F(AcmAbsoluteCaptureTimestamp, HaveBeginningOfFrameCaptureTime) {
+  constexpr int64_t first_absolute_capture_timestamp_ms = 123456789;
+
+  int64_t absolute_capture_timestamp_ms = first_absolute_capture_timestamp_ms;
+  EXPECT_CALL(transport_,
+              SendData(_, _, _, _, _, first_absolute_capture_timestamp_ms))
+      .Times(1);
+  EXPECT_CALL(
+      transport_,
+      SendData(_, _, _, _, _, first_absolute_capture_timestamp_ms + kPTimeMs))
+      .Times(1);
+  for (int k = 0; k < 5; ++k) {
+    acm_->Add10MsData(
+        GetAudioWithAbsoluteCaptureTimestamp(absolute_capture_timestamp_ms));
+    absolute_capture_timestamp_ms += 10;
+  }
 }
 
 // Disabling all of these tests on iOS until file support has been added.
@@ -787,7 +865,13 @@ TEST_F(AcmSenderBitExactnessOldApi, Pcma_stereo_20ms) {
 
 #if defined(WEBRTC_CODEC_ILBC) && defined(WEBRTC_LINUX) && \
     defined(WEBRTC_ARCH_X86_64)
+
+// TODO(bugs.webrtc.org/345525069): Either fix/enable or remove iLBC.
+#if defined(__has_feature) && __has_feature(undefined_behavior_sanitizer)
+TEST_F(AcmSenderBitExactnessOldApi, DISABLED_Ilbc_30ms) {
+#else
 TEST_F(AcmSenderBitExactnessOldApi, Ilbc_30ms) {
+#endif
   ASSERT_NO_FATAL_FAILURE(SetUpTest("ILBC", 8000, 1, 102, 240, 240));
   Run(/*audio_checksum_ref=*/"a739434bec8a754e9356ce2115603ce5",
       /*payload_checksum_ref=*/"cfae2e9f6aba96e145f2bcdd5050ce78",
@@ -797,7 +881,13 @@ TEST_F(AcmSenderBitExactnessOldApi, Ilbc_30ms) {
 #endif
 
 #if defined(WEBRTC_LINUX) && defined(WEBRTC_ARCH_X86_64)
+
+// TODO(bugs.webrtc.org/345525069): Either fix/enable or remove G722.
+#if defined(__has_feature) && __has_feature(undefined_behavior_sanitizer)
+TEST_F(AcmSenderBitExactnessOldApi, DISABLED_G722_20ms) {
+#else
 TEST_F(AcmSenderBitExactnessOldApi, G722_20ms) {
+#endif
   ASSERT_NO_FATAL_FAILURE(SetUpTest("G722", 16000, 1, 9, 320, 160));
   Run(/*audio_checksum_ref=*/"b875d9a3e41f5470857bdff02e3b368f",
       /*payload_checksum_ref=*/"fc68a87e1380614e658087cb35d5ca10",
@@ -807,7 +897,13 @@ TEST_F(AcmSenderBitExactnessOldApi, G722_20ms) {
 #endif
 
 #if defined(WEBRTC_LINUX) && defined(WEBRTC_ARCH_X86_64)
+
+// TODO(bugs.webrtc.org/345525069): Either fix/enable or remove G722.
+#if defined(__has_feature) && __has_feature(undefined_behavior_sanitizer)
+TEST_F(AcmSenderBitExactnessOldApi, DISABLED_G722_stereo_20ms) {
+#else
 TEST_F(AcmSenderBitExactnessOldApi, G722_stereo_20ms) {
+#endif
   ASSERT_NO_FATAL_FAILURE(SetUpTest("G722", 16000, 2, 119, 320, 160));
   Run(/*audio_checksum_ref=*/"02c427d73363b2f37853a0dd17fe1aba",
       /*payload_checksum_ref=*/"66516152eeaa1e650ad94ff85f668dac",

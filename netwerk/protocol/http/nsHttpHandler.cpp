@@ -138,6 +138,7 @@ using mozilla::dom::Promise;
 namespace mozilla::net {
 
 LazyLogModule gHttpLog("nsHttp");
+LazyLogModule gHttpIOLog("HttpIO");
 
 #ifdef ANDROID
 static nsCString GetDeviceModelId() {
@@ -244,6 +245,8 @@ static nsCString DocumentAcceptHeader() {
 
   return mimeTypes;
 }
+
+Atomic<bool, Relaxed> nsHttpHandler::sParentalControlsEnabled(false);
 
 nsHttpHandler::nsHttpHandler()
     : mIdleTimeout(PR_SecondsToInterval(10)),
@@ -378,6 +381,24 @@ nsresult nsHttpHandler::Init() {
       return qlogDir->HumanReadablePath();
     };
     mHttp3QlogDir = initQLogDir();
+
+    if (const char* origin = PR_GetEnv("MOZ_FORCE_QUIC_ON")) {
+      nsCCharSeparatedTokenizer tokens(nsDependentCString(origin), ':');
+      nsAutoCString host;
+      int32_t port = 443;
+      if (tokens.hasMoreTokens()) {
+        host = tokens.nextToken();
+        if (tokens.hasMoreTokens()) {
+          nsresult res;
+          int32_t tmp = tokens.nextToken().ToInteger(&res);
+          if (NS_SUCCEEDED(res)) {
+            port = tmp;
+          }
+        }
+        mAltSvcMappingTemptativeMap.InsertOrUpdate(
+            host, MakeUnique<nsCString>(nsPrintfCString("h3=:%d", port)));
+      }
+    }
   }
 
   // monitor some preference changes
@@ -470,7 +491,6 @@ nsresult nsHttpHandler::Init() {
     obsService->AddObserver(this, "psm:user-certificate-deleted", true);
     obsService->AddObserver(this, "intl:app-locales-changed", true);
     obsService->AddObserver(this, "browser-delayed-startup-finished", true);
-    obsService->AddObserver(this, "network:captive-portal-connectivity", true);
     obsService->AddObserver(this, "network:reset-http3-excluded-list", true);
     obsService->AddObserver(this, "network:socket-process-crashed", true);
 
@@ -484,15 +504,49 @@ nsresult nsHttpHandler::Init() {
 
   MakeNewRequestTokenBucket();
   mWifiTickler = new Tickler();
-  if (NS_FAILED(mWifiTickler->Init())) mWifiTickler = nullptr;
-
-  nsCOMPtr<nsIParentalControlsService> pc =
-      do_CreateInstance("@mozilla.org/parental-controls-service;1");
-  if (pc) {
-    pc->GetParentalControlsEnabled(&mParentalControlEnabled);
+  if (NS_FAILED(mWifiTickler->Init())) {
+    mWifiTickler = nullptr;
   }
 
+  UpdateParentalControlsEnabled(false /* wait for completion */);
   return NS_OK;
+}
+
+void nsHttpHandler::UpdateParentalControlsEnabled(bool waitForCompletion) {
+  // Child process does not have privileges to read parentals control state
+  if (!XRE_IsParentProcess()) {
+    return;
+  }
+
+  auto getParentalControlsTask = []() {
+    nsCOMPtr<nsIParentalControlsService> pc =
+        do_CreateInstance("@mozilla.org/parental-controls-service;1");
+    if (pc) {
+      bool localEnabled = false;
+      pc->GetParentalControlsEnabled(&localEnabled);
+      sParentalControlsEnabled = localEnabled;
+
+      // Cache the state of parental controls via preference
+      if (!AppShutdown::IsInOrBeyond(ShutdownPhase::AppShutdownConfirmed)) {
+        Preferences::SetBool(
+            StaticPrefs::GetPrefName_network_parental_controls_cached_state(),
+            localEnabled);
+      }
+    }
+  };
+
+  if (waitForCompletion) {
+    getParentalControlsTask();
+  } else {
+    // To avoid blocking on determining parental controls state, used the cached
+    // pref until the runnable completes
+    sParentalControlsEnabled =
+        mozilla::StaticPrefs::network_parental_controls_cached_state();
+    Unused << NS_DispatchToMainThreadQueue(
+        NS_NewRunnableFunction("GetParentalControlsEnabled",
+                               std::move(getParentalControlsTask)),
+        mozilla::EventQueuePriority::Idle);
+  }
 }
 
 const nsCString& nsHttpHandler::Http3QlogDir() {
@@ -534,15 +588,15 @@ nsresult nsHttpHandler::InitConnectionMgr() {
     auto task = [self]() {
       RefPtr<HttpConnectionMgrParent> parent =
           self->mConnMgr->AsHttpConnectionMgrParent();
-      Unused << SocketProcessParent::GetSingleton()
-                    ->SendPHttpConnectionMgrConstructor(
-                        parent,
-                        HttpHandlerInitArgs(
-                            self->mLegacyAppName, self->mLegacyAppVersion,
-                            self->mPlatform, self->mOscpu, self->mMisc,
-                            self->mProduct, self->mProductSub, self->mAppName,
-                            self->mAppVersion, self->mCompatFirefox,
-                            self->mCompatDevice, self->mDeviceModelId));
+      RefPtr<SocketProcessParent> socketParent =
+          SocketProcessParent::GetSingleton();
+      Unused << socketParent->SendPHttpConnectionMgrConstructor(
+          parent,
+          HttpHandlerInitArgs(self->mLegacyAppName, self->mLegacyAppVersion,
+                              self->mPlatform, self->mOscpu, self->mMisc,
+                              self->mProduct, self->mProductSub, self->mAppName,
+                              self->mAppVersion, self->mCompatFirefox,
+                              self->mCompatDevice, self->mDeviceModelId));
     };
     gIOService->CallOrWaitForSocketProcess(std::move(task));
   } else {
@@ -615,7 +669,7 @@ nsresult nsHttpHandler::AddStandardRequestHeaders(
   if (NS_FAILED(rv)) return rv;
 
   // add the "Send Hint" header
-  if (mSafeHintEnabled || mParentalControlEnabled) {
+  if (mSafeHintEnabled || sParentalControlsEnabled) {
     rv = request->SetHeader(nsHttp::Prefer, "safe"_ns, false,
                             nsHttpHeaderArray::eVarietyRequestDefault);
     if (NS_FAILED(rv)) return rv;
@@ -1022,6 +1076,29 @@ void nsHttpHandler::InitUserAgentComponents() {
   mUserAgentIsDirty = true;
 }
 
+#ifdef XP_MACOSX
+void nsHttpHandler::InitMSAuthorities() {
+  if (!StaticPrefs::network_http_microsoft_entra_sso_enabled()) {
+    return;
+  }
+
+  nsAutoCString authorityList;
+
+  if (NS_FAILED(Preferences::GetCString("network.microsoft-sso-authority-list",
+                                        authorityList))) {
+    return;
+  }
+  mMSAuthorities.Clear();
+
+  // Normalize the MS authority list
+  nsCCharSeparatedTokenizer tokenizer(authorityList, ',');
+  while (tokenizer.hasMoreTokens()) {
+    const nsDependentCSubstring& token = tokenizer.nextToken();
+    mMSAuthorities.Insert(token);
+  }
+}
+#endif
+
 uint32_t nsHttpHandler::MaxSocketCount() {
   PR_CallOnce(&nsSocketTransportService::gMaxCountInitOnce,
               nsSocketTransportService::DiscoverMaxCount);
@@ -1104,8 +1181,9 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
       if (!XRE_IsSocketProcess()) {
         mDeviceModelId = mozilla::net::GetDeviceModelId();
         if (gIOService->SocketProcessReady()) {
-          Unused << SocketProcessParent::GetSingleton()
-                        ->SendUpdateDeviceModelId(mDeviceModelId);
+          RefPtr<SocketProcessParent> socketParent =
+              SocketProcessParent::GetSingleton();
+          Unused << socketParent->SendUpdateDeviceModelId(mDeviceModelId);
         }
       }
     } else {
@@ -1832,6 +1910,18 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
     }
   }
 
+#ifdef XP_MACOSX
+  if (XRE_IsParentProcess()) {
+    if (PREF_CHANGED(HTTP_PREF("microsoft-entra-sso.enabled"))) {
+      rv =
+          Preferences::GetBool(HTTP_PREF("microsoft-entra-sso.enabled"), &cVar);
+      if (NS_SUCCEEDED(rv) && cVar) {
+        InitMSAuthorities();
+      }
+    }
+  }
+#endif
+
   // Enable HTTP response timeout if TCP Keepalives are disabled.
   mResponseTimeoutEnabled =
       !mTCPKeepaliveShortLivedEnabled && !mTCPKeepaliveLongLivedEnabled;
@@ -2217,9 +2307,6 @@ nsHttpHandler::Observe(nsISupports* subject, const char* topic,
   } else if (!strcmp(topic, "intl:app-locales-changed")) {
     // If the locale changed, there's a chance the accept language did too
     mAcceptLanguagesIsDirty = true;
-  } else if (!strcmp(topic, "network:captive-portal-connectivity")) {
-    nsAutoCString data8 = NS_ConvertUTF16toUTF8(data);
-    mThroughCaptivePortal = data8.EqualsLiteral("captive");
   } else if (!strcmp(topic, "network:reset-http3-excluded-list")) {
     MutexAutoLock lock(mHttpExclusionLock);
     mExcludedHttp3Origins.Clear();
@@ -2804,7 +2891,7 @@ void nsHttpHandler::MaybeAddAltSvcForTesting(
 }
 
 bool nsHttpHandler::EchConfigEnabled(bool aIsHttp3) const {
-  if (mParentalControlEnabled) {
+  if (sParentalControlsEnabled) {
     return false;
   }
 
@@ -2831,6 +2918,14 @@ bool nsHttpHandler::IsHostExcludedForHTTPSRR(const nsACString& aHost) {
 
   return mExcludedHostsForHTTPSRRUpgrade.Contains(aHost);
 }
+
+#ifdef XP_MACOSX
+bool nsHttpHandler::IsHostMSAuthority(const nsACString& aHost) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  return mMSAuthorities.Contains(aHost);
+}
+#endif
 
 void nsHttpHandler::Exclude0RttTcp(const nsHttpConnectionInfo* ci) {
   MOZ_ASSERT(OnSocketThread());

@@ -170,24 +170,25 @@ typedef std::set<rtc::SocketAddress> ServerAddresses;
 // connections to similar mechanisms of the other client.  Subclasses of this
 // one add support for specific mechanisms like local UDP ports.
 class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
+ public:
+  // A struct containing common arguments to creating a port. See also
+  // CreateRelayPortArgs.
+  struct PortParametersRef {
+    webrtc::TaskQueueBase* network_thread;
+    rtc::PacketSocketFactory* socket_factory;
+    const rtc::Network* network;
+    absl::string_view ice_username_fragment;
+    absl::string_view ice_password;
+    const webrtc::FieldTrialsView* field_trials;
+  };
+
  protected:
   // Constructors for use only by via constructors in derived classes.
-  Port(webrtc::TaskQueueBase* thread,
+  Port(const PortParametersRef& args, webrtc::IceCandidateType type);
+  Port(const PortParametersRef& args,
        webrtc::IceCandidateType type,
-       rtc::PacketSocketFactory* factory,
-       const rtc::Network* network,
-       absl::string_view username_fragment,
-       absl::string_view password,
-       const webrtc::FieldTrialsView* field_trials = nullptr);
-  Port(webrtc::TaskQueueBase* thread,
-       webrtc::IceCandidateType type,
-       rtc::PacketSocketFactory* factory,
-       const rtc::Network* network,
        uint16_t min_port,
        uint16_t max_port,
-       absl::string_view username_fragment,
-       absl::string_view password,
-       const webrtc::FieldTrialsView* field_trials = nullptr,
        bool shared_socket = false);
 
  public:
@@ -321,20 +322,6 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
       StunMessage* message,
       const rtc::SocketAddress& addr,
       const std::vector<uint16_t>& unknown_types);
-
-  void set_proxy(absl::string_view user_agent, const rtc::ProxyInfo& proxy) {
-    RTC_DCHECK_NOTREACHED();
-    user_agent_ = std::string(user_agent);
-    proxy_ = proxy;
-  }
-  const std::string& user_agent() override {
-    RTC_DCHECK_NOTREACHED();
-    return user_agent_;
-  }
-  const rtc::ProxyInfo& proxy() override {
-    RTC_DCHECK_NOTREACHED();
-    return proxy_;
-  }
 
   void EnablePortPackets() override;
 
@@ -505,9 +492,6 @@ class RTC_EXPORT Port : public PortInterface, public sigslot::has_slots<> {
   IceRole ice_role_;
   uint64_t tiebreaker_;
   bool shared_socket_;
-  // Information to use when going through a proxy.
-  std::string user_agent_;
-  rtc::ProxyInfo proxy_;
 
   // A virtual cost perceived by the user, usually based on the network type
   // (WiFi. vs. Cellular). It takes precedence over the priority when

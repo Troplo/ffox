@@ -266,6 +266,7 @@
   MACRO_(hasOwn, "hasOwn")                                                     \
   MACRO_(hasOwnProperty, "hasOwnProperty")                                     \
   MACRO_(highWaterMark, "highWaterMark")                                       \
+  IF_EXPLICIT_RESOURCE_MANAGEMENT(MACRO_(hint, "hint"))                        \
   MACRO_(hour, "hour")                                                         \
   MACRO_(hour12, "hour12")                                                     \
   MACRO_(hourCycle, "hourCycle")                                               \
@@ -276,6 +277,7 @@
   MACRO_(ignorePunctuation, "ignorePunctuation")                               \
   MACRO_(implements, "implements")                                             \
   MACRO_(import, "import")                                                     \
+  MACRO_(importedStringConstants, "importedStringConstants")                   \
   MACRO2(in, "in")                                                             \
   MACRO_(includes, "includes")                                                 \
   MACRO_(incumbentGlobal, "incumbentGlobal")                                   \
@@ -370,7 +372,7 @@
   MACRO_(maxOffset, "maxOffset")                                               \
   MACRO_(mergeFields, "mergeFields")                                           \
   MACRO_(message, "message")                                                   \
-  IF_DECORATORS(MACRO_(method, "method"))                                      \
+  IF_EXPLICIT_RESOURCE_MANAGEMENT_OR_DECORATORS(MACRO_(method, "method"))      \
   MACRO_(meta, "meta")                                                         \
   MACRO_(microsecond, "microsecond")                                           \
   MACRO_(microseconds, "microseconds")                                         \
@@ -445,6 +447,7 @@
   MACRO2(of, "of")                                                             \
   MACRO_(offset, "offset")                                                     \
   MACRO2(ok, "ok")                                                             \
+  MACRO_(omitPadding, "omitPadding")                                           \
   MACRO_(one, "one")                                                           \
   MACRO_(optimizedOut, "optimizedOut")                                         \
   MACRO_(other, "other")                                                       \

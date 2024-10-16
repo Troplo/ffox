@@ -84,8 +84,11 @@ class nsTableCellFrame : public nsContainerFrame,
 #endif
 
   nsContainerFrame* GetContentInsertionFrame() override {
-    return PrincipalChildList().FirstChild()->GetContentInsertionFrame();
+    return Inner()->GetContentInsertionFrame();
   }
+
+  // Return our anonymous inner frame.
+  nsIFrame* Inner() const;
 
   nsIFrame* CellContentFrame() const;
 
@@ -102,8 +105,9 @@ class nsTableCellFrame : public nsContainerFrame,
                               nsDisplayListBuilder* aBuilder,
                               const nsDisplayListSet& aLists);
 
-  nscoord GetMinISize(gfxContext* aRenderingContext) override;
-  nscoord GetPrefISize(gfxContext* aRenderingContext) override;
+  nscoord IntrinsicISize(gfxContext* aContext,
+                         mozilla::IntrinsicISizeType aType) override;
+
   IntrinsicSizeOffsetData IntrinsicISizeOffsets(
       nscoord aPercentageBasis = NS_UNCONSTRAINEDSIZE) override;
 

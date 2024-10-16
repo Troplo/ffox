@@ -476,9 +476,7 @@ GeckoFontMetrics Gecko_GetFontMetrics(const nsPresContext*, bool is_vertical,
                                       bool use_user_font_set,
                                       bool retrieve_math_scales);
 
-mozilla::StyleSheet* Gecko_StyleSheet_Clone(
-    const mozilla::StyleSheet* aSheet,
-    const mozilla::StyleSheet* aNewParentSheet);
+mozilla::StyleSheet* Gecko_StyleSheet_Clone(const mozilla::StyleSheet* aSheet);
 
 void Gecko_StyleSheet_AddRef(const mozilla::StyleSheet* aSheet);
 void Gecko_StyleSheet_Release(const mozilla::StyleSheet* aSheet);
@@ -536,9 +534,8 @@ bool Gecko_ErrorReportingEnabled(const mozilla::StyleSheet* sheet,
 void Gecko_ReportUnexpectedCSSError(
     uint64_t windowId, nsIURI* uri, const char* message, const char* param,
     uint32_t paramLen, const char* prefix, const char* prefixParam,
-    uint32_t prefixParamLen, const char* suffix, const char* source,
-    uint32_t sourceLen, const char* selectors, uint32_t selectorsLen,
-    uint32_t lineNumber, uint32_t colNumber);
+    uint32_t prefixParamLen, const char* suffix, const char* selectors,
+    uint32_t selectorsLen, uint32_t lineNumber, uint32_t colNumber);
 
 // DOM APIs.
 void Gecko_ContentList_AppendAll(nsSimpleContentList* aContentList,

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { Module } from "chrome://remote/content/shared/messagehandler/Module.sys.mjs";
+import { RootBiDiModule } from "chrome://remote/content/webdriver-bidi/modules/RootBiDiModule.sys.mjs";
 
 const lazy = {};
 
@@ -11,6 +11,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
   getWebDriverSessionById:
     "chrome://remote/content/shared/webdriver/Session.sys.mjs",
+  pprint: "chrome://remote/content/shared/Format.sys.mjs",
   TabManager: "chrome://remote/content/shared/TabManager.sys.mjs",
   UserContextManager:
     "chrome://remote/content/shared/UserContextManager.sys.mjs",
@@ -34,7 +35,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
  *     Array of UserContextInfo for the current user contexts.
  */
 
-class BrowserModule extends Module {
+class BrowserModule extends RootBiDiModule {
   constructor(messageHandler) {
     super(messageHandler);
   }
@@ -116,7 +117,7 @@ class BrowserModule extends Module {
 
     lazy.assert.string(
       userContextId,
-      `Expected "userContext" to be a string, got ${userContextId}`
+      lazy.pprint`Expected "userContext" to be a string, got ${userContextId}`
     );
 
     if (userContextId === lazy.UserContextManager.defaultUserContextId) {

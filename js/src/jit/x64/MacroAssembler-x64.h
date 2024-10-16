@@ -533,6 +533,7 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   void cmpPtr(Register lhs, Register rhs) { cmpq(rhs, lhs); }
   void testPtr(Register lhs, Register rhs) { testq(rhs, lhs); }
   void testPtr(Register lhs, Imm32 rhs) { testq(rhs, lhs); }
+  void testPtr(Register lhs, ImmWord rhs) { test64(lhs, Imm64(rhs.value)); }
   void testPtr(const Operand& lhs, Imm32 rhs) { testq(rhs, lhs); }
   void test64(Register lhs, Register rhs) { testq(rhs, lhs); }
   void test64(Register lhs, const Imm64 rhs) {
@@ -1211,8 +1212,8 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared {
   inline void incrementInt32Value(const Address& addr);
 
  public:
-  void handleFailureWithHandlerTail(Label* profilerExitTail,
-                                    Label* bailoutTail);
+  void handleFailureWithHandlerTail(Label* profilerExitTail, Label* bailoutTail,
+                                    uint32_t* returnValueCheckOffset);
 
   // Instrumentation for entering and leaving the profiler.
   void profilerEnterFrame(Register framePtr, Register scratch);

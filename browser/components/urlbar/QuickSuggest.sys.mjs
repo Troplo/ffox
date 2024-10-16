@@ -20,6 +20,8 @@ const FEATURES = {
   AdmWikipedia: "resource:///modules/urlbar/private/AdmWikipedia.sys.mjs",
   BlockedSuggestions:
     "resource:///modules/urlbar/private/BlockedSuggestions.sys.mjs",
+  FakespotSuggestions:
+    "resource:///modules/urlbar/private/FakespotSuggestions.sys.mjs",
   ImpressionCaps: "resource:///modules/urlbar/private/ImpressionCaps.sys.mjs",
   MDNSuggestions: "resource:///modules/urlbar/private/MDNSuggestions.sys.mjs",
   PocketSuggestions:
@@ -153,13 +155,12 @@ class _QuickSuggest {
   }
 
   /**
-   * @returns {Map}
-   *   A map from the name of each registered Rust suggestion type to the
-   *   feature that manages that type. This mapping is determined by each
-   *   feature's `rustSuggestionTypes`.
+   * @returns {Set}
+   *   The set of features that manage Rust suggestion types, as determined by
+   *   each feature's `rustSuggestionTypes`.
    */
-  get featuresByRustSuggestionType() {
-    return this.#featuresByRustSuggestionType;
+  get rustFeatures() {
+    return this.#rustFeatures;
   }
 
   get logger() {
@@ -190,6 +191,9 @@ class _QuickSuggest {
       for (let type of feature.rustSuggestionTypes) {
         this.#featuresByRustSuggestionType.set(type, feature);
       }
+      if (feature.rustSuggestionTypes.length) {
+        this.#rustFeatures.add(feature);
+      }
 
       // Update the map from enabling preferences to features.
       let prefs = feature.enablingPreferences;
@@ -205,8 +209,8 @@ class _QuickSuggest {
       }
     }
 
-    this._updateFeatureState();
-    lazy.NimbusFeatures.urlbar.onUpdate(() => this._updateFeatureState());
+    this.#updateAll();
+    lazy.NimbusFeatures.urlbar.onUpdate(() => this.#updateAll());
     lazy.UrlbarPrefs.addObserver(this);
   }
 
@@ -516,7 +520,7 @@ class _QuickSuggest {
   /**
    * Updates state based on whether quick suggest and its features are enabled.
    */
-  _updateFeatureState() {
+  #updateAll() {
     // IMPORTANT: This method is a `NimbusFeatures.urlbar.onUpdate()` callback,
     // which means it's called on every change to any pref that is a fallback
     // for a urlbar Nimbus variable.
@@ -542,6 +546,9 @@ class _QuickSuggest {
 
   // Maps from Rust suggestion types to Suggest feature instances.
   #featuresByRustSuggestionType = new Map();
+
+  // Set of feature instances that manage Rust suggestion types.
+  #rustFeatures = new Set();
 
   // Maps from preference names to the `Set` of feature instances they enable.
   #featuresByEnablingPrefs = new Map();

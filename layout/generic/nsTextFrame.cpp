@@ -675,7 +675,8 @@ int32_t nsTextFrame::GetInFlowContentLength() {
           ? static_cast<FlowLengthProperty*>(
                 mContent->GetProperty(nsGkAtoms::flowlength))
           : nullptr;
-
+  MOZ_ASSERT(mContent->HasFlag(NS_HAS_FLOWLENGTH_PROPERTY) == !!flowLength,
+             "incorrect NS_HAS_FLOWLENGTH_PROPERTY flag");
   /**
    * This frame must start inside the cached flow. If the flow starts at
    * mContentOffset but this frame is empty, logically it might be before the
@@ -704,8 +705,9 @@ int32_t nsTextFrame::GetInFlowContentLength() {
             nsINode::DeleteProperty<FlowLengthProperty>))) {
       delete flowLength;
       flowLength = nullptr;
+    } else {
+      mContent->SetFlags(NS_HAS_FLOWLENGTH_PROPERTY);
     }
-    mContent->SetFlags(NS_HAS_FLOWLENGTH_PROPERTY);
   }
   if (flowLength) {
     flowLength->mStartOffset = mContentOffset;
@@ -2798,26 +2800,49 @@ void BuildTextRunsScanner::SetupBreakSinksForTextRun(gfxTextRun* aTextRun,
 }
 
 static bool MayCharacterHaveEmphasisMark(uint32_t aCh) {
-  auto category = unicode::GetGeneralCategory(aCh);
-  // Comparing an unsigned variable against zero is a compile error,
-  // so we use static assert here to ensure we really don't need to
-  // compare it with the given constant.
-  static_assert(std::is_unsigned_v<decltype(category)> &&
-                    HB_UNICODE_GENERAL_CATEGORY_CONTROL == 0,
-                "if this constant is not zero, or category is signed, "
-                "we need to explicitly do the comparison below");
-  return !(category <= HB_UNICODE_GENERAL_CATEGORY_UNASSIGNED ||
-           (category >= HB_UNICODE_GENERAL_CATEGORY_LINE_SEPARATOR &&
-            category <= HB_UNICODE_GENERAL_CATEGORY_SPACE_SEPARATOR));
-}
+  // Punctuation characters that *can* take emphasis marks (exceptions to the
+  // rule that characters with GeneralCategory=P* do not take emphasis), as per
+  // https://drafts.csswg.org/css-text-decor/#text-emphasis-style-property
+  // There are no non-BMP codepoints in the punctuation exceptions, so we can
+  // just use a 16-bit string to list & check them.
+  constexpr nsLiteralString kPunctuationAcceptsEmphasis =
+      u"\x0023"  // #  NUMBER SIGN
+      u"\x0025"  // %  PERCENT SIGN
+      u"\x0026"  // &  AMPERSAND
+      u"\x0040"  // @  COMMERCIAL AT
+      u"\x00A7"  // §  SECTION SIGN
+      u"\x00B6"  // ¶  PILCROW SIGN
+      u"\x0609"  // ؉  ARABIC-INDIC PER MILLE SIGN
+      u"\x060A"  // ؊  ARABIC-INDIC PER TEN THOUSAND SIGN
+      u"\x066A"  // ٪  ARABIC PERCENT SIGN
+      u"\x2030"  // ‰  PER MILLE SIGN
+      u"\x2031"  // ‱  PER TEN THOUSAND SIGN
+      u"\x204A"  // ⁊  TIRONIAN SIGN ET
+      u"\x204B"  // ⁋  REVERSED PILCROW SIGN
+      u"\x2053"  // ⁓  SWUNG DASH
+      u"\x303D"  // 〽️  PART ALTERNATION MARK
+      // Characters that are NFKD-equivalent to the above, extracted from
+      // UnicodeData.txt.
+      u"\xFE5F"      // SMALL NUMBER SIGN;Po;0;ET;<small> 0023;;;;N;;;;;
+      u"\xFE60"      // SMALL AMPERSAND;Po;0;ON;<small> 0026;;;;N;;;;;
+      u"\xFE6A"      // SMALL PERCENT SIGN;Po;0;ET;<small> 0025;;;;N;;;;;
+      u"\xFE6B"      // SMALL COMMERCIAL AT;Po;0;ON;<small> 0040;;;;N;;;;;
+      u"\xFF03"      // FULLWIDTH NUMBER SIGN;Po;0;ET;<wide> 0023;;;;N;;;;;
+      u"\xFF05"      // FULLWIDTH PERCENT SIGN;Po;0;ET;<wide> 0025;;;;N;;;;;
+      u"\xFF06"      // FULLWIDTH AMPERSAND;Po;0;ON;<wide> 0026;;;;N;;;;;
+      u"\xFF20"_ns;  // FULLWIDTH COMMERCIAL AT;Po;0;ON;<wide> 0040;;;;N;;;;;
 
-static bool MayCharacterHaveEmphasisMark(uint8_t aCh) {
-  // 0x00~0x1f and 0x7f~0x9f are in category Cc
-  // 0x20 and 0xa0 are in category Zs
-  bool result = !(aCh <= 0x20 || (aCh >= 0x7f && aCh <= 0xa0));
-  MOZ_ASSERT(result == MayCharacterHaveEmphasisMark(uint32_t(aCh)),
-             "result for uint8_t should match result for uint32_t");
-  return result;
+  switch (unicode::GetGenCategory(aCh)) {
+    case nsUGenCategory::kSeparator:  // whitespace, line- & para-separators
+      return false;
+    case nsUGenCategory::kOther:  // control categories
+      return false;
+    case nsUGenCategory::kPunctuation:
+      return aCh <= 0xffff &&
+             kPunctuationAcceptsEmphasis.Contains(char16_t(aCh));
+    default:
+      return true;
+  }
 }
 
 void BuildTextRunsScanner::SetupTextEmphasisForTextRun(gfxTextRun* aTextRun,
@@ -4251,9 +4276,13 @@ class nsContinuingTextFrame final : public nsTextFrame {
   };
 
   void AddInlineMinISize(gfxContext* aRenderingContext,
-                         InlineMinISizeData* aData) final;
+                         InlineMinISizeData* aData) final {
+    // Do nothing, since the first-in-flow accounts for everything.
+  }
   void AddInlinePrefISize(gfxContext* aRenderingContext,
-                          InlinePrefISizeData* aData) final;
+                          InlinePrefISizeData* aData) final {
+    // Do nothing, since the first-in-flow accounts for everything.
+  }
 
  protected:
   explicit nsContinuingTextFrame(ComputedStyle* aStyle,
@@ -4373,28 +4402,9 @@ nsIFrame* nsContinuingTextFrame::FirstInFlow() const {
 // XXX We really need to make :first-letter happen during frame
 // construction.
 
-// Needed for text frames in XUL.
-/* virtual */
-nscoord nsTextFrame::GetMinISize(gfxContext* aRenderingContext) {
-  return nsLayoutUtils::MinISizeFromInline(this, aRenderingContext);
-}
-
-// Needed for text frames in XUL.
-/* virtual */
-nscoord nsTextFrame::GetPrefISize(gfxContext* aRenderingContext) {
-  return nsLayoutUtils::PrefISizeFromInline(this, aRenderingContext);
-}
-
-/* virtual */
-void nsContinuingTextFrame::AddInlineMinISize(gfxContext* aRenderingContext,
-                                              InlineMinISizeData* aData) {
-  // Do nothing, since the first-in-flow accounts for everything.
-}
-
-/* virtual */
-void nsContinuingTextFrame::AddInlinePrefISize(gfxContext* aRenderingContext,
-                                               InlinePrefISizeData* aData) {
-  // Do nothing, since the first-in-flow accounts for everything.
+nscoord nsTextFrame::IntrinsicISize(gfxContext* aContext,
+                                    IntrinsicISizeType aType) {
+  return IntrinsicISizeFromInline(aContext, aType);
 }
 
 //----------------------------------------------------------------------
@@ -7517,7 +7527,8 @@ bool nsTextFrame::IsFrameSelected() const {
                "use the public IsSelected() instead");
   if (mIsSelected == nsTextFrame::SelectionState::Unknown) {
     const bool isSelected =
-        GetContent()->IsSelected(GetContentOffset(), GetContentEnd());
+        GetContent()->IsSelected(GetContentOffset(), GetContentEnd(),
+                                 PresShell()->GetSelectionNodeCache());
     mIsSelected = isSelected ? nsTextFrame::SelectionState::Selected
                              : nsTextFrame::SelectionState::NotSelected;
   } else {
@@ -8611,7 +8622,7 @@ void nsTextFrame::MarkIntrinsicISizesDirty() {
 // XXX this doesn't handle characters shaped by line endings. We need to
 // temporarily override the "current line ending" settings.
 void nsTextFrame::AddInlineMinISizeForFlow(gfxContext* aRenderingContext,
-                                           nsIFrame::InlineMinISizeData* aData,
+                                           InlineMinISizeData* aData,
                                            TextRunType aTextRunType) {
   uint32_t flowEndInTextRun;
   gfxSkipCharsIterator iter =
@@ -8853,7 +8864,7 @@ static bool IsUnreflowedLetterFrame(nsIFrame* aFrame) {
 // first-line changing min-width
 /* virtual */
 void nsTextFrame::AddInlineMinISize(gfxContext* aRenderingContext,
-                                    nsIFrame::InlineMinISizeData* aData) {
+                                    InlineMinISizeData* aData) {
   // Check if this textframe belongs to a first-letter frame that has not yet
   // been reflowed; if so, we need to deal with splitting off a continuation
   // before we can measure the advance correctly.
@@ -8899,9 +8910,9 @@ void nsTextFrame::AddInlineMinISize(gfxContext* aRenderingContext,
 
 // XXX this doesn't handle characters shaped by line endings. We need to
 // temporarily override the "current line ending" settings.
-void nsTextFrame::AddInlinePrefISizeForFlow(
-    gfxContext* aRenderingContext, nsIFrame::InlinePrefISizeData* aData,
-    TextRunType aTextRunType) {
+void nsTextFrame::AddInlinePrefISizeForFlow(gfxContext* aRenderingContext,
+                                            InlinePrefISizeData* aData,
+                                            TextRunType aTextRunType) {
   if (IsUnreflowedLetterFrame(GetParent())) {
     MaybeSplitFramesForFirstLetter();
   }
@@ -9020,7 +9031,7 @@ void nsTextFrame::AddInlinePrefISizeForFlow(
 // first-line and first-letter changing pref-width
 /* virtual */
 void nsTextFrame::AddInlinePrefISize(gfxContext* aRenderingContext,
-                                     nsIFrame::InlinePrefISizeData* aData) {
+                                     InlinePrefISizeData* aData) {
   float inflation = nsLayoutUtils::FontSizeInflationFor(this);
   TextRunType trtype = (inflation == 1.0f) ? eNotInflated : eInflated;
 

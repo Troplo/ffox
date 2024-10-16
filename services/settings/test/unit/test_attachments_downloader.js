@@ -45,6 +45,10 @@ add_setup(() => {
     "/cdn/main-workspace/some-collection/",
     do_get_file("test_attachments_downloader")
   );
+  server.registerDirectory(
+    "/cdn/bundles/",
+    do_get_file("test_attachments_downloader")
+  );
 
   // For this test, we are using a server other than production. Force
   // LOAD_DUMPS to true so that we can still load attachments from dumps.
@@ -59,15 +63,25 @@ async function clear_state() {
   );
 
   downloader = new Downloader("main", "some-collection");
-  const dummyCacheImpl = {
-    get: async () => {},
-    set: async () => {},
-    delete: async () => {},
+  downloader.cache = {};
+  const memCacheImpl = {
+    get: async id => {
+      return downloader.cache[id];
+    },
+    set: async (id, obj) => {
+      downloader.cache[id] = obj;
+    },
+    delete: async id => {
+      delete downloader.cache[id];
+    },
+    hasData: async () => {
+      return !!Object.keys(downloader.cache).length;
+    },
   };
   // The download() method requires a cacheImpl, but the Downloader
   // class does not have one. Define a dummy no-op one.
   Object.defineProperty(downloader, "cacheImpl", {
-    value: dummyCacheImpl,
+    value: memCacheImpl,
     // Writable to allow specific tests to override cacheImpl.
     writable: true,
   });
@@ -87,36 +101,6 @@ async function clear_state() {
     response.setStatusLine(null, 200, "OK");
   });
 }
-
-add_task(clear_state);
-
-add_task(async function test_base_attachment_url_depends_on_server() {
-  const before = await downloader._baseAttachmentsURL();
-
-  Services.prefs.setStringPref(
-    "services.settings.server",
-    `http://localhost:${server.identity.primaryPort}/v2`
-  );
-
-  server.registerPathHandler("/v2/", (request, response) => {
-    response.write(
-      JSON.stringify({
-        capabilities: {
-          attachments: {
-            base_url: "http://some-cdn-url.org",
-          },
-        },
-      })
-    );
-    response.setHeader("Content-Type", "application/json; charset=UTF-8");
-    response.setStatusLine(null, 200, "OK");
-  });
-
-  const after = await downloader._baseAttachmentsURL();
-
-  Assert.notEqual(before, after, "base URL was changed");
-  Assert.equal(after, "http://some-cdn-url.org/", "A trailing slash is added");
-});
 add_task(clear_state);
 
 add_task(
@@ -834,4 +818,104 @@ add_task(
     );
   }
 );
+
+add_task(clear_state);
+
+add_task(async function test_cacheAll_happy_path() {
+  // verify bundle is downloaded succesfully
+  const allSuccess = await downloader.cacheAll();
+  Assert.ok(
+    allSuccess,
+    "Attachments cacheAll succesfully downloaded a bundle and saved all attachments"
+  );
+
+  // verify no temp zip file is left behind
+  const tempFiles = await IOUtils.getChildren(PathUtils.tempDir);
+  Assert.equal(
+    tempFiles.find(x => x.endsWith(".zip")),
+    undefined,
+    "No zip file is left behind."
+  );
+
+  // verify accuracy of attachments downloaded
+  Assert.equal(
+    downloader.cache["1"].record.title,
+    "test1",
+    "Test record 1 meta content appears accurate."
+  );
+  Assert.equal(
+    await downloader.cache["1"].blob.text(),
+    "test1\n",
+    "Test file 1 content is accurate."
+  );
+  Assert.equal(
+    downloader.cache["2"].record.title,
+    "test2",
+    "Test record 2 meta content appears accurate."
+  );
+  Assert.equal(
+    await downloader.cache["2"].blob.text(),
+    "test2\n",
+    "Test file 2 content is accurate."
+  );
+});
+
+add_task(async function test_cacheAll_skips_with_existing_data() {
+  downloader.cache = {
+    1: "1",
+  };
+  const allSuccess = await downloader.cacheAll();
+  Assert.equal(
+    allSuccess,
+    null,
+    "Attachments cacheAll skips downloads if data already exists"
+  );
+});
+
+add_task(async function test_cacheAll_does_not_skip_if_force_is_true() {
+  downloader.cache = {
+    1: "1",
+  };
+  const allSuccess = await downloader.cacheAll(true);
+  Assert.equal(
+    allSuccess,
+    true,
+    "Attachments cacheAll does not skip downloads if force is true"
+  );
+});
+
+add_task(clear_state);
+
+add_task(async function test_cacheAll_failed_request() {
+  downloader.bucketName = "fake-bucket";
+  downloader.collectionName = "fake-collection";
+  const allSuccess = await downloader.cacheAll();
+  Assert.equal(
+    allSuccess,
+    false,
+    "Attachments cacheAll request failed to download a bundle and returned false"
+  );
+});
+
+add_task(clear_state);
+
+add_task(async function test_cacheAll_failed_unzip() {
+  downloader.bucketName = "error-bucket";
+  downloader.collectionName = "bad-zip";
+  const allSuccess = await downloader.cacheAll();
+  Assert.equal(
+    allSuccess,
+    false,
+    "Attachments cacheAll request failed to extract a bundle and returned false"
+  );
+
+  // verify no temp zip file is left behind
+  const tempFiles = await IOUtils.getChildren(PathUtils.tempDir);
+  Assert.equal(
+    tempFiles.find(x => x.endsWith(".zip")),
+    undefined,
+    "No zip file is left behind."
+  );
+});
+
 add_task(clear_state);

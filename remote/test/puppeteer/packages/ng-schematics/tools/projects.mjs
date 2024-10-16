@@ -50,6 +50,8 @@ class AngularProject {
   /** E2E test runner to use */
   #runner;
 
+  type = '';
+
   constructor(runner, name) {
     this.#runner = runner ?? 'node';
     this.#name = name ?? randomUUID();
@@ -71,13 +73,19 @@ class AngularProject {
         ...options,
       });
 
-      createProcess.stdout.on('data', data => {
+      const onData = data => {
         data = data
           .toString()
           // Replace new lines with a prefix including the test runner
-          .replace(/(?:\r\n?|\n)(?=.*[\r\n])/g, `\n${this.#runner} - `);
-        console.log(`${this.#runner} - ${data}`);
-      });
+          .replace(
+            /(?:\r\n?|\n)(?=.*[\r\n])/g,
+            `\n${this.#runner}:${this.type} - `
+          );
+        console.log(`${this.#runner}:${this.type} - ${data}`);
+      };
+
+      createProcess.stdout.on('data', onData);
+      createProcess.stderr.on('data', onData);
 
       createProcess.on('error', message => {
         console.error(`Running ${command} exited with error:`, message);
@@ -140,17 +148,33 @@ class AngularProject {
 }
 
 export class AngularProjectSingle extends AngularProject {
+  type = 'single';
+
   async createProject() {
     await this.executeCommand(
-      `ng new ${this.name} --directory=sandbox/${this.name} --defaults --skip-git`
+      `ng new ${this.name} --directory=sandbox/${this.name} --defaults --skip-git`,
+      {
+        env: {
+          PUPPETEER_SKIP_DOWNLOAD: 'true',
+          ...process.env,
+        },
+      }
     );
   }
 }
 
 export class AngularProjectMulti extends AngularProject {
+  type = 'multi';
+
   async createProject() {
     await this.executeCommand(
-      `ng new ${this.name} --create-application=false --directory=sandbox/${this.name} --defaults --skip-git`
+      `ng new ${this.name} --create-application=false --directory=sandbox/${this.name} --defaults --skip-git`,
+      {
+        env: {
+          PUPPETEER_SKIP_DOWNLOAD: 'true',
+          ...process.env,
+        },
+      }
     );
 
     await this.executeCommand(

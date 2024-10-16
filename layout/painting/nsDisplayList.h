@@ -787,13 +787,6 @@ class nsDisplayListBuilder {
   uint32_t GetImageDecodeFlags() const;
 
   /**
-   * Subtracts aRegion from *aVisibleRegion. We avoid letting
-   * aVisibleRegion become overcomplex by simplifying it if necessary.
-   */
-  void SubtractFromVisibleRegion(nsRegion* aVisibleRegion,
-                                 const nsRegion& aRegion);
-
-  /**
    * Mark the frames in aFrames to be displayed if they intersect aDirtyRect
    * (which is relative to aDirtyFrame). If the frames have placeholders
    * that might not be displayed, we mark the placeholders and their ancestors
@@ -6135,7 +6128,8 @@ class nsDisplayTransform : public nsPaintedDisplayItem {
 
   nsDisplayTransform(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                      nsDisplayList* aList, const nsRect& aChildrenBuildingRect,
-                     PrerenderDecision aPrerenderDecision);
+                     PrerenderDecision aPrerenderDecision,
+                     bool aWrapsBackdropFilter);
 
   nsDisplayTransform(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                      nsDisplayList* aList, const nsRect& aChildrenBuildingRect,
@@ -6495,6 +6489,7 @@ class nsDisplayTransform : public nsPaintedDisplayItem {
   // from the same CSS stacking context.
   bool mHasAssociatedPerspective : 1;
   bool mContainsASRs : 1;
+  bool mWrapsBackdropFilter : 1;
 };
 
 /* A display item that applies a perspective transformation to a single

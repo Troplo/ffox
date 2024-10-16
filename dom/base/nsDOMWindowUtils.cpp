@@ -33,6 +33,7 @@
 #include "mozilla/ScrollContainerFrame.h"
 #include "mozilla/ServoStyleSet.h"
 #include "mozilla/SharedStyleSheetCache.h"
+#include "mozilla/dom/SharedScriptCache.h"
 #include "mozilla/StaticPrefs_test.h"
 #include "mozilla/InputTaskManager.h"
 #include "nsIObjectLoadingContent.h"
@@ -1290,6 +1291,12 @@ nsDOMWindowUtils::ClearSharedStyleSheetCache() {
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::ClearSharedScriptCache() {
+  SharedScriptCache::Clear();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::GetParsedStyleSheets(uint32_t* aSheets) {
   RefPtr<Document> doc = GetDocument();
   if (!doc) {
@@ -1554,7 +1561,7 @@ nsDOMWindowUtils::GetTranslationNodes(nsINode* aRoot,
 
   uint32_t limit = 15000;
 
-  // We begin iteration with content->GetNextNode because we want to explictly
+  // We begin iteration with content->GetNextNode because we want to explicitly
   // skip the root tag from being a translation node.
   nsIContent* content = root;
   while ((limit > 0) && (content = content->GetNextNode(root))) {
@@ -1698,6 +1705,27 @@ nsDOMWindowUtils::GetIsMozAfterPaintPending(bool* aResult) {
   nsPresContext* presContext = GetPresContext();
   if (!presContext) return NS_OK;
   *aResult = presContext->IsDOMPaintEventPending();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetIsWindowFullyOccluded(bool* aResult) {
+  NS_ENSURE_ARG_POINTER(aResult);
+  *aResult = false;
+  if (nsIWidget* widget = GetWidget()) {
+    *aResult = widget->IsFullyOccluded();
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetIsCompositorPaused(bool* aResult) {
+  NS_ENSURE_ARG_POINTER(aResult);
+  *aResult = false;
+  CompositorBridgeChild* cbc = GetCompositorBridge();
+  if (cbc) {
+    *aResult = cbc->IsPaused();
+  }
   return NS_OK;
 }
 
@@ -2559,7 +2587,10 @@ nsDOMWindowUtils::SendSelectionSetEvent(uint32_t aOffset, uint32_t aLength,
 NS_IMETHODIMP
 nsDOMWindowUtils::SendContentCommandEvent(const nsAString& aType,
                                           nsITransferable* aTransferable,
-                                          const nsAString& aString) {
+                                          const nsAString& aString,
+                                          uint32_t aOffset,
+                                          const nsAString& aReplaceSrcString,
+                                          uint32_t aAdditionalFlags) {
   // get the widget to send the event to
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (!widget) return NS_ERROR_FAILURE;
@@ -2579,6 +2610,8 @@ nsDOMWindowUtils::SendContentCommandEvent(const nsAString& aType,
     msg = eContentCommandRedo;
   } else if (aType.EqualsLiteral("insertText")) {
     msg = eContentCommandInsertText;
+  } else if (aType.EqualsLiteral("replaceText")) {
+    msg = eContentCommandReplaceText;
   } else if (aType.EqualsLiteral("pasteTransferable")) {
     msg = eContentCommandPasteTransferable;
   } else {
@@ -2588,8 +2621,13 @@ nsDOMWindowUtils::SendContentCommandEvent(const nsAString& aType,
   WidgetContentCommandEvent event(true, msg, widget);
   if (msg == eContentCommandInsertText) {
     event.mString.emplace(aString);
-  }
-  if (msg == eContentCommandPasteTransferable) {
+  } else if (msg == eContentCommandReplaceText) {
+    event.mString.emplace(aString);
+    event.mSelection.mReplaceSrcString = aReplaceSrcString;
+    event.mSelection.mOffset = aOffset;
+    event.mSelection.mPreventSetSelection =
+        !!(aAdditionalFlags & CONTENT_COMMAND_FLAG_PREVENT_SET_SELECTION);
+  } else if (msg == eContentCommandPasteTransferable) {
     event.mTransferable = aTransferable;
   }
 
@@ -2624,7 +2662,7 @@ nsDOMWindowUtils::GetVisitedDependentComputedStyle(
   {
     ErrorResult rv;
     decl = innerWindow->GetComputedStyle(*aElement, aPseudoElement, rv);
-    ENSURE_SUCCESS(rv, rv.StealNSResult());
+    RETURN_NSRESULT_ON_FAILURE(rv);
   }
 
   nsAutoCString result;
@@ -3071,12 +3109,7 @@ nsDOMWindowUtils::ZoomToFocusedInput() {
     return NS_OK;
   }
 
-  nsFocusManager* fm = nsFocusManager::GetFocusManager();
-  if (!fm) {
-    return NS_OK;
-  }
-
-  RefPtr<Element> element = fm->GetFocusedElement();
+  const RefPtr<Element> element = nsFocusManager::GetFocusedElementStatic();
   if (!element) {
     return NS_OK;
   }
@@ -4786,7 +4819,7 @@ nsDOMWindowUtils::GetEffectivelyThrottlesFrameRequests(bool* aResult) {
   if (!doc) {
     return NS_ERROR_FAILURE;
   }
-  *aResult = !doc->WouldScheduleFrameRequestCallbacks() ||
+  *aResult = !doc->ShouldFireFrameRequestCallbacks() ||
              doc->ShouldThrottleFrameRequests();
   return NS_OK;
 }

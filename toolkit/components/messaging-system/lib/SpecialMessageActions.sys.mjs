@@ -9,8 +9,14 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
+  // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
+  CustomizableUI: "resource:///modules/CustomizableUI.sys.mjs",
   FxAccounts: "resource://gre/modules/FxAccounts.sys.mjs",
   MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
+  PlacesTransactions: "resource://gre/modules/PlacesTransactions.sys.mjs",
+  // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
+  PlacesUIUtils: "resource:///modules/PlacesUIUtils.sys.mjs",
+  PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
   Spotlight: "resource:///modules/asrouter/Spotlight.sys.mjs",
   UIState: "resource://services-sync/UIState.sys.mjs",
@@ -86,6 +92,13 @@ export const SpecialMessageActions = {
    */
   pinFirefoxToTaskbar(window, privateBrowsing = false) {
     return window.getShellService().pinToTaskbar(privateBrowsing);
+  },
+
+  /**
+   * Pin current application to Windows start menu.
+   */
+  pinToStartMenu(window) {
+    return window.getShellService().pinToStartMenu();
   },
 
   /**
@@ -204,6 +217,7 @@ export const SpecialMessageActions = {
       "cookiebanners.service.mode.privateBrowsing",
       "cookiebanners.service.detectOnly",
       "messaging-system.askForFeedback",
+      "browser.toolbars.bookmarks.visibility",
     ];
 
     if (
@@ -356,6 +370,95 @@ export const SpecialMessageActions = {
   },
 
   /**
+   * Sets the visibility of bookmarks toolbar.
+   *
+   * @param {Window} window Reference to a window object
+   * @param {string} visibility Visibility options which can be "always", "newtab", or "never"
+   */
+  setBookmarksToolbarVisibility(window, visibility) {
+    Services.prefs.setCharPref(
+      "browser.toolbars.bookmarks.visibility",
+      visibility
+    );
+
+    lazy.CustomizableUI.setToolbarVisibility(
+      window.document.getElementById("PersonalToolbar").id,
+      visibility,
+      false
+    );
+  },
+
+  /**
+   * Bookmarks the current tab.
+   *
+   * @param {Window} window Reference to a window object
+   * @param {boolean} shouldHideDialog True if bookmark dialog should be hidden
+   * @param {boolean} shouldHideConfirmationHint True if bookmark confirmation hint should be hidden
+   */
+  async bookmarkCurrentTab(
+    window,
+    shouldHideDialog = false,
+    shouldHideConfirmationHint = false
+  ) {
+    if (!window.top.gBrowser) {
+      return;
+    }
+
+    // Bookmark current tab without showing the bookmark dialog
+    if (shouldHideDialog) {
+      let browser = window.top.gBrowser.selectedBrowser;
+      let url = URL.fromURI(Services.io.createExposableURI(browser.currentURI));
+
+      let info = await lazy.PlacesUtils.bookmarks.fetch({ url });
+      let parentGuid = await lazy.PlacesUIUtils.defaultParentGuid;
+      info = { url, parentGuid };
+      let charset = null;
+      let isErrorPage = false;
+
+      // Check if the current tab is an error page,
+      // if so, attempt to get the title from the history entry
+      if (browser.documentURI) {
+        isErrorPage = /^about:(neterror|certerror|blocked)/.test(
+          browser.documentURI.spec
+        );
+      }
+      try {
+        if (isErrorPage) {
+          let entry = await lazy.PlacesUtils.history.fetch(browser.currentURI);
+          if (entry) {
+            info.title = entry.title;
+          }
+        } else {
+          info.title = browser.contentTitle;
+        }
+        info.title = info.title || url.href;
+        charset = browser.characterSet;
+      } catch (e) {
+        console.error(e);
+      }
+
+      // Creates new bookmark
+      info.guid = await lazy.PlacesTransactions.NewBookmark(info).transact();
+
+      if (charset) {
+        lazy.PlacesUIUtils.setCharsetForPage(url, charset, window).catch(
+          console.error
+        );
+      }
+      window.gURLBar.handleRevert();
+
+      if (!shouldHideConfirmationHint) {
+        window.StarUI.showConfirmation();
+      }
+    } else {
+      // Bookmarks current tab with bookmark dialog shown
+      window.top.PlacesCommandHook.bookmarkTabs([
+        window.top.gBrowser.selectedTab,
+      ]);
+    }
+  },
+
+  /**
    * Processes "Special Message Actions", which are definitions of behaviors such as opening tabs
    * installing add-ons, or focusing the awesome bar that are allowed to can be triggered from
    * Messaging System interactions.
@@ -433,6 +536,9 @@ export const SpecialMessageActions = {
         break;
       case "PIN_FIREFOX_TO_TASKBAR":
         await this.pinFirefoxToTaskbar(window, action.data?.privatePin);
+        break;
+      case "PIN_FIREFOX_TO_START_MENU":
+        await this.pinToStartMenu(window);
         break;
       case "PIN_AND_DEFAULT":
         // We must explicitly await pinning to the taskbar before
@@ -561,6 +667,16 @@ export const SpecialMessageActions = {
       case "FOCUS_URLBAR":
         window.gURLBar.focus();
         window.gURLBar.select();
+        break;
+      case "BOOKMARK_CURRENT_TAB":
+        this.bookmarkCurrentTab(
+          window,
+          action.data?.shouldHideDialog,
+          action.data?.shouldHideConfirmationHint
+        );
+        break;
+      case "SET_BOOKMARKS_TOOLBAR_VISIBILITY":
+        this.setBookmarksToolbarVisibility(window, action.data?.visibility);
         break;
     }
     return undefined;

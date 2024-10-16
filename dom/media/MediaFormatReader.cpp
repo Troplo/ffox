@@ -382,7 +382,10 @@ void MediaFormatReader::DecoderFactory::DoCreateDecoder(Data& aData) {
           {*ownerData.GetCurrentInfo()->GetAsAudioInfo(), mOwner->mCrashHelper,
            CreateDecoderParams::UseNullDecoder(ownerData.mIsNullDecode),
            TrackInfo::kAudioTrack, std::move(onWaitingForKeyEvent),
-           mOwner->mMediaEngineId, mOwner->mTrackingId});
+           mOwner->mMediaEngineId, mOwner->mTrackingId,
+           mOwner->mEncryptedCustomIdent
+               ? CreateDecoderParams::EncryptedCustomIdent::True
+               : CreateDecoderParams::EncryptedCustomIdent::False});
       break;
     }
 
@@ -402,7 +405,10 @@ void MediaFormatReader::DecoderFactory::DoCreateDecoder(Data& aData) {
            OptionSet(ownerData.mHardwareDecodingDisabled
                          ? Option::HardwareDecoderNotAllowed
                          : Option::Default),
-           mOwner->mMediaEngineId, mOwner->mTrackingId});
+           mOwner->mMediaEngineId, mOwner->mTrackingId,
+           mOwner->mEncryptedCustomIdent
+               ? CreateDecoderParams::EncryptedCustomIdent::True
+               : CreateDecoderParams::EncryptedCustomIdent::False});
       break;
     }
 
@@ -895,7 +901,8 @@ MediaFormatReader::MediaFormatReader(MediaFormatReaderInit& aInit,
       mTrackingId(std::move(aInit.mTrackingId)),
       mReadMetadataStartTime(Nothing()),
       mReadMetaDataTime(TimeDuration::Zero()),
-      mTotalWaitingForVideoDataTime(TimeDuration::Zero()) {
+      mTotalWaitingForVideoDataTime(TimeDuration::Zero()),
+      mEncryptedCustomIdent(false) {
   MOZ_ASSERT(aDemuxer);
   MOZ_COUNT_CTOR(MediaFormatReader);
   DDLINKCHILD("audio decoder data", "MediaFormatReader::DecoderDataWithPromise",
@@ -1289,8 +1296,11 @@ void MediaFormatReader::OnDemuxerInitDone(const MediaResult& aResult) {
 
   // If the duration is 0 on both audio and video, it mMetadataDuration is to be
   // Nothing(). Duration will use buffered ranges.
+  LOG("videoDuration=%" PRId64 ", audioDuration=%" PRId64,
+      videoDuration.ToMicroseconds(), audioDuration.ToMicroseconds());
   if (videoDuration.IsPositive() || audioDuration.IsPositive()) {
     auto duration = std::max(videoDuration, audioDuration);
+    LOG("Determine mMetadataDuration=%" PRId64, duration.ToMicroseconds());
     mInfo.mMetadataDuration = Some(duration);
   }
 
@@ -1345,6 +1355,7 @@ void MediaFormatReader::MaybeResolveMetadataPromise() {
 
   if (!startTime.IsInfinite()) {
     mInfo.mStartTime = startTime;  // mInfo.mStartTime is initialized to 0.
+    LOG("Set start time=%s", mInfo.mStartTime.ToString().get());
   }
 
   MetadataHolder metadata;
@@ -1390,12 +1401,6 @@ void MediaFormatReader::ReadUpdatedMetadata(MediaInfo* aInfo) {
     MutexAutoLock lock(mAudio.mMutex);
     if (HasAudio()) {
       aInfo->mAudio = *mAudio.GetWorkingInfo()->GetAsAudioInfo();
-      Maybe<nsCString> audioProcessPerCodecName = GetAudioProcessPerCodec();
-      if (audioProcessPerCodecName.isSome()) {
-        Telemetry::ScalarAdd(
-            Telemetry::ScalarID::MEDIA_AUDIO_PROCESS_PER_CODEC_NAME,
-            NS_ConvertUTF8toUTF16(*audioProcessPerCodecName), 1);
-      }
     }
   }
 }
@@ -1803,6 +1808,11 @@ void MediaFormatReader::NotifyNewOutput(
                 !!decoder.mIsHardwareAccelerated);
           }
         }
+        // As the real video decoder creation might be delayed, we want to
+        // update the decoder name again, instead of using the wrong name.
+        if (decoder.mNumSamplesOutput == 1) {
+          decoder.mDescription = mVideo.mDecoder->GetDescriptionName();
+        }
       }
       decoder.mDecodePerfRecorder->Record(
           sample->mTime.ToMicroseconds(),
@@ -2102,11 +2112,15 @@ void MediaFormatReader::HandleDemuxedSamples(
           (*info)->mCrypto.mCryptoScheme ==
               decoder.GetCurrentInfo()->mCrypto.mCryptoScheme &&
           (*info)->mMimeType == decoder.GetCurrentInfo()->mMimeType;
+      LOG("%s stream id has changed from:%d to:%d, recyclable=%d, "
+          "alwaysRecyle=%d",
+          TrackTypeToStr(aTrack), decoder.mLastStreamSourceID, info->GetID(),
+          recyclable, decoder.mDecoder->ShouldDecoderAlwaysBeRecycled());
+      recyclable |= decoder.mDecoder->ShouldDecoderAlwaysBeRecycled();
       if (!recyclable && decoder.mTimeThreshold.isNothing() &&
           (decoder.mNextStreamSourceID.isNothing() ||
            decoder.mNextStreamSourceID.ref() != info->GetID())) {
-        LOG("%s stream id has changed from:%d to:%d, draining decoder.",
-            TrackTypeToStr(aTrack), decoder.mLastStreamSourceID, info->GetID());
+        LOG("draining decoder for stream id change.");
         decoder.RequestDrain();
         decoder.mNextStreamSourceID = Some(info->GetID());
         ScheduleUpdate(aTrack);
@@ -2894,7 +2908,7 @@ RefPtr<MediaFormatReader::SeekPromise> MediaFormatReader::Seek(
   MOZ_ASSERT(OnTaskQueue());
 
   LOG("aTarget=(%" PRId64 "), track=%s", aTarget.GetTime().ToMicroseconds(),
-      SeekTarget::TrackToStr(aTarget.GetTrack()));
+      SeekTarget::EnumValueToString(aTarget.GetTrack()));
 
   MOZ_DIAGNOSTIC_ASSERT(mSeekPromise.IsEmpty());
   MOZ_DIAGNOSTIC_ASSERT(mPendingSeekTime.isNothing());
@@ -3275,6 +3289,8 @@ void MediaFormatReader::UpdateBuffered() {
     // IntervalSet already starts at 0 or is empty, nothing to shift.
     mBuffered = intervals;
   } else {
+    LOG("Subtract start time for buffered range, startTime=%" PRId64,
+        mInfo.mStartTime.ToMicroseconds());
     mBuffered = intervals.Shift(TimeUnit::Zero() - mInfo.mStartTime);
   }
 }
@@ -3295,31 +3311,6 @@ RefPtr<GenericPromise> MediaFormatReader::RequestDebugInfo(
   }
   GetDebugInfo(aInfo);
   return GenericPromise::CreateAndResolve(true, __func__);
-}
-
-Maybe<nsCString> MediaFormatReader::GetAudioProcessPerCodec() {
-  if (mAudio.mDescription == "uninitialized"_ns) {
-    return Nothing();
-  }
-
-  MOZ_ASSERT(mAudio.mProcessName.Length() > 0,
-             "Should have had a process name");
-  MOZ_ASSERT(mAudio.mCodecName.Length() > 0, "Should have had a codec name");
-
-  nsCString processName = mAudio.mProcessName;
-  nsCString audioProcessPerCodecName(processName + ","_ns + mAudio.mCodecName);
-  if (processName != "utility"_ns) {
-    if (!StaticPrefs::media_rdd_process_enabled()) {
-      audioProcessPerCodecName += ",rdd-disabled"_ns;
-    }
-    if (!StaticPrefs::media_utility_process_enabled()) {
-      audioProcessPerCodecName += ",utility-disabled"_ns;
-    }
-    if (StaticPrefs::media_allow_audio_non_utility()) {
-      audioProcessPerCodecName += ",allow-non-utility"_ns;
-    }
-  }
-  return Some(audioProcessPerCodecName);
 }
 
 void MediaFormatReader::GetDebugInfo(dom::MediaFormatReaderDebugInfo& aInfo) {
@@ -3486,6 +3477,11 @@ void MediaFormatReader::OnFirstDemuxFailed(TrackInfo::TrackType aType,
   MOZ_ASSERT(decoder.mFirstDemuxedSampleTime.isNothing());
   decoder.mFirstDemuxedSampleTime.emplace(TimeUnit::FromInfinity());
   MaybeResolveMetadataPromise();
+}
+
+void MediaFormatReader::SetEncryptedCustomIdent() {
+  LOG("Set mEncryptedCustomIdent");
+  mEncryptedCustomIdent = true;
 }
 
 }  // namespace mozilla

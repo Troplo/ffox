@@ -32,6 +32,7 @@ var gExceptionPaths = [
   "chrome://activity-stream/content/data/content/assets/remote/",
   "chrome://activity-stream/content/data/content/assets/mobile-download-qr-new-user-cn.svg",
   "chrome://activity-stream/content/data/content/assets/mobile-download-qr-existing-user-cn.svg",
+  "chrome://activity-stream/content/data/content/assets/mr-amo-collection.svg",
   "chrome://activity-stream/content/data/content/assets/person-typing.svg",
   "chrome://browser/content/assets/moz-vpn.svg",
   "chrome://browser/content/assets/vpn-logo.svg",
@@ -84,10 +85,6 @@ var gExceptionPaths = [
 
   // Strip on Share parameter lists
   "chrome://global/content/antitracking/",
-
-  // Expecting to integrate the UrlbarSearchTermsPersistence component in
-  // Bug 1903633
-  "resource:///modules/UrlbarSearchTermsPersistence.sys.mjs",
 ];
 
 // These are not part of the omni.ja file, so we find them only when running
@@ -165,6 +162,9 @@ var allowlist = [
 
   // toolkit/mozapps/extensions/AddonContentPolicy.cpp
   { file: "resource://gre/localization/en-US/toolkit/global/cspErrors.ftl" },
+
+  // toolkit/components/antitracking/bouncetrackingprotection/BounceTrackingProtection.cpp
+  { file: "resource://gre/localization/en-US/toolkit/global/antiTracking.ftl" },
 
   // The l10n build system can't package string files only for some platforms.
   {
@@ -303,10 +303,6 @@ if (AppConstants.NIGHTLY_BUILD) {
       // A debug tool that is only available in Nightly builds, and is accessed
       // directly by developers via the chrome URI (bug 1888491)
       { file: "chrome://browser/content/backup/debug.html" },
-
-      // The Transformers.js prod lib is not used in Nightly builds
-      { file: "chrome://global/content/ml/transformers.js" },
-      { file: "chrome://global/content/ml/ort.js" },
     ]
   );
 }

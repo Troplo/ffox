@@ -682,6 +682,11 @@ bool DMABufSurfaceRGBA::CreateTexture(GLContext* aGLContext, int aPlane) {
     return false;
   }
 
+  if (!aGLContext->IsExtensionSupported(gl::GLContext::OES_EGL_image)) {
+    LOGDMABUF(("DMABufSurfaceRGBA::CreateTexture(): no OES_EGL_image."));
+    return false;
+  }
+
   const auto& gle = gl::GLContextEGL::Cast(aGLContext);
   const auto& egl = gle->mEgl;
   mEGLImage =
@@ -1580,7 +1585,7 @@ gfx::SurfaceFormat DMABufSurfaceYUV::GetFormat() {
     case SURFACE_NV12:
       return gfx::SurfaceFormat::NV12;
     case SURFACE_YUV420:
-      return gfx::SurfaceFormat::YUV;
+      return gfx::SurfaceFormat::YUV420;
     default:
       NS_WARNING("DMABufSurfaceYUV::GetFormat(): Wrong surface format!");
       return gfx::SurfaceFormat::UNKNOWN;

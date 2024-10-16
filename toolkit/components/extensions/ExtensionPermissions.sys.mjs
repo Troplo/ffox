@@ -6,6 +6,7 @@
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
+import { ExtensionUtils } from "resource://gre/modules/ExtensionUtils.sys.mjs";
 
 /** @type {Lazy} */
 const lazy = {};
@@ -50,6 +51,8 @@ const RKV_DIRNAME = "extension-store-permissions";
 const VERSION_KEY = "_version";
 
 const VERSION_VALUE = 1;
+
+const WEB_SCHEMES = ["http", "https"];
 
 // Bug 1646182: remove once we fully migrate to rkv
 let prefs;
@@ -322,6 +325,14 @@ let store = createStore();
 const extPermAccessQueues = new Map();
 
 export var ExtensionPermissions = {
+  /**
+   * A per-extension container for origins requested at runtime, not in the
+   * manifest. This is only preserved in memory for UI consistency.
+   *
+   * @type {Map<string, Set>}
+   */
+  tempOrigins: new ExtensionUtils.DefaultMap(() => new Set()),
+
   // The public ExtensionPermissions.add, get, remove, removeAll methods may
   // interact with the same underlying data source. These methods are not
   // designed with concurrent modifications in mind, and therefore we
@@ -523,11 +534,17 @@ export var ExtensionPermissions = {
           emitter.emit("remove-permissions", removed);
         }
       }
+
+      let temp = this.tempOrigins.get(extensionId);
+      for (let origin of removed.origins) {
+        temp.add(origin);
+      }
     });
   },
 
   async removeAll(extensionId) {
     return this._synchronizeExtPermAccess(extensionId, async () => {
+      this.tempOrigins.delete(extensionId);
       lazy.StartupCache.permissions.delete(extensionId);
 
       let removed = store.get(extensionId);
@@ -577,7 +594,39 @@ export var ExtensionPermissions = {
 };
 
 export var OriginControls = {
-  allDomains: new MatchPattern("*://*/*"),
+  /**
+   * @typedef {object} NativeTab
+   * @property {XULBrowserElement} linkedBrowser
+   */
+
+  /**
+   * Determine if the given Manifest V3 extension has a host permissions for
+   * the given tab which was one expected to be granted at install time (by
+   * being listed in host_permissions or derived from match patterns for
+   * content scripts declared in the manifest).
+   *
+   * NOTE: this helper method is only used for additional checks only hit for
+   * MV3 extensions, but the implementation is technically not strictly MV3
+   * specific.
+   *
+   * @param {WebExtensionPolicy} policy
+   * @param {NativeTab} nativeTab
+   * @returns {boolean} Whether the extension has a non optional host
+   * permission for the given tab.
+   */
+  hasMV3RequestedOrigin(policy, nativeTab) {
+    const uri = nativeTab.linkedBrowser?.currentURI;
+
+    if (!uri) {
+      return false;
+    }
+
+    // Determine if that are host permissions that would have been granted
+    // as install time that are matching the tab URI.
+    const manifestOrigins =
+      policy.extension.getManifestOriginsMatchPatternSet();
+    return manifestOrigins.matches(uri);
+  },
 
   /**
    * @typedef {object} OriginControlState
@@ -598,9 +647,14 @@ export var OriginControls = {
    */
   getState(policy, nativeTab) {
     // Note: don't use the nativeTab directly because it's different on mobile.
-    let tab = policy?.extension?.tabManager.getWrapper(nativeTab);
-    let temporaryAccess = tab?.hasActiveTabPermission;
+    let tab = policy?.extension?.tabManager?.getWrapper(nativeTab);
+    let tabHasActiveTabPermission = tab?.hasActiveTabPermission;
     let uri = tab?.browser.currentURI;
+    return this._getStateInternal(policy, { uri, tabHasActiveTabPermission });
+  },
+
+  _getStateInternal(policy, { uri, tabHasActiveTabPermission }) {
+    let temporaryAccess = tabHasActiveTabPermission;
 
     if (!uri) {
       return { noAccess: true };
@@ -638,7 +692,7 @@ export var OriginControls = {
 
     if (
       quarantined ||
-      !this.allDomains.matches(uri) ||
+      (uri.scheme !== "https" && uri.scheme !== "http") ||
       WebExtensionPolicy.isRestrictedURI(uri) ||
       (!couldRequest && !hasAccess && !activeTab)
     ) {
@@ -648,7 +702,7 @@ export var OriginControls = {
     if (!couldRequest && !hasAccess && activeTab) {
       return { whenClicked: true, temporaryAccess };
     }
-    if (policy.allowedOrigins.subsumes(this.allDomains)) {
+    if (policy.allowedOrigins.matchesAllWebUrls) {
       return { allDomains: true, hasAccess };
     }
 
@@ -673,14 +727,18 @@ export var OriginControls = {
    */
   getAttentionState(policy, window) {
     if (policy?.manifestVersion >= 3) {
-      const state = this.getState(policy, window.gBrowser.selectedTab);
+      const { selectedTab } = window.gBrowser;
+      const state = this.getState(policy, selectedTab);
       // Request attention when the extension cannot access the current tab,
       // but has a host permission that could be granted.
       // Quarantined is always false when the feature is disabled.
       const quarantined = !!state.quarantined;
-      const attention =
+      let attention =
         quarantined ||
-        (!!state.alwaysOn && !state.hasAccess && !state.temporaryAccess);
+        (!!state.alwaysOn &&
+          !state.hasAccess &&
+          !state.temporaryAccess &&
+          this.hasMV3RequestedOrigin(policy, selectedTab));
 
       return { attention, quarantined };
     }
@@ -698,7 +756,53 @@ export var OriginControls = {
     if (!policy.active) {
       return;
     }
-    let perms = { permissions: [], origins: ["*://" + uri.host] };
+
+    // Already granted.
+    if (policy.allowedOrigins.matches(uri)) {
+      return;
+    }
+
+    // Only try to compute the per-host host permissions on web scheme urls (http/https).
+    if (!WEB_SCHEMES.includes(uri.scheme)) {
+      return;
+    }
+
+    // Determine which one from the 3 set of granted host permissions
+    // (granting access to the given url's host and scheme) are subsumed
+    // by the optional host permissions declared by the extension.
+    let originPatterns = [];
+    const originPatternsChoices = [
+      // Single wildcard scheme permission for the current host.
+      [`*://${uri.host}/*`],
+      // Two separate scheme-specific permission for the current host.
+      WEB_SCHEMES.map(scheme => `${scheme}://${uri.host}/*`),
+      // One scheme-specific permission for the current host and scheme.
+      [`${uri.scheme}://${uri.host}/*`],
+    ];
+    for (const originPatternsChoice of originPatternsChoices) {
+      const choiceMatchPatternSet = new MatchPatternSet(originPatternsChoice);
+      const choiceSubsumed = choiceMatchPatternSet.patterns.every(mp =>
+        policy.extension.optionalOrigins.subsumes(mp)
+      );
+      if (choiceSubsumed) {
+        originPatterns = originPatternsChoice;
+        break;
+      }
+    }
+
+    // Nothing to grant.
+    if (!originPatterns.length) {
+      // This shouldn't be ever hit outside of unit tests and so we log an error
+      // to prevent it from being silently hit (and make it easier to investigate
+      // potential bugs in our OriginControls.getState logic that could leave to
+      // this).
+      Cu.reportError(
+        `Unxpected no host permission patterns to grant found for ${policy.debugName} on ${uri.spec}`
+      );
+      return;
+    }
+
+    let perms = { permissions: [], origins: originPatterns };
     return ExtensionPermissions.add(policy.id, perms, policy.extension);
   },
 
@@ -707,7 +811,46 @@ export var OriginControls = {
     if (!policy.active) {
       return;
     }
-    let perms = { permissions: [], origins: ["*://" + uri.host] };
+
+    // Return earlier if the extension doesn't really have access to the
+    // given url.
+    if (!policy.allowedOrigins.matches(uri)) {
+      return;
+    }
+
+    // Only try to revoke per-host host permissions on web scheme urls (http/https).
+    if (!WEB_SCHEMES.includes(uri.scheme)) {
+      // TODO: once we have introduce a user-controlled opt-in for file urls
+      // we could consider to remove that internal permission to revoke
+      // to the extension access to file urls (and the user would be able
+      // to grant it back from the addon manager).
+      return;
+    }
+
+    // NOTE: all urls wouldn't be currently be revoked and so in that case
+    // setWhenClicked is going to be a no-op.
+    const matchHost = new MatchPattern(`*://${uri.host}/*`);
+    const patternsToRevoke = policy.allowedOrigins.patterns
+      .filter(mp => mp.overlaps(matchHost))
+      .map(mp => mp.pattern)
+      .filter(pattern => !lazy.Extension.isAllSitesPermission(pattern));
+
+    // Nothing to revoke.
+    if (!patternsToRevoke.length) {
+      // This shouldn't be ever hit outside of unit tests and so we log an error
+      // to prevent it from being silently hit (and make it easier to investigate
+      // potential bugs in our OriginControls.getState logic that could leave to
+      // this).
+      Cu.reportError(
+        `Unxpected no host permission patterns to revoke found for ${policy.debugName} on ${uri.spec}`
+      );
+      return;
+    }
+
+    let perms = {
+      permissions: [],
+      origins: patternsToRevoke,
+    };
     return ExtensionPermissions.remove(policy.id, perms, policy.extension);
   },
 

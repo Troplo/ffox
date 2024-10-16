@@ -224,6 +224,7 @@
     name: StringTest
     type: Args_Int32_GeneralGeneral
   entry: Instance::stringTest
+  inline_op: StringTest
   export: test
   params:
     - 'externref'
@@ -236,6 +237,7 @@
     name: StringCast
     type: Args_General2
   entry: Instance::stringCast
+  inline_op: StringCast
   export: cast
   params:
     - 'externref'
@@ -416,6 +418,30 @@
   fail_mode: FailOnNullPtr
   uses_memory: false
 
+- op: CreateSuspender
+  symbolic_address:
+    name: CreateSuspender
+    type: Args_General_GeneralInt32
+  entry: CreateSuspender
+  export: createSuspender
+  params:
+    - 'i32'
+  result: 'externref'
+  fail_mode: FailOnNullPtr
+  uses_memory: false
+
+- op: CreatePromisingPromise
+  symbolic_address:
+    name: CreatePromisingPromise
+    type: Args_General2
+  entry: CreatePromisingPromise
+  export: createPromisingPromise
+  params:
+    - 'externref'
+  result: 'externref'
+  fail_mode: FailOnNullPtr
+  uses_memory: false
+
 - op: CurrentSuspender
   symbolic_address:
     name: CurrentSuspender
@@ -438,6 +464,19 @@
     - 'externref'
   result: 'anyref'
   fail_mode: FailOnNullPtr
+  uses_memory: false
+
+- op: AddPromiseReactions
+  symbolic_address:
+    name: AddPromiseReactions
+    type: Args_Int32_GeneralGeneralGeneralGeneral
+  entry: AddPromiseReactions
+  export: addPromiseReactions
+  params:
+    - 'externref'
+    - 'externref'
+    - 'funcref'
+  fail_mode: FailOnNegI32
   uses_memory: false
 
 - op: SetPromisingPromiseResults

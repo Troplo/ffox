@@ -145,9 +145,6 @@ declare_args() {
   # Selects whether the audio processing module should be excluded.
   rtc_exclude_audio_processing_module = false
 
-  # Set this to true to enable BWE test logging.
-  rtc_enable_bwe_test_logging = false
-
   # Set this to false to skip building examples.
   rtc_build_examples = false
 
@@ -275,6 +272,9 @@ declare_args() {
   # WebRTC does not declare its public dependencies. See webrtc:8603. Instead
   # WebRTC is using a global common dependencies.
   rtc_common_public_deps = []  # no-presubmit-check TODO(webrtc:8603)
+
+  # When true, include the Perfetto library.
+  rtc_use_perfetto = false
 }
 
 if (!build_with_mozilla) {
@@ -396,6 +396,10 @@ if (is_mac || is_ios) {
   }
 }
 
+if (build_with_chromium) {
+  rtc_use_perfetto = true
+}
+
 # Global public configuration that should be applied to all WebRTC targets. You
 # normally shouldn't need to include this in your target as it's automatically
 # included when using the rtc_* templates. It set the defines, include paths and
@@ -422,21 +426,18 @@ set_defaults("rtc_library") {
   configs = rtc_add_configs
   public_deps = rtc_common_public_deps  # no-presubmit-check TODO(webrtc:8603)
   suppressed_configs = []
-  absl_deps = []
 }
 
 set_defaults("rtc_source_set") {
   configs = rtc_add_configs
   public_deps = rtc_common_public_deps  # no-presubmit-check TODO(webrtc:8603)
   suppressed_configs = []
-  absl_deps = []
 }
 
 set_defaults("rtc_static_library") {
   configs = rtc_add_configs
   public_deps = rtc_common_public_deps  # no-presubmit-check TODO(webrtc:8603)
   suppressed_configs = []
-  absl_deps = []
 }
 
 set_defaults("rtc_executable") {
@@ -564,17 +565,20 @@ template("rtc_test") {
       }
     }
 
-    # If absl_deps is [], no action is needed. If not [], then it needs to be
-    # converted to //third_party/abseil-cpp:absl when build_with_chromium=true
-    # otherwise it just needs to be added to deps.
-    if (defined(absl_deps) && absl_deps != []) {
-      if (!defined(deps)) {
+    assert(
+        !defined(absl_deps),
+        "`absl_deps` has been deprecated, add your Abseil dependencies to the `deps` variable.")
+
+    # Abseil dependencies need to be converted to //third_party/abseil-cpp:absl when build_with_chromium=true
+    if (build_with_chromium && defined(deps)) {
+      absl_dependencies =
+          filter_labels_include(deps, [ "//third_party/abseil-cpp/*" ])
+      if (absl_dependencies != []) {
+        filtered_deps =
+            filter_labels_exclude(deps, [ "//third_party/abseil-cpp/*" ])
         deps = []
-      }
-      if (build_with_chromium) {
+        deps = filtered_deps
         deps += [ "//third_party/abseil-cpp:absl" ]
-      } else {
-        deps += absl_deps
       }
     }
 
@@ -678,17 +682,20 @@ template("rtc_source_set") {
       public_configs += invoker.public_configs
     }
 
-    # If absl_deps is [], no action is needed. If not [], then it needs to be
-    # converted to //third_party/abseil-cpp:absl when build_with_chromium=true
-    # otherwise it just needs to be added to deps.
-    if (absl_deps != []) {
-      if (!defined(deps)) {
+    assert(
+        !defined(absl_deps),
+        "`absl_deps` has been deprecated, add your Abseil dependencies to the `deps` variable.")
+
+    # Abseil dependencies need to be converted to //third_party/abseil-cpp:absl when build_with_chromium=true
+    if (build_with_chromium && defined(deps)) {
+      absl_dependencies =
+          filter_labels_include(deps, [ "//third_party/abseil-cpp/*" ])
+      if (absl_dependencies != []) {
+        filtered_deps =
+            filter_labels_exclude(deps, [ "//third_party/abseil-cpp/*" ])
         deps = []
-      }
-      if (build_with_chromium) {
+        deps = filtered_deps
         deps += [ "//third_party/abseil-cpp:absl" ]
-      } else {
-        deps += absl_deps
       }
     }
   }
@@ -767,17 +774,20 @@ template("rtc_static_library") {
       public_configs += invoker.public_configs
     }
 
-    # If absl_deps is [], no action is needed. If not [], then it needs to be
-    # converted to //third_party/abseil-cpp:absl when build_with_chromium=true
-    # otherwise it just needs to be added to deps.
-    if (absl_deps != []) {
-      if (!defined(deps)) {
+    assert(
+        !defined(absl_deps),
+        "`absl_deps` has been deprecated, add your Abseil dependencies to the `deps` variable.")
+
+    # Abseil dependencies need to be converted to //third_party/abseil-cpp:absl when build_with_chromium=true
+    if (build_with_chromium && defined(deps)) {
+      absl_dependencies =
+          filter_labels_include(deps, [ "//third_party/abseil-cpp/*" ])
+      if (absl_dependencies != []) {
+        filtered_deps =
+            filter_labels_exclude(deps, [ "//third_party/abseil-cpp/*" ])
         deps = []
-      }
-      if (build_with_chromium) {
+        deps = filtered_deps
         deps += [ "//third_party/abseil-cpp:absl" ]
-      } else {
-        deps += absl_deps
       }
     }
   }
@@ -906,17 +916,20 @@ template("rtc_library") {
       public_configs += invoker.public_configs
     }
 
-    # If absl_deps is [], no action is needed. If not [], then it needs to be
-    # converted to //third_party/abseil-cpp:absl when build_with_chromium=true
-    # otherwise it just needs to be added to deps.
-    if (absl_deps != []) {
-      if (!defined(deps)) {
+    assert(
+        !defined(absl_deps),
+        "`absl_deps` has been deprecated, add your Abseil dependencies to the `deps` variable.")
+
+    # Abseil dependencies need to be converted to //third_party/abseil-cpp:absl when build_with_chromium=true
+    if (build_with_chromium && defined(deps)) {
+      absl_dependencies =
+          filter_labels_include(deps, [ "//third_party/abseil-cpp/*" ])
+      if (absl_dependencies != []) {
+        filtered_deps =
+            filter_labels_exclude(deps, [ "//third_party/abseil-cpp/*" ])
         deps = []
-      }
-      if (build_with_chromium) {
+        deps = filtered_deps
         deps += [ "//third_party/abseil-cpp:absl" ]
-      } else {
-        deps += absl_deps
       }
     }
   }
@@ -1039,6 +1052,7 @@ if (is_mac || is_ios) {
     umbrella_header_path =
         "$target_gen_dir/$output_name.framework/WebRTC/$output_name.h"
     modulemap_path = "$target_gen_dir/Modules/module.modulemap"
+    privacy_manifest_path = "$target_gen_dir/$target_name/PrivacyInfo.xcprivacy"
 
     action_foreach("create_bracket_include_headers_$target_name") {
       script = "//tools_webrtc/apple/copy_framework_header.py"
@@ -1079,6 +1093,7 @@ if (is_mac || is_ios) {
         deps += [
           ":copy_framework_headers_$this_target_name",
           ":copy_modulemap_$this_target_name",
+          ":copy_privacy_manifest_$this_target_name",
           ":copy_umbrella_header_$this_target_name",
           ":create_bracket_include_headers_$this_target_name",
           ":modulemap_$this_target_name",
@@ -1101,6 +1116,7 @@ if (is_mac || is_ios) {
                 ":create_bracket_include_headers_$this_target_name")
 
         deps += [
+          ":copy_privacy_manifest_$this_target_name",
           ":copy_umbrella_header_$this_target_name",
           ":create_bracket_include_headers_$this_target_name",
         ]
@@ -1110,8 +1126,13 @@ if (is_mac || is_ios) {
     if (is_mac || target_environment == "catalyst") {
       # Catalyst frameworks use the same layout as regular Mac frameworks.
       headers_dir = "Versions/A/Headers"
+
+      # The path to the privacy manifest file differs between Mac and iOS.
+      # https://developer.apple.com/documentation/bundleresources/privacy_manifest_files/adding_a_privacy_manifest_to_your_app_or_third-party_sdk
+      privacy_manifest_out_path = "Versions/A/Resources/PrivacyInfo.xcprivacy"
     } else {
       headers_dir = "Headers"
+      privacy_manifest_out_path = "PrivacyInfo.xcprivacy"
     }
 
     bundle_data("copy_framework_headers_$this_target_name") {
@@ -1160,6 +1181,25 @@ if (is_mac || is_ios) {
           [ "$root_out_dir/$output_name.framework/$headers_dir/$output_name.h" ]
 
       deps = [ ":umbrella_header_$target_name" ]
+    }
+
+    action("create_privacy_manifest_$target_name") {
+      script = "//tools_webrtc/apple/generate_privacy_manifest.py"
+
+      args = [
+        "--output",
+        rebase_path(privacy_manifest_path),
+      ]
+
+      outputs = [ privacy_manifest_path ]
+    }
+
+    copy("copy_privacy_manifest_$target_name") {
+      sources = [ privacy_manifest_path ]
+      outputs =
+          [ "$root_out_dir/$output_name.framework/$privacy_manifest_out_path" ]
+
+      deps = [ ":create_privacy_manifest_$target_name" ]
     }
   }
 }

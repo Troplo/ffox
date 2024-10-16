@@ -15,6 +15,7 @@
 #include <memory>
 
 #include "absl/base/attributes.h"
+#include "api/environment/environment.h"
 #include "api/field_trials_view.h"
 #include "api/rtc_event_log/rtc_event_log.h"
 #include "api/transport/network_types.h"
@@ -35,6 +36,10 @@ class TargetTransferRateObserver {
 // Configuration sent to factory create function. The parameters here are
 // optional to use for a network controller implementation.
 struct NetworkControllerConfig {
+  explicit NetworkControllerConfig(const Environment& env) : env(env) {}
+
+  Environment env;
+
   // The initial constraints to start with, these can be changed at any later
   // time by calls to OnTargetRateConstraints. Note that the starting rate
   // has to be set initially to provide a starting state for the network
@@ -43,12 +48,6 @@ struct NetworkControllerConfig {
   // Initial stream specific configuration, these are changed at any later time
   // by calls to OnStreamsConfig.
   StreamsConfig stream_based_config;
-
-  // Optional override of configuration of WebRTC internals. Using nullptr here
-  // indicates that the field trial API will be used.
-  const FieldTrialsView* key_value_config = nullptr;
-  // Optional override of event log.
-  RtcEventLog* event_log = nullptr;
 };
 
 // NetworkControllerInterface is implemented by network controllers. A network

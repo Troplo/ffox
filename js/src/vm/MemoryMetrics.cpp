@@ -34,7 +34,6 @@
 #include "wasm/WasmInstance-inl.h"
 
 using mozilla::MallocSizeOf;
-using mozilla::PodCopy;
 
 using namespace js;
 
@@ -171,8 +170,8 @@ NotableScriptSourceInfo::NotableScriptSourceInfo(const char* filename,
 
 }  // namespace JS
 
-typedef HashSet<ScriptSource*, DefaultHasher<ScriptSource*>, SystemAllocPolicy>
-    SourceSet;
+using SourceSet =
+    HashSet<ScriptSource*, DefaultHasher<ScriptSource*>, SystemAllocPolicy>;
 
 struct StatsClosure {
   RuntimeStats* rtStats;

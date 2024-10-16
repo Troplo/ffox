@@ -6,10 +6,12 @@
 #include "CookieParser.h"
 #include "CookieLogging.h"
 
+#include "mozilla/CheckedInt.h"
 #include "mozilla/dom/nsMixedContentBlocker.h"
 #include "mozilla/glean/GleanMetrics.h"
 #include "mozilla/net/Cookie.h"
 #include "mozilla/StaticPrefs_network.h"
+#include "mozilla/TextUtils.h"
 #include "nsIConsoleReportCollector.h"
 #include "nsIScriptError.h"
 #include "nsIURI.h"
@@ -23,6 +25,7 @@ constexpr auto CONSOLE_CHIPS_CATEGORY = "cookiesCHIPS"_ns;
 constexpr auto CONSOLE_OVERSIZE_CATEGORY = "cookiesOversize"_ns;
 constexpr auto CONSOLE_REJECTION_CATEGORY = "cookiesRejection"_ns;
 constexpr auto CONSOLE_SAMESITE_CATEGORY = "cookieSameSite"_ns;
+constexpr auto CONSOLE_INVALID_ATTRIBUTE_CATEGORY = "cookieInvalidAttribute"_ns;
 constexpr auto SAMESITE_MDN_URL =
     "https://developer.mozilla.org/docs/Web/HTTP/Headers/Set-Cookie/"
     u"SameSite"_ns;
@@ -158,8 +161,8 @@ CookieParser::~CookieParser() {
 
   for (const char* attribute : mWarnings.mAttributeOverwritten) {
     CookieLogging::LogMessageToConsole(
-        mCRC, mHostURI, nsIScriptError::warningFlag, CONSOLE_OVERSIZE_CATEGORY,
-        "CookieAttributeOverwritten"_ns,
+        mCRC, mHostURI, nsIScriptError::warningFlag,
+        CONSOLE_INVALID_ATTRIBUTE_CATEGORY, "CookieAttributeOverwritten"_ns,
         AutoTArray<nsString, 2>{NS_ConvertUTF8toUTF16(mCookieData.name()),
                                 NS_ConvertUTF8toUTF16(attribute)});
   }
@@ -168,6 +171,13 @@ CookieParser::~CookieParser() {
     CookieLogging::LogMessageToConsole(
         mCRC, mHostURI, nsIScriptError::infoFlag, CONSOLE_SAMESITE_CATEGORY,
         "CookieSameSiteValueInvalid2"_ns,
+        AutoTArray<nsString, 1>{NS_ConvertUTF8toUTF16(mCookieData.name())});
+  }
+
+  if (mWarnings.mInvalidMaxAgeAttribute) {
+    CookieLogging::LogMessageToConsole(
+        mCRC, mHostURI, nsIScriptError::infoFlag,
+        CONSOLE_INVALID_ATTRIBUTE_CATEGORY, "CookieInvalidMaxAgeAttribute"_ns,
         AutoTArray<nsString, 1>{NS_ConvertUTF8toUTF16(mCookieData.name())});
   }
 
@@ -641,6 +651,52 @@ bool CookieParser::CheckPrefixes(CookieStruct& aCookieData,
   return true;
 }
 
+bool CookieParser::ParseMaxAgeAttribute(const nsACString& aMaxage,
+                                        int64_t* aValue) {
+  MOZ_ASSERT(aValue);
+
+  if (aMaxage.IsEmpty()) {
+    return false;
+  }
+
+  nsACString::const_char_iterator iter;
+  aMaxage.BeginReading(iter);
+
+  nsACString::const_char_iterator end;
+  aMaxage.EndReading(end);
+
+  // Negative values mean that the cookie is already expired. Don't bother to
+  // parse.
+  if (*iter == '-') {
+    *aValue = INT64_MIN;
+    return true;
+  }
+
+  CheckedInt<int64_t> value(0);
+
+  for (; iter != end; ++iter) {
+    if (!mozilla::IsAsciiDigit(*iter)) {
+      mWarnings.mInvalidMaxAgeAttribute = true;
+      return false;
+    }
+
+    value *= 10;
+    if (!value.isValid()) {
+      *aValue = INT64_MAX;
+      return true;
+    }
+
+    value += *iter - '0';
+    if (!value.isValid()) {
+      *aValue = INT64_MAX;
+      return true;
+    }
+  }
+
+  *aValue = value.value();
+  return true;
+}
+
 bool CookieParser::GetExpiry(CookieStruct& aCookieData,
                              const nsACString& aExpires,
                              const nsACString& aMaxage, int64_t aCurrentTime,
@@ -659,26 +715,22 @@ bool CookieParser::GetExpiry(CookieStruct& aCookieData,
    * Note: We need to consider accounting for network lag here, per RFC.
    */
   // check for max-age attribute first; this overrides expires attribute
-  if (!aMaxage.IsEmpty()) {
-    // obtain numeric value of maxageAttribute
-    int64_t maxage;
-    int32_t numInts = PR_sscanf(aMaxage.BeginReading(), "%lld", &maxage);
-
-    // default to session cookie if the conversion failed
-    if (numInts != 1) {
-      return true;
-    }
-
-    // if this addition overflows, expiryTime will be less than currentTime
-    // and the cookie will be expired - that's okay.
-    if (maxageCap) {
-      aCookieData.expiry() = aCurrentTime + std::min(maxage, maxageCap);
+  int64_t maxage = 0;
+  if (ParseMaxAgeAttribute(aMaxage, &maxage)) {
+    if (maxage == INT64_MIN || maxage == INT64_MAX) {
+      aCookieData.expiry() = maxage;
     } else {
-      aCookieData.expiry() = aCurrentTime + maxage;
+      CheckedInt<int64_t> value(aCurrentTime);
+      value += maxageCap ? std::min(maxage, maxageCap) : maxage;
+
+      aCookieData.expiry() = value.isValid() ? value.value() : INT64_MAX;
     }
 
-    // check for expires attribute
-  } else if (!aExpires.IsEmpty()) {
+    return false;
+  }
+
+  // check for expires attribute
+  if (!aExpires.IsEmpty()) {
     PRTime expires;
 
     // parse expiry time
@@ -699,14 +751,13 @@ bool CookieParser::GetExpiry(CookieStruct& aCookieData,
       aCookieData.expiry() = expires / int64_t(PR_USEC_PER_SEC);
     }
 
-    // default to session cookie if no attributes found.  Here we don't need to
-    // enforce the maxage cap, because session cookies are short-lived by
-    // definition.
-  } else {
-    return true;
+    return false;
   }
 
-  return false;
+  // default to session cookie if no attributes found.  Here we don't need to
+  // enforce the maxage cap, because session cookies are short-lived by
+  // definition.
+  return true;
 }
 
 // returns true if 'a' is equal to or a subdomain of 'b',
@@ -809,7 +860,7 @@ bool CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
 
   // aCookieHeader is an in/out param to point to the next cookie, if
   // there is one. Save the present value for logging purposes
-  nsCString savedCookieHeader(aCookieHeader);
+  mCookieString.Assign(aCookieHeader);
 
   // newCookie says whether there are multiple cookies in the header;
   // so we can handle them separately.
@@ -846,7 +897,7 @@ bool CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
 
   // reject cookie if name and value are empty, per RFC6265bis
   if (mCookieData.name().IsEmpty() && mCookieData.value().IsEmpty()) {
-    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, savedCookieHeader,
+    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, mCookieString,
                       "cookie name and value are empty");
 
     RejectCookie(RejectedEmptyNameAndValue);
@@ -855,13 +906,11 @@ bool CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
 
   // reject cookie if it's over the size limit, per RFC2109
   if (!CookieCommons::CheckNameAndValueSize(mCookieData)) {
-    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, savedCookieHeader,
+    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, mCookieString,
                       "cookie too big (> 4kb)");
     RejectCookie(RejectedNameValueOversize);
     return newCookie;
   }
-
-  CookieCommons::RecordUnicodeTelemetry(mCookieData);
 
   // We count SetCookie operations in the parent process only for HTTP set
   // cookies to prevent double counting.
@@ -870,7 +919,7 @@ bool CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
   }
 
   if (!CookieCommons::CheckName(mCookieData)) {
-    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, savedCookieHeader,
+    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, mCookieString,
                       "invalid name character");
     RejectCookie(RejectedInvalidCharName);
     return newCookie;
@@ -878,14 +927,14 @@ bool CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
 
   // domain & path checks
   if (!CheckDomain(mCookieData, mHostURI, aBaseDomain, aRequireHostMatch)) {
-    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, savedCookieHeader,
+    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, mCookieString,
                       "failed the domain tests");
     RejectCookie(RejectedInvalidDomain);
     return newCookie;
   }
 
   if (!CheckPath()) {
-    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, savedCookieHeader,
+    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, mCookieString,
                       "failed the path tests");
     return newCookie;
   }
@@ -894,7 +943,7 @@ bool CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
   // `__Host-` or `__Secure-`
   if (mCookieData.name().IsEmpty() && (HasSecurePrefix(mCookieData.value()) ||
                                        HasHostPrefix(mCookieData.value()))) {
-    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, savedCookieHeader,
+    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, mCookieString,
                       "failed hidden prefix tests");
     RejectCookie(RejectedInvalidPrefix);
     return newCookie;
@@ -902,14 +951,14 @@ bool CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
 
   // magic prefix checks. MUST be run after CheckDomain() and CheckPath()
   if (!CheckPrefixes(mCookieData, potentiallyTrustworthy)) {
-    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, savedCookieHeader,
+    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, mCookieString,
                       "failed the prefix tests");
     RejectCookie(RejectedInvalidPrefix);
     return newCookie;
   }
 
   if (!CookieCommons::CheckValue(mCookieData)) {
-    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, savedCookieHeader,
+    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, mCookieString,
                       "invalid value character");
     RejectCookie(RejectedInvalidCharValue);
     return newCookie;
@@ -917,7 +966,7 @@ bool CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
 
   // if the new cookie is httponly, make sure we're not coming from script
   if (!aFromHttp && mCookieData.isHttpOnly()) {
-    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, savedCookieHeader,
+    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, mCookieString,
                       "cookie is httponly; coming from script");
     RejectCookie(RejectedHttpOnlyButFromScript);
     return newCookie;
@@ -943,7 +992,7 @@ bool CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
       laxByDefault ? mCookieData.sameSite() : mCookieData.rawSameSite();
   if ((effectiveSameSite != nsICookie::SAMESITE_NONE) &&
       aIsForeignAndNotAddon) {
-    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, savedCookieHeader,
+    COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, mCookieString,
                       "failed the samesite tests");
     RejectCookie(RejectedForNonSameSiteness);
     return newCookie;
@@ -959,7 +1008,7 @@ bool CookieParser::Parse(const nsACString& aBaseDomain, bool aRequireHostMatch,
         (aIsInPrivateBrowsing &&
          StaticPrefs::
              network_cookie_cookieBehavior_optInPartitioning_pbmode())) {
-      COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, savedCookieHeader,
+      COOKIE_LOGFAILURE(SET_COOKIE, mHostURI, mCookieString,
                         "foreign cookies must be partitioned");
       RejectCookie(RejectedForeignNoPartitionedError);
       return newCookie;
@@ -975,6 +1024,10 @@ void CookieParser::RejectCookie(Rejection aRejection) {
   MOZ_ASSERT(mRejection == NoRejection);
   MOZ_ASSERT(aRejection != NoRejection);
   mRejection = aRejection;
+}
+
+void CookieParser::GetCookieString(nsACString& aCookieString) const {
+  aCookieString.Assign(mCookieString);
 }
 
 }  // namespace net

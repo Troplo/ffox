@@ -136,7 +136,7 @@ MSG_DEF(JSMSG_BAD_DERIVED_RETURN,      1, JSEXN_TYPEERR, "derived class construc
 MSG_DEF(JSMSG_BAD_HERITAGE,            2, JSEXN_TYPEERR, "class heritage {0} is {1}")
 MSG_DEF(JSMSG_NOT_OBJORNULL,           1, JSEXN_TYPEERR, "{0} is not an object or null")
 MSG_DEF(JSMSG_CONSTRUCTOR_DISABLED,    1, JSEXN_TYPEERR, "{0} is disabled")
-MSG_DEF(JSMSG_NO_DISPOSE_IN_USING,     0, JSEXN_TYPEERR, "'Symbol.dispose' property is not callable")
+MSG_DEF(JSMSG_DISPOSE_NOT_CALLABLE,     0, JSEXN_TYPEERR, "'Symbol.dispose' property is not callable")
 MSG_DEF(JSMSG_DISPOSABLE_NOT_OBJ,      0, JSEXN_TYPEERR, "Value to be disposed is not an object")
 
 // JSON
@@ -225,8 +225,10 @@ MSG_DEF(JSMSG_AWAIT_OUTSIDE_ASYNC,     0, JSEXN_SYNTAXERR, "await is only valid 
 MSG_DEF(JSMSG_AWAIT_OUTSIDE_ASYNC_OR_MODULE, 0, JSEXN_SYNTAXERR, "await is only valid in async functions, async generators and modules")
 MSG_DEF(JSMSG_TOP_LEVEL_AWAIT_NOT_SUPPORTED, 0, JSEXN_SYNTAXERR, "top level await is not supported in this context")
 MSG_DEF(JSMSG_BAD_ARROW_ARGS,          0, JSEXN_SYNTAXERR, "invalid arrow-function arguments (parentheses around the arrow-function may help)")
+MSG_DEF(JSMSG_BAD_CLASS_MEMBER_DEF,    0, JSEXN_SYNTAXERR, "bad class member definition")
 MSG_DEF(JSMSG_BAD_COALESCE_MIXING,     0, JSEXN_SYNTAXERR, "cannot use `??` unparenthesized within `||` and `&&` expressions")
 MSG_DEF(JSMSG_BAD_CONST_DECL,          0, JSEXN_SYNTAXERR, "missing = in const declaration")
+MSG_DEF(JSMSG_BAD_CONSTRUCTOR_DEF,     0, JSEXN_SYNTAXERR, "a class constructor definition must be a plain public method")
 MSG_DEF(JSMSG_BAD_CONTINUE,            0, JSEXN_SYNTAXERR, "continue must be inside loop")
 MSG_DEF(JSMSG_BAD_DESTRUCT_ASS,        0, JSEXN_SYNTAXERR, "invalid destructuring assignment operator")
 MSG_DEF(JSMSG_BAD_DESTRUCT_TARGET,     0, JSEXN_SYNTAXERR, "invalid destructuring target")
@@ -239,7 +241,6 @@ MSG_DEF(JSMSG_BAD_STARTING_FOROF_LHS,  1, JSEXN_SYNTAXERR, "an expression X in '
 MSG_DEF(JSMSG_BAD_INCOP_OPERAND,       0, JSEXN_SYNTAXERR, "invalid increment/decrement operand")
 MSG_DEF(JSMSG_BAD_LEFTSIDE_OF_ASS,     0, JSEXN_SYNTAXERR, "invalid assignment left-hand side")
 MSG_DEF(JSMSG_BAD_LOCAL_STRING_EXPORT, 0, JSEXN_SYNTAXERR, "string exports can't be used without 'from'")
-MSG_DEF(JSMSG_BAD_METHOD_DEF,          0, JSEXN_SYNTAXERR, "bad method definition")
 MSG_DEF(JSMSG_BAD_POW_LEFTSIDE,        0, JSEXN_SYNTAXERR, "unparenthesized unary expression can't appear on the left-hand side of '**'")
 MSG_DEF(JSMSG_BAD_PROP_ID,             0, JSEXN_SYNTAXERR, "invalid property id")
 MSG_DEF(JSMSG_BAD_RETURN_OR_YIELD,     1, JSEXN_SYNTAXERR, "{0} not in function")
@@ -258,6 +259,7 @@ MSG_DEF(JSMSG_BRACKET_OPENED,          2, JSEXN_NOTE, "[ opened at line {0}, col
 MSG_DEF(JSMSG_CATCH_IDENTIFIER,        0, JSEXN_SYNTAXERR, "missing identifier in catch")
 MSG_DEF(JSMSG_CATCH_OR_FINALLY,        0, JSEXN_SYNTAXERR, "missing catch or finally after try")
 MSG_DEF(JSMSG_CATCH_WITHOUT_TRY,       0, JSEXN_SYNTAXERR, "catch without try")
+MSG_DEF(JSMSG_CLASS_STATIC_PROTO,      0, JSEXN_SYNTAXERR, "a class may not have a static property named 'prototype'")
 MSG_DEF(JSMSG_COLON_AFTER_CASE,        0, JSEXN_SYNTAXERR, "missing : after case label")
 MSG_DEF(JSMSG_COLON_AFTER_ID,          0, JSEXN_SYNTAXERR, "missing : after property id")
 MSG_DEF(JSMSG_COLON_IN_COND,           0, JSEXN_SYNTAXERR, "missing : in conditional expression")
@@ -282,10 +284,10 @@ MSG_DEF(JSMSG_DEPRECATED_OCTAL_LITERAL,0, JSEXN_SYNTAXERR, "\"0\"-prefixed octal
 MSG_DEF(JSMSG_DEPRECATED_OCTAL_ESCAPE ,0, JSEXN_SYNTAXERR, "octal escape sequences can't be used in untagged template literals or in strict mode code")
 MSG_DEF(JSMSG_DEPRECATED_EIGHT_OR_NINE_ESCAPE, 0, JSEXN_SYNTAXERR, "the escapes \\8 and \\9 can't be used in untagged template literals or in strict mode code")
 MSG_DEF(JSMSG_DEPRECATED_PRAGMA,       1, JSEXN_WARN, "Using //@ to indicate {0} pragmas is deprecated. Use //# instead")
+MSG_DEF(JSMSG_DUPLICATE_CONSTRUCTOR,   0, JSEXN_SYNTAXERR, "a class cannot have more than one constructor definition")
 MSG_DEF(JSMSG_DUPLICATE_EXPORT_NAME,   1, JSEXN_SYNTAXERR, "duplicate export name '{0}'")
 MSG_DEF(JSMSG_DUPLICATE_FORMAL,        1, JSEXN_SYNTAXERR, "duplicate formal argument {0}")
 MSG_DEF(JSMSG_DUPLICATE_LABEL,         0, JSEXN_SYNTAXERR, "duplicate label")
-MSG_DEF(JSMSG_DUPLICATE_PROPERTY,      1, JSEXN_SYNTAXERR, "property name {0} appears more than once in object literal")
 MSG_DEF(JSMSG_DUPLICATE_PROTO_PROPERTY, 0, JSEXN_SYNTAXERR, "property name __proto__ appears more than once in object literal")
 MSG_DEF(JSMSG_EQUAL_AS_ASSIGN,         0, JSEXN_SYNTAXERR, "test for equality (==) mistyped as assignment (=)?")
 MSG_DEF(JSMSG_EXPORT_DECL_AT_TOP_LEVEL,0, JSEXN_SYNTAXERR, "export declarations may only appear at top level of a module")
@@ -464,6 +466,7 @@ MSG_DEF(JSMSG_WASM_ARRAY_IMP_LIMIT,    0, JSEXN_WASMRUNTIMEERROR, "too many arra
 MSG_DEF(JSMSG_WASM_ARRAY_NEW_ELEM_NOT_IMPLEMENTED, 0, JSEXN_WASMRUNTIMEERROR, "array.new_elem does not yet support the expression encoding of element segments")
 MSG_DEF(JSMSG_WASM_BAD_RANGE,          2, JSEXN_RANGEERR,    "bad {0} {1}")
 MSG_DEF(JSMSG_WASM_BAD_GROW,           1, JSEXN_RANGEERR,    "failed to grow {0}")
+MSG_DEF(JSMSG_WASM_MAX_LT_INITIAL,     1, JSEXN_RANGEERR,    "initial {0} size cannot be greater than maximum")
 MSG_DEF(JSMSG_WASM_TABLE_OUT_OF_BOUNDS, 0, JSEXN_WASMRUNTIMEERROR,   "table index out of bounds")
 MSG_DEF(JSMSG_WASM_BAD_ENFORCE_RANGE,  2, JSEXN_TYPEERR,     "bad {0} {1}")
 MSG_DEF(JSMSG_WASM_BAD_BUF_ARG,        0, JSEXN_TYPEERR,     "first argument must be an ArrayBuffer or typed array object")
@@ -555,6 +558,7 @@ MSG_DEF(JSMSG_SC_BAD_CLONE_VERSION,    0, JSEXN_ERR, "unsupported structured clo
 MSG_DEF(JSMSG_SC_BAD_SERIALIZED_DATA,  1, JSEXN_INTERNALERR, "bad serialized structured data ({0})")
 MSG_DEF(JSMSG_SC_DUP_TRANSFERABLE,     0, JSEXN_TYPEERR, "duplicate transferable for structured clone")
 MSG_DEF(JSMSG_SC_NOT_TRANSFERABLE,     0, JSEXN_TYPEERR, "invalid transferable array for structured clone")
+MSG_DEF(JSMSG_SC_TRANSFERABLE_TWICE,   0, JSEXN_TYPEERR, "structured clone cannot transfer twice")
 MSG_DEF(JSMSG_SC_UNSUPPORTED_TYPE,     0, JSEXN_TYPEERR, "unsupported type for structured data")
 MSG_DEF(JSMSG_SC_NOT_CLONABLE,         1, JSEXN_TYPEERR, "The {0} object cannot be serialized. The Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy HTTP headers will enable this in the future.")
 MSG_DEF(JSMSG_SC_NOT_CLONABLE_WITH_COOP_COEP, 1, JSEXN_TYPEERR, "The {0} object cannot be serialized. The Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy HTTP headers can be used to enable this.")
@@ -605,6 +609,8 @@ MSG_DEF(JSMSG_DEBUG_PROMISE_NOT_FULFILLED, 0, JSEXN_TYPEERR, "Promise hasn't bee
 MSG_DEF(JSMSG_DEBUG_PROMISE_NOT_REJECTED, 0, JSEXN_TYPEERR, "Promise hasn't been rejected")
 MSG_DEF(JSMSG_DEBUG_NO_BINARY_SOURCE,  0, JSEXN_ERR, "WebAssembly binary source is not available")
 MSG_DEF(JSMSG_DEBUG_EXCLUSIVE_FRAME_COVERAGE, 0, JSEXN_ERR, "onEnterFrame and collectCoverageInfo cannot be active at the same time")
+MSG_DEF(JSMSG_NATIVE_TRACING_BUFFER_MALFORMED, 0, JSEXN_ERR, "bad data encountered while reading the native tracing buffer")
+MSG_DEF(JSMSG_NATIVE_TRACING_MUST_BE_ENABLED, 0, JSEXN_ERR, "Cannot collect a native trace without setting nativeTracing to true")
 
 // Testing functions
 MSG_DEF(JSMSG_TESTING_SCRIPTS_ONLY, 0, JSEXN_TYPEERR, "only works on scripts")
@@ -643,6 +649,8 @@ MSG_DEF(JSMSG_ESCAPE_AT_END_OF_REGEXP, 0, JSEXN_SYNTAXERR, "\\ at end of pattern
 MSG_DEF(JSMSG_EXEC_NOT_OBJORNULL,      0, JSEXN_TYPEERR, "RegExp exec method should return object or null")
 MSG_DEF(JSMSG_INVALID_DECIMAL_ESCAPE, 0, JSEXN_SYNTAXERR, "invalid decimal escape in regular expression")
 MSG_DEF(JSMSG_INVALID_GROUP,           0, JSEXN_SYNTAXERR, "invalid regexp group")
+MSG_DEF(JSMSG_REPEATED_FLAG,           0, JSEXN_SYNTAXERR, "repeated flag in regexp modifier")
+MSG_DEF(JSMSG_INVALID_FLAG_GROUP,      0, JSEXN_SYNTAXERR, "invalid flag group")
 MSG_DEF(JSMSG_INVALID_IDENTITY_ESCAPE, 0, JSEXN_SYNTAXERR, "invalid identity escape in regular expression")
 MSG_DEF(JSMSG_INVALID_UNICODE_ESCAPE,  0, JSEXN_SYNTAXERR, "invalid unicode escape in regular expression")
 MSG_DEF(JSMSG_MISSING_PAREN,           0, JSEXN_SYNTAXERR, "unterminated parenthetical")
@@ -963,5 +971,8 @@ MSG_DEF(JSMSG_TEMPORAL_PARSER_INVALID_SUBMINUTE_TIMEZONE, 0, JSEXN_RANGEERR, "ti
 
 // TODO: Improve the messaging for suppressed errors (Bug 1906150)
 MSG_DEF(JSMSG_ERROR_WAS_SUPPRESSED, 0, IF_EXPLICIT_RESOURCE_MANAGEMENT(JSEXN_SUPPRESSEDERR, JSEXN_INTERNALERR), "An error is suppressed because another error happened while disposing an object")
+
+// DisposableStack
+MSG_DEF(JSMSG_DISPOSABLE_STACK_DISPOSED, 0, JSEXN_REFERENCEERR, "DisposableStack has already been disposed")
 
 //clang-format on

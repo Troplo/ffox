@@ -37,6 +37,10 @@
 
 #include "gfxPlatform.h"
 
+#ifdef XP_MACOSX
+#  include "mozilla/gfx/ScaledFontMac.h"
+#endif
+
 namespace mozilla::gfx {
 
 BackingTexture::BackingTexture(const IntSize& aSize, SurfaceFormat aFormat,
@@ -304,7 +308,7 @@ bool DrawTargetWebgl::Init(const IntSize& size, const SurfaceFormat format,
     return false;
   }
 
-  auto shmem = MakeRefPtr<mozilla::ipc::SharedMemoryBasic>();
+  auto shmem = MakeRefPtr<mozilla::ipc::SharedMemory>();
   if (NS_WARN_IF(!shmem->Create(shmemSize)) ||
       NS_WARN_IF(!shmem->Map(shmemSize))) {
     return false;
@@ -316,7 +320,7 @@ bool DrawTargetWebgl::Init(const IntSize& size, const SurfaceFormat format,
   mSkia = new DrawTargetSkia;
   auto stride = layers::ImageDataSerializer::ComputeRGBStride(
       SurfaceFormat::B8G8R8A8, size.width);
-  if (!mSkia->Init(reinterpret_cast<uint8_t*>(mShmem->memory()), size, stride,
+  if (!mSkia->Init(reinterpret_cast<uint8_t*>(mShmem->Memory()), size, stride,
                    SurfaceFormat::B8G8R8A8, true)) {
     return false;
   }
@@ -1230,9 +1234,10 @@ bool SharedContextWebgl::CreateShaders() {
         "   v_cliptc = vertex / u_viewport;\n"
         "   v_clipdist = vec4(vertex - u_clipbounds.xy,\n"
         "                     u_clipbounds.zw - vertex);\n"
-        "   v_dist = vec4(extrude, 1.0 - extrude) * scale.xyxy +\n"
-        "            0.5 * min(scale.xyxy, 1.0) + (1.0 - u_aa);\n"
-        "   v_alpha = a_vertex.z;\n"
+        "   float noAA = 1.0 - u_aa;\n"
+        "   v_dist = vec4(extrude, 1.0 - extrude) * scale.xyxy + 0.5 + noAA;\n"
+        "   v_alpha = min(a_vertex.z,\n"
+        "                 min(scale.x, 1.0) * min(scale.y, 1.0) + noAA);\n"
         "}\n";
     auto fsSource =
         "precision mediump float;\n"
@@ -1246,7 +1251,7 @@ bool SharedContextWebgl::CreateShaders() {
         "   float clip = texture2D(u_clipmask, v_cliptc).r;\n"
         "   vec4 dist = min(v_dist, v_clipdist);\n"
         "   dist.xy = min(dist.xy, dist.zw);\n"
-        "   float aa = v_alpha * clamp(min(dist.x, dist.y), 0.0, 1.0);\n"
+        "   float aa = clamp(min(dist.x, dist.y), 0.0, v_alpha);\n"
         "   gl_FragColor = clip * aa * u_color;\n"
         "}\n";
     RefPtr<WebGLShader> vsId = mWebgl->CreateShader(LOCAL_GL_VERTEX_SHADER);
@@ -1314,9 +1319,10 @@ bool SharedContextWebgl::CreateShaders() {
         "   v_texcoord = u_texmatrix[0] * extrude.x +\n"
         "                u_texmatrix[1] * extrude.y +\n"
         "                u_texmatrix[2];\n"
-        "   v_dist = vec4(extrude, 1.0 - extrude) * scale.xyxy +\n"
-        "            0.5 * min(scale.xyxy, 1.0) + (1.0 - u_aa);\n"
-        "   v_alpha = a_vertex.z;\n"
+        "   float noAA = 1.0 - u_aa;\n"
+        "   v_dist = vec4(extrude, 1.0 - extrude) * scale.xyxy + 0.5 + noAA;\n"
+        "   v_alpha = min(a_vertex.z,\n"
+        "                 min(scale.x, 1.0) * min(scale.y, 1.0) + noAA);\n"
         "}\n";
     auto fsSource =
         "precision mediump float;\n"
@@ -1337,7 +1343,7 @@ bool SharedContextWebgl::CreateShaders() {
         "   float clip = texture2D(u_clipmask, v_cliptc).r;\n"
         "   vec4 dist = min(v_dist, v_clipdist);\n"
         "   dist.xy = min(dist.xy, dist.zw);\n"
-        "   float aa = v_alpha * clamp(min(dist.x, dist.y), 0.0, 1.0);\n"
+        "   float aa = clamp(min(dist.x, dist.y), 0.0, v_alpha);\n"
         "   gl_FragColor = clip * aa * u_color *\n"
         "                  mix(image, image.rrrr, u_swizzle);\n"
         "}\n";
@@ -1408,23 +1414,27 @@ inline ColorPattern DrawTargetWebgl::GetClearPattern() const {
       DeviceColor(0.0f, 0.0f, 0.0f, IsOpaque(mFormat) ? 1.0f : 0.0f));
 }
 
-// Check if the transformed rect would contain the entire viewport.
-inline bool DrawTargetWebgl::RectContainsViewport(const Rect& aRect) const {
-  return mTransform.PreservesAxisAlignedRectangles() &&
-         MatrixDouble(mTransform)
-             .TransformBounds(
-                 RectDouble(aRect.x, aRect.y, aRect.width, aRect.height))
-             .Contains(RectDouble(GetRect()));
+template <typename R>
+inline RectDouble DrawTargetWebgl::TransformDouble(const R& aRect) const {
+  return MatrixDouble(mTransform).TransformBounds(WidenToDouble(aRect));
+}
+
+// Check if the transformed rect clips to the viewport.
+inline Maybe<Rect> DrawTargetWebgl::RectClippedToViewport(
+    const RectDouble& aRect) const {
+  if (!mTransform.PreservesAxisAlignedRectangles()) {
+    return Nothing();
+  }
+
+  return Some(NarrowToFloat(aRect.SafeIntersect(RectDouble(GetRect()))));
 }
 
 // Ensure that the rect, after transform, is within reasonable precision limits
 // such that when transformed and clipped in the shader it will not round bits
 // from the mantissa in a way that will diverge in a noticeable way from path
 // geometry calculated by the path fallback.
-static inline bool RectInsidePrecisionLimits(const Rect& aRect,
-                                             const Matrix& aTransform) {
-  return Rect(-(1 << 20), -(1 << 20), 2 << 20, 2 << 20)
-      .Contains(aTransform.TransformBounds(aRect));
+static inline bool RectInsidePrecisionLimits(const RectDouble& aRect) {
+  return RectDouble(-(1 << 20), -(1 << 20), 2 << 20, 2 << 20).Contains(aRect);
 }
 
 void DrawTargetWebgl::ClearRect(const Rect& aRect) {
@@ -1433,14 +1443,16 @@ void DrawTargetWebgl::ClearRect(const Rect& aRect) {
     return;
   }
 
-  bool containsViewport = RectContainsViewport(aRect);
-  if (containsViewport) {
-    // If the rect encompasses the entire viewport, just clear the viewport
-    // instead to avoid transform issues.
-    DrawRect(Rect(GetRect()), GetClearPattern(),
+  RectDouble xformRect = TransformDouble(aRect);
+  bool containsViewport = false;
+  if (Maybe<Rect> clipped = RectClippedToViewport(xformRect)) {
+    // If the rect clips to viewport, just clear the clipped rect
+    // to avoid transform issues.
+    containsViewport = clipped->Size() == Size(GetSize());
+    DrawRect(*clipped, GetClearPattern(),
              DrawOptions(1.0f, CompositionOp::OP_CLEAR), Nothing(), nullptr,
              false);
-  } else if (RectInsidePrecisionLimits(aRect, mTransform)) {
+  } else if (RectInsidePrecisionLimits(xformRect)) {
     // If the rect transform won't stress precision, then just use it.
     DrawRect(aRect, GetClearPattern(),
              DrawOptions(1.0f, CompositionOp::OP_CLEAR));
@@ -1555,11 +1567,8 @@ void DrawTargetWebgl::CopySurface(SourceSurface* aSurface,
 void DrawTargetWebgl::PushClip(const Path* aPath) {
   if (aPath && aPath->GetBackendType() == BackendType::SKIA) {
     // Detect if the path is really just a rect to simplify caching.
-    const PathSkia* pathSkia = static_cast<const PathSkia*>(aPath);
-    const SkPath& skPath = pathSkia->GetPath();
-    SkRect rect = SkRect::MakeEmpty();
-    if (skPath.isRect(&rect)) {
-      PushClipRect(SkRectToRect(rect));
+    if (Maybe<Rect> rect = aPath->AsRect()) {
+      PushClipRect(*rect);
       return;
     }
   }
@@ -2592,16 +2601,18 @@ bool SharedContextWebgl::PruneTextureMemory(size_t aMargin, bool aPruneUnused) {
 void DrawTargetWebgl::FillRect(const Rect& aRect, const Pattern& aPattern,
                                const DrawOptions& aOptions) {
   if (SupportsPattern(aPattern)) {
-    if (RectInsidePrecisionLimits(aRect, mTransform)) {
-      DrawRect(aRect, aPattern, aOptions);
-      return;
+    RectDouble xformRect = TransformDouble(aRect);
+    if (aPattern.GetType() == PatternType::COLOR) {
+      if (Maybe<Rect> clipped = RectClippedToViewport(xformRect)) {
+        // If the pattern is transform-invariant and the rect clips to the
+        // viewport, just clip drawing to the viewport to avoid transform
+        // issues.
+        DrawRect(*clipped, aPattern, aOptions, Nothing(), nullptr, false);
+        return;
+      }
     }
-    if (aPattern.GetType() == PatternType::COLOR &&
-        RectContainsViewport(aRect)) {
-      // If the pattern is transform-invariant and the rect encompasses the
-      // entire viewport, just clip drawing to the viewport to avoid transform
-      // issues.
-      DrawRect(Rect(GetRect()), aPattern, aOptions, Nothing(), nullptr, false);
+    if (RectInsidePrecisionLimits(xformRect)) {
+      DrawRect(aRect, aPattern, aOptions);
       return;
     }
   }
@@ -2762,17 +2773,19 @@ void DrawTargetWebgl::Fill(const Path* aPath, const Pattern& aPattern,
   SkRect skiaRect = SkRect::MakeEmpty();
   // Draw the path as a simple rectangle with a supported pattern when possible.
   if (skiaPath.isRect(&skiaRect) && SupportsPattern(aPattern)) {
-    Rect rect = SkRectToRect(skiaRect);
-    if (RectInsidePrecisionLimits(rect, mTransform)) {
-      DrawRect(rect, aPattern, aOptions);
-      return;
+    RectDouble rect = SkRectToRectDouble(skiaRect);
+    RectDouble xformRect = TransformDouble(rect);
+    if (aPattern.GetType() == PatternType::COLOR) {
+      if (Maybe<Rect> clipped = RectClippedToViewport(xformRect)) {
+        // If the pattern is transform-invariant and the rect clips to the
+        // viewport, just clip drawing to the viewport to avoid transform
+        // issues.
+        DrawRect(*clipped, aPattern, aOptions, Nothing(), nullptr, false);
+        return;
+      }
     }
-    if (aPattern.GetType() == PatternType::COLOR &&
-        RectContainsViewport(rect)) {
-      // If the pattern is transform-invariant and the rect encompasses the
-      // entire viewport, just clip drawing to the viewport to avoid transform
-      // issues.
-      DrawRect(Rect(GetRect()), aPattern, aOptions, Nothing(), nullptr, false);
+    if (RectInsidePrecisionLimits(xformRect)) {
+      DrawRect(NarrowToFloat(rect), aPattern, aOptions);
       return;
     }
   }
@@ -4169,6 +4182,43 @@ static bool CheckForColorGlyphs(const RefPtr<SourceSurface>& aSurface) {
   return false;
 }
 
+// Quantize the preblend color used to key the cache, as only the high bits are
+// used to determine the amount of preblending. This avoids excessive cache use.
+// This roughly matches the quantization used in WebRender and Skia.
+static DeviceColor QuantizePreblendColor(const DeviceColor& aColor,
+                                         bool aUseSubpixelAA) {
+  int32_t r = int32_t(aColor.r * 255.0f + 0.5f);
+  int32_t g = int32_t(aColor.g * 255.0f + 0.5f);
+  int32_t b = int32_t(aColor.b * 255.0f + 0.5f);
+  // Ensure that even if two values would normally quantize to the same bucket,
+  // that the reference value within the bucket still allows for accurate
+  // determination of whether light-on-dark or dark-on-light rasterization will
+  // be used (as on macOS).
+  bool lightOnDark = r >= 85 && g >= 85 && b >= 85 && r + g + b >= 2 * 255;
+  // Skia only uses the high 3 bits of each color component to cache preblend
+  // ramp tables.
+  constexpr int32_t lumBits = 3;
+  constexpr int32_t ceilMask = (1 << (8 - lumBits)) - 1;
+  constexpr int32_t floorMask = ((1 << lumBits) - 1) << (8 - lumBits);
+  if (!aUseSubpixelAA) {
+    // If not using subpixel AA, then quantize only the luminance, stored in the
+    // G channel.
+    g = (r * 54 + g * 183 + b * 19) >> 8;
+    g |= ceilMask;
+    // Still distinguish between light and dark in the key.
+    r = b = lightOnDark ? 255 : 0;
+  } else if (lightOnDark) {
+    r |= ceilMask;
+    g |= ceilMask;
+    b |= ceilMask;
+  } else {
+    r &= floorMask;
+    g &= floorMask;
+    b &= floorMask;
+  }
+  return DeviceColor{r / 255.0f, g / 255.0f, b / 255.0f, 1.0f};
+}
+
 // Draws glyphs to the WebGL target by trying to generate a cached texture for
 // the text run that can be subsequently reused to quickly render the text run
 // without using any software surfaces.
@@ -4200,18 +4250,24 @@ bool SharedContextWebgl::DrawGlyphsAccel(ScaledFont* aFont,
   DeviceColor color = aOptions.mCompositionOp == CompositionOp::OP_CLEAR
                           ? DeviceColor(1, 1, 1, 1)
                           : static_cast<const ColorPattern&>(aPattern).mColor;
-#ifdef XP_MACOSX
-  // On macOS, depending on whether the text is classified as light-on-dark or
-  // dark-on-light, we may end up with different amounts of dilation applied, so
-  // we can't use the same mask in the two circumstances, or the glyphs will be
-  // dilated incorrectly.
-  bool lightOnDark =
-      useBitmaps || (color.r >= 0.33f && color.g >= 0.33f && color.b >= 0.33f &&
-                     color.r + color.g + color.b >= 2.0f);
+#if defined(XP_MACOSX) || defined(XP_WIN)
+  // macOS and Windows use gamma-aware blending.
+  bool usePreblend = aUseSubpixelAA;
 #else
-  // On other platforms, we assume no color-dependent dilation.
-  const bool lightOnDark = true;
+  // FreeType backends currently don't use any preblending.
+  bool usePreblend = false;
 #endif
+
+#ifdef XP_MACOSX
+  // If font smoothing is requested, even if there is no subpixel AA, gamma-
+  // aware blending might be used and differing amounts of dilation might be
+  // applied.
+  if (aFont->GetType() == FontType::MAC &&
+      static_cast<ScaledFontMac*>(aFont)->UseFontSmoothing()) {
+    usePreblend = true;
+  }
+#endif
+
   // If the font has bitmaps, use the color directly. Otherwise, the texture
   // will hold a grayscale mask, so encode the key's subpixel and light-or-dark
   // state in the color.
@@ -4222,9 +4278,9 @@ bool SharedContextWebgl::DrawGlyphsAccel(ScaledFont* aFont,
   HashNumber hash =
       GlyphCacheEntry::HashGlyphs(aBuffer, quantizeTransform, quantizeScale);
   DeviceColor colorOrMask =
-      useBitmaps
-          ? color
-          : DeviceColor::Mask(aUseSubpixelAA ? 1 : 0, lightOnDark ? 1 : 0);
+      useBitmaps ? color
+                 : (usePreblend ? QuantizePreblendColor(color, aUseSubpixelAA)
+                                : DeviceColor::Mask(aUseSubpixelAA ? 1 : 0, 1));
   IntRect clipRect(IntPoint(), mViewportSize);
   RefPtr<GlyphCacheEntry> entry =
       cache->FindEntry(aBuffer, colorOrMask, quantizeTransform, quantizeScale,
@@ -4245,7 +4301,7 @@ bool SharedContextWebgl::DrawGlyphsAccel(ScaledFont* aFont,
     if (xformBounds.IsEmpty()) {
       return true;
     }
-    IntRect fullBounds = RoundedOut(currentTransform.TransformBounds(*bounds));
+    IntRect fullBounds = RoundedOut(xformBounds);
     IntRect clipBounds = fullBounds.Intersect(clipRect);
     // Check if the bounds are completely clipped out.
     if (clipBounds.IsEmpty()) {
@@ -4293,16 +4349,9 @@ bool SharedContextWebgl::DrawGlyphsAccel(ScaledFont* aFont,
     // wasn't valid. Render the text run into a temporary target.
     RefPtr<DrawTargetSkia> textDT = new DrawTargetSkia;
     if (textDT->Init(intBounds.Size(),
-                     lightOnDark && !useBitmaps && !aUseSubpixelAA
-                         ? SurfaceFormat::A8
-                         : SurfaceFormat::B8G8R8A8)) {
-      if (!lightOnDark) {
-        // If rendering dark-on-light text, we need to clear the background to
-        // white while using an opaque alpha value to allow this.
-        textDT->FillRect(Rect(IntRect(IntPoint(), intBounds.Size())),
-                         ColorPattern(DeviceColor(1, 1, 1, 1)),
-                         DrawOptions(1.0f, CompositionOp::OP_OVER));
-      }
+                     useBitmaps || usePreblend || aUseSubpixelAA
+                         ? SurfaceFormat::B8G8R8A8
+                         : SurfaceFormat::A8)) {
       textDT->SetTransform(currentTransform *
                            Matrix::Translation(-intBounds.TopLeft()));
       textDT->SetPermitSubpixelAA(aUseSubpixelAA);
@@ -4310,42 +4359,20 @@ bool SharedContextWebgl::DrawGlyphsAccel(ScaledFont* aFont,
                               aOptions.mAntialiasMode);
       // If bitmaps might be used, then we have to supply the color, as color
       // emoji may ignore it while grayscale bitmaps may use it, with no way to
-      // know ahead of time. Otherwise, assume the output will be a mask and
-      // just render it white to determine intensity. Depending on whether the
-      // text is light or dark, we render white or black text respectively.
-      ColorPattern colorPattern(
-          useBitmaps ? color : DeviceColor::Mask(lightOnDark ? 1 : 0, 1));
-      if (aStrokeOptions) {
-        textDT->StrokeGlyphs(aFont, aBuffer, colorPattern, *aStrokeOptions,
-                             drawOptions);
+      // know ahead of time. If we are using preblending in some form, then the
+      // output also will depend on the supplied color. Otherwise, assume the
+      // output will be a mask and just render it white to determine intensity.
+      if (!useBitmaps && usePreblend) {
+        textDT->DrawGlyphMask(aFont, aBuffer, color, aStrokeOptions,
+                              drawOptions);
       } else {
-        textDT->FillGlyphs(aFont, aBuffer, colorPattern, drawOptions);
-      }
-      if (!lightOnDark) {
-        uint8_t* data = nullptr;
-        IntSize size;
-        int32_t stride = 0;
-        SurfaceFormat format = SurfaceFormat::UNKNOWN;
-        if (!textDT->LockBits(&data, &size, &stride, &format)) {
-          return false;
+        ColorPattern colorPattern(useBitmaps ? color : DeviceColor(1, 1, 1, 1));
+        if (aStrokeOptions) {
+          textDT->StrokeGlyphs(aFont, aBuffer, colorPattern, *aStrokeOptions,
+                               drawOptions);
+        } else {
+          textDT->FillGlyphs(aFont, aBuffer, colorPattern, drawOptions);
         }
-        uint8_t* row = data;
-        for (int y = 0; y < size.height; ++y) {
-          uint8_t* px = row;
-          for (int x = 0; x < size.width; ++x) {
-            // If rendering dark-on-light text, we need to invert the final mask
-            // so that it is in the expected white text on transparent black
-            // format. The alpha will be initialized to the largest of the
-            // values.
-            px[0] = 255 - px[0];
-            px[1] = 255 - px[1];
-            px[2] = 255 - px[2];
-            px[3] = std::max(px[0], std::max(px[1], px[2]));
-            px += 4;
-          }
-          row += stride;
-        }
-        textDT->ReleaseBits(data);
       }
       RefPtr<SourceSurface> textSurface = textDT->Snapshot();
       if (textSurface) {

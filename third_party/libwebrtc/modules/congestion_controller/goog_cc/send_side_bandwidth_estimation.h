@@ -22,7 +22,7 @@
 
 #include "absl/types/optional.h"
 #include "api/field_trials_view.h"
-#include "api/network_state_predictor.h"
+#include "api/transport/bandwidth_usage.h"
 #include "api/transport/network_types.h"
 #include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
@@ -37,8 +37,8 @@ class RtcEventLog;
 
 class LinkCapacityTracker {
  public:
-  LinkCapacityTracker();
-  ~LinkCapacityTracker();
+  LinkCapacityTracker() = default;
+  ~LinkCapacityTracker() = default;
   // Call when a new delay-based estimate is available.
   void UpdateDelayBasedEstimate(Timestamp at_time,
                                 DataRate delay_based_bitrate);
@@ -50,7 +50,6 @@ class LinkCapacityTracker {
   DataRate estimate() const;
 
  private:
-  FieldTrialParameter<TimeDelta> tracking_rate;
   double capacity_estimate_bps_ = 0;
   Timestamp last_link_capacity_update_ = Timestamp::MinusInfinity();
   DataRate last_delay_based_estimate_ = DataRate::PlusInfinity();

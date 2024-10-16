@@ -1428,10 +1428,12 @@ static NativeObject* DefineConstructorAndPrototype(
     return nullptr;
   }
 
-  RootedId id(cx, AtomToId(atom));
-  RootedValue value(cx, ObjectValue(*ctor));
-  if (!DefineDataProperty(cx, obj, id, value, 0)) {
-    return nullptr;
+  if (clasp->specShouldDefineConstructor()) {
+    RootedId id(cx, AtomToId(atom));
+    RootedValue value(cx, ObjectValue(*ctor));
+    if (!DefineDataProperty(cx, obj, id, value, 0)) {
+      return nullptr;
+    }
   }
 
   if (ctorp) {
@@ -2255,6 +2257,14 @@ JS_PUBLIC_API bool js::ShouldIgnorePropertyDefinition(JSContext* cx,
   if (key == JSProto_Function && !JS::Prefs::experimental_uint8array_base64() &&
       (id == NameToId(cx->names().fromBase64) ||
        id == NameToId(cx->names().fromHex))) {
+    return true;
+  }
+
+  // It's gently surprising that this is JSProto_Function, but the trick
+  // to realize is that this is a -constructor function-, not a function
+  // on the prototype; and the proto of the constructor is JSProto_Function.
+  if (key == JSProto_Function && !JS::Prefs::experimental_regexp_escape() &&
+      id == NameToId(cx->names().escape)) {
     return true;
   }
 #endif

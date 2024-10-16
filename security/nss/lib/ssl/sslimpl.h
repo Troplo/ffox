@@ -183,7 +183,7 @@ typedef struct ssl3DHParamsStr ssl3DHParams;
 
 struct ssl3CertNodeStr {
     struct ssl3CertNodeStr *next;
-    CERTCertificate *cert;
+    SECItem *derCert;
 };
 
 typedef SECStatus (*sslHandshakeFunc)(sslSocket *ss);
@@ -2051,9 +2051,11 @@ SECStatus SSLExp_SetTls13GreaseEchSize(PRFileDesc *fd, PRUint8 size);
 SECStatus SSLExp_EnableTls13BackendEch(PRFileDesc *fd, PRBool enabled);
 SECStatus SSLExp_CallExtensionWriterOnEchInner(PRFileDesc *fd, PRBool enabled);
 
+SECStatus SSLExp_PeerCertificateChainDER(PRFileDesc *fd, SECItemArray **out);
+
 SEC_END_PROTOS
 
-#if defined(XP_UNIX) || defined(XP_OS2)
+#if defined(XP_UNIX)
 #define SSL_GETPID getpid
 #elif defined(WIN32)
 #define SSL_GETPID _getpid

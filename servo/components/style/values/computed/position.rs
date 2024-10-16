@@ -14,8 +14,8 @@ use crate::values::generics::position::PositionComponent as GenericPositionCompo
 use crate::values::generics::position::PositionOrAuto as GenericPositionOrAuto;
 use crate::values::generics::position::ZIndex as GenericZIndex;
 pub use crate::values::specified::position::{
-    AnchorName, AnchorScope, DashedIdentAndOrTryTactic, InsetArea, InsetAreaKeyword,
-    PositionAnchor, PositionTryOptions, PositionTryOrder, PositionVisibility,
+    AnchorName, AnchorScope, DashedIdentAndOrTryTactic, PositionArea, PositionAreaKeyword,
+    PositionAnchor, PositionTryFallbacks, PositionTryOrder, PositionVisibility,
 };
 pub use crate::values::specified::position::{GridAutoFlow, GridTemplateAreas, MasonryAutoFlow};
 use crate::Zero;

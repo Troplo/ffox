@@ -695,10 +695,11 @@ void WebRenderAPI::Readback(const TimeStamp& aStartTime, gfx::IntSize size,
     MOZ_COUNTED_DTOR_OVERRIDE(Readback)
 
     void Run(RenderThread& aRenderThread, WindowId aWindowId) override {
+      RendererStats stats = {0};
       aRenderThread.UpdateAndRender(aWindowId, VsyncId(), mStartTime,
                                     /* aRender */ true, Some(mSize),
                                     wr::SurfaceFormatToImageFormat(mFormat),
-                                    Some(mBuffer), mNeedsYFlip);
+                                    Some(mBuffer), &stats, mNeedsYFlip);
       layers::AutoCompleteTask complete(mTask);
     }
 
@@ -1548,6 +1549,20 @@ void DisplayListBuilder::PushP010Image(
     wr::ImageRendering aRendering, bool aPreferCompositorSurface,
     bool aSupportsExternalCompositing) {
   wr_dp_push_yuv_P010_image(
+      mWrState, aBounds, MergeClipLeaf(aClip), aIsBackfaceVisible,
+      &mCurrentSpaceAndClipChain, aImageChannel0, aImageChannel1, aColorDepth,
+      aColorSpace, aColorRange, aRendering, aPreferCompositorSurface,
+      aSupportsExternalCompositing);
+}
+
+void DisplayListBuilder::PushNV16Image(
+    const wr::LayoutRect& aBounds, const wr::LayoutRect& aClip,
+    bool aIsBackfaceVisible, wr::ImageKey aImageChannel0,
+    wr::ImageKey aImageChannel1, wr::WrColorDepth aColorDepth,
+    wr::WrYuvColorSpace aColorSpace, wr::WrColorRange aColorRange,
+    wr::ImageRendering aRendering, bool aPreferCompositorSurface,
+    bool aSupportsExternalCompositing) {
+  wr_dp_push_yuv_NV16_image(
       mWrState, aBounds, MergeClipLeaf(aClip), aIsBackfaceVisible,
       &mCurrentSpaceAndClipChain, aImageChannel0, aImageChannel1, aColorDepth,
       aColorSpace, aColorRange, aRendering, aPreferCompositorSurface,

@@ -22,8 +22,8 @@
 #include "api/task_queue/task_queue_base.h"
 #include "api/test/create_network_emulation_manager.h"
 #include "api/test/network_emulation_manager.h"
+#include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
-#include "call/simulated_network.h"
 #include "net/dcsctp/public/dcsctp_options.h"
 #include "net/dcsctp/public/dcsctp_socket.h"
 #include "net/dcsctp/public/types.h"
@@ -55,6 +55,7 @@ using ::testing::AllOf;
 using ::testing::Ge;
 using ::testing::Le;
 using ::testing::SizeIs;
+using ::webrtc::DataRate;
 using ::webrtc::TimeDelta;
 using ::webrtc::Timestamp;
 
@@ -327,7 +328,7 @@ class DcSctpSocketNetworkTest : public testing::Test {
   DcSctpSocketNetworkTest()
       : options_(MakeOptionsForTest()),
         emulation_(webrtc::CreateNetworkEmulationManager(
-            webrtc::TimeMode::kSimulated)) {}
+            {.time_mode = webrtc::TimeMode::kSimulated})) {}
 
   void MakeNetwork(const webrtc::BuiltInNetworkBehaviorConfig& config) {
     webrtc::EmulatedEndpoint* endpoint_a =
@@ -407,7 +408,7 @@ TEST_F(DcSctpSocketNetworkTest, CanSendLargeMessage) {
 TEST_F(DcSctpSocketNetworkTest, CanSendMessagesReliablyWithLowBandwidth) {
   webrtc::BuiltInNetworkBehaviorConfig pipe_config;
   pipe_config.queue_delay_ms = 30;
-  pipe_config.link_capacity_kbps = 1000;
+  pipe_config.link_capacity = DataRate::KilobitsPerSec(1000);
   MakeNetwork(pipe_config);
 
   SctpActor sender("A", emulated_socket_a_, options_);
@@ -436,7 +437,7 @@ TEST_F(DcSctpSocketNetworkTest,
        DCSCTP_NDEBUG_TEST(CanSendMessagesReliablyWithMediumBandwidth)) {
   webrtc::BuiltInNetworkBehaviorConfig pipe_config;
   pipe_config.queue_delay_ms = 30;
-  pipe_config.link_capacity_kbps = 18000;
+  pipe_config.link_capacity = DataRate::KilobitsPerSec(18000);
   MakeNetwork(pipe_config);
 
   SctpActor sender("A", emulated_socket_a_, options_);

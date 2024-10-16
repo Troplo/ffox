@@ -11,7 +11,7 @@
 use euclid::vec2;
 use api::{ColorF, ExtendMode, GradientStop, PremultipliedColorF};
 use api::units::*;
-use crate::pattern::{Pattern, PatternBuilder, PatternBuilderContext, PatternBuilderState, PatternKind, PatternShaderInput};
+use crate::pattern::{Pattern, PatternBuilder, PatternBuilderContext, PatternBuilderState, PatternKind, PatternShaderInput, PatternTextureInput};
 use crate::scene_building::IsVisible;
 use crate::frame_builder::FrameBuildingState;
 use crate::intern::{Internable, InternDebug, Handle as InternHandle};
@@ -104,6 +104,7 @@ pub struct ConicGradientTemplate {
 impl PatternBuilder for ConicGradientTemplate {
     fn build(
         &self,
+        _sub_rect: Option<DeviceRect>,
         _ctx: &PatternBuilderContext,
         state: &mut PatternBuilderState,
     ) -> Pattern {
@@ -119,6 +120,19 @@ impl PatternBuilder for ConicGradientTemplate {
             &self.stops,
             state.frame_gpu_data,
         )
+    }
+
+    fn get_base_color(
+        &self,
+        _ctx: &PatternBuilderContext,
+    ) -> ColorF {
+        ColorF::WHITE
+    }
+
+    fn use_shared_pattern(
+        &self,
+    ) -> bool {
+        true
     }
 }
 
@@ -454,6 +468,7 @@ pub fn conic_gradient_pattern(
             gradient_address.as_int(),
             stops_address.as_int(),
         ),
+        texture_input: PatternTextureInput::default(),
         base_color: ColorF::WHITE,
         is_opaque,
     }

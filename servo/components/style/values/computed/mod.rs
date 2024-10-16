@@ -36,17 +36,15 @@ use std::cmp;
 use std::f32;
 use std::ops::{Add, Sub};
 
-#[cfg(feature = "gecko")]
 pub use self::align::{
     AlignContent, AlignItems, JustifyContent, JustifyItems, SelfAlignment,
 };
-#[cfg(feature = "gecko")]
 pub use self::align::{AlignSelf, JustifySelf};
 pub use self::angle::Angle;
 pub use self::animation::{
-    AnimationComposition, AnimationDirection, AnimationFillMode, AnimationIterationCount,
-    AnimationName, AnimationPlayState, AnimationTimeline, ScrollAxis, ScrollTimelineName,
-    TransitionBehavior, TransitionProperty, ViewTimelineInset,
+    AnimationComposition, AnimationDirection, AnimationDuration, AnimationFillMode,
+    AnimationIterationCount, AnimationName, AnimationPlayState, AnimationTimeline, ScrollAxis,
+    TimelineName, TransitionBehavior, TransitionProperty, ViewTimelineInset, ViewTransitionName,
 };
 pub use self::background::{BackgroundRepeat, BackgroundSize};
 pub use self::basic_shape::FillRule;
@@ -92,13 +90,13 @@ pub use self::position::AnchorScope;
 pub use self::position::AspectRatio;
 pub use self::position::DashedIdentAndOrTryTactic;
 pub use self::position::PositionAnchor;
-pub use self::position::PositionTryOptions;
+pub use self::position::PositionTryFallbacks;
 pub use self::position::PositionTryOrder;
 pub use self::position::PositionVisibility;
 pub use self::position::{
     GridAutoFlow, GridTemplateAreas, MasonryAutoFlow, Position, PositionOrAuto, ZIndex,
 };
-pub use self::position::{InsetArea, InsetAreaKeyword};
+pub use self::position::{PositionArea, PositionAreaKeyword};
 pub use self::ratio::Ratio;
 pub use self::rect::NonNegativeLengthOrNumberRect;
 pub use self::resolution::Resolution;
@@ -122,7 +120,6 @@ pub use super::specified::ViewportVariant;
 pub use super::specified::{BorderStyle, TextDecorationLine};
 pub use app_units::Au;
 
-#[cfg(feature = "gecko")]
 pub mod align;
 pub mod angle;
 pub mod animation;
@@ -621,19 +618,12 @@ where
 
     #[inline]
     fn to_computed_value(&self, context: &Context) -> Self::ComputedValue {
-        self.iter()
-            .map(|item| item.to_computed_value(context))
-            .collect::<Vec<_>>()
-            .into_boxed_slice()
+        self.iter().map(|item| item.to_computed_value(context)).collect()
     }
 
     #[inline]
     fn from_computed_value(computed: &Self::ComputedValue) -> Self {
-        computed
-            .iter()
-            .map(T::from_computed_value)
-            .collect::<Vec<_>>()
-            .into_boxed_slice()
+        computed.iter().map(T::from_computed_value).collect()
     }
 }
 
@@ -805,7 +795,7 @@ impl ToAnimatedValue for NonNegativeNumber {
     type AnimatedValue = CSSFloat;
 
     #[inline]
-    fn to_animated_value(self) -> Self::AnimatedValue {
+    fn to_animated_value(self, _: &crate::values::animated::Context) -> Self::AnimatedValue {
         self.0
     }
 
@@ -848,7 +838,7 @@ impl ToAnimatedValue for ZeroToOneNumber {
     type AnimatedValue = CSSFloat;
 
     #[inline]
-    fn to_animated_value(self) -> Self::AnimatedValue {
+    fn to_animated_value(self, _: &crate::values::animated::Context) -> Self::AnimatedValue {
         self.0
     }
 
@@ -872,7 +862,7 @@ impl ToAnimatedValue for GreaterThanOrEqualToOneNumber {
     type AnimatedValue = CSSFloat;
 
     #[inline]
-    fn to_animated_value(self) -> Self::AnimatedValue {
+    fn to_animated_value(self, _: &crate::values::animated::Context) -> Self::AnimatedValue {
         self.0
     }
 
@@ -970,7 +960,7 @@ impl ToAnimatedValue for NonNegativeNumberOrPercentage {
     type AnimatedValue = NumberOrPercentage;
 
     #[inline]
-    fn to_animated_value(self) -> Self::AnimatedValue {
+    fn to_animated_value(self, _: &crate::values::animated::Context) -> Self::AnimatedValue {
         self.0
     }
 
@@ -993,7 +983,7 @@ impl ToAnimatedValue for PositiveInteger {
     type AnimatedValue = CSSInteger;
 
     #[inline]
-    fn to_animated_value(self) -> Self::AnimatedValue {
+    fn to_animated_value(self, _: &crate::values::animated::Context) -> Self::AnimatedValue {
         self.0
     }
 

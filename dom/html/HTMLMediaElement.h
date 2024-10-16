@@ -666,7 +666,6 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   double TotalVideoHDRPlayTime() const;
   double VisiblePlayTime() const;
   double InvisiblePlayTime() const;
-  double VideoDecodeSuspendedTime() const;
   double TotalAudioPlayTime() const;
   double AudiblePlayTime() const;
   double InaudiblePlayTime() const;
@@ -1117,7 +1116,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
    * When loading a new source on an existing media element, make sure to reset
    * everything that is accessible using the media element API.
    */
-  void ResetState();
+  virtual void ResetState();
 
   /**
    * The resource-fetch algorithm step of the load algorithm.
@@ -1414,6 +1413,10 @@ class HTMLMediaElement : public nsGenericHTMLElement,
   // This function is used to update the status of media control when the media
   // changes its status of being used in the Picture-in-Picture mode.
   void UpdateMediaControlAfterPictureInPictureModeChanged();
+
+  // Return true if the element has pending callbacks that should prevent the
+  // suspension of video playback.
+  virtual bool HasPendingCallbacks() const { return false; }
 
   // The current decoder. Load() has been called on this decoder.
   // At most one of mDecoder and mSrcStream can be non-null.
@@ -1806,7 +1809,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 
   already_AddRefed<PlayPromise> CreatePlayPromise(ErrorResult& aRv) const;
 
-  virtual void MaybeBeginCloningVisually(){};
+  virtual void MaybeBeginCloningVisually() {};
 
   uint32_t GetPreloadDefault() const;
   uint32_t GetPreloadDefaultAuto() const;
@@ -1937,5 +1940,9 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 bool HasDebuggerOrTabsPrivilege(JSContext* aCx, JSObject* aObj);
 
 }  // namespace mozilla::dom
+
+inline nsISupports* ToSupports(mozilla::dom::HTMLMediaElement* aElement) {
+  return static_cast<mozilla::dom::EventTarget*>(aElement);
+}
 
 #endif  // mozilla_dom_HTMLMediaElement_h

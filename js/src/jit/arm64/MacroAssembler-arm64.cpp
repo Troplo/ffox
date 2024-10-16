@@ -17,6 +17,7 @@
 #include "jit/BaselineFrame.h"
 #include "jit/JitRuntime.h"
 #include "jit/MacroAssembler.h"
+#include "jit/ProcessExecutableMemory.h"
 #include "util/Memory.h"
 #include "vm/BigIntType.h"
 #include "vm/JitActivation.h"  // js::jit::JitActivation
@@ -182,8 +183,9 @@ void MacroAssemblerCompat::loadPrivate(const Address& src, Register dest) {
   loadPtr(src, dest);
 }
 
-void MacroAssemblerCompat::handleFailureWithHandlerTail(Label* profilerExitTail,
-                                                        Label* bailoutTail) {
+void MacroAssemblerCompat::handleFailureWithHandlerTail(
+    Label* profilerExitTail, Label* bailoutTail,
+    uint32_t* returnValueCheckOffset) {
   // Fail rather than silently create wrong code.
   MOZ_RELEASE_ASSERT(GetStackPointer64().Is(PseudoStackPointer64));
 
@@ -202,13 +204,15 @@ void MacroAssemblerCompat::handleFailureWithHandlerTail(Label* profilerExitTail,
   asMasm().callWithABI<Fn, HandleException>(
       ABIType::General, CheckUnsafeCallWithABI::DontCheckHasExitFrame);
 
+  *returnValueCheckOffset = asMasm().currentOffset();
+
   Label entryFrame;
   Label catch_;
   Label finally;
   Label returnBaseline;
   Label returnIon;
   Label bailout;
-  Label wasm;
+  Label wasmInterpEntry;
   Label wasmCatch;
 
   // Check the `asMasm` calls above didn't mess with the StackPointer identity.
@@ -228,8 +232,9 @@ void MacroAssemblerCompat::handleFailureWithHandlerTail(Label* profilerExitTail,
                     Imm32(ExceptionResumeKind::ForcedReturnIon), &returnIon);
   asMasm().branch32(Assembler::Equal, r0, Imm32(ExceptionResumeKind::Bailout),
                     &bailout);
-  asMasm().branch32(Assembler::Equal, r0, Imm32(ExceptionResumeKind::Wasm),
-                    &wasm);
+  asMasm().branch32(Assembler::Equal, r0,
+                    Imm32(ExceptionResumeKind::WasmInterpEntry),
+                    &wasmInterpEntry);
   asMasm().branch32(Assembler::Equal, r0, Imm32(ExceptionResumeKind::WasmCatch),
                     &wasmCatch);
 
@@ -364,17 +369,16 @@ void MacroAssemblerCompat::handleFailureWithHandlerTail(Label* profilerExitTail,
   Mov(x0, 1);
   jump(bailoutTail);
 
-  // If we are throwing and the innermost frame was a wasm frame, reset SP and
-  // FP; SP is pointing to the unwound return address to the wasm entry, so
-  // we can just ret().
-  bind(&wasm);
+  // Reset SP and FP; SP is pointing to the unwound return address to the wasm
+  // interpreter entry, so we can just ret().
+  bind(&wasmInterpEntry);
   Ldr(x29, MemOperand(PseudoStackPointer64,
                       ResumeFromException::offsetOfFramePointer()));
   Ldr(PseudoStackPointer64,
       MemOperand(PseudoStackPointer64,
                  ResumeFromException::offsetOfStackPointer()));
   syncStackPtr();
-  Mov(x23, int64_t(wasm::FailInstanceReg));
+  Mov(x23, int64_t(wasm::InterpFailInstanceReg));
   ret();
 
   // Found a wasm catch handler, restore state and jump to it.
@@ -459,7 +463,7 @@ void MacroAssemblerCompat::wasmLoadImpl(const wasm::MemoryAccessDesc& access,
                                         Register memoryBase_, Register ptr_,
                                         AnyRegister outany, Register64 out64) {
   access.assertOffsetInGuardPages();
-  uint32_t offset = access.offset();
+  uint32_t offset = access.offset32();
 
   MOZ_ASSERT(memoryBase_ != ptr_);
 
@@ -613,7 +617,7 @@ void MacroAssemblerCompat::wasmStoreImpl(const wasm::MemoryAccessDesc& access,
                                          AnyRegister valany, Register64 val64,
                                          Register memoryBase_, Register ptr_) {
   access.assertOffsetInGuardPages();
-  uint32_t offset = access.offset();
+  uint32_t offset = access.offset32();
 
   ARMRegister memoryBase(memoryBase_, 64);
   ARMRegister ptr(ptr_, 64);
@@ -1411,6 +1415,21 @@ void MacroAssembler::patchFarJump(CodeOffset farJump, uint32_t targetOffset) {
   inst2->SetInstructionBits((uint32_t)(distance >> 32));
 }
 
+void MacroAssembler::patchFarJump(uint8_t* farJump, uint8_t* target) {
+  Instruction* inst1 = (Instruction*)(farJump + 4);
+  Instruction* inst2 = (Instruction*)(farJump + 8);
+
+  int64_t distance = (int64_t)target - (int64_t)farJump;
+  MOZ_RELEASE_ASSERT(mozilla::Abs(distance) <=
+                     (intptr_t)jit::MaxCodeBytesPerProcess);
+
+  MOZ_ASSERT(inst1->InstructionBits() == UINT32_MAX);
+  MOZ_ASSERT(inst2->InstructionBits() == UINT32_MAX);
+
+  inst1->SetInstructionBits((uint32_t)distance);
+  inst2->SetInstructionBits((uint32_t)(distance >> 32));
+}
+
 CodeOffset MacroAssembler::nopPatchableToCall() {
   AutoForbidPoolsAndNops afp(this,
                              /* max number of instructions in scope = */ 1);
@@ -1430,6 +1449,25 @@ void MacroAssembler::patchCallToNop(uint8_t* call) {
   Instruction* instr = reinterpret_cast<Instruction*>(inst);
   MOZ_ASSERT(instr->IsBL() || instr->IsNOP());
   nop(instr);
+}
+
+CodeOffset MacroAssembler::move32WithPatch(Register dest) {
+  AutoForbidPoolsAndNops afp(this,
+                             /* max number of instructions in scope = */ 3);
+  CodeOffset offs = CodeOffset(currentOffset());
+  movz(ARMRegister(dest, 64), 0, 0);
+  movk(ARMRegister(dest, 64), 0, 16);
+  return offs;
+}
+
+void MacroAssembler::patchMove32(CodeOffset offset, int32_t n) {
+  Instruction* i1 = getInstructionAt(BufferOffset(offset.offset()));
+  MOZ_ASSERT(i1->IsMovz());
+  i1->SetInstructionBits(i1->InstructionBits() | ImmMoveWide(n));
+
+  Instruction* i2 = getInstructionAt(BufferOffset(offset.offset() + 4));
+  MOZ_ASSERT(i2->IsMovk());
+  i2->SetInstructionBits(i2->InstructionBits() | ImmMoveWide(n >> 16));
 }
 
 void MacroAssembler::pushReturnAddress() {
@@ -2905,7 +2943,6 @@ void MacroAssembler::flexibleDivMod32(Register rhs, Register srcDest,
                                       Register remOutput, bool isUnsigned,
                                       const LiveRegisterSet&) {
   vixl::UseScratchRegisterScope temps(this);
-  ARMRegister scratch = temps.AcquireW();
   ARMRegister src = temps.AcquireW();
 
   // Preserve src for remainder computation
@@ -2916,9 +2953,10 @@ void MacroAssembler::flexibleDivMod32(Register rhs, Register srcDest,
   } else {
     Sdiv(ARMRegister(srcDest, 32), src, ARMRegister(rhs, 32));
   }
-  // Compute remainder
-  Mul(scratch, ARMRegister(srcDest, 32), ARMRegister(rhs, 32));
-  Sub(ARMRegister(remOutput, 32), src, scratch);
+
+  // Compute the remainder: remOutput = src - (srcDest * rhs).
+  Msub(/* result= */ ARMRegister(remOutput, 32), ARMRegister(srcDest, 32),
+       ARMRegister(rhs, 32), src);
 }
 
 CodeOffset MacroAssembler::moveNearAddressWithPatch(Register dest) {
@@ -3406,7 +3444,7 @@ void MacroAssembler::shiftIndex32AndAdd(Register indexTemp32, int shift,
 }
 
 #ifdef ENABLE_WASM_TAIL_CALLS
-void MacroAssembler::wasmMarkSlowCall() { Mov(x28, x28); }
+void MacroAssembler::wasmMarkCallAsSlow() { Mov(x28, x28); }
 
 const int32_t SlowCallMarker = 0xaa1c03fc;
 
@@ -3416,6 +3454,14 @@ void MacroAssembler::wasmCheckSlowCallsite(Register ra, Label* notSlow,
   Ldr(W(temp2), MemOperand(X(ra), 0));
   Cmp(W(temp2), Operand(SlowCallMarker));
   B(Assembler::NotEqual, notSlow);
+}
+
+CodeOffset MacroAssembler::wasmMarkedSlowCall(const wasm::CallSiteDesc& desc,
+                                              const Register reg) {
+  AutoForbidPoolsAndNops afp(this, !GetStackPointer64().Is(vixl::sp) ? 3 : 2);
+  CodeOffset offset = call(desc, reg);
+  wasmMarkCallAsSlow();
+  return offset;
 }
 #endif  // ENABLE_WASM_TAIL_CALLS
 

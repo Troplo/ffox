@@ -25,15 +25,13 @@ use std::ops::Add;
 use style_traits::values::specified::AllowedNumericType;
 use style_traits::{CssWriter, ParseError, SpecifiedValueInfo, StyleParseErrorKind, ToCss};
 
-#[cfg(feature = "gecko")]
 pub use self::align::{AlignContent, AlignItems, AlignSelf, ContentDistribution};
-#[cfg(feature = "gecko")]
 pub use self::align::{JustifyContent, JustifyItems, JustifySelf, SelfAlignment};
 pub use self::angle::{AllowUnitlessZeroAngle, Angle};
 pub use self::animation::{
-    AnimationComposition, AnimationDirection, AnimationFillMode, AnimationIterationCount,
-    AnimationName, AnimationPlayState, AnimationTimeline, ScrollAxis, ScrollTimelineName,
-    TransitionBehavior, TransitionProperty, ViewTimelineInset,
+    AnimationComposition, AnimationDirection, AnimationDuration, AnimationFillMode,
+    AnimationIterationCount, AnimationName, AnimationPlayState, AnimationTimeline, ScrollAxis,
+    TimelineName, TransitionBehavior, TransitionProperty, ViewTimelineInset, ViewTransitionName,
 };
 pub use self::background::{BackgroundRepeat, BackgroundSize};
 pub use self::basic_shape::FillRule;
@@ -84,11 +82,11 @@ pub use self::position::AnchorName;
 pub use self::position::AnchorScope;
 pub use self::position::AspectRatio;
 pub use self::position::PositionAnchor;
-pub use self::position::PositionTryOptions;
+pub use self::position::PositionTryFallbacks;
 pub use self::position::PositionTryOrder;
 pub use self::position::PositionVisibility;
 pub use self::position::{GridAutoFlow, GridTemplateAreas, Position, PositionOrAuto};
-pub use self::position::{InsetArea, InsetAreaKeyword};
+pub use self::position::{PositionArea, PositionAreaKeyword};
 pub use self::position::{MasonryAutoFlow, MasonryItemOrder, MasonryPlacement};
 pub use self::position::{PositionComponent, ZIndex};
 pub use self::ratio::Ratio;
@@ -114,7 +112,6 @@ pub use self::ui::CursorImage;
 pub use self::ui::{BoolInteger, Cursor, UserSelect};
 pub use super::generics::grid::GridTemplateComponent as GenericGridTemplateComponent;
 
-#[cfg(feature = "gecko")]
 pub mod align;
 pub mod angle;
 pub mod animation;

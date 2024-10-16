@@ -284,6 +284,9 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   mozilla::ipc::IPCResult RecvDynamicToolbarOffsetChanged(
       const mozilla::ScreenIntCoord& aOffset);
 
+  mozilla::ipc::IPCResult RecvKeyboardHeightChanged(
+      const mozilla::ScreenIntCoord& aHeight);
+
   mozilla::ipc::IPCResult RecvActivate(uint64_t aActionId);
 
   mozilla::ipc::IPCResult RecvDeactivate(uint64_t aActionId);
@@ -404,6 +407,15 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
 
   mozilla::ipc::IPCResult RecvNormalPriorityInsertText(
       const nsAString& aStringToInsert);
+
+  mozilla::ipc::IPCResult RecvReplaceText(const nsString& aReplaceSrcString,
+                                          const nsString& aStringToInsert,
+                                          uint32_t aOffset,
+                                          bool aPreventSetSelection);
+
+  mozilla::ipc::IPCResult RecvNormalPriorityReplaceText(
+      const nsString& aReplaceSrcString, const nsString& aStringToInsert,
+      uint32_t aOffset, bool aPreventSetSelection);
 
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvPasteTransferable(
@@ -543,6 +555,7 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   ScreenIntCoord GetDynamicToolbarMaxHeight() const {
     return mDynamicToolbarMaxHeight;
   };
+  mozilla::ScreenIntCoord GetKeyboardHeight() const { return mKeyboardHeight; }
 
   bool IPCOpen() const { return mIPCOpen; }
 
@@ -671,10 +684,11 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   mozilla::ipc::IPCResult RecvInvokeChildDragSession(
       const MaybeDiscarded<WindowContext>& aSourceWindowContext,
       const MaybeDiscarded<WindowContext>& aSourceTopWindowContext,
-      nsTArray<IPCTransferableData>&& aTransferables, const uint32_t& aAction);
+      nsIPrincipal* aPrincipal, nsTArray<IPCTransferableData>&& aTransferables,
+      const uint32_t& aAction);
 
   mozilla::ipc::IPCResult RecvUpdateDragSession(
-      nsTArray<IPCTransferableData>&& aTransferables,
+      nsIPrincipal* aPrincipal, nsTArray<IPCTransferableData>&& aTransferables,
       EventMessage aEventMessage);
 
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
@@ -774,6 +788,10 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
       const MaybeDiscarded<BrowsingContext>& aSourceBC,
       const embedding::PrintData& aPrintData);
 
+  already_AddRefed<DataTransfer> ConvertToDataTransfer(
+      nsIPrincipal* aPrincipal, nsTArray<IPCTransferableData>&& aTransferables,
+      EventMessage aMessage);
+
   class DelayedDeleteRunnable;
 
   RefPtr<BrowserChildMessageManager> mBrowserChildMessageManager;
@@ -804,6 +822,8 @@ class BrowserChild final : public nsMessageManagerScriptExecutor,
   // NOTE: This value is valuable only for the top level browser.
   LayoutDeviceIntPoint mChromeOffset;
   ScreenIntCoord mDynamicToolbarMaxHeight;
+  // The software keyboard height.
+  ScreenIntCoord mKeyboardHeight;
   TabId mUniqueId;
 
   bool mDidFakeShow : 1;

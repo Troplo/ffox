@@ -338,17 +338,13 @@ bool NeckoParent::DeallocPWebSocketEventListenerParent(
   return true;
 }
 
-already_AddRefed<PDataChannelParent> NeckoParent::AllocPDataChannelParent(
-    const uint32_t& channelId) {
+already_AddRefed<PDataChannelParent> NeckoParent::AllocPDataChannelParent() {
   RefPtr<DataChannelParent> p = new DataChannelParent();
   return p.forget();
 }
 
 mozilla::ipc::IPCResult NeckoParent::RecvPDataChannelConstructor(
-    PDataChannelParent* actor, const uint32_t& channelId) {
-  DataChannelParent* p = static_cast<DataChannelParent*>(actor);
-  DebugOnly<bool> rv = p->Init(channelId);
-  MOZ_ASSERT(rv);
+    PDataChannelParent* actor) {
   return IPC_OK();
 }
 
@@ -740,7 +736,7 @@ mozilla::ipc::IPCResult NeckoParent::RecvInitSocketProcessBridge(
       return;
     }
 
-    SocketProcessParent* parent = SocketProcessParent::GetSingleton();
+    RefPtr<SocketProcessParent> parent = SocketProcessParent::GetSingleton();
     if (NS_WARN_IF(!parent)) {
       resolver(std::move(invalidEndpoint));
       return;
@@ -749,7 +745,8 @@ mozilla::ipc::IPCResult NeckoParent::RecvInitSocketProcessBridge(
     Endpoint<PSocketProcessBridgeParent> parentEndpoint;
     Endpoint<PSocketProcessBridgeChild> childEndpoint;
     if (NS_WARN_IF(NS_FAILED(PSocketProcessBridge::CreateEndpoints(
-            parent->OtherPid(), self->Manager()->OtherPid(), &parentEndpoint,
+            parent->OtherEndpointProcInfo(),
+            self->Manager()->OtherEndpointProcInfo(), &parentEndpoint,
             &childEndpoint)))) {
       resolver(std::move(invalidEndpoint));
       return;

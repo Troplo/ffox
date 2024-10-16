@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -288,9 +289,11 @@ void vp9_update_buffer_level_svc_preencode(VP9_COMP *cpi) {
         svc->current_superframe > 0) {
       // TODO(marpan): This may need to be modified for temporal layers.
       const double framerate_pts = 10000000.0 / ts_delta;
-      lrc->bits_off_target += (int)round(lc->target_bandwidth / framerate_pts);
+      const double bits = round(lc->target_bandwidth / framerate_pts);
+      lrc->bits_off_target += (int)VPXMIN(bits, INT_MAX);
     } else {
-      lrc->bits_off_target += (int)round(lc->target_bandwidth / lc->framerate);
+      const double bits = round(lc->target_bandwidth / lc->framerate);
+      lrc->bits_off_target += (int)VPXMIN(bits, INT_MAX);
     }
     // Clip buffer level to maximum buffer size for the layer.
     lrc->bits_off_target =
@@ -2664,28 +2667,24 @@ void vp9_rc_update_framerate(VP9_COMP *cpi) {
 static void vbr_rate_correction(VP9_COMP *cpi, int *this_frame_target) {
   RATE_CONTROL *const rc = &cpi->rc;
   int64_t vbr_bits_off_target = rc->vbr_bits_off_target;
-  int max_delta;
-  int frame_window = VPXMIN(16, ((int)cpi->twopass.total_stats.count -
-                                 cpi->common.current_video_frame));
+  int64_t frame_target = *this_frame_target;
+  int frame_window = (int)VPXMIN(
+      16, cpi->twopass.total_stats.count - cpi->common.current_video_frame);
 
   // Calcluate the adjustment to rate for this frame.
   if (frame_window > 0) {
-    max_delta = (vbr_bits_off_target > 0)
-                    ? (int)(vbr_bits_off_target / frame_window)
-                    : (int)(-vbr_bits_off_target / frame_window);
+    int64_t max_delta = (vbr_bits_off_target > 0)
+                            ? (vbr_bits_off_target / frame_window)
+                            : (-vbr_bits_off_target / frame_window);
 
-    max_delta = VPXMIN(max_delta,
-                       ((*this_frame_target * VBR_PCT_ADJUSTMENT_LIMIT) / 100));
+    max_delta =
+        VPXMIN(max_delta, ((frame_target * VBR_PCT_ADJUSTMENT_LIMIT) / 100));
 
     // vbr_bits_off_target > 0 means we have extra bits to spend
     if (vbr_bits_off_target > 0) {
-      *this_frame_target += (vbr_bits_off_target > max_delta)
-                                ? max_delta
-                                : (int)vbr_bits_off_target;
+      frame_target += VPXMIN(vbr_bits_off_target, max_delta);
     } else {
-      *this_frame_target -= (vbr_bits_off_target < -max_delta)
-                                ? max_delta
-                                : (int)-vbr_bits_off_target;
+      frame_target -= VPXMIN(-vbr_bits_off_target, max_delta);
     }
   }
 
@@ -2693,15 +2692,18 @@ static void vbr_rate_correction(VP9_COMP *cpi, int *this_frame_target) {
   // Don't do it for kf,arf,gf or overlay frames.
   if (!frame_is_kf_gf_arf(cpi) && !rc->is_src_frame_alt_ref &&
       rc->vbr_bits_off_target_fast) {
-    int one_frame_bits = VPXMAX(rc->avg_frame_bandwidth, *this_frame_target);
-    int fast_extra_bits;
-    fast_extra_bits = (int)VPXMIN(rc->vbr_bits_off_target_fast, one_frame_bits);
-    fast_extra_bits = (int)VPXMIN(
-        fast_extra_bits,
-        VPXMAX(one_frame_bits / 8, rc->vbr_bits_off_target_fast / 8));
-    *this_frame_target += (int)fast_extra_bits;
+    int64_t one_frame_bits = VPXMAX(rc->avg_frame_bandwidth, frame_target);
+    int64_t fast_extra_bits =
+        VPXMIN(rc->vbr_bits_off_target_fast, one_frame_bits);
+    fast_extra_bits =
+        VPXMIN(fast_extra_bits,
+               VPXMAX(one_frame_bits / 8, rc->vbr_bits_off_target_fast / 8));
+    frame_target += fast_extra_bits;
     rc->vbr_bits_off_target_fast -= fast_extra_bits;
   }
+
+  // Clamp the target for the frame to the maximum allowed for one frame.
+  *this_frame_target = (int)VPXMIN(frame_target, INT_MAX);
 }
 
 void vp9_set_target_rate(VP9_COMP *cpi) {

@@ -326,9 +326,8 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     return;
   }
 
-  const bool pointerEventsNone =
-      Style()->PointerEvents() == StylePointerEvents::None;
-  if (aBuilder->IsForEventDelivery() && pointerEventsNone) {
+  const bool forEvents = aBuilder->IsForEventDelivery();
+  if (forEvents && Style()->PointerEvents() == StylePointerEvents::None) {
     // If we are pointer-events:none then we don't need to HitTest background or
     // anything else.
     return;
@@ -349,6 +348,10 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   }
   decorations.MoveTo(aLists);
 
+  if (forEvents && !ContentReactsToPointerEvents()) {
+    return;
+  }
+
   if (HidesContent()) {
     return;
   }
@@ -356,8 +359,7 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   // If we're passing pointer events to children then we have to descend into
   // subdocuments no matter what, to determine which parts are transparent for
   // hit-testing or event regions.
-  bool needToDescend = aBuilder->GetDescendIntoSubdocuments();
-  if (!mInnerView || !needToDescend) {
+  if (!mInnerView || !aBuilder->GetDescendIntoSubdocuments()) {
     return;
   }
 
@@ -417,7 +419,7 @@ void nsSubDocumentFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       ignoreViewportScrolling = presShell->IgnoringViewportScrolling();
     }
 
-    aBuilder->EnterPresShell(subdocRootFrame, pointerEventsNone);
+    aBuilder->EnterPresShell(subdocRootFrame, !ContentReactsToPointerEvents());
     aBuilder->IncrementPresShellPaintCount(presShell);
   } else {
     visible = aBuilder->GetVisibleRect();
@@ -553,20 +555,16 @@ nsresult nsSubDocumentFrame::GetFrameName(nsAString& aResult) const {
 }
 #endif
 
-/* virtual */
-nscoord nsSubDocumentFrame::GetMinISize(gfxContext* aRenderingContext) {
-  return GetIntrinsicISize();
-}
-
-/* virtual */
-nscoord nsSubDocumentFrame::GetPrefISize(gfxContext* aRenderingContext) {
-  // If the subdocument is an SVG document, then in theory we want to return
-  // the same thing that SVGOuterSVGFrame::GetPrefISize does.  That method
-  // has some special handling of percentage values to avoid unhelpful zero
-  // sizing in the presence of orthogonal writing modes.  We don't bother
+nscoord nsSubDocumentFrame::IntrinsicISize(gfxContext* aContext,
+                                           IntrinsicISizeType aType) {
+  // Note: when computing max-content inline size (i.e. when aType is
+  // IntrinsicISizeType::PrefISize), if the subdocument is an SVG document, then
+  // in theory we want to return the same value that SVGOuterSVGFrame does. That
+  // method has some special handling of percentage values to avoid unhelpful
+  // zero sizing in the presence of orthogonal writing modes. We don't bother
   // with that for SVG documents in <embed> and <object>, since that special
   // handling doesn't look up across document boundaries anyway.
-  return GetIntrinsicISize();
+  return GetIntrinsicSize().ISize(GetWritingMode()).valueOr(0);
 }
 
 /* virtual */
@@ -625,23 +623,6 @@ AspectRatio nsSubDocumentFrame::GetIntrinsicRatio() const {
   // intrinsic ratio. For example `<iframe style="width: 100px">` should not
   // shrink in the vertical axis to preserve the 300x150 ratio.
   return nsAtomicContainerFrame::GetIntrinsicRatio();
-}
-
-/* virtual */
-LogicalSize nsSubDocumentFrame::ComputeAutoSize(
-    gfxContext* aRenderingContext, WritingMode aWM, const LogicalSize& aCBSize,
-    nscoord aAvailableISize, const LogicalSize& aMargin,
-    const LogicalSize& aBorderPadding, const StyleSizeOverrides& aSizeOverrides,
-    ComputeSizeFlags aFlags) {
-  if (!IsInline()) {
-    return nsIFrame::ComputeAutoSize(aRenderingContext, aWM, aCBSize,
-                                     aAvailableISize, aMargin, aBorderPadding,
-                                     aSizeOverrides, aFlags);
-  }
-
-  const WritingMode wm = GetWritingMode();
-  LogicalSize result(wm, GetIntrinsicISize(), GetIntrinsicBSize());
-  return result.ConvertTo(aWM, wm);
 }
 
 /* virtual */
@@ -1234,6 +1215,21 @@ void nsSubDocumentFrame::SubdocumentIntrinsicSizeOrRatioChanged() {
   }
 }
 
+bool nsSubDocumentFrame::ContentReactsToPointerEvents() const {
+  if (Style()->PointerEvents() == StylePointerEvents::None) {
+    return false;
+  }
+  if (mIsInObjectOrEmbed) {
+    if (nsCOMPtr<nsIObjectLoadingContent> iolc = do_QueryInterface(mContent)) {
+      const auto* olc = static_cast<nsObjectLoadingContent*>(iolc.get());
+      if (olc->IsSyntheticImageDocument()) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 // Return true iff |aManager| is a "temporary layer manager".  They're
 // used for small software rendering tasks, like drawWindow.  That's
 // currently implemented by a BasicLayerManager without a backing
@@ -1242,9 +1238,8 @@ nsDisplayRemote::nsDisplayRemote(nsDisplayListBuilder* aBuilder,
                                  nsSubDocumentFrame* aFrame)
     : nsPaintedDisplayItem(aBuilder, aFrame),
       mEventRegionsOverride(EventRegionsOverride::NoOverride) {
-  const bool frameIsPointerEventsNone =
-      aFrame->Style()->PointerEvents() == StylePointerEvents::None;
-  if (aBuilder->IsInsidePointerEventsNoneDoc() || frameIsPointerEventsNone) {
+  if (aBuilder->IsInsidePointerEventsNoneDoc() ||
+      !aFrame->ContentReactsToPointerEvents()) {
     mEventRegionsOverride |= EventRegionsOverride::ForceEmptyHitRegion;
   }
   if (nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(

@@ -2,6 +2,7 @@ from .. import (
     any_bool,
     any_dict,
     any_int,
+    any_number,
     any_int_or_null,
     any_list,
     any_string,
@@ -10,6 +11,10 @@ from .. import (
     recursive_compare,
 )
 
+from webdriver.bidi.modules.network import (
+    NetworkStringValue,
+    SetCookieHeader,
+)
 
 def assert_bytes_value(bytes_value):
     assert bytes_value["type"] in ["string", "base64"]
@@ -27,19 +32,19 @@ def assert_headers(event_headers, expected_headers):
 def assert_timing_info(timing_info):
     recursive_compare(
         {
-            "timeOrigin": any_int,
-            "requestTime": any_int,
-            "redirectStart": any_int,
-            "redirectEnd": any_int,
-            "fetchStart": any_int,
-            "dnsStart": any_int,
-            "dnsEnd": any_int,
-            "connectStart": any_int,
-            "connectEnd": any_int,
-            "tlsStart": any_int,
-            "requestStart": any_int,
-            "responseStart": any_int,
-            "responseEnd": any_int,
+            "timeOrigin": any_number,
+            "requestTime": any_number,
+            "redirectStart": any_number,
+            "redirectEnd": any_number,
+            "fetchStart": any_number,
+            "dnsStart": any_number,
+            "dnsEnd": any_number,
+            "connectStart": any_number,
+            "connectEnd": any_number,
+            "tlsStart": any_number,
+            "requestStart": any_number,
+            "responseStart": any_number,
+            "responseEnd": any_number,
         },
         timing_info,
     )
@@ -347,3 +352,231 @@ PHASE_TO_EVENT_MAP = {
     "beforeRequestSent": [BEFORE_REQUEST_SENT_EVENT, assert_before_request_sent_event],
     "responseStarted": [RESPONSE_STARTED_EVENT, assert_response_event],
 }
+
+# Common parameters for Set-Cookie headers tests used for network interception
+# commands.
+#
+# Note that the domain needs to be handled separately because the actual
+# value will be retrieved via the domain_value fixture.
+# with_domain can either be :
+#  - "default": domain will be set to domain_value() and the page will be
+#    loaded on domain_value().
+#  - "alt": domain will be set to domain_value(alt) and the page will be
+#    loaded on domain_value(alt).
+#  - None (or any other value): domain will not be set and the page will be
+#    loaded on domain_value() (which is the default).
+SET_COOKIE_TEST_PARAMETERS = [
+    (
+        SetCookieHeader(
+            name="foo",
+            path="/",
+            value=NetworkStringValue("bar"),
+        ),
+        None,
+        {
+            "httpOnly": False,
+            "name": "foo",
+            "path": "/",
+            "sameSite": "none",
+            "secure": False,
+            "size": 6,
+            "value": {"type": "string", "value": "bar"},
+        },
+    ),
+    (
+        SetCookieHeader(
+            name="foo",
+            path="/",
+            value=NetworkStringValue("bar"),
+        ),
+        "default domain",
+        {
+            "httpOnly": False,
+            "name": "foo",
+            "path": "/",
+            "sameSite": "none",
+            "secure": False,
+            "size": 6,
+            "value": {"type": "string", "value": "bar"},
+        },
+    ),
+    (
+        SetCookieHeader(
+            name="foo",
+            path="/",
+            value=NetworkStringValue("bar"),
+        ),
+        "alt domain",
+        {
+            "httpOnly": False,
+            "name": "foo",
+            "path": "/",
+            "sameSite": "none",
+            "secure": False,
+            "size": 6,
+            "value": {"type": "string", "value": "bar"},
+        },
+    ),
+    (
+        SetCookieHeader(
+            name="foo",
+            path="/some/other/path",
+            value=NetworkStringValue("bar"),
+        ),
+        None,
+        {
+            "httpOnly": False,
+            "name": "foo",
+            "path": "/some/other/path",
+            "sameSite": "none",
+            "secure": False,
+            "size": 6,
+            "value": {"type": "string", "value": "bar"},
+        },
+    ),
+    (
+        SetCookieHeader(
+            http_only=True,
+            name="foo",
+            path="/",
+            value=NetworkStringValue("bar"),
+        ),
+        None,
+        {
+            "httpOnly": True,
+            "name": "foo",
+            "path": "/",
+            "sameSite": "none",
+            "secure": False,
+            "size": 6,
+            "value": {"type": "string", "value": "bar"},
+        },
+    ),
+    (
+        SetCookieHeader(
+            name="foo",
+            path="/",
+            secure=True,
+            value=NetworkStringValue("bar"),
+        ),
+        None,
+        {
+            "httpOnly": False,
+            "name": "foo",
+            "path": "/",
+            "sameSite": "none",
+            "secure": True,
+            "size": 6,
+            "value": {"type": "string", "value": "bar"},
+        },
+    ),
+    (
+        SetCookieHeader(
+            expiry="Tue, 14 Feb 2040 17:41:14 GMT",
+            name="foo",
+            path="/",
+            value=NetworkStringValue("bar"),
+        ),
+        None,
+        {
+            # Corresponds to the timestamp in seconds for "Tue, 14 Feb 2040 17:41:14 GMT"
+            "expiry": 2212854074,
+            "httpOnly": False,
+            "name": "foo",
+            "path": "/",
+            "sameSite": "none",
+            "secure": False,
+            "size": 6,
+            "value": {"type": "string", "value": "bar"},
+        },
+    ),
+    (
+        SetCookieHeader(
+            max_age=3600,
+            name="foo",
+            path="/",
+            value=NetworkStringValue("bar"),
+        ),
+        None,
+        {
+            "expiry": any_int,
+            "httpOnly": False,
+            "name": "foo",
+            "path": "/",
+            "sameSite": "none",
+            "secure": False,
+            "size": 6,
+            "value": {"type": "string", "value": "bar"},
+        },
+    ),
+    (
+        SetCookieHeader(
+            same_site="none",
+            # SameSite None requires Secure to set the cookie correctly.
+            secure=True,
+            name="foo",
+            path="/",
+            value=NetworkStringValue("bar"),
+        ),
+        None,
+        {
+            "httpOnly": False,
+            "name": "foo",
+            "path": "/",
+            "sameSite": "none",
+            "secure": True,
+            "size": 6,
+            "value": {"type": "string", "value": "bar"},
+        },
+    ),
+    (
+        SetCookieHeader(
+            same_site="lax",
+            name="foo",
+            path="/",
+            value=NetworkStringValue("bar"),
+        ),
+        None,
+        {
+            "httpOnly": False,
+            "name": "foo",
+            "path": "/",
+            "sameSite": "lax",
+            "secure": False,
+            "size": 6,
+            "value": {"type": "string", "value": "bar"},
+        },
+    ),
+    (
+        SetCookieHeader(
+            same_site="strict",
+            name="foo",
+            path="/",
+            value=NetworkStringValue("bar"),
+        ),
+        None,
+        {
+            "httpOnly": False,
+            "name": "foo",
+            "path": "/",
+            "sameSite": "strict",
+            "secure": False,
+            "size": 6,
+            "value": {"type": "string", "value": "bar"},
+        },
+    ),
+]
+
+SET_COOKIE_TEST_IDS=[
+    "no domain",
+    "default domain",
+    "alt domain",
+    "custom path",
+    "http only",
+    "secure",
+    "expiry",
+    "max age",
+    "same site none",
+    "same site lax",
+    "same site strict",
+]

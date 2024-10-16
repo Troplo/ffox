@@ -19,7 +19,7 @@ ChromeUtils.defineESModuleGetters(this, {
  * @param {any}      message
  * @param {object?}  [options]
  * @param {Function} [callback]
- * @returns {{extensionId: string?, message: any, callback: Function?}}
+ * @returns {{extensionId: string|null, message: any, callback: Function|null}}
  */
 /* eslint-enable jsdoc/check-param-names */
 function parseBonkersArgs(...args) {
@@ -92,7 +92,7 @@ this.runtime = class extends ExtensionAPI {
         id: extension.id,
 
         getURL(url) {
-          return extension.baseURI.resolve(url);
+          return extension.getURL(url);
         },
 
         getFrameId(target) {

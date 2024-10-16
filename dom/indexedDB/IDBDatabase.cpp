@@ -22,7 +22,6 @@
 #include "mozilla/Services.h"
 #include "mozilla/dom/IDBTransactionBinding.h"
 #include "mozilla/storage.h"
-#include "mozilla/Telemetry.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/DOMStringListBinding.h"
 #include "mozilla/dom/Exceptions.h"
@@ -548,14 +547,6 @@ RefPtr<IDBTransaction> IDBDatabase::Transaction(
           return objectStore.metadata().name() == name;
         });
     if (foundIt == end) {
-      Telemetry::ScalarAdd(
-          storeNames.IsEmpty()
-              ? Telemetry::ScalarID::
-                    IDB_FAILURE_UNKNOWN_OBJECTSTORE_EMPTY_DATABASE
-              : Telemetry::ScalarID::
-                    IDB_FAILURE_UNKNOWN_OBJECTSTORE_NON_EMPTY_DATABASE,
-          1);
-
       // Not using nsPrintfCString in case "name" has embedded nulls.
       aRv.ThrowNotFoundError("'"_ns + NS_ConvertUTF16toUTF8(name) +
                              "' is not a known object store name"_ns);
@@ -732,12 +723,7 @@ void IDBDatabase::AbortTransactions(bool aShouldWarn) {
 
   for (IDBTransaction* transaction : transactionsThatNeedWarning) {
     MOZ_ASSERT(transaction);
-
-    nsString filename;
-    uint32_t lineNo, column;
-    transaction->GetCallerLocation(filename, &lineNo, &column);
-
-    LogWarning(kWarningMessage, filename, lineNo, column);
+    LogWarning(kWarningMessage, transaction->GetCallerLocation());
   }
 }
 
@@ -879,15 +865,13 @@ void IDBDatabase::NoteInactiveTransactionDelayed() {
 }
 
 void IDBDatabase::LogWarning(const char* aMessageName,
-                             const nsAString& aFilename, uint32_t aLineNumber,
-                             uint32_t aColumnNumber) {
+                             const JSCallingLocation& aLoc) {
   AssertIsOnOwningThread();
   MOZ_ASSERT(aMessageName);
 
   ScriptErrorHelper::DumpLocalizedMessage(
-      nsDependentCString(aMessageName), aFilename, aLineNumber, aColumnNumber,
-      nsIScriptError::warningFlag, mFactory->IsChrome(),
-      mFactory->InnerWindowID());
+      nsDependentCString(aMessageName), aLoc, nsIScriptError::warningFlag,
+      mFactory->IsChrome(), mFactory->InnerWindowID());
 }
 
 NS_IMPL_ADDREF_INHERITED(IDBDatabase, DOMEventTargetHelper)

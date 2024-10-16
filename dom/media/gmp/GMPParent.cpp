@@ -40,6 +40,7 @@
 #ifdef XP_WIN
 #  include "mozilla/FileUtilsWin.h"
 #  include "mozilla/WinDllServices.h"
+#  include "PDMFactory.h"
 #  include "WMFDecoderModule.h"
 #endif
 #if defined(MOZ_WIDGET_ANDROID)
@@ -741,7 +742,8 @@ bool GMPCapability::Supports(const nsTArray<GMPCapability>& aCapabilities,
         // certain services packs.
         if (tag.EqualsLiteral(kClearKeyKeySystemName)) {
           if (capabilities.mAPIName.EqualsLiteral(GMP_API_VIDEO_DECODER)) {
-            if (!WMFDecoderModule::CanCreateMFTDecoder(WMFStreamType::H264)) {
+            auto pdmFactory = MakeRefPtr<PDMFactory>();
+            if (pdmFactory->SupportsMimeType("video/avc"_ns).isEmpty()) {
               continue;
             }
           }
@@ -1274,7 +1276,8 @@ bool GMPParent::OpenPGMPContent() {
   Endpoint<PGMPContentParent> parent;
   Endpoint<PGMPContentChild> child;
   if (NS_WARN_IF(NS_FAILED(PGMPContent::CreateEndpoints(
-          base::GetCurrentProcId(), OtherPid(), &parent, &child)))) {
+          mozilla::ipc::EndpointProcInfo::Current(), OtherEndpointProcInfo(),
+          &parent, &child)))) {
     return false;
   }
 

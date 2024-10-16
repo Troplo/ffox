@@ -69,7 +69,6 @@ impl ProgrammableStageDescriptor {
             entry_point: cow_label(&self.entry_point),
             constants: Cow::Owned(constants),
             zero_initialize_workgroup_memory: true,
-            vertex_pulling_transform: true,
         }
     }
 }
@@ -290,6 +289,7 @@ pub struct RenderBundleEncoderDescriptor<'a> {
 struct IdentityHub {
     adapters: IdentityManager<markers::Adapter>,
     devices: IdentityManager<markers::Device>,
+    queues: IdentityManager<markers::Queue>,
     buffers: IdentityManager<markers::Buffer>,
     command_buffers: IdentityManager<markers::CommandBuffer>,
     render_bundles: IdentityManager<markers::RenderBundle>,
@@ -309,6 +309,7 @@ impl Default for IdentityHub {
         IdentityHub {
             adapters: IdentityManager::new(),
             devices: IdentityManager::new(),
+            queues: IdentityManager::new(),
             buffers: IdentityManager::new(),
             command_buffers: IdentityManager::new(),
             render_bundles: IdentityManager::new(),
@@ -331,7 +332,7 @@ impl ImplicitLayout<'_> {
             pipeline: identities.pipeline_layouts.process(backend),
             bind_groups: Cow::Owned(
                 (0..8) // hal::MAX_BIND_GROUPS
-                    .map(|_| Some(identities.bind_group_layouts.process(backend)))
+                    .map(|_| identities.bind_group_layouts.process(backend))
                     .collect(),
             ),
         }
@@ -509,27 +510,45 @@ pub extern "C" fn wgpu_client_adapter_extract_info(
     };
 }
 
-#[no_mangle]
-pub extern "C" fn wgpu_client_serialize_device_descriptor(
-    desc: &wgt::DeviceDescriptor<Option<&nsACString>>,
-    bb: &mut ByteBuf,
-) {
-    let label = wgpu_string(desc.label);
-    *bb = make_byte_buf(&desc.map_label(|_| label));
+#[repr(C)]
+pub struct FfiDeviceDescriptor<'a> {
+    pub label: Option<&'a nsACString>,
+    pub required_features: wgt::Features,
+    pub required_limits: wgt::Limits,
 }
 
 #[no_mangle]
-pub extern "C" fn wgpu_client_make_device_id(
+pub extern "C" fn wgpu_client_serialize_device_descriptor(
+    desc: &FfiDeviceDescriptor,
+    bb: &mut ByteBuf,
+) {
+    let label = wgpu_string(desc.label);
+    let desc = wgt::DeviceDescriptor {
+        label,
+        required_features: desc.required_features.clone(),
+        required_limits: desc.required_limits.clone(),
+        memory_hints: wgt::MemoryHints::MemoryUsage,
+    };
+    *bb = make_byte_buf(&desc);
+}
+
+#[repr(C)]
+pub struct DeviceQueueId {
+    device: id::DeviceId,
+    queue: id::QueueId,
+}
+
+#[no_mangle]
+pub extern "C" fn wgpu_client_make_device_queue_id(
     client: &Client,
     adapter_id: id::AdapterId,
-) -> id::DeviceId {
+) -> DeviceQueueId {
     let backend = adapter_id.backend();
-    client
-        .identities
-        .lock()
-        .select(backend)
-        .devices
-        .process(backend)
+    let mut identities_guard = client.identities.lock();
+    let hub = identities_guard.select(backend);
+    let device = hub.devices.process(backend);
+    let queue = hub.queues.process(backend);
+    DeviceQueueId { device, queue }
 }
 
 #[no_mangle]
@@ -831,11 +850,11 @@ pub extern "C" fn wgpu_client_free_render_bundle_id(client: &Client, id: id::Ren
 #[repr(C)]
 pub struct ComputePassDescriptor<'a> {
     pub label: Option<&'a nsACString>,
-    pub timestamp_writes: Option<&'a ComputePassTimestampWrites<'a>>,
+    pub timestamp_writes: Option<&'a PassTimestampWrites<'a>>,
 }
 
 #[repr(C)]
-pub struct ComputePassTimestampWrites<'a> {
+pub struct PassTimestampWrites<'a> {
     pub query_set: id::QuerySetId,
     pub beginning_of_pass_write_index: Option<&'a u32>,
     pub end_of_pass_write_index: Option<&'a u32>,
@@ -853,14 +872,14 @@ pub unsafe extern "C" fn wgpu_command_encoder_begin_compute_pass(
     let label = wgpu_string(label);
 
     let timestamp_writes = timestamp_writes.map(|tsw| {
-        let &ComputePassTimestampWrites {
+        let &PassTimestampWrites {
             query_set,
             beginning_of_pass_write_index,
             end_of_pass_write_index,
         } = tsw;
         let beginning_of_pass_write_index = beginning_of_pass_write_index.cloned();
         let end_of_pass_write_index = end_of_pass_write_index.cloned();
-        wgc::command::ComputePassTimestampWrites {
+        wgc::command::PassTimestampWrites {
             query_set,
             beginning_of_pass_write_index,
             end_of_pass_write_index,
@@ -895,15 +914,8 @@ pub struct RenderPassDescriptor<'a> {
     pub color_attachments: *const wgc::command::RenderPassColorAttachment,
     pub color_attachments_length: usize,
     pub depth_stencil_attachment: *const wgc::command::RenderPassDepthStencilAttachment,
-    pub timestamp_writes: Option<&'a RenderPassTimestampWrites<'a>>,
+    pub timestamp_writes: Option<&'a PassTimestampWrites<'a>>,
     pub occlusion_query_set: Option<wgc::id::QuerySetId>,
-}
-
-#[repr(C)]
-pub struct RenderPassTimestampWrites<'a> {
-    pub query_set: wgc::id::QuerySetId,
-    pub beginning_of_pass_write_index: Option<&'a u32>,
-    pub end_of_pass_write_index: Option<&'a u32>,
 }
 
 #[no_mangle]
@@ -922,14 +934,14 @@ pub unsafe extern "C" fn wgpu_command_encoder_begin_render_pass(
     let label = wgpu_string(label);
 
     let timestamp_writes = timestamp_writes.map(|tsw| {
-        let &RenderPassTimestampWrites {
+        let &PassTimestampWrites {
             query_set,
             beginning_of_pass_write_index,
             end_of_pass_write_index,
         } = tsw;
         let beginning_of_pass_write_index = beginning_of_pass_write_index.cloned();
         let end_of_pass_write_index = end_of_pass_write_index.cloned();
-        wgc::command::RenderPassTimestampWrites {
+        wgc::command::PassTimestampWrites {
             query_set,
             beginning_of_pass_write_index,
             end_of_pass_write_index,
@@ -1270,7 +1282,7 @@ pub unsafe extern "C" fn wgpu_client_create_compute_pipeline(
             let implicit = ImplicitLayout::new(identities.select(backend), backend);
             ptr::write(implicit_pipeline_layout_id, Some(implicit.pipeline));
             for (i, bgl_id) in implicit.bind_groups.iter().enumerate() {
-                *implicit_bind_group_layout_ids.add(i) = *bgl_id;
+                *implicit_bind_group_layout_ids.add(i) = Some(*bgl_id);
             }
             Some(implicit)
         }
@@ -1325,7 +1337,7 @@ pub unsafe extern "C" fn wgpu_client_create_render_pipeline(
             let implicit = ImplicitLayout::new(identities.select(backend), backend);
             ptr::write(implicit_pipeline_layout_id, Some(implicit.pipeline));
             for (i, bgl_id) in implicit.bind_groups.iter().enumerate() {
-                *implicit_bind_group_layout_ids.add(i) = *bgl_id;
+                *implicit_bind_group_layout_ids.add(i) = Some(*bgl_id);
             }
             Some(implicit)
         }

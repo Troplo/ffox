@@ -78,9 +78,6 @@ const size_t kDefaultPayloadSize = 1440;
 
 const int64_t kParameterUpdateIntervalMs = 1000;
 
-// Animation is capped to 720p.
-constexpr int kMaxAnimationPixels = 1280 * 720;
-
 constexpr int kDefaultMinScreenSharebps = 1200000;
 
 int GetNumSpatialLayers(const VideoCodec& codec) {
@@ -542,22 +539,6 @@ absl::optional<int> ParseEncoderThreadLimit(const FieldTrialsView& trials) {
   return encoder_thread_limit.GetOptional();
 }
 
-absl::optional<VideoSourceRestrictions> MergeRestrictions(
-    const std::vector<absl::optional<VideoSourceRestrictions>>& list) {
-  absl::optional<VideoSourceRestrictions> return_value;
-  for (const auto& res : list) {
-    if (!res) {
-      continue;
-    }
-    if (!return_value) {
-      return_value = *res;
-      continue;
-    }
-    return_value->UpdateMin(*res);
-  }
-  return return_value;
-}
-
 }  //  namespace
 
 VideoStreamEncoder::EncoderRateSettings::EncoderRateSettings()
@@ -660,8 +641,7 @@ VideoStreamEncoder::VideoStreamEncoder(
       number_of_cores_(number_of_cores),
       settings_(settings),
       allocation_cb_type_(allocation_cb_type),
-      rate_control_settings_(
-          RateControlSettings::ParseFromKeyValueConfig(&env_.field_trials())),
+      rate_control_settings_(env_.field_trials()),
       encoder_selector_from_constructor_(encoder_selector),
       encoder_selector_from_factory_(
           encoder_selector_from_constructor_
@@ -676,8 +656,6 @@ VideoStreamEncoder::VideoStreamEncoder(
                              env_.clock().TimeInMilliseconds()),
       last_frame_log_ms_(env_.clock().TimeInMilliseconds()),
       next_frame_types_(1, VideoFrameType::kVideoFrameDelta),
-      automatic_animation_detection_experiment_(
-          ParseAutomatincAnimationDetectionFieldTrial()),
       input_state_provider_(encoder_stats_observer),
       video_stream_adapter_(
           std::make_unique<VideoStreamAdapter>(&input_state_provider_,
@@ -1018,19 +996,19 @@ void VideoStreamEncoder::ReconfigureEncoder() {
   if (encoder_config_.video_stream_factory) {
     // Note: only tests set their own EncoderStreamFactory...
     streams = encoder_config_.video_stream_factory->CreateEncoderStreams(
-        last_frame_info_->width, last_frame_info_->height, encoder_config_);
+        env_.field_trials(), last_frame_info_->width, last_frame_info_->height,
+        encoder_config_);
   } else {
-    rtc::scoped_refptr<VideoEncoderConfig::VideoStreamFactoryInterface>
-        factory = rtc::make_ref_counted<cricket::EncoderStreamFactory>(
-            encoder_config_.video_format.name, encoder_config_.max_qp,
-            encoder_config_.content_type ==
-                webrtc::VideoEncoderConfig::ContentType::kScreen,
-            encoder_config_.legacy_conference_mode, encoder_->GetEncoderInfo(),
-            MergeRestrictions({latest_restrictions_, animate_restrictions_}),
-            &env_.field_trials());
+    auto factory = rtc::make_ref_counted<cricket::EncoderStreamFactory>(
+        encoder_config_.video_format.name, encoder_config_.max_qp,
+        encoder_config_.content_type ==
+            webrtc::VideoEncoderConfig::ContentType::kScreen,
+        encoder_config_.legacy_conference_mode, encoder_->GetEncoderInfo(),
+        latest_restrictions_);
 
     streams = factory->CreateEncoderStreams(
-        last_frame_info_->width, last_frame_info_->height, encoder_config_);
+        env_.field_trials(), last_frame_info_->width, last_frame_info_->height,
+        encoder_config_);
   }
 
   // TODO(webrtc:14451) : Move AlignmentAdjuster into EncoderStreamFactory
@@ -1268,8 +1246,7 @@ void VideoStreamEncoder::ReconfigureEncoder() {
         }
       }));
 
-  rate_allocator_ =
-      settings_.bitrate_allocator_factory->CreateVideoBitrateAllocator(codec);
+  rate_allocator_ = settings_.bitrate_allocator_factory->Create(env_, codec);
   rate_allocator_->SetLegacyConferenceMode(
       encoder_config_.legacy_conference_mode);
 
@@ -1557,7 +1534,6 @@ void VideoStreamEncoder::OnFrame(Timestamp post_time,
   encoder_stats_observer_->OnIncomingFrame(incoming_frame.width(),
                                            incoming_frame.height());
   ++captured_frame_count_;
-  CheckForAnimatedContent(incoming_frame, post_time.us());
   bool cwnd_frame_drop =
       cwnd_frame_drop_interval_ &&
       (cwnd_frame_counter_++ % cwnd_frame_drop_interval_.value() == 0);
@@ -2009,8 +1985,8 @@ void VideoStreamEncoder::EncodeVideoFrame(const VideoFrame& video_frame,
   }
   accumulated_update_rect_is_valid_ = true;
 
-  TRACE_EVENT_ASYNC_STEP0("webrtc", "Video", video_frame.render_time_ms(),
-                          "Encode");
+  TRACE_EVENT_ASYNC_STEP_INTO0("webrtc", "Video", video_frame.render_time_ms(),
+                               "Encode");
 
   stream_resource_manager_.OnEncodeStarted(out_frame, time_when_posted_us);
 
@@ -2021,8 +1997,9 @@ void VideoStreamEncoder::EncodeVideoFrame(const VideoFrame& video_frame,
       << send_codec_.height << " received a too small frame "
       << out_frame.width() << "x" << out_frame.height();
 
-  TRACE_EVENT1("webrtc", "VCMGenericEncoder::Encode", "timestamp",
-               out_frame.rtp_timestamp());
+  TRACE_EVENT2("webrtc", "webrtc::VideoEncoder::Encode", "rtp_timestamp",
+               out_frame.rtp_timestamp(), "storage_representation",
+               out_frame.video_frame_buffer()->storage_representation());
 
   frame_encode_metadata_writer_.OnEncodeStarted(out_frame);
 
@@ -2129,7 +2106,8 @@ EncodedImageCallback::Result VideoStreamEncoder::OnEncodedImage(
     const EncodedImage& encoded_image,
     const CodecSpecificInfo* codec_specific_info) {
   TRACE_EVENT_INSTANT1("webrtc", "VCMEncodedFrameCallback::Encoded",
-                       "timestamp", encoded_image.RtpTimestamp());
+                       TRACE_EVENT_SCOPE_GLOBAL, "timestamp",
+                       encoded_image.RtpTimestamp());
 
   const size_t simulcast_index = encoded_image.SimulcastIndex().value_or(0);
   const VideoCodecType codec_type = codec_specific_info
@@ -2449,114 +2427,6 @@ void VideoStreamEncoder::ReleaseEncoder() {
   encoder_->Release();
   encoder_initialized_ = false;
   TRACE_EVENT0("webrtc", "VCMGenericEncoder::Release");
-}
-
-VideoStreamEncoder::AutomaticAnimationDetectionExperiment
-VideoStreamEncoder::ParseAutomatincAnimationDetectionFieldTrial() const {
-  AutomaticAnimationDetectionExperiment result;
-
-  result.Parser()->Parse(env_.field_trials().Lookup(
-      "WebRTC-AutomaticAnimationDetectionScreenshare"));
-
-  if (!result.enabled) {
-    RTC_LOG(LS_INFO) << "Automatic animation detection experiment is disabled.";
-    return result;
-  }
-
-  RTC_LOG(LS_INFO) << "Automatic animation detection experiment settings:"
-                      " min_duration_ms="
-                   << result.min_duration_ms
-                   << " min_area_ration=" << result.min_area_ratio
-                   << " min_fps=" << result.min_fps;
-
-  return result;
-}
-
-void VideoStreamEncoder::CheckForAnimatedContent(
-    const VideoFrame& frame,
-    int64_t time_when_posted_in_us) {
-  if (!automatic_animation_detection_experiment_.enabled ||
-      encoder_config_.content_type !=
-          VideoEncoderConfig::ContentType::kScreen ||
-      stream_resource_manager_.degradation_preference() !=
-          DegradationPreference::BALANCED) {
-    return;
-  }
-
-  if (expect_resize_state_ == ExpectResizeState::kResize && last_frame_info_ &&
-      last_frame_info_->width != frame.width() &&
-      last_frame_info_->height != frame.height()) {
-    // On applying resolution cap there will be one frame with no/different
-    // update, which should be skipped.
-    // It can be delayed by several frames.
-    expect_resize_state_ = ExpectResizeState::kFirstFrameAfterResize;
-    return;
-  }
-
-  if (expect_resize_state_ == ExpectResizeState::kFirstFrameAfterResize) {
-    // The first frame after resize should have new, scaled update_rect.
-    if (frame.has_update_rect()) {
-      last_update_rect_ = frame.update_rect();
-    } else {
-      last_update_rect_ = absl::nullopt;
-    }
-    expect_resize_state_ = ExpectResizeState::kNoResize;
-  }
-
-  bool should_cap_resolution = false;
-  if (!frame.has_update_rect()) {
-    last_update_rect_ = absl::nullopt;
-    animation_start_time_ = Timestamp::PlusInfinity();
-  } else if ((!last_update_rect_ ||
-              frame.update_rect() != *last_update_rect_)) {
-    last_update_rect_ = frame.update_rect();
-    animation_start_time_ = Timestamp::Micros(time_when_posted_in_us);
-  } else {
-    TimeDelta animation_duration =
-        Timestamp::Micros(time_when_posted_in_us) - animation_start_time_;
-    float area_ratio = static_cast<float>(last_update_rect_->width *
-                                          last_update_rect_->height) /
-                       (frame.width() * frame.height());
-    if (animation_duration.ms() >=
-            automatic_animation_detection_experiment_.min_duration_ms &&
-        area_ratio >=
-            automatic_animation_detection_experiment_.min_area_ratio &&
-        encoder_stats_observer_->GetInputFrameRate() >=
-            automatic_animation_detection_experiment_.min_fps) {
-      should_cap_resolution = true;
-    }
-  }
-  if (cap_resolution_due_to_video_content_ != should_cap_resolution) {
-    expect_resize_state_ = should_cap_resolution ? ExpectResizeState::kResize
-                                                 : ExpectResizeState::kNoResize;
-    cap_resolution_due_to_video_content_ = should_cap_resolution;
-    if (should_cap_resolution) {
-      RTC_LOG(LS_INFO) << "Applying resolution cap due to animation detection.";
-    } else {
-      RTC_LOG(LS_INFO) << "Removing resolution cap due to no consistent "
-                          "animation detection.";
-    }
-    // TODO(webrtc:14451) Split video_source_sink_controller_
-    // so that ownership on restrictions/wants is kept on &encoder_queue_
-    if (should_cap_resolution) {
-      animate_restrictions_ =
-          VideoSourceRestrictions(kMaxAnimationPixels,
-                                  /* target_pixels_per_frame= */ absl::nullopt,
-                                  /* max_frame_rate= */ absl::nullopt);
-    } else {
-      animate_restrictions_.reset();
-    }
-
-    worker_queue_->PostTask(
-        SafeTask(task_safety_.flag(), [this, should_cap_resolution]() {
-          RTC_DCHECK_RUN_ON(worker_queue_);
-          video_source_sink_controller_.SetPixelsPerFrameUpperLimit(
-              should_cap_resolution
-                  ? absl::optional<size_t>(kMaxAnimationPixels)
-                  : absl::nullopt);
-          video_source_sink_controller_.PushSourceSinkSettings();
-        }));
-  }
 }
 
 void VideoStreamEncoder::InjectAdaptationResource(

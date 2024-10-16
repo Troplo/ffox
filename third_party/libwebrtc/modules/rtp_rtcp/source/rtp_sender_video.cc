@@ -27,10 +27,10 @@
 #include "api/units/frequency.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
-#include "modules/remote_bitrate_estimator/test/bwe_test_logging.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/absolute_capture_time_sender.h"
 #include "modules/rtp_rtcp/source/byte_io.h"
+#include "modules/rtp_rtcp/source/ntp_time_util.h"
 #include "modules/rtp_rtcp/source/rtp_dependency_descriptor_extension.h"
 #include "modules/rtp_rtcp/source/rtp_descriptor_authentication.h"
 #include "modules/rtp_rtcp/source/rtp_format.h"
@@ -38,7 +38,6 @@
 #include "modules/rtp_rtcp/source/rtp_header_extensions.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
 #include "modules/rtp_rtcp/source/rtp_video_layers_allocation_extension.h"
-#include "modules/rtp_rtcp/source/time_util.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/experiments/field_trial_parser.h"
 #include "rtc_base/logging.h"
@@ -159,7 +158,9 @@ RTPSenderVideo::RTPSenderVideo(const Config& config)
                     rtp_sender_->SSRC(),
                     rtp_sender_->Rid(),
                     config.task_queue_factory)
-              : nullptr) {
+              : nullptr),
+      enable_av1_even_split_(
+          config.field_trials->IsEnabled("WebRTC-Video-AV1EvenPayloadSizes")) {
   if (frame_transformer_delegate_)
     frame_transformer_delegate_->Init();
 }
@@ -639,8 +640,8 @@ bool RTPSenderVideo::SendVideo(int payload_type,
            "one is required since require_frame_encryptor is set";
   }
 
-  std::unique_ptr<RtpPacketizer> packetizer =
-      RtpPacketizer::Create(codec_type, payload, limits, video_header);
+  std::unique_ptr<RtpPacketizer> packetizer = RtpPacketizer::Create(
+      codec_type, payload, limits, video_header, enable_av1_even_split_);
 
   const size_t num_packets = packetizer->NumPackets();
 

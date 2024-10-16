@@ -575,6 +575,8 @@ enum class LayoutFrameClassFlags : uint16_t {
   SupportsAspectRatio = 1 << 13,
   // Whether this frame class is always a BFC.
   BlockFormattingContext = 1 << 14,
+  // Whether we're a SVG rendering observer container.
+  SVGRenderingObserverContainer = 1 << 15,
 };
 
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(LayoutFrameClassFlags)
@@ -2042,16 +2044,18 @@ class nsIFrame : public nsQueryFrame {
   }
 
   /**
-   * Returns true if this frame is an SVG frame that has SVG transforms applied
-   * to it, or if its parent frame is an SVG frame that has children-only
+   * Returns true if this frame's parent is an SVG frame that has children-only
    * transforms (e.g. an SVG viewBox attribute).
-   * If aOwnTransforms is non-null and the frame has its own SVG transforms,
-   * aOwnTransforms will be set to these transforms. If aFromParentTransforms
-   * is non-null and the frame has an SVG parent with children-only transforms,
-   * then aFromParentTransforms will be set to these transforms.
+   * If aFromParentTransforms is non-null, then aFromParentTransforms will be
+   * set to these transforms.
    */
-  virtual bool IsSVGTransformed(Matrix* aOwnTransforms = nullptr,
-                                Matrix* aFromParentTransforms = nullptr) const;
+  bool GetParentSVGTransforms(Matrix* aFromParentTransforms = nullptr) const {
+    if (!HasAnyStateBits(NS_FRAME_SVG_LAYOUT)) {
+      return false;
+    }
+    return DoGetParentSVGTransforms(aFromParentTransforms);
+  }
+  virtual bool DoGetParentSVGTransforms(Matrix* = nullptr) const;
 
   /**
    * Returns whether this frame will attempt to extend the 3d transforms of its
@@ -2468,7 +2472,7 @@ class nsIFrame : public nsQueryFrame {
     }
   }
 
-  bool IsPrimaryFrameOfRootOrBodyElement() const;
+  bool ShouldPropagateRepaintsToRoot() const;
 
   /**
    * @return true if this frame is used as a fieldset's rendered legend.
@@ -2577,7 +2581,9 @@ class nsIFrame : public nsQueryFrame {
    *
    * This method must not return a negative value.
    */
-  virtual nscoord GetMinISize(gfxContext* aRenderingContext);
+  nscoord GetMinISize(gfxContext* aContext) {
+    return IntrinsicISize(aContext, mozilla::IntrinsicISizeType::MinISize);
+  }
 
   /**
    * Get the max-content intrinsic inline size of the frame.  This must be
@@ -2585,7 +2591,20 @@ class nsIFrame : public nsQueryFrame {
    *
    * Otherwise, all the comments for |GetMinISize| above apply.
    */
-  virtual nscoord GetPrefISize(gfxContext* aRenderingContext);
+  nscoord GetPrefISize(gfxContext* aContext) {
+    return IntrinsicISize(aContext, mozilla::IntrinsicISizeType::PrefISize);
+  }
+
+  /**
+   * A helper to implement GetMinISize() and GetPrefISize(). A derived class
+   * should override this method to return its intrinsic size.
+   *
+   * All the comments for GetMinISize() and GetPrefISize() apply.
+   */
+  virtual nscoord IntrinsicISize(gfxContext* aContext,
+                                 mozilla::IntrinsicISizeType aType) {
+    return 0;
+  }
 
   /**
    * |InlineIntrinsicISize| represents the intrinsic inline size information
@@ -2595,17 +2614,9 @@ class nsIFrame : public nsQueryFrame {
    * information about whitespace (for both collapsing and trimming).
    */
   struct InlineIntrinsicISizeData {
-    InlineIntrinsicISizeData()
-        : mLine(nullptr),
-          mLineContainer(nullptr),
-          mPrevLines(0),
-          mCurrentLine(0),
-          mTrailingWhitespace(0),
-          mSkipWhitespace(true) {}
-
     // The line. This may be null if the inlines are not associated with
     // a block or if we just don't know the line.
-    const nsLineList_iterator* mLine;
+    const nsLineList_iterator* mLine = nullptr;
 
     // The line container. Private, to ensure we always use SetLineContainer
     // to update it.
@@ -2614,7 +2625,7 @@ class nsIFrame : public nsQueryFrame {
     // |mLine| and |mLineContainer| fields when following a next-in-flow link,
     // so we must not assume these can always be dereferenced.
    private:
-    nsIFrame* mLineContainer;
+    nsIFrame* mLineContainer = nullptr;
 
     // Setter and getter for the lineContainer field:
    public:
@@ -2623,50 +2634,48 @@ class nsIFrame : public nsQueryFrame {
     }
     nsIFrame* LineContainer() const { return mLineContainer; }
 
-    // The maximum intrinsic width for all previous lines.
-    nscoord mPrevLines;
+    // The max-content intrinsic inline size for all previous lines.
+    nscoord mPrevLines = 0;
 
-    // The maximum intrinsic width for the current line.  At a line
-    // break (mandatory for preferred width; allowed for minimum width),
-    // the caller should call |Break()|.
-    nscoord mCurrentLine;
+    // The max-content intrinsic inline size for the current line.  At a line
+    // break (mandatory for max-content inline size; allowed for min-content
+    // inline size), the caller should call |Break()|.
+    nscoord mCurrentLine = 0;
 
-    // This contains the width of the trimmable whitespace at the end of
+    // This contains the inline size of the trimmable whitespace at the end of
     // |mCurrentLine|; it is zero if there is no such whitespace.
-    nscoord mTrailingWhitespace;
+    nscoord mTrailingWhitespace = 0;
 
     // True if initial collapsable whitespace should be skipped.  This
     // should be true at the beginning of a block, after hard breaks
     // and when the last text ended with whitespace.
-    bool mSkipWhitespace;
+    bool mSkipWhitespace = true;
 
     // Floats encountered in the lines.
-    class FloatInfo {
+    class FloatInfo final {
      public:
-      FloatInfo(const nsIFrame* aFrame, nscoord aWidth)
-          : mFrame(aFrame), mWidth(aWidth) {}
+      FloatInfo(const nsIFrame* aFrame, nscoord aISize)
+          : mFrame(aFrame), mISize(aISize) {}
       const nsIFrame* Frame() const { return mFrame; }
-      nscoord Width() const { return mWidth; }
+      nscoord ISize() const { return mISize; }
 
      private:
       const nsIFrame* mFrame;
-      nscoord mWidth;
+      nscoord mISize;
     };
 
     nsTArray<FloatInfo> mFloats;
   };
 
   struct InlineMinISizeData : public InlineIntrinsicISizeData {
-    InlineMinISizeData() : mAtStartOfLine(true) {}
-
     // The default implementation for nsIFrame::AddInlineMinISize.
     void DefaultAddInlineMinISize(nsIFrame* aFrame, nscoord aISize,
                                   bool aAllowBreak = true);
 
     // We need to distinguish forced and optional breaks for cases where the
-    // current line total is negative.  When it is, we need to ignore
-    // optional breaks to prevent min-width from ending up bigger than
-    // pref-width.
+    // current line total is negative. When it is, we need to ignore optional
+    // breaks to prevent min-content inline size from ending up bigger than
+    // max-content inline size.
     void ForceBreak();
 
     // If the break here is actually taken, aHyphenWidth must be added to the
@@ -2676,12 +2685,10 @@ class nsIFrame : public nsQueryFrame {
     // Whether we're currently at the start of the line.  If we are, we
     // can't break (for example, between the text-indent and the first
     // word).
-    bool mAtStartOfLine;
+    bool mAtStartOfLine = true;
   };
 
   struct InlinePrefISizeData : public InlineIntrinsicISizeData {
-    InlinePrefISizeData() : mLineIsEmpty(true) {}
-
     /**
      * Finish the current line and start a new line.
      *
@@ -2702,39 +2709,40 @@ class nsIFrame : public nsQueryFrame {
     void DefaultAddInlinePrefISize(nscoord aISize);
 
     // True if the current line contains nothing other than placeholders.
-    bool mLineIsEmpty;
+    bool mLineIsEmpty = true;
   };
 
   /**
-   * Add the intrinsic minimum width of a frame in a way suitable for
-   * use in inline layout to an |InlineIntrinsicISizeData| object that
-   * represents the intrinsic width information of all the previous
+   * Add the min-content intrinsic inline size of a frame in a way suitable for
+   * use in inline layout to an |InlineMinISizeData| object that
+   * represents the intrinsic inline size information of all the previous
    * frames in the inline layout region.
    *
    * All *allowed* breakpoints within the frame determine what counts as
-   * a line for the |InlineIntrinsicISizeData|.  This means that
+   * a line for the |InlineMinISizeData|.  This means that
    * |aData->mTrailingWhitespace| will always be zero (unlike for
    * AddInlinePrefISize).
    *
    * All the comments for |GetMinISize| apply, except that this function
    * is responsible for adding padding, border, and margin and for
-   * considering the effects of 'width', 'min-width', and 'max-width'.
+   * considering the effects of 'inline-size', 'min-inline-size', and
+   * 'max-inline-size'.
    *
    * This may be called on any frame.  Frames that do not participate in
-   * line breaking can inherit the default implementation on nsFrame,
+   * line breaking can inherit the default implementation on nsIFrame,
    * which calls |GetMinISize|.
    */
   virtual void AddInlineMinISize(gfxContext* aRenderingContext,
                                  InlineMinISizeData* aData);
 
   /**
-   * Add the intrinsic preferred width of a frame in a way suitable for
-   * use in inline layout to an |InlineIntrinsicISizeData| object that
-   * represents the intrinsic width information of all the previous
+   * Add the max-content intrinsic inline size of a frame in a way suitable for
+   * use in inline layout to an |InlinePrefISizeData| object that
+   * represents the intrinsic inline size information of all the previous
    * frames in the inline layout region.
    *
    * All the comments for |AddInlineMinISize| and |GetPrefISize| apply,
-   * except that this fills in an |InlineIntrinsicISizeData| structure
+   * except that this fills in an |InlinePrefISizeData| structure
    * based on using all *mandatory* breakpoints within the frame.
    */
   virtual void AddInlinePrefISize(gfxContext* aRenderingContext,
@@ -2889,6 +2897,14 @@ class nsIFrame : public nsQueryFrame {
    */
   nscoord ShrinkISizeToFit(gfxContext* aRenderingContext, nscoord aISizeInCB,
                            mozilla::ComputeSizeFlags aFlags);
+
+  /**
+   * A helper for derived classes to implement min-content & max-content
+   * intrinsic inline size in terms of AddInlineMinISize() and
+   * AddInlinePrefISize().
+   */
+  nscoord IntrinsicISizeFromInline(gfxContext* aContext,
+                                   mozilla::IntrinsicISizeType aType);
 
  public:
   /**
@@ -3059,9 +3075,11 @@ class nsIFrame : public nsQueryFrame {
 
   /**
    * Computes any overflow area created by children of this frame and
-   * includes it into aOverflowAreas.
+   * includes it into aOverflowAreas. If aAsIfScrolled is true, then it behaves
+   * as if we were the scrolled content frame.
    */
-  virtual void UnionChildOverflow(mozilla::OverflowAreas& aOverflowAreas);
+  virtual void UnionChildOverflow(mozilla::OverflowAreas& aOverflowAreas,
+                                  bool aAsIfScrolled = false);
 
   // Returns the applicable overflow-clip-margin values.
   nsSize OverflowClipMargin(mozilla::PhysicalAxes aClipAxes) const;
@@ -3381,6 +3399,9 @@ class nsIFrame : public nsQueryFrame {
     return sLayoutFrameTypes[uint8_t(mClass)];
   }
 
+  /** Return this frame's class id */
+  ClassID GetClassID() const { return mClass; }
+
   /**
    * Get the type flags of the frame.
    *
@@ -3430,6 +3451,8 @@ class nsIFrame : public nsQueryFrame {
   CLASS_FLAG_METHOD0(SupportsCSSTransforms);
   CLASS_FLAG_METHOD0(SupportsContainLayoutAndPaint)
   CLASS_FLAG_METHOD0(SupportsAspectRatio)
+  CLASS_FLAG_METHOD(IsSVGRenderingObserverContainer,
+                    SVGRenderingObserverContainer);
 
 #undef CLASS_FLAG_METHOD
 #undef CLASS_FLAG_METHOD0
@@ -3469,12 +3492,9 @@ class nsIFrame : public nsQueryFrame {
    *   or visual coordinates
    * @param aStopAtAncestor don't look further than aStopAtAncestor. If null,
    *   all ancestors (including across documents) will be traversed.
-   * @param aOutAncestor [out] The ancestor frame the frame has chosen.  If
-   *   this frame has no ancestor, *aOutAncestor will be set to null. If
-   * this frame is not a root frame, then *aOutAncestor will be in the same
-   * document as this frame. If this frame IsTransformed(), then *aOutAncestor
-   * will be the parent frame (if not preserve-3d) or the nearest
-   * non-transformed ancestor (if preserve-3d).
+   * @param aOutAncestor [out] The ancestor frame the frame has chosen. If this
+   *   frame has no ancestor, *aOutAncestor will be set to null. If this frame
+   *   IsTransformed(), then *aOutAncestor will be the parent frame.
    * @return A Matrix4x4 that converts points in the coordinate space
    *   RelativeTo{this, aViewportType} into points in aOutAncestor's
    *   coordinate space.
@@ -3633,16 +3653,6 @@ class nsIFrame : public nsQueryFrame {
    * Normally does nothing since DLBI handles removed frames.
    */
   virtual void InvalidateFrameForRemoval() {}
-
-  /**
-   * When HasUserData(frame->LayerIsPrerenderedDataKey()), then the
-   * entire overflow area of this frame has been rendered in its
-   * layer(s).
-   */
-  static void* LayerIsPrerenderedDataKey() {
-    return &sLayerIsPrerenderedDataKey;
-  }
-  static uint8_t sLayerIsPrerenderedDataKey;
 
   /**
    * Checks if a frame has had InvalidateFrame() called on it since the
@@ -4670,17 +4680,6 @@ class nsIFrame : public nsQueryFrame {
   }
 
   /**
-   * Returns true if the frame is an SVG Rendering Observer container.
-   */
-  bool IsRenderingObserverContainer() const {
-    // NS_FRAME_SVG_LAYOUT is used as a proxy to check for an SVG frame because
-    // NS_STATE_SVG_RENDERING_OBSERVER_CONTAINER is an SVG specific state bit.
-    return HasAllStateBits(NS_FRAME_SVG_LAYOUT |
-                           NS_STATE_SVG_RENDERING_OBSERVER_CONTAINER) ||
-           IsSVGOuterSVGFrame();
-  }
-
-  /**
    * Return whether this frame keeps track of overflow areas. (Frames for
    * non-display SVG elements -- e.g. <clipPath> -- do not maintain overflow
    * areas, because they're never painted.)
@@ -4783,6 +4782,7 @@ class nsIFrame : public nsQueryFrame {
     MinContent,
     MaxContent,
     MozAvailable,
+    Stretch,
     FitContent,
     FitContentFunction,
   };
@@ -4796,6 +4796,9 @@ class nsIFrame : public nsQueryFrame {
         return mozilla::Some(ExtremumLength::MaxContent);
       case SizeOrMaxSize::Tag::MozAvailable:
         return mozilla::Some(ExtremumLength::MozAvailable);
+      case SizeOrMaxSize::Tag::WebkitFillAvailable:
+      case SizeOrMaxSize::Tag::Stretch:
+        return mozilla::Some(ExtremumLength::Stretch);
       case SizeOrMaxSize::Tag::FitContent:
         return mozilla::Some(ExtremumLength::FitContent);
       case SizeOrMaxSize::Tag::FitContentFunction:
@@ -5115,7 +5118,7 @@ class nsIFrame : public nsQueryFrame {
   mozilla::WritingMode mWritingMode;
 
   /** The ClassID of the concrete class of this instance. */
-  ClassID mClass;  // 1 byte
+  const ClassID mClass;  // 1 byte
 
   bool mMayHaveRoundedCorners : 1;
 

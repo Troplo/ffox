@@ -5,6 +5,7 @@
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  QuickSuggest: "resource:///modules/QuickSuggest.sys.mjs",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
   UrlbarUtils: "resource:///modules/UrlbarUtils.sys.mjs",
 });
@@ -79,7 +80,8 @@ export class BaseFeature {
    * @returns {Array}
    *   If the feature manages one or more types of suggestions served by the
    *   Suggest Rust component, the subclass should override this getter and
-   *   return an array of the type names as defined in `suggest.udl`.
+   *   return an array of the type names as defined in `suggest.udl`. e.g.,
+   *   "Amp", "Wikipedia", "Mdn", etc.
    */
   get rustSuggestionTypes() {
     return [];
@@ -136,16 +138,20 @@ export class BaseFeature {
   }
 
   /**
-   * If the feature manages more than one type of suggestion served by the
-   * Suggest Rust component, the subclass should override this method and return
-   * true if the given suggestion type is enabled and false otherwise. Ideally a
-   * feature manages at most one type of Rust suggestion, and in that case it's
-   * fine to rely on the default implementation here because the suggestion type
-   * will be enabled iff the feature itself is enabled.
+   * If the feature manages one or more suggestion types served by the Suggest
+   * Rust component, this method should return true if the given suggestion type
+   * is enabled and false otherwise. Many features do nothing but manage a
+   * single Rust suggestion type, and the suggestion type should be enabled iff
+   * the feature itself is enabled. Those features can rely on the default
+   * implementation here since a feature's Rust suggestions will not be fetched
+   * if the feature is disabled. Other features either manage multiple
+   * suggestion types or have functionality beyond their Rust suggestions and
+   * need to remain enabled even when their suggestions are not. Those features
+   * should override this method.
    *
    * @param {string} _type
-   *   A Rust suggestion type name as defined in `suggest.udl`. See also
-   *   `rustSuggestionTypes`.
+   *   A Rust suggestion type name as defined in `suggest.udl`, e.g., "Amp",
+   *   "Wikipedia", "Mdn", etc. See also `BaseFeature.rustSuggestionTypes`.
    * @returns {boolean}
    *   Whether the suggestion type is enabled.
    */
@@ -207,17 +213,21 @@ export class BaseFeature {
 
   /**
    * Enables or disables the feature according to `shouldEnable` and whether
-   * quick suggest is enabled. If the feature is already enabled appropriately,
-   * does nothing.
+   * quick suggest is enabled. If the feature's enabled status changes,
+   * `enable()` is called with the new status; otherwise `enable()` is not
+   * called. If the feature manages any Rust suggestion types that become
+   * enabled as a result, they will be ingested.
    */
   update() {
     let enable =
       lazy.UrlbarPrefs.get("quickSuggestEnabled") && this.shouldEnable;
     if (enable != this.isEnabled) {
       this.logger.info(`Setting enabled = ${enable}`);
-      this.enable(enable);
       this.#isEnabled = enable;
+      this.enable(enable);
     }
+
+    lazy.QuickSuggest.rustBackend?.ingestEnabledSuggestions(this);
   }
 
   #isEnabled = false;

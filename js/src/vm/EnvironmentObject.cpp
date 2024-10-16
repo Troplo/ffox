@@ -8,6 +8,7 @@
 
 #include "mozilla/Maybe.h"
 
+#include "builtin/Array.h"
 #include "builtin/ModuleObject.h"
 #include "js/Exception.h"
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
@@ -224,7 +225,9 @@ CallObject* CallObject::createHollowForDebug(JSContext* cx,
 }
 
 const JSClass CallObject::class_ = {
-    "Call", JSCLASS_HAS_RESERVED_SLOTS(CallObject::RESERVED_SLOTS)};
+    "Call",
+    JSCLASS_HAS_RESERVED_SLOTS(CallObject::RESERVED_SLOTS),
+};
 
 /*****************************************************************************/
 
@@ -335,7 +338,9 @@ VarEnvironmentObject* VarEnvironmentObject::createWithoutEnclosing(
 }
 
 const JSClass VarEnvironmentObject::class_ = {
-    "Var", JSCLASS_HAS_RESERVED_SLOTS(VarEnvironmentObject::RESERVED_SLOTS)};
+    "Var",
+    JSCLASS_HAS_RESERVED_SLOTS(VarEnvironmentObject::RESERVED_SLOTS),
+};
 
 /*****************************************************************************/
 
@@ -371,7 +376,8 @@ const JSClass ModuleEnvironmentObject::class_ = {
     &ModuleEnvironmentObject::classOps_,
     JS_NULL_CLASS_SPEC,
     JS_NULL_CLASS_EXT,
-    &ModuleEnvironmentObject::objectOps_};
+    &ModuleEnvironmentObject::objectOps_,
+};
 
 /* static */
 ModuleEnvironmentObject* ModuleEnvironmentObject::create(
@@ -415,7 +421,7 @@ ModuleEnvironmentObject* ModuleEnvironmentObject::create(
 #endif
 
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-  env->initSlot(ModuleEnvironmentObject::DISPOSABLE_OBJECTS_SLOT,
+  env->initSlot(ModuleEnvironmentObject::DISPOSABLE_RESOURCE_STACK_SLOT,
                 UndefinedValue());
 #endif
 
@@ -423,38 +429,36 @@ ModuleEnvironmentObject* ModuleEnvironmentObject::create(
 }
 
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-// TODO: at the time of unflagging ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-// consider having a common base class for LexicalEnvironmentObject and
-// ModuleEnvironmentObject containing all the common code.
-static bool addDisposableObjectHelper(JS::Handle<EnvironmentObject*> env,
-                                      uint32_t slot, JSContext* cx,
-                                      JS::Handle<JS::Value> val) {
-  Value slotData = env->getReservedSlot(slot);
-  ListObject* disposablesList = nullptr;
+static ArrayObject* initialiseAndSetDisposeCapabilityHelper(
+    JSContext* cx, JS::Handle<EnvironmentObject*> env, uint32_t slot) {
+  JS::Value slotData = env->getReservedSlot(slot);
+  ArrayObject* disposablesList = nullptr;
   if (slotData.isUndefined()) {
-    disposablesList = ListObject::create(cx);
+    disposablesList = NewDenseEmptyArray(cx);
     if (!disposablesList) {
-      return false;
+      return nullptr;
     }
     env->setReservedSlot(slot, ObjectValue(*disposablesList));
   } else {
-    disposablesList = &slotData.toObject().as<ListObject>();
+    disposablesList = &slotData.toObject().as<ArrayObject>();
   }
-  return disposablesList->append(cx, val);
+  return disposablesList;
 }
 
-bool ModuleEnvironmentObject::addDisposableObject(JSContext* cx,
-                                                  JS::Handle<JS::Value> val) {
-  Rooted<ModuleEnvironmentObject*> env(cx, this);
-  return addDisposableObjectHelper(env, DISPOSABLE_OBJECTS_SLOT, cx, val);
+ArrayObject* DisposableEnvironmentObject::getOrCreateDisposeCapability(
+    JSContext* cx) {
+  Rooted<DisposableEnvironmentObject*> env(cx, this);
+  return initialiseAndSetDisposeCapabilityHelper(
+      cx, env, DISPOSABLE_RESOURCE_STACK_SLOT);
 }
 
-Value ModuleEnvironmentObject::getDisposables() {
-  return getReservedSlot(DISPOSABLE_OBJECTS_SLOT);
+// TODO: The get & clear disposables function can be merged. (bug 1907736)
+JS::Value DisposableEnvironmentObject::getDisposables() {
+  return getReservedSlot(DISPOSABLE_RESOURCE_STACK_SLOT);
 }
 
-void ModuleEnvironmentObject::clearDisposables() {
-  setReservedSlot(DISPOSABLE_OBJECTS_SLOT, UndefinedValue());
+void DisposableEnvironmentObject::clearDisposables() {
+  setReservedSlot(DISPOSABLE_RESOURCE_STACK_SLOT, UndefinedValue());
 }
 #endif
 
@@ -646,7 +650,8 @@ bool ModuleEnvironmentObject::newEnumerate(JSContext* cx, HandleObject obj,
 
 const JSClass WasmInstanceEnvironmentObject::class_ = {
     "WasmInstance",
-    JSCLASS_HAS_RESERVED_SLOTS(WasmInstanceEnvironmentObject::RESERVED_SLOTS)};
+    JSCLASS_HAS_RESERVED_SLOTS(WasmInstanceEnvironmentObject::RESERVED_SLOTS),
+};
 
 /* static */
 WasmInstanceEnvironmentObject*
@@ -673,7 +678,8 @@ WasmInstanceEnvironmentObject::createHollowForDebug(
 
 const JSClass WasmFunctionCallObject::class_ = {
     "WasmCall",
-    JSCLASS_HAS_RESERVED_SLOTS(WasmFunctionCallObject::RESERVED_SLOTS)};
+    JSCLASS_HAS_RESERVED_SLOTS(WasmFunctionCallObject::RESERVED_SLOTS),
+};
 
 /* static */
 WasmFunctionCallObject* WasmFunctionCallObject::createHollowForDebug(
@@ -885,7 +891,8 @@ const JSClass WithEnvironmentObject::class_ = {
     JS_NULL_CLASS_OPS,
     JS_NULL_CLASS_SPEC,
     JS_NULL_CLASS_EXT,
-    &WithEnvironmentObjectOps};
+    &WithEnvironmentObjectOps,
+};
 
 /* static */
 NonSyntacticVariablesObject* NonSyntacticVariablesObject::create(
@@ -914,7 +921,8 @@ NonSyntacticVariablesObject* NonSyntacticVariablesObject::create(
 
 const JSClass NonSyntacticVariablesObject::class_ = {
     "NonSyntacticVariablesObject",
-    JSCLASS_HAS_RESERVED_SLOTS(NonSyntacticVariablesObject::RESERVED_SLOTS)};
+    JSCLASS_HAS_RESERVED_SLOTS(NonSyntacticVariablesObject::RESERVED_SLOTS),
+};
 
 bool js::CreateNonSyntacticEnvironmentChain(JSContext* cx,
                                             HandleObjectVector envChain,
@@ -960,7 +968,8 @@ const JSClass LexicalEnvironmentObject::class_ = {
     JS_NULL_CLASS_OPS,
     JS_NULL_CLASS_SPEC,
     JS_NULL_CLASS_EXT,
-    JS_NULL_OBJECT_OPS};
+    JS_NULL_OBJECT_OPS,
+};
 
 /* static */
 LexicalEnvironmentObject* LexicalEnvironmentObject::create(
@@ -984,7 +993,7 @@ LexicalEnvironmentObject* LexicalEnvironmentObject::create(
   }
 
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-  env->initSlot(LexicalEnvironmentObject::DISPOSABLE_OBJECTS_SLOT,
+  env->initSlot(LexicalEnvironmentObject::DISPOSABLE_RESOURCE_STACK_SLOT,
                 UndefinedValue());
 #endif
 
@@ -994,22 +1003,6 @@ LexicalEnvironmentObject* LexicalEnvironmentObject::create(
 bool LexicalEnvironmentObject::isExtensible() const {
   return NativeObject::isExtensible();
 }
-
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-bool LexicalEnvironmentObject::addDisposableObject(JSContext* cx,
-                                                   JS::Handle<JS::Value> val) {
-  Rooted<LexicalEnvironmentObject*> env(cx, this);
-  return addDisposableObjectHelper(env, DISPOSABLE_OBJECTS_SLOT, cx, val);
-}
-
-Value LexicalEnvironmentObject::getDisposables() {
-  return getReservedSlot(DISPOSABLE_OBJECTS_SLOT);
-}
-
-void LexicalEnvironmentObject::clearDisposables() {
-  setReservedSlot(DISPOSABLE_OBJECTS_SLOT, UndefinedValue());
-}
-#endif
 
 /* static */
 BlockLexicalEnvironmentObject* BlockLexicalEnvironmentObject::create(
@@ -1401,7 +1394,8 @@ const JSClass RuntimeLexicalErrorObject::class_ = {
     JS_NULL_CLASS_OPS,
     JS_NULL_CLASS_SPEC,
     JS_NULL_CLASS_EXT,
-    &RuntimeLexicalErrorObjectObjectOps};
+    &RuntimeLexicalErrorObjectObjectOps,
+};
 
 /*****************************************************************************/
 
@@ -4151,7 +4145,7 @@ void js::GetSuspendedGeneratorEnvironmentAndScope(
 
 #ifdef DEBUG
 
-typedef HashSet<PropertyName*> PropertyNameSet;
+using PropertyNameSet = HashSet<PropertyName*>;
 
 static bool RemoveReferencedNames(JSContext* cx, HandleScript script,
                                   PropertyNameSet& remainingNames) {

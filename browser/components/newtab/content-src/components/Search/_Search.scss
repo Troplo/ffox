@@ -9,18 +9,24 @@ $glyph-forward: url('chrome://browser/skin/forward.svg');
 .search-wrapper {
   padding: 34px 0 38px;
 
-  .only-search & {
-    padding: 0 0 38px;
+  // Bug 1914055 - Layout experiment: search spacing
+  .layout-variant-a &,
+  .layout-variant-b & {
+    padding-top: 0;
+    padding-bottom: 32px;
   }
 
-  .logo-and-wordmark {
-    $logo-size: 82px;
-    $wordmark-size: 134px;
+  // Edge case for users who have pocket stories turned off
+  .layout-variant-a.no-recommended-stories &,
+  .layout-variant-b.no-recommended-stories & {
+    padding-bottom: 40px;
+  }
 
-    align-items: center;
-    display: flex;
-    justify-content: center;
-    margin-bottom: 48px;
+  // Edge case for users who have only search enabled
+  .layout-variant-a .only-search &,
+  .layout-variant-b .only-search & {
+    padding-bottom: 40px;
+  }
 
     // Flowinity FlowFox change
     &:hover .logo {
@@ -66,6 +72,8 @@ $glyph-forward: url('chrome://browser/skin/forward.svg');
         margin-inline-start: 12px;
       }
     }
+  .only-search & {
+    padding: 0 0 38px;
   }
 
   .search-inner-wrapper {
@@ -87,6 +95,21 @@ $glyph-forward: url('chrome://browser/skin/forward.svg');
     @media (min-width: $break-point-widest) {
       width: $searchbar-width-largest;
     }
+
+    // Bug 1914053 - Layout experiment: search bar width
+    .layout-variant-a &,
+    .layout-variant-b & {
+      width: 304px;
+
+      @media (min-width: $break-point-large) {
+        width: 510px;
+      }
+
+      @media (min-width: $break-point-widest) {
+        width: 720px;
+      }
+    }
+
   }
 
   .search-handoff-button,
@@ -182,6 +205,64 @@ $glyph-forward: url('chrome://browser/skin/forward.svg');
   }
 }
 
+.layout-variant-b.has-recommended-stories {
+  .search-wrapper {
+    margin-block-start: 16px;
+  }
+
+  .logo-and-wordmark {
+    position: fixed;
+    inset-inline-start: 40px;
+    inset-block-start: 40px;
+  }
+
+  &.no-search {
+    .body-wrapper {
+      margin-block-start: 0;
+
+      @media (min-width: $break-point-large) {
+        // This is to handle the gap left by search being removed.
+        margin-block-start: 108px;
+      }
+
+      @media (min-width: $break-point-ultra-wide) {
+        margin-block-start: 0;
+      }
+    }
+  }
+
+  .search-inner-wrapper {
+    width: 350px;
+
+    @media (min-width: $break-point-large) {
+      width: 410px;
+    }
+
+    @media (min-width: $break-point-widest) {
+      width: 584px;
+    }
+
+    @media (min-width: $break-point-weather) {
+      width: 720px;
+    }
+  }
+
+  .logo {
+    width: 52px;
+    height: 52px;
+    background-size: 52px;
+  }
+
+  .wordmark {
+    display: none;
+    height: 52px;
+
+    @media (min-width: $break-point-large) {
+      display: block;
+    }
+  }
+}
+
 @media (height <= 700px) {
   .search-wrapper {
     padding: 0 0 30px;
@@ -236,6 +317,13 @@ $glyph-forward: url('chrome://browser/skin/forward.svg');
   .fake-textbox {
     opacity: 0.54;
     text-align: start;
+
+    // Bug 1914055 - Layout experiment: search spacing
+    .layout-variant-a &,
+    .layout-variant-b & {
+      -webkit-line-clamp: 1;
+      overflow: hidden;
+    }
   }
 
   .fake-caret {

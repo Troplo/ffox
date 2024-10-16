@@ -77,7 +77,7 @@
 #include "js/WrapperCallbacks.h"
 #include "proxy/DOMProxy.h"
 #include "util/Identifier.h"  // IsIdentifier
-#include "util/StringBuffer.h"
+#include "util/StringBuilder.h"
 #include "util/Text.h"
 #include "vm/BoundFunctionObject.h"
 #include "vm/EnvironmentObject.h"
@@ -91,6 +91,7 @@
 #include "vm/JSFunction.h"
 #include "vm/JSObject.h"
 #include "vm/JSScript.h"
+#include "vm/Logging.h"
 #include "vm/PlainObject.h"    // js::PlainObject
 #include "vm/PromiseObject.h"  // js::PromiseObject
 #include "vm/Runtime.h"
@@ -118,13 +119,10 @@
 using namespace js;
 
 using mozilla::Maybe;
-using mozilla::PodCopy;
-using mozilla::Some;
 
 using JS::AutoStableStringChars;
 using JS::CompileOptions;
 using JS::ReadOnlyCompileOptions;
-using JS::SourceText;
 
 // See preprocessor definition of JS_BITS_PER_WORD in jstypes.h; make sure
 // JS_64BIT (used internally) agrees with it
@@ -816,12 +814,12 @@ JS_PUBLIC_API bool JS_RefreshCrossCompartmentWrappers(JSContext* cx,
   return RemapAllWrappersForObject(cx, obj, obj);
 }
 
-typedef struct JSStdName {
+struct JSStdName {
   size_t atomOffset; /* offset of atom pointer in JSAtomState */
   JSProtoKey key;
   bool isDummy() const { return key == JSProto_Null; }
   bool isSentinel() const { return key == JSProto_LIMIT; }
-} JSStdName;
+};
 
 static const JSStdName* LookupStdName(const JSAtomState& names, JSAtom* name,
                                       const JSStdName* table) {
@@ -3640,7 +3638,7 @@ JS_PUBLIC_API bool JS_Stringify(JSContext* cx, MutableHandleValue vp,
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
   cx->check(replacer, space);
-  StringBuffer sb(cx);
+  StringBuilder sb(cx);
   if (!sb.ensureTwoByteChars()) {
     return false;
   }
@@ -3659,7 +3657,7 @@ JS_PUBLIC_API bool JS::ToJSON(JSContext* cx, HandleValue value,
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
   cx->check(replacer, space);
-  StringBuffer sb(cx);
+  StringBuilder sb(cx);
   if (!sb.ensureTwoByteChars()) {
     return false;
   }
@@ -3680,7 +3678,7 @@ JS_PUBLIC_API bool JS::ToJSONMaybeSafely(JSContext* cx, JS::HandleObject input,
   CHECK_THREAD(cx);
   cx->check(input);
 
-  StringBuffer sb(cx);
+  StringBuilder sb(cx);
   if (!sb.ensureTwoByteChars()) {
     return false;
   }
@@ -4426,6 +4424,12 @@ JS_PUBLIC_API void JS_SetGlobalJitCompilerOption(JSContext* cx,
       jit::JitOptions.js_regexp_duplicate_named_groups = !!value;
       break;
 
+#ifdef NIGHTLY_BUILD
+    case JSJITCOMPILER_REGEXP_MODIFIERS:
+      jit::JitOptions.js_regexp_modifiers = !!value;
+      break;
+#endif
+
 #ifdef DEBUG
     case JSJITCOMPILER_FULL_DEBUG_CHECKS:
       jit::JitOptions.fullDebugChecks = !!value;
@@ -4850,6 +4854,18 @@ JS_PUBLIC_API bool JS::FinishIncrementalEncoding(JSContext* cx,
 }
 
 JS_PUBLIC_API bool JS::FinishIncrementalEncoding(JSContext* cx,
+                                                 JS::HandleScript script,
+                                                 JS::Stencil** stencilOut) {
+  if (!script) {
+    return false;
+  }
+  if (!script->scriptSource()->xdrFinalizeEncoder(cx, stencilOut)) {
+    return false;
+  }
+  return true;
+}
+
+JS_PUBLIC_API bool JS::FinishIncrementalEncoding(JSContext* cx,
                                                  JS::Handle<JSObject*> module,
                                                  TranscodeBuffer& buffer) {
   if (!module->as<ModuleObject>()
@@ -4905,6 +4921,10 @@ JS_PUBLIC_API void JS::SetShadowRealmInitializeGlobalCallback(
 JS_PUBLIC_API void JS::SetShadowRealmGlobalCreationCallback(
     JSContext* cx, JS::GlobalCreationCallback callback) {
   cx->runtime()->shadowRealmGlobalCreationCallback = callback;
+}
+
+JS_PUBLIC_API bool JS::SetLoggingInterface(LoggingInterface& iface) {
+  return js::LogModule::initializeAll(iface);
 }
 
 JS::FirstSubsumedFrame::FirstSubsumedFrame(

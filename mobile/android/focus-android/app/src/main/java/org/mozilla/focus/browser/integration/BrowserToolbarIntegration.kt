@@ -111,6 +111,7 @@ class BrowserToolbarIntegration(
             tabCounterListener.invoke()
         },
         store = store,
+        showMaskInPrivateMode = false,
     )
 
     @VisibleForTesting
@@ -182,7 +183,6 @@ class BrowserToolbarIntegration(
                 window = fragment.activity?.window,
                 menuItemIndex = menu.menuBuilder.items.size - 1,
                 closeListener = { fragment.closeCustomTab() },
-                updateTheme = true,
                 forceActionButtonTinting = false,
             )
         }

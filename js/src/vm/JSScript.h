@@ -92,7 +92,7 @@ class StencilXDR;
 
 class ScriptCounts {
  public:
-  typedef mozilla::Vector<PCCounts, 0, SystemAllocPolicy> PCCountsVector;
+  using PCCountsVector = mozilla::Vector<PCCounts, 0, SystemAllocPolicy>;
 
   inline ScriptCounts();
   inline explicit ScriptCounts(PCCountsVector&& jumpTargets);
@@ -909,7 +909,7 @@ class ScriptSource {
   JSLinearString* substringDontDeflate(JSContext* cx, size_t start,
                                        size_t stop);
 
-  [[nodiscard]] bool appendSubstring(JSContext* cx, js::StringBuffer& buf,
+  [[nodiscard]] bool appendSubstring(JSContext* cx, js::StringBuilder& buf,
                                      size_t start, size_t stop);
 
   void setParameterListEnd(uint32_t parameterListEnd) {
@@ -1085,7 +1085,8 @@ class ScriptSource {
 
   [[nodiscard]] bool startIncrementalEncoding(
       JSContext* cx,
-      UniquePtr<frontend::ExtensibleCompilationStencil>&& initial);
+      UniquePtr<frontend::ExtensibleCompilationStencil>&& initial,
+      bool& alreadyStarted);
 
   [[nodiscard]] bool addDelazificationToIncrementalEncoding(
       JSContext* cx, const frontend::CompilationStencil& stencil);
@@ -1094,6 +1095,8 @@ class ScriptSource {
   // |xdrEncodeTopLevel|, and free the XDR encoder.  In case of errors, the
   // |buffer| is considered undefined.
   bool xdrFinalizeEncoder(JSContext* cx, JS::TranscodeBuffer& buffer);
+
+  bool xdrFinalizeEncoder(JSContext* cx, JS::Stencil** stencilOut);
 
   // Discard the incremental encoding data and free the XDR encoder.
   void xdrAbortEncoder();
@@ -1544,7 +1547,7 @@ class BaseScript : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   SourceExtent extent() const { return extent_; }
 
   [[nodiscard]] bool appendSourceDataForToString(JSContext* cx,
-                                                 js::StringBuffer& buf);
+                                                 js::StringBuilder& buf);
 
   // Line number (1-origin)
   uint32_t lineno() const { return extent_.lineno; }

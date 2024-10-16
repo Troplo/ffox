@@ -816,19 +816,15 @@ LogicalSize nsContainerFrame::ComputeAutoSize(
     const mozilla::LogicalSize& aBorderPadding,
     const StyleSizeOverrides& aSizeOverrides, ComputeSizeFlags aFlags) {
   LogicalSize result(aWM, 0xdeadbeef, NS_UNCONSTRAINEDSIZE);
-  nscoord availBased =
-      aAvailableISize - aMargin.ISize(aWM) - aBorderPadding.ISize(aWM);
   if (aFlags.contains(ComputeSizeFlag::ShrinkWrap)) {
-    // Only bother computing our 'auto' ISize if the result will be used.
-    const auto& styleISize = aSizeOverrides.mStyleISize
-                                 ? *aSizeOverrides.mStyleISize
-                                 : StylePosition()->ISize(aWM);
-    if (styleISize.IsAuto()) {
-      result.ISize(aWM) =
-          ShrinkISizeToFit(aRenderingContext, availBased, aFlags);
-    }
+    // Delegate to nsIFrame::ComputeAutoSize() for computing the shrink-wrapping
+    // size.
+    result = nsIFrame::ComputeAutoSize(aRenderingContext, aWM, aCBSize,
+                                       aAvailableISize, aMargin, aBorderPadding,
+                                       aSizeOverrides, aFlags);
   } else {
-    result.ISize(aWM) = availBased;
+    result.ISize(aWM) =
+        aAvailableISize - aMargin.ISize(aWM) - aBorderPadding.ISize(aWM);
   }
 
   if (IsTableCaption()) {
@@ -2467,12 +2463,12 @@ LogicalSize nsContainerFrame::ComputeSizeWithIntrinsicDimensions(
         bSize = autoSize.height;
       } else {
         // Not honoring an intrinsic ratio: clamp the dimensions independently.
-        iSize = NS_CSS_MINMAX(tentISize, minISize, maxISize);
-        bSize = NS_CSS_MINMAX(tentBSize, minBSize, maxBSize);
+        iSize = CSSMinMax(tentISize, minISize, maxISize);
+        bSize = CSSMinMax(tentBSize, minBSize, maxBSize);
       }
     } else {
       // 'auto' iSize, non-'auto' bSize
-      bSize = NS_CSS_MINMAX(bSize, minBSize, maxBSize);
+      bSize = CSSMinMax(bSize, minBSize, maxBSize);
       if (stretchI != eStretch) {
         if (aspectRatio) {
           iSize = aspectRatio.ComputeRatioDependentSize(
@@ -2486,12 +2482,12 @@ LogicalSize nsContainerFrame::ComputeSizeWithIntrinsicDimensions(
           iSize = fallbackIntrinsicSize.ISize(aWM);
         }
       }  // else - leave iSize as is to fill the CB
-      iSize = NS_CSS_MINMAX(iSize, minISize, maxISize);
+      iSize = CSSMinMax(iSize, minISize, maxISize);
     }
   } else {
     if (isAutoBSize) {
       // non-'auto' iSize, 'auto' bSize
-      iSize = NS_CSS_MINMAX(iSize, minISize, maxISize);
+      iSize = CSSMinMax(iSize, minISize, maxISize);
       if (stretchB != eStretch) {
         if (aspectRatio) {
           bSize = aspectRatio.ComputeRatioDependentSize(LogicalAxis::Block, aWM,
@@ -2505,12 +2501,12 @@ LogicalSize nsContainerFrame::ComputeSizeWithIntrinsicDimensions(
           bSize = fallbackIntrinsicSize.BSize(aWM);
         }
       }  // else - leave bSize as is to fill the CB
-      bSize = NS_CSS_MINMAX(bSize, minBSize, maxBSize);
+      bSize = CSSMinMax(bSize, minBSize, maxBSize);
 
     } else {
       // non-'auto' iSize, non-'auto' bSize
-      iSize = NS_CSS_MINMAX(iSize, minISize, maxISize);
-      bSize = NS_CSS_MINMAX(bSize, minBSize, maxBSize);
+      iSize = CSSMinMax(iSize, minISize, maxISize);
+      bSize = CSSMinMax(bSize, minBSize, maxBSize);
     }
   }
 

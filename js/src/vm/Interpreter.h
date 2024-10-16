@@ -16,7 +16,6 @@
 #include "vm/BuiltinObjectKind.h"
 #include "vm/CheckIsObjectKind.h"  // CheckIsObjectKind
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-#  include "vm/DisposableRecord.h"
 #  include "vm/ErrorObject.h"
 #  include "vm/UsingHint.h"
 #endif
@@ -644,8 +643,6 @@ bool OptimizeSpreadCall(JSContext* cx, HandleValue arg,
 bool OptimizeGetIterator(JSContext* cx, HandleValue arg, bool* result);
 
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-bool DisposeDisposablesOnScopeLeave(JSContext* cx, JS::Handle<JSObject*> env);
-
 bool GetDisposeMethod(JSContext* cx, JS::Handle<JS::Value> obj, UsingHint hint,
                       JS::MutableHandle<JS::Value> disposeMethod);
 
@@ -654,7 +651,18 @@ ErrorObject* CreateSuppressedError(JSContext* cx, JS::Handle<JS::Value> error,
 
 bool CreateDisposableResource(JSContext* cx, JS::Handle<JS::Value> objVal,
                               UsingHint hint,
+                              JS::Handle<mozilla::Maybe<JS::Value>> methodVal,
                               JS::MutableHandle<JS::Value> result);
+
+bool AddDisposableResource(JSContext* cx,
+                           JS::Handle<ArrayObject*> disposeCapability,
+                           JS::Handle<JS::Value> val, UsingHint hint,
+                           JS::Handle<mozilla::Maybe<JS::Value>> methodVal);
+
+bool AddDisposableResourceToCapability(
+    JSContext* cx, JS::Handle<ArrayObject*> disposeCapability,
+    JS::Handle<JS::Value> val, JS::Handle<JS::Value> method,
+    JS::Handle<JS::Value> needsClosure, UsingHint hint);
 #endif
 
 ArrayObject* ArrayFromArgumentsObject(JSContext* cx,

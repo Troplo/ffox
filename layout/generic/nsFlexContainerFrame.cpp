@@ -693,7 +693,7 @@ class nsFlexContainerFrame::FlexItem final {
     // Before we've resolved flexible lengths, we keep mMainSize set to
     // the 'hypothetical main size', which is the flex base size, clamped
     // to the [min,max] range:
-    mMainSize = NS_CSS_MINMAX(mFlexBaseSize, mMainMinSize, mMainMaxSize);
+    mMainSize = CSSMinMax(mFlexBaseSize, mMainMinSize, mMainMaxSize);
 
     FLEX_ITEM_LOG(mFrame, "Set flex base size: %d, hypothetical main size: %d",
                   mFlexBaseSize, mMainSize);
@@ -2106,7 +2106,7 @@ nscoord nsFlexContainerFrame::MeasureFlexItemContentBSize(
   if (aForceBResizeForMeasuringReflow) {
     childRIForMeasuringBSize.SetBResize(true);
     // Not 100% sure this is needed, but be conservative for now:
-    childRIForMeasuringBSize.mFlags.mIsBResizeForPercentages = true;
+    childRIForMeasuringBSize.SetBResizeForPercentages(true);
   }
 
   const CachedBAxisMeasurement& measurement =
@@ -3883,7 +3883,7 @@ void FlexItem::ResolveStretchedCrossSize(nscoord aLineCrossSize) {
   // remains as our item's cross-size (clamped to its min/max range).
   nscoord stretchedSize = aLineCrossSize - MarginBorderPaddingSizeInCrossAxis();
 
-  stretchedSize = NS_CSS_MINMAX(stretchedSize, mCrossMinSize, mCrossMaxSize);
+  stretchedSize = CSSMinMax(stretchedSize, mCrossMinSize, mCrossMaxSize);
 
   // Update the cross-size & make a note that it's stretched, so we know to
   // override the reflow input's computed cross-size in our final reflow.
@@ -4521,7 +4521,7 @@ void nsFlexContainerFrame::SizeItemInCrossAxis(ReflowInput& aChildReflowInput,
     // weren't, then we would've taken the early-return above.)
     aChildReflowInput.SetBResize(true);
     // Not 100% sure this is needed, but be conservative for now:
-    aChildReflowInput.mFlags.mIsBResizeForPercentages = true;
+    aChildReflowInput.SetBResizeForPercentages(true);
   }
 
   // Potentially reflow the item, and get the sizing info.
@@ -4864,7 +4864,7 @@ Maybe<nscoord> nsFlexContainerFrame::GetNaturalBaselineBOffset(
 }
 
 void nsFlexContainerFrame::UnionInFlowChildOverflow(
-    OverflowAreas& aOverflowAreas) {
+    OverflowAreas& aOverflowAreas, bool aAsIfScrolled) {
   // The CSS Overflow spec [1] requires that a scrollable container's
   // scrollable overflow should include the following areas.
   //
@@ -4882,6 +4882,7 @@ void nsFlexContainerFrame::UnionInFlowChildOverflow(
   //
   // [1] https://drafts.csswg.org/css-overflow-3/#scrollable.
   const bool isScrolledContent =
+      aAsIfScrolled ||
       Style()->GetPseudoType() == PseudoStyleType::scrolledContent;
   bool anyScrolledContentItem = false;
   // Union of normal-positioned margin boxes for all the items.
@@ -4931,8 +4932,9 @@ void nsFlexContainerFrame::UnionInFlowChildOverflow(
   }
 }
 
-void nsFlexContainerFrame::UnionChildOverflow(OverflowAreas& aOverflowAreas) {
-  UnionInFlowChildOverflow(aOverflowAreas);
+void nsFlexContainerFrame::UnionChildOverflow(OverflowAreas& aOverflowAreas,
+                                              bool aAsIfScrolled) {
+  UnionInFlowChildOverflow(aOverflowAreas, aAsIfScrolled);
   // Union with child frames, skipping the principal list since we already
   // handled those above.
   nsLayoutUtils::UnionChildOverflow(this, aOverflowAreas,
@@ -6413,8 +6415,12 @@ void nsFlexContainerFrame::ReflowPlaceholders(
   }
 }
 
-nscoord nsFlexContainerFrame::IntrinsicISize(gfxContext* aRenderingContext,
-                                             IntrinsicISizeType aType) {
+nscoord nsFlexContainerFrame::ComputeIntrinsicISize(gfxContext* aContext,
+                                                    IntrinsicISizeType aType) {
+  if (Maybe<nscoord> containISize = ContainIntrinsicISize()) {
+    return *containISize;
+  }
+
   nscoord containerISize = 0;
   const nsStylePosition* stylePos = StylePosition();
   const FlexboxAxisTracker axisTracker(this);
@@ -6448,8 +6454,8 @@ nscoord nsFlexContainerFrame::IntrinsicISize(gfxContext* aRenderingContext,
       continue;
     }
 
-    nscoord childISize = nsLayoutUtils::IntrinsicForContainer(
-        aRenderingContext, childFrame, aType);
+    nscoord childISize =
+        nsLayoutUtils::IntrinsicForContainer(aContext, childFrame, aType);
 
     // * For a row-oriented single-line flex container, the intrinsic
     // {min/pref}-isize is the sum of its items' {min/pref}-isizes and
@@ -6474,32 +6480,15 @@ nscoord nsFlexContainerFrame::IntrinsicISize(gfxContext* aRenderingContext,
   return containerISize;
 }
 
-/* virtual */
-nscoord nsFlexContainerFrame::GetMinISize(gfxContext* aRenderingContext) {
-  if (mCachedMinISize == NS_INTRINSIC_ISIZE_UNKNOWN) {
-    if (Maybe<nscoord> containISize = ContainIntrinsicISize()) {
-      mCachedMinISize = *containISize;
-    } else {
-      mCachedMinISize =
-          IntrinsicISize(aRenderingContext, IntrinsicISizeType::MinISize);
-    }
+nscoord nsFlexContainerFrame::IntrinsicISize(gfxContext* aContext,
+                                             IntrinsicISizeType aType) {
+  nscoord& cachedISize = aType == IntrinsicISizeType::MinISize
+                             ? mCachedMinISize
+                             : mCachedPrefISize;
+  if (cachedISize == NS_INTRINSIC_ISIZE_UNKNOWN) {
+    cachedISize = ComputeIntrinsicISize(aContext, aType);
   }
-
-  return mCachedMinISize;
-}
-
-/* virtual */
-nscoord nsFlexContainerFrame::GetPrefISize(gfxContext* aRenderingContext) {
-  if (mCachedPrefISize == NS_INTRINSIC_ISIZE_UNKNOWN) {
-    if (Maybe<nscoord> containISize = ContainIntrinsicISize()) {
-      mCachedPrefISize = *containISize;
-    } else {
-      mCachedPrefISize =
-          IntrinsicISize(aRenderingContext, IntrinsicISizeType::PrefISize);
-    }
-  }
-
-  return mCachedPrefISize;
+  return cachedISize;
 }
 
 int32_t nsFlexContainerFrame::GetNumLines() const {

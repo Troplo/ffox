@@ -33,6 +33,7 @@ import org.mozilla.fenix.helpers.MockBrowserDataHelper.createTabItem
 import org.mozilla.fenix.helpers.MockBrowserDataHelper.setCustomSearchEngine
 import org.mozilla.fenix.helpers.SearchDispatcher
 import org.mozilla.fenix.helpers.TestAssetHelper
+import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeLong
 import org.mozilla.fenix.helpers.TestHelper
 import org.mozilla.fenix.helpers.TestHelper.exitMenu
 import org.mozilla.fenix.helpers.TestHelper.verifySnackBarText
@@ -90,7 +91,7 @@ class SearchTest : TestSetup() {
         searchMockServer.shutdown()
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154189
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154189
     @Test
     fun verifySearchBarItemsTest() {
         navigationToolbar {
@@ -107,7 +108,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154190
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154190
     @Test
     fun verifySearchSelectorMenuItemsTest() {
         homeScreen {
@@ -122,7 +123,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154194
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154194
     @Test
     fun verifySearchPlaceholderForGeneralDefaultSearchEnginesTest() {
         generalEnginesList.forEach {
@@ -140,7 +141,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154195
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154195
     @Test
     fun verifySearchPlaceholderForNotDefaultGeneralSearchEnginesTest() {
         val generalEnginesList = listOf("DuckDuckGo", "Bing")
@@ -155,7 +156,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154196
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154196
     @Test
     fun verifySearchPlaceholderForTopicSpecificSearchEnginesTest() {
         val topicEnginesList = listOf("Wikipedia", "eBay")
@@ -170,7 +171,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1059459
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1059459
     @SmokeTest
     @Test
     fun verifyQRScanningCameraAccessDialogTest() {
@@ -192,7 +193,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/235397
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/235397
     @SmokeTest
     @Test
     fun scanQRCodeToOpenAWebpageTest() {
@@ -207,7 +208,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154191
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154191
     @Test
     fun verifyScanButtonAvailableOnlyForGeneralSearchEnginesTest() {
         generalEnginesList.forEach {
@@ -229,7 +230,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/235395
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/235395
     // Verifies a temporary change of search engine from the Search shortcut menu
     @SmokeTest
     @Test
@@ -249,7 +250,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/233589
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/233589
     @Test
     fun defaultSearchEnginesCanBeSetFromSearchSelectorMenuTest() {
         searchScreen {
@@ -267,7 +268,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/522918
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/522918
     @Test
     fun verifyClearSearchButtonTest() {
         homeScreen {
@@ -278,8 +279,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1623441
-    @Ignore("Test run timing out: https://github.com/mozilla-mobile/fenix/issues/27704")
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1623441
     @SmokeTest
     @Test
     fun searchResultsOpenedInNewTabsGenerateSearchGroupsTest() {
@@ -307,7 +307,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1592229
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1592229
     @Test
     fun verifyAPageIsAddedToASearchGroupOnlyOnceTest() {
         val firstPageUrl = TestAssetHelper.getGenericAsset(searchMockServer, 1).url
@@ -352,7 +352,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1591782
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1591782
     @Ignore("Failing due to known bug, see https://github.com/mozilla-mobile/fenix/issues/23818")
     @Test
     fun searchGroupIsGeneratedWhenNavigatingInTheSameTabTest() {
@@ -376,7 +376,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1591781
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1591781
     @SmokeTest
     @Test
     fun searchGroupIsNotGeneratedForLinksOpenedInPrivateTabsTest() {
@@ -408,8 +408,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1592269
-    @Ignore("Test run timing out: https://github.com/mozilla-mobile/fenix/issues/27704")
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1592269
     @SmokeTest
     @Test
     fun deleteIndividualHistoryItemsFromSearchGroupTest() {
@@ -451,7 +450,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1592242
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1592242
     @Ignore("Test run timing out: https://github.com/mozilla-mobile/fenix/issues/27704")
     @Test
     fun deleteSearchGroupFromHomeScreenTest() {
@@ -492,7 +491,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1592235
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1592235
     @Ignore("Test run timing out: https://github.com/mozilla-mobile/fenix/issues/27704")
     @Test
     fun openAPageFromHomeScreenSearchGroupTest() {
@@ -541,8 +540,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1592238
-    @Ignore("Test run timing out: https://github.com/mozilla-mobile/fenix/issues/27704")
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1592238
     @Test
     fun shareAPageFromHomeScreenSearchGroupTest() {
         val firstPageUrl = TestAssetHelper.getGenericAsset(searchMockServer, 1).url
@@ -580,14 +578,14 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1232633
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1232633
     // Default search code for Google-US
     @Test
     fun defaultSearchCodeGoogleUS() {
         homeScreen {
         }.openSearch {
         }.submitQuery(queryString) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.openThreeDotMenu {
         }.openHistory {
             // Full URL no longer visible in the nav bar, so we'll check the history record
@@ -601,7 +599,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1232637
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1232637
     // Default search code for Bing-US
     @Test
     fun defaultSearchCodeBingUS() {
@@ -617,7 +615,7 @@ class SearchTest : TestSetup() {
         homeScreen {
         }.openSearch {
         }.submitQuery(queryString) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.openThreeDotMenu {
         }.openHistory {
             // Full URL no longer visible in the nav bar, so we'll check the history record
@@ -631,7 +629,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1232638
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1232638
     // Default search code for DuckDuckGo-US
     @Test
     fun defaultSearchCodeDuckDuckGoUS() {
@@ -646,7 +644,7 @@ class SearchTest : TestSetup() {
         homeScreen {
         }.openSearch {
         }.submitQuery(queryString) {
-            waitForPageToLoad()
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }.openThreeDotMenu {
         }.openHistory {
             // Full URL no longer visible in the nav bar, so we'll check the history record
@@ -660,7 +658,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1850517
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1850517
     // Test that verifies the Firefox Suggest results in a general search context
     @Test
     fun verifyFirefoxSuggestHeaderForBrowsingDataSuggestionsTest() {
@@ -685,7 +683,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154215
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154215
     @SmokeTest
     @Test
     fun verifyHistorySearchWithBrowsingHistoryTest() {
@@ -703,7 +701,7 @@ class SearchTest : TestSetup() {
             verifySuggestionsAreNotDisplayed(rule = activityTestRule, "Mozilla")
             clickClearButton()
             typeSearch(searchTerm = "generic")
-            verifyTypedToolbarText("generic")
+            verifyTypedToolbarText("generic", exists = true)
             verifySearchEngineSuggestionResults(
                 rule = activityTestRule,
                 searchSuggestions = arrayOf(
@@ -717,7 +715,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154197
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154197
     @Test
     fun verifyTabsSearchItemsTest() {
         navigationToolbar {
@@ -731,7 +729,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154198
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154198
     @Test
     fun verifyTabsSearchWithoutOpenTabsTest() {
         navigationToolbar {
@@ -745,7 +743,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154199
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154199
     @SmokeTest
     @Test
     fun verifyTabsSearchWithOpenTabsTest() {
@@ -763,7 +761,7 @@ class SearchTest : TestSetup() {
             verifySuggestionsAreNotDisplayed(rule = activityTestRule, "Mozilla")
             clickClearButton()
             typeSearch(searchTerm = "generic")
-            verifyTypedToolbarText("generic")
+            verifyTypedToolbarText("generic", exists = true)
             verifySearchEngineSuggestionResults(
                 rule = activityTestRule,
                 searchSuggestions = arrayOf(
@@ -781,7 +779,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154203
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154203
     @Test
     fun verifyBookmarksSearchItemsTest() {
         navigationToolbar {
@@ -794,7 +792,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154204
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154204
     @Test
     fun verifyBookmarkSearchWithNoBookmarksTest() {
         navigationToolbar {
@@ -805,7 +803,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154206
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154206
     @Test
     fun verifyBookmarksSearchForBookmarkedItemsTest() {
         createBookmarkItem(url = "https://bookmarktest1.com", title = "Test1", position = 1u)
@@ -833,7 +831,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154212
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154212
     @Test
     fun verifyHistorySearchItemsTest() {
         navigationToolbar {
@@ -847,7 +845,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2154213
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154213
     @Test
     fun verifyHistorySearchWithoutBrowsingHistoryTest() {
         navigationToolbar {
@@ -861,7 +859,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/2230212
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2230212
     @SmokeTest
     @Test
     fun searchHistoryNotRememberedInPrivateBrowsingTest() {
@@ -908,7 +906,7 @@ class SearchTest : TestSetup() {
         }
     }
 
-    // TestRail link: https://testrail.stage.mozaws.net/index.php?/cases/view/1232631
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1232631
     // Expected for app language set to Arabic
     @Test
     fun verifySearchEnginesFunctionalityUsingRTLLocaleTest() {

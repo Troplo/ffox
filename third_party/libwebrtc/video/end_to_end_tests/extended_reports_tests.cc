@@ -20,11 +20,11 @@
 #include "api/rtp_headers.h"
 #include "api/task_queue/task_queue_base.h"
 #include "api/test/simulated_network.h"
+#include "api/units/data_rate.h"
 #include "api/video_codecs/sdp_video_format.h"
 #include "call/call.h"
 #include "call/fake_network_pipe.h"
 #include "call/rtp_config.h"
-#include "call/simulated_network.h"
 #include "call/simulated_packet_receiver.h"
 #include "call/video_receive_stream.h"
 #include "call/video_send_stream.h"
@@ -37,6 +37,7 @@
 #include "test/call_test.h"
 #include "test/field_trial.h"
 #include "test/gtest.h"
+#include "test/network/simulated_network.h"
 #include "test/rtcp_packet_parser.h"
 #include "test/rtp_rtcp_observer.h"
 #include "test/video_test_constants.h"
@@ -76,7 +77,7 @@ class RtcpXrObserver : public test::EndToEndTest {
         sent_zero_rtcp_target_bitrate_(false),
         sent_rtcp_dlrr_(0),
         send_simulated_network_(nullptr) {
-    forward_transport_config_.link_capacity_kbps = 500;
+    forward_transport_config_.link_capacity = DataRate::KilobitsPerSec(500);
     forward_transport_config_.queue_delay_ms = 0;
     forward_transport_config_.loss_percent = 0;
   }
@@ -109,7 +110,7 @@ class RtcpXrObserver : public test::EndToEndTest {
         enable_zero_target_bitrate_) {
       // Reduce bandwidth restriction to disable second stream after it was
       // enabled for some time.
-      forward_transport_config_.link_capacity_kbps = 200;
+      forward_transport_config_.link_capacity = DataRate::KilobitsPerSec(200);
       send_simulated_network_->SetConfig(forward_transport_config_);
     }
 

@@ -10,6 +10,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "chrome://remote/content/shared/NavigationManager.sys.mjs",
   notifySameDocumentChanged:
     "chrome://remote/content/shared/NavigationManager.sys.mjs",
+  notifyNavigationFailed:
+    "chrome://remote/content/shared/NavigationManager.sys.mjs",
   notifyNavigationStarted:
     "chrome://remote/content/shared/NavigationManager.sys.mjs",
   notifyNavigationStopped:
@@ -42,7 +44,13 @@ export class NavigationListenerParent extends JSWindowActorParent {
           break;
         }
         case "NavigationListenerChild:navigationStopped": {
-          lazy.notifyNavigationStopped(payload);
+          const errorName = ChromeUtils.getXPCOMErrorName(data.status);
+          if (this.#isContentBlocked(errorName)) {
+            payload.errorName = errorName;
+            lazy.notifyNavigationFailed(payload);
+          } else {
+            lazy.notifyNavigationStopped(payload);
+          }
           break;
         }
         default:
@@ -58,5 +66,18 @@ export class NavigationListenerParent extends JSWindowActorParent {
         throw e;
       }
     }
+  }
+
+  #isContentBlocked(blockedReason) {
+    return [
+      // If content is blocked with e.g. CSP meta tag.
+      "NS_ERROR_CONTENT_BLOCKED",
+      // If a resource load was blocked because of the CSP header.
+      "NS_ERROR_CSP_FRAME_ANCESTOR_VIOLATION",
+      // If a resource load was blocked because of the Cross-Origin-Embedder-Policy header.
+      "NS_ERROR_DOM_COEP_FAILED",
+      // If a resource load was blocked because of the X-Frame-Options header.
+      "NS_ERROR_XFO_VIOLATION",
+    ].includes(blockedReason);
   }
 }

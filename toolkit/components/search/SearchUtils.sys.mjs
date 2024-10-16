@@ -111,10 +111,6 @@ class LoadListener {
 }
 
 export var SearchUtils = {
-  // Permanently enable the new search configuration until we remove the old
-  // code as part of bug 1870686.
-  newSearchConfigEnabled: true,
-
   BROWSER_SEARCH_PREF,
 
   /**
@@ -130,56 +126,16 @@ export var SearchUtils = {
   SETTINGS_ALLOWLIST_KEY: "search-default-override-allowlist",
 
   /**
-   * This is the Remote Settings key for getting the older search engine
-   * configuration. Tests may use `SETTINGS_KEY` if they want to get the key
-   * for the current configuration according to the preference.
-   */
-  OLD_SETTINGS_KEY: "search-config",
-
-  /**
-   * This is the Remote Settings key for getting the newer search engine
-   * configuration. Tests may use `SETTINGS_KEY` if they want to get the key
-   * for the current configuration according to the preference.
-   */
-  NEW_SETTINGS_KEY: "search-config-v2",
-
-  /**
-   * This is the Remote Settings key for getting the overrides for the
-   * older search engine configuration. Tests may use `SETTINGS_OVERRIDES_KEY`
-   * for the current configuration according to the preference.
-   */
-  OLD_SETTINGS_OVERRIDES_KEY: "search-config-overrides",
-
-  /**
-   * This is the Remote Settings key for getting the overrides for the
-   * newer search engine configuration. Tests may use `SETTINGS_OVERRIDES_KEY`
-   * for the current configuration according to the preference.
-   */
-  NEW_SETTINGS_OVERRIDES_KEY: "search-config-overrides-v2",
-
-  /**
    * This is the Remote Settings key that we use to get the search engine
    * configurations.
-   *
-   * @returns {string}
    */
-  get SETTINGS_KEY() {
-    return SearchUtils.newSearchConfigEnabled
-      ? SearchUtils.NEW_SETTINGS_KEY
-      : SearchUtils.OLD_SETTINGS_KEY;
-  },
+  SETTINGS_KEY: "search-config-v2",
 
   /**
    * This is the Remote Settings key that we use to get the search engine
    * configuration overrides.
-   *
-   * @returns {string}
    */
-  get SETTINGS_OVERRIDES_KEY() {
-    return SearchUtils.newSearchConfigEnabled
-      ? SearchUtils.NEW_SETTINGS_OVERRIDES_KEY
-      : SearchUtils.OLD_SETTINGS_OVERRIDES_KEY;
-  },
+  SETTINGS_OVERRIDES_KEY: "search-config-overrides-v2",
 
   /**
    * Topic used for events involving the service itself.
@@ -239,25 +195,6 @@ export var SearchUtils = {
   },
 
   LoadListener,
-
-  // This is a list of search engines that we currently consider to be "General"
-  // search, as opposed to a vertical search engine such as one used for
-  // shopping, book search, etc.
-  //
-  // Currently these are a list of hard-coded application provided ones. At some
-  // point in the future we expect to allow WebExtensions to specify by themselves,
-  // however this needs more definition on the "vertical" search terms, and the
-  // effects before we enable it.
-  GENERAL_SEARCH_ENGINE_IDS: new Set([
-    "google@search.mozilla.org",
-    "ddg@search.mozilla.org",
-    "bing@search.mozilla.org",
-    "baidu@search.mozilla.org",
-    "ecosia@search.mozilla.org",
-    "qwant@search.mozilla.org",
-    "yahoo-jp@search.mozilla.org",
-    "yandex@search.mozilla.org",
-  ]),
 
   /**
    * Notifies watchers of SEARCH_ENGINE_TOPIC about changes to an engine or to
@@ -339,7 +276,7 @@ export var SearchUtils = {
    *   The current settings version.
    */
   get SETTINGS_VERSION() {
-    return 9;
+    return 10;
   },
 
   /**
@@ -379,7 +316,7 @@ export var SearchUtils = {
     return result.substring(0, maxLength);
   },
 
-  getVerificationHash(name) {
+  getVerificationHash(name, profileDir = PathUtils.profileDir) {
     let disclaimer =
       "By modifying this file, I agree that I am doing so " +
       "only within $appName itself, using official, user-driven search " +
@@ -389,7 +326,7 @@ export var SearchUtils = {
       "to accordingly.";
 
     let salt =
-      PathUtils.filename(PathUtils.profileDir) +
+      PathUtils.filename(profileDir) +
       name +
       disclaimer.replace(/\$appName/g, Services.appinfo.name);
 

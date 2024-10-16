@@ -183,17 +183,6 @@ document.addEventListener(
           BrowserCommands.fullScreen();
           break;
 
-        // == blockedPopupOptions ==
-        case "blockedPopupAllowSite":
-          gPopupBlockerObserver.toggleAllowPopupsForSite(event);
-          break;
-        case "blockedPopupEdit":
-          gPopupBlockerObserver.editPopupSettings();
-          break;
-        case "blockedPopupDontShowMessage":
-          gPopupBlockerObserver.dontShowMessage();
-          break;
-
         // == pictureInPictureToggleContextMenu ==
         case "context_HidePictureInPictureToggle":
           PictureInPicture.hideToggle();
@@ -311,16 +300,13 @@ document.addEventListener(
           CreateContainerTabMenu(event);
           break;
         case "toolbar-context-menu":
-          onViewToolbarsPopupShowing(
+          ToolbarContextMenu.onViewToolbarsPopupShowing(
             event,
             document.getElementById("viewToolbarsMenuSeparator")
           );
           ToolbarContextMenu.updateDownloadsAutoHide(event.target);
           ToolbarContextMenu.updateDownloadsAlwaysOpenPanel(event.target);
           ToolbarContextMenu.updateExtension(event.target, event);
-          break;
-        case "blockedPopupOptions":
-          gPopupBlockerObserver.fillPopupList(event);
           break;
         case "pageActionContextMenu":
           BrowserPageActions.onContextMenuShowing(event, event.target);
@@ -361,9 +347,6 @@ document.addEventListener(
 
     mainPopupSet.addEventListener("popuphiding", event => {
       switch (event.target.id) {
-        case "blockedPopupOptions":
-          gPopupBlockerObserver.onPopupHiding(event);
-          break;
         case "tabbrowser-tab-tooltip":
           event.target.removeAttribute("position");
           break;

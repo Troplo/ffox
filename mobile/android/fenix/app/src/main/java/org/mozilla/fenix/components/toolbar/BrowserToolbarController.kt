@@ -16,10 +16,11 @@ import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.concept.engine.EngineView
 import mozilla.components.concept.engine.prompt.ShareData
 import mozilla.components.feature.tabs.TabsUseCases
-import mozilla.components.service.glean.private.NoExtras
 import mozilla.components.support.ktx.kotlin.isUrl
 import mozilla.components.ui.tabcounter.TabCounterMenu
+import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.fenix.GleanMetrics.Events
+import org.mozilla.fenix.GleanMetrics.NavigationBar
 import org.mozilla.fenix.GleanMetrics.ReaderMode
 import org.mozilla.fenix.GleanMetrics.Translations
 import org.mozilla.fenix.HomeActivity
@@ -32,6 +33,7 @@ import org.mozilla.fenix.browser.browsingmode.BrowsingMode
 import org.mozilla.fenix.browser.readermode.ReaderModeController
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.AppAction.SnackbarAction
+import org.mozilla.fenix.components.menu.MenuAccessPoint
 import org.mozilla.fenix.components.toolbar.interactor.BrowserToolbarInteractor
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.nav
@@ -87,6 +89,16 @@ interface BrowserToolbarController {
      * @see [BrowserToolbarInteractor.onNewTabButtonClicked]
      */
     fun handleNewTabButtonClick()
+
+    /**
+     * @see [BrowserToolbarInteractor.onNewTabButtonLongClicked]
+     */
+    fun handleNewTabButtonLongClick()
+
+    /**
+     * @see [BrowserToolbarInteractor.onMenuButtonClicked]
+     */
+    fun handleMenuButtonClicked(accessPoint: MenuAccessPoint, customTabSessionId: String? = null)
 }
 
 private const val MAX_DISPLAY_NUMBER_SHOPPING_CFR = 3
@@ -277,8 +289,25 @@ class DefaultBrowserToolbarController(
             )
         }
 
+        NavigationBar.browserNewTabTapped.record(NoExtras())
+
+        browserAnimator.captureEngineViewAndDrawStatically {
+            navController.navigate(
+                BrowserFragmentDirections.actionGlobalHome(focusOnAddressBar = true),
+            )
+        }
+    }
+
+    override fun handleNewTabButtonLongClick() {
+        NavigationBar.browserNewTabLongTapped.record(NoExtras())
+    }
+
+    override fun handleMenuButtonClicked(accessPoint: MenuAccessPoint, customTabSessionId: String?) {
         navController.navigate(
-            BrowserFragmentDirections.actionGlobalHome(focusOnAddressBar = true),
+            BrowserFragmentDirections.actionGlobalMenuDialogFragment(
+                accesspoint = accessPoint,
+                customTabSessionId = customTabSessionId,
+            ),
         )
     }
 

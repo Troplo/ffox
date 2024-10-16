@@ -47,7 +47,7 @@
 #include "shell/jsshell.h"
 #include "shell/StringUtils.h"
 #include "util/GetPidProvider.h"  // getpid()
-#include "util/StringBuffer.h"
+#include "util/StringBuilder.h"
 #include "util/Text.h"
 #include "util/WindowsWrapper.h"
 #include "vm/JSObject.h"
@@ -686,7 +686,8 @@ const JSClass FileObject::class_ = {
     "File",
     JSCLASS_HAS_RESERVED_SLOTS(FileObject::NUM_SLOTS) |
         JSCLASS_FOREGROUND_FINALIZE,
-    &FileObjectClassOps};
+    &FileObjectClassOps,
+};
 
 static FileObject* redirect(JSContext* cx, HandleString relFilename,
                             RCFile** globalFile) {
@@ -903,7 +904,7 @@ static bool ospath_join(JSContext* cx, unsigned argc, Value* vp) {
     }
 
     if (IsAbsolutePath(str)) {
-      MOZ_ALWAYS_TRUE(buffer.resize(0));
+      buffer.clear();
     } else if (i != 0) {
       UniqueChars path = JS_EncodeStringToUTF8(cx, str);
       if (!path) {

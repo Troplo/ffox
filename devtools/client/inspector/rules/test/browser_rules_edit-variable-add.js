@@ -24,17 +24,11 @@ add_task(async function () {
     view,
     "div",
     "color",
-    "ruleview-unmatched-variable",
+    "ruleview-unmatched",
     "--color is not set"
   );
 
   info("Add the --color CSS variable");
   await addProperty(view, 0, "--color", "lime");
-  checkCSSVariableOutput(
-    view,
-    "div",
-    "color",
-    "ruleview-variable",
-    "--color = lime"
-  );
+  checkCSSVariableOutput(view, "div", "color", "ruleview-variable", "lime");
 });

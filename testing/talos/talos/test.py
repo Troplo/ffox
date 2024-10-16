@@ -177,7 +177,6 @@ class ts_paint(TsBase):
     filters = filter.ignore_first.prepare(1) + filter.median.prepare()
     tpmozafterpaint = True
     mainthread = False
-    responsiveness = False
     unit = "ms"
 
 
@@ -350,7 +349,6 @@ class PageloaderTest(Test):
         "tpscrolltest",
         "xperf_counters",
         "timeout",
-        "responsiveness",
         "profile_path",
         "xperf_providers",
         "xperf_user_providers",
@@ -420,7 +418,7 @@ class pdfpaint(PageloaderTest):
 
     tpmanifest = "${talos}/tests/pdfpaint/pdfpaint.manifest"
     tppagecycles = 1
-    timeout = 1800
+    timeout = 2000
     tptimeout = 60000
     pdfpaint = True
     unit = "ms"
@@ -486,7 +484,7 @@ class tabswitch(PageloaderTest):
     extensions = ["${talos}/tests/tabswitch", "${talos}/pageloader"]
     tpmanifest = "${talos}/tests/tabswitch/tabswitch.manifest"
     tppagecycles = 5
-    timeout = 900
+    timeout = 1200
     tploadnocache = True
     preferences = {
         "addon.test.tabswitch.urlfile": os.path.join("${talos}", "tests", "tp5o.html"),
@@ -1059,7 +1057,6 @@ class tp5o(PageloaderTest):
     win_counters = ["% Processor Time"]
     linux_counters = ["XRes"]
     mac_counters = []
-    responsiveness = True
     gecko_profile_interval = 2
     filters = filter.ignore_first.prepare(5) + filter.median.prepare()
     timeout = 1800

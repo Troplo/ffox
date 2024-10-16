@@ -32,10 +32,10 @@ static const unsigned MaxResultsForJitInlineCall = MaxResultsForJitEntry;
 // returned in registers.
 static const unsigned MaxRegisterResults = 1;
 
-// A magic value of the InstanceReg to indicate after a return to the entry
-// stub that an exception has been caught and that we should throw.
-
-static const unsigned FailInstanceReg = 0xbad;
+// A magic value of the InstanceReg to indicate after a return to the
+// interpreter entry stub that an exception has been caught and that we should
+// throw.
+static const unsigned InterpFailInstanceReg = 0xbad;
 
 // The following thresholds were derived from a microbenchmark. If we begin to
 // ship this optimization for more platforms, we will need to extend this list.
@@ -69,6 +69,10 @@ static const uint32_t MinSuperTypeVectorLength = 8;
 // below offset of each entry in the jump table to be compatible with
 // BaseScript/SelfHostedLazyScript.
 static const uint32_t JumpTableJitEntryOffset = 0;
+
+// Some JIT code relies on wasm exported functions not being nursery allocated.
+// This assert tracks those locations for future updating, if this changes.
+#define STATIC_ASSERT_WASM_FUNCTIONS_TENURED
 
 }  // namespace wasm
 }  // namespace js

@@ -166,6 +166,9 @@ with Files("ImageBitmap*"):
 with Files("ImageCapture*"):
     BUG_COMPONENT = ("Core", "Audio/Video")
 
+with Files("ImageDecoder.webidl"):
+    BUG_COMPONENT = ("Core", "Audio/Video: Web Codecs")
+
 with Files("InputEvent.webidl"):
     BUG_COMPONENT = ("Core", "DOM: UI Events & Focus Handling")
 
@@ -355,6 +358,9 @@ with Files("VRDisplay.webidl"):
 with Files("Video*"):
     BUG_COMPONENT = ("Core", "Audio/Video")
 
+with Files("ViewTransition.webidl"):
+    BUG_COMPONENT = ("Core", "CSS Parsing and Computation")
+
 with Files("WaveShaperNode.webidl"):
     BUG_COMPONENT = ("Core", "Web Audio")
 
@@ -394,6 +400,7 @@ with Files("WebTransport*"):
 GENERATED_WEBIDL_FILES = [
     "CSS2Properties.webidl",
     "CSSPageDescriptors.webidl",
+    "CSSPositionTryDescriptors.webidl",
 ]
 
 PREPROCESSED_WEBIDL_FILES = [
@@ -497,6 +504,7 @@ WEBIDL_FILES = [
     "CSSMozDocumentRule.webidl",
     "CSSNamespaceRule.webidl",
     "CSSPageRule.webidl",
+    "CSSPositionTryRule.webidl",
     "CSSPropertyRule.webidl",
     "CSSPseudoElement.webidl",
     "CSSRule.webidl",
@@ -692,6 +700,7 @@ WEBIDL_FILES = [
     "ImageBitmapRenderingContext.webidl",
     "ImageCapture.webidl",
     "ImageData.webidl",
+    "ImageDecoder.webidl",
     "ImageDocument.webidl",
     "InputEvent.webidl",
     "IntersectionObserver.webidl",
@@ -758,7 +767,13 @@ WEBIDL_FILES = [
     "MutationEvent.webidl",
     "MutationObserver.webidl",
     "NamedNodeMap.webidl",
+    "NavigateEvent.webidl",
+    "Navigation.webidl",
+    "NavigationActivation.webidl",
+    "NavigationDestination.webidl",
+    "NavigationHistoryEntry.webidl",
     "NavigationPreloadManager.webidl",
+    "NavigationTransition.webidl",
     "Navigator.webidl",
     "NetErrorInfo.webidl",
     "NetworkInformation.webidl",
@@ -1005,6 +1020,7 @@ WEBIDL_FILES = [
     "VideoPlaybackQuality.webidl",
     "VideoTrack.webidl",
     "VideoTrackList.webidl",
+    "ViewTransition.webidl",
     "VisualViewport.webidl",
     "VRDisplay.webidl",
     "VRDisplayEvent.webidl",
@@ -1169,6 +1185,7 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     "MediaStreamEvent.webidl",
     "MediaStreamTrackEvent.webidl",
     "MIDIConnectionEvent.webidl",
+    "NavigationCurrentEntryChangeEvent.webidl",
     "OfflineAudioCompletionEvent.webidl",
     "PageTransitionEvent.webidl",
     "PerformanceEntryEvent.webidl",

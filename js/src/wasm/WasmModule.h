@@ -28,6 +28,8 @@
 #include "wasm/WasmSerialize.h"
 #include "wasm/WasmTable.h"
 
+using mozilla::Maybe;
+
 namespace JS {
 class OptimizedEncodingListener;
 }
@@ -38,9 +40,18 @@ namespace wasm {
 struct CompileArgs;
 
 // In the context of wasm, the OptimizedEncodingListener specifically is
-// listening for the completion of tier-2.
+// listening for the completion of complete tier-2.
 
-using Tier2Listener = RefPtr<JS::OptimizedEncodingListener>;
+using CompleteTier2Listener = RefPtr<JS::OptimizedEncodingListener>;
+
+// Report tier-2 compilation results off-thread.  If `maybeFuncIndex` is
+// `Some`, this report is for a partial tier-2 compilation of the specified
+// function.  Otherwise it's for a complete tier-2 compilation.
+
+void ReportTier2ResultsOffThread(bool success, Maybe<uint32_t> maybeFuncIndex,
+                                 const ScriptedCaller& scriptedCaller,
+                                 const UniqueChars& error,
+                                 const UniqueCharsVector& warnings);
 
 // A struct containing the typed, imported values that are harvested from the
 // import object and passed to Module::instantiate(). This struct must be
@@ -86,15 +97,11 @@ class Module : public JS::WasmModule {
   // This contains all compilation artifacts for the module.
   const SharedCode code_;
 
-  // This field is only meaningful when code_->codeMeta().debugEnabled.
+  // This field is set during complete tier-2 compilation and cleared on
+  // success or failure. These happen on different threads and are serialized
+  // by the control flow of helper tasks.
 
-  const SharedBytes debugBytecode_;
-
-  // This field is set during tier-2 compilation and cleared on success or
-  // failure. These happen on different threads and are serialized by the
-  // control flow of helper tasks.
-
-  mutable Tier2Listener tier2Listener_;
+  mutable CompleteTier2Listener completeTier2Listener_;
 
   // This flag is used for logging (and testing) purposes to indicate
   // whether the module was deserialized (from a cache).
@@ -104,7 +111,7 @@ class Module : public JS::WasmModule {
   // This flag is only used for testing purposes and is cleared on success or
   // failure. The field is racily polled from various threads.
 
-  mutable Atomic<bool> testingTier2Active_;
+  mutable mozilla::Atomic<bool> testingTier2Active_;
 
   // Cached malloc allocation size for GC memory tracking.
 
@@ -130,15 +137,15 @@ class Module : public JS::WasmModule {
   bool instantiateGlobals(JSContext* cx, const ValVector& globalImportValues,
                           WasmGlobalObjectVector& globalObjs) const;
 
-  class Tier2GeneratorTaskImpl;
+  class CompleteTier2GeneratorTaskImpl;
 
  public:
+  class PartialTier2CompileTaskImpl;
+
   Module(const ModuleMetadata& moduleMeta, const Code& code,
-         const ShareableBytes* debugBytecode = nullptr,
          bool loggingDeserialized = false)
       : moduleMeta_(&moduleMeta),
         code_(&code),
-        debugBytecode_(debugBytecode),
         loggingDeserialized_(loggingDeserialized),
         testingTier2Active_(false) {
     initGCMallocBytesExcludingCode();
@@ -151,7 +158,7 @@ class Module : public JS::WasmModule {
   const CodeMetadataForAsmJS* codeMetaForAsmJS() const {
     return code_->codeMetaForAsmJS();
   }
-  const Bytes& debugBytecode() const { return debugBytecode_->bytes; }
+  const Bytes& bytecode() const { return code().bytecode(); }
   uint32_t tier1CodeMemoryUsed() const { return code_->tier1CodeMemoryUsed(); }
 
   // Instantiate this module with the given imports:
@@ -165,19 +172,17 @@ class Module : public JS::WasmModule {
   // finishTier2() from a helper thread, passing tier-variant data which will
   // be installed and made visible.
 
-  void startTier2(const CompileArgs& args, const ShareableBytes& bytecode,
+  void startTier2(const ShareableBytes& bytecode,
                   JS::OptimizedEncodingListener* listener);
-  bool finishTier2(const LinkData& sharedStubsLinkData,
-                   const LinkData& linkData2, UniqueCodeBlock code2) const;
+  bool finishTier2(UniqueCodeBlock tier2CodeBlock,
+                   UniqueLinkData tier2LinkData) const;
 
   void testingBlockOnTier2Complete() const;
   bool testingTier2Active() const { return testingTier2Active_; }
 
   // Code caching support.
 
-  [[nodiscard]] bool serialize(const LinkData& sharedStubsLinkData,
-                               const LinkData& optimizedLinkData,
-                               Bytes* bytes) const;
+  [[nodiscard]] bool serialize(Bytes* bytes) const;
   static RefPtr<Module> deserialize(const uint8_t* begin, size_t size);
   bool loggingDeserialized() const { return loggingDeserialized_; }
 
@@ -188,7 +193,7 @@ class Module : public JS::WasmModule {
 
   // about:memory reporting:
 
-  void addSizeOfMisc(MallocSizeOf mallocSizeOf,
+  void addSizeOfMisc(mozilla::MallocSizeOf mallocSizeOf,
                      CodeMetadata::SeenSet* seenCodeMeta,
                      CodeMetadataForAsmJS::SeenSet* seenCodeMetaForAsmJS,
                      Code::SeenSet* seenCode, size_t* code, size_t* data) const;
@@ -204,9 +209,7 @@ class Module : public JS::WasmModule {
 
   bool extractCode(JSContext* cx, Tier tier, MutableHandleValue vp) const;
 
-  WASM_DECLARE_FRIEND_SERIALIZE_ARGS(Module,
-                                     const wasm::LinkData& sharedStubsLinkData,
-                                     const wasm::LinkData& optimizedLinkData);
+  WASM_DECLARE_FRIEND_SERIALIZE(Module);
 };
 
 using MutableModule = RefPtr<Module>;

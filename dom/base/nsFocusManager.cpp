@@ -26,6 +26,7 @@
 #include "nsIBaseWindow.h"
 #include "nsIAppWindow.h"
 #include "nsTextControlFrame.h"
+#include "nsThreadUtils.h"
 #include "nsViewManager.h"
 #include "nsFrameSelection.h"
 #include "mozilla/dom/Selection.h"
@@ -42,6 +43,7 @@
 #include "nsRange.h"
 #include "nsFrameLoaderOwner.h"
 #include "nsQueryObject.h"
+#include "nsIXULRuntime.h"
 
 #include "mozilla/AccessibleCaretEventHub.h"
 #include "mozilla/ContentEvents.h"
@@ -395,6 +397,16 @@ nsFocusManager::GetFocusedContentBrowsingContext(
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsFocusManager::GetActiveContentBrowsingContext(
+    BrowsingContext** aBrowsingContext) {
+  MOZ_DIAGNOSTIC_ASSERT(
+      XRE_IsParentProcess(),
+      "We only have use cases for this in the parent process");
+  NS_IF_ADDREF(*aBrowsingContext = GetActiveBrowsingContextInChrome());
+  return NS_OK;
+}
+
 nsresult nsFocusManager::SetFocusedWindowWithCallerType(
     mozIDOMWindowProxy* aWindowToFocus, CallerType aCallerType) {
   LOGFOCUS(("<<SetFocusedWindow begin>>"));
@@ -577,13 +589,20 @@ nsFocusManager::ClearFocus(mozIDOMWindowProxy* aWindow) {
 
   if (IsSameOrAncestor(window, GetFocusedBrowsingContext())) {
     RefPtr<BrowsingContext> bc = window->GetBrowsingContext();
-    bool isAncestor = (GetFocusedBrowsingContext() != bc);
-    uint64_t actionId = GenerateFocusActionId();
-    if (Blur(bc, nullptr, isAncestor, true, false, actionId)) {
+    RefPtr<BrowsingContext> focusedBC = GetFocusedBrowsingContext();
+    const bool isAncestor = (focusedBC != bc);
+    RefPtr<BrowsingContext> ancestorBC = isAncestor ? bc : nullptr;
+    if (Blur(focusedBC, ancestorBC, isAncestor, true, false,
+             GenerateFocusActionId())) {
       // if we are clearing the focus on an ancestor of the focused window,
       // the ancestor will become the new focused window, so focus it
       if (isAncestor) {
-        Focus(window, nullptr, 0, true, false, false, true, actionId);
+        // Intentionally use a new actionId here because the above
+        // Blur() will clear the focus of the ancestors of focusedBC, and
+        // this Focus() call might need to update the focus of those ancestors,
+        // so it needs to have a newer actionId to make that happen.
+        Focus(window, nullptr, 0, true, false, false, true,
+              GenerateFocusActionId());
       }
     }
   } else {
@@ -727,7 +746,8 @@ void nsFocusManager::WindowRaised(mozIDOMWindowProxy* aWindow,
   if (XRE_IsParentProcess()) {
     mActiveWindow = window;
   } else if (bc->IsTop()) {
-    SetActiveBrowsingContextInContent(bc, aActionId);
+    SetActiveBrowsingContextInContent(bc, aActionId,
+                                      false /* aIsEnteringBFCache */);
   }
 
   // ensure that the window is enabled and visible
@@ -836,7 +856,8 @@ void nsFocusManager::WindowLowered(mozIDOMWindowProxy* aWindow,
   } else {
     BrowsingContext* bc = window->GetBrowsingContext();
     if (bc == bc->Top()) {
-      SetActiveBrowsingContextInContent(nullptr, aActionId);
+      SetActiveBrowsingContextInContent(nullptr, aActionId,
+                                        false /* aIsEnteringBFCache */);
     }
   }
 
@@ -925,13 +946,20 @@ nsresult nsFocusManager::ContentRemoved(Document* aDocument,
 
   // Notify the editor in case we removed its ancestor limiter.
   if (previousFocusedElement->IsEditable()) {
-    if (nsCOMPtr<nsIDocShell> docShell = aDocument->GetDocShell()) {
-      if (RefPtr<HTMLEditor> htmlEditor = docShell->GetHTMLEditor()) {
-        RefPtr<Selection> selection = htmlEditor->GetSelection();
+    if (nsIDocShell* const docShell = aDocument->GetDocShell()) {
+      if (HTMLEditor* const htmlEditor = docShell->GetHTMLEditor()) {
+        Selection* const selection = htmlEditor->GetSelection();
         if (selection && selection->GetFrameSelection() &&
             previousFocusedElement ==
                 selection->GetFrameSelection()->GetAncestorLimiter()) {
-          htmlEditor->FinalizeSelection();
+          // The editing host may be being removed right now.  So, it's already
+          // removed from the child chain of the parent node, but it still know
+          // the parent node.  This could cause unexpected result at scheduling
+          // paint of the caret.  Therefore, we should call FinalizeSelection
+          // after unblocking to run the script.
+          nsContentUtils::AddScriptRunner(
+              NewRunnableMethod("HTMLEditor::FinalizeSelection", htmlEditor,
+                                &HTMLEditor::FinalizeSelection));
         }
       }
     }
@@ -1025,7 +1053,7 @@ void nsFocusManager::WindowShown(mozIDOMWindowProxy* aWindow,
 }
 
 void nsFocusManager::WindowHidden(mozIDOMWindowProxy* aWindow,
-                                  uint64_t aActionId) {
+                                  uint64_t aActionId, bool aIsEnteringBFCache) {
   // if there is no window or it is not the same or an ancestor of the
   // currently focused window, just return, as the current focus will not
   // be affected.
@@ -1186,7 +1214,7 @@ void nsFocusManager::WindowHidden(mozIDOMWindowProxy* aWindow,
       mActiveBrowsingContextInContent ==
           docShellBeingHidden->GetBrowsingContext() &&
       mActiveBrowsingContextInContent->GetIsInBFCache()) {
-    SetActiveBrowsingContextInContent(nullptr, aActionId);
+    SetActiveBrowsingContextInContent(nullptr, aActionId, aIsEnteringBFCache);
   }
 
   // if the window being hidden is an ancestor of the focused window, adjust
@@ -1478,7 +1506,7 @@ void LogWarningFullscreenWindowRaise(Element* aElement) {
   Unused << nsContentUtils::ReportToConsoleByWindowID(
       localizedMsg, nsIScriptError::warningFlag, "DOM"_ns,
       windowGlobalParent->InnerWindowId(),
-      windowGlobalParent->GetDocumentURI());
+      SourceLocation(windowGlobalParent->GetDocumentURI()));
 }
 
 // Ensure that when an embedded popup with a noautofocus attribute
@@ -3515,6 +3543,27 @@ nsresult nsFocusManager::DetermineElementToMoveFocus(
           // previous element in the document. So the tabindex on elements
           // should be ignored.
           ignoreTabIndex = true;
+          // If selection starts from a focusable and tabbable element, we want
+          // to make it focused rather than next/previous one.
+          if (startContent->IsElement() && startContent->GetPrimaryFrame() &&
+              startContent->GetPrimaryFrame()->IsFocusable().IsTabbable()) {
+            startContent =
+                forward ? (startContent->GetPreviousSibling()
+                               ? startContent->GetPreviousSibling()
+                               // We don't need to get previous leaf node
+                               // because it may be too far from
+                               // startContent. We just want the previous
+                               // node immediately before startContent.
+                               : startContent->GetParent())
+                        // We want the next node immdiately after startContent.
+                        // Therefore, we don't want its first child.
+                        : startContent->GetNextNonChildNode();
+            // If we reached the root element, we should treat it as there is no
+            // selection as same as above.
+            if (startContent == rootElement) {
+              startContent = nullptr;
+            }
+          }
         }
       }
 
@@ -5137,7 +5186,8 @@ void nsFocusManager::BrowsingContextDetached(BrowsingContext* aContext) {
 }
 
 void nsFocusManager::SetActiveBrowsingContextInContent(
-    mozilla::dom::BrowsingContext* aContext, uint64_t aActionId) {
+    mozilla::dom::BrowsingContext* aContext, uint64_t aActionId,
+    bool aIsEnteringBFCache) {
   MOZ_ASSERT(!XRE_IsParentProcess());
   MOZ_ASSERT(!aContext || aContext->IsInProcess());
   mozilla::dom::ContentChild* contentChild =
@@ -5156,7 +5206,12 @@ void nsFocusManager::SetActiveBrowsingContextInContent(
   if (aContext != mActiveBrowsingContextInContent) {
     if (aContext) {
       contentChild->SendSetActiveBrowsingContext(aContext, aActionId);
-    } else if (mActiveBrowsingContextInContent) {
+    } else if (mActiveBrowsingContextInContent &&
+               !(BFCacheInParent() && aIsEnteringBFCache)) {
+      // No need to tell the parent process to update the active browsing
+      // context to null if we are entering BFCache, because the browsing
+      // context that is about to show will update it.
+      //
       // We want to sync this over only if this isn't happening
       // due to the active BrowsingContext switching processes,
       // in which case the BrowserChild has already marked itself

@@ -103,12 +103,12 @@
 #include "RootCertificateTelemetryUtils.h"
 #include "ScopedNSSTypes.h"
 #include "SharedCertVerifier.h"
-#include "SharedSSLState.h"
 #include "VerifySSLServerCertChild.h"
 #include "cert.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Casting.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/StaticPrefs_security.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
@@ -438,43 +438,15 @@ static SECStatus BlockServerCertChangeForSpdy(
 }
 
 void GatherTelemetryForSingleSCT(const ct::VerifiedSCT& verifiedSct) {
-  // See SSL_SCTS_ORIGIN in Histograms.json.
-  uint32_t origin = 0;
-  switch (verifiedSct.origin) {
-    case ct::VerifiedSCT::Origin::Embedded:
-      origin = 1;
-      break;
-    case ct::VerifiedSCT::Origin::TLSExtension:
-      origin = 2;
-      break;
-    case ct::VerifiedSCT::Origin::OCSPResponse:
-      origin = 3;
-      break;
-    default:
-      MOZ_ASSERT_UNREACHABLE("Unexpected VerifiedSCT::Origin type");
-  }
-  Telemetry::Accumulate(Telemetry::SSL_SCTS_ORIGIN, origin);
-
   // See SSL_SCTS_VERIFICATION_STATUS in Histograms.json.
   uint32_t verificationStatus = 0;
-  switch (verifiedSct.status) {
-    case ct::VerifiedSCT::Status::Valid:
+  switch (verifiedSct.logState) {
+    case ct::CTLogState::Admissible:
       verificationStatus = 1;
       break;
-    case ct::VerifiedSCT::Status::UnknownLog:
-      verificationStatus = 2;
-      break;
-    case ct::VerifiedSCT::Status::InvalidSignature:
-      verificationStatus = 3;
-      break;
-    case ct::VerifiedSCT::Status::InvalidTimestamp:
-      verificationStatus = 4;
-      break;
-    case ct::VerifiedSCT::Status::ValidFromDisqualifiedLog:
+    case ct::CTLogState::Retired:
       verificationStatus = 5;
       break;
-    default:
-      MOZ_ASSERT_UNREACHABLE("Unexpected VerifiedSCT::Status type");
   }
   Telemetry::Accumulate(Telemetry::SSL_SCTS_VERIFICATION_STATUS,
                         verificationStatus);
@@ -492,10 +464,29 @@ void GatherCertificateTransparencyTelemetry(
     GatherTelemetryForSingleSCT(sct);
   }
 
-  // Decoding errors are reported to the 0th bucket
-  // of the SSL_SCTS_VERIFICATION_STATUS enumerated probe.
+  // See SSL_SCTS_VERIFICATION_STATUS in Histograms.json.
   for (size_t i = 0; i < info.verifyResult.decodingErrors; ++i) {
     Telemetry::Accumulate(Telemetry::SSL_SCTS_VERIFICATION_STATUS, 0);
+  }
+  for (size_t i = 0; i < info.verifyResult.sctsFromUnknownLogs; ++i) {
+    Telemetry::Accumulate(Telemetry::SSL_SCTS_VERIFICATION_STATUS, 2);
+  }
+  for (size_t i = 0; i < info.verifyResult.sctsWithInvalidSignatures; ++i) {
+    Telemetry::Accumulate(Telemetry::SSL_SCTS_VERIFICATION_STATUS, 3);
+  }
+  for (size_t i = 0; i < info.verifyResult.sctsWithInvalidTimestamps; ++i) {
+    Telemetry::Accumulate(Telemetry::SSL_SCTS_VERIFICATION_STATUS, 4);
+  }
+
+  // See SSL_SCTS_ORIGIN in Histograms.json.
+  for (size_t i = 0; i < info.verifyResult.embeddedSCTs; ++i) {
+    Telemetry::Accumulate(Telemetry::SSL_SCTS_ORIGIN, 1);
+  }
+  for (size_t i = 0; i < info.verifyResult.sctsFromTLSHandshake; ++i) {
+    Telemetry::Accumulate(Telemetry::SSL_SCTS_ORIGIN, 2);
+  }
+  for (size_t i = 0; i < info.verifyResult.sctsFromOCSP; ++i) {
+    Telemetry::Accumulate(Telemetry::SSL_SCTS_ORIGIN, 3);
   }
 
   // Handle the histogram of SCTs counts.
@@ -506,19 +497,10 @@ void GatherCertificateTransparencyTelemetry(
   Telemetry::Accumulate(Telemetry::SSL_SCTS_PER_CONNECTION, sctsCount);
 
   // Report CT Policy compliance by CA.
-  switch (info.policyCompliance) {
-    case ct::CTPolicyCompliance::Compliant:
-      AccumulateTelemetryForRootCA(
-          Telemetry::SSL_CT_POLICY_COMPLIANT_CONNECTIONS_BY_CA, rootCert);
-      break;
-    case ct::CTPolicyCompliance::NotEnoughScts:
-    case ct::CTPolicyCompliance::NotDiverseScts:
-      AccumulateTelemetryForRootCA(
-          Telemetry::SSL_CT_POLICY_NON_COMPLIANT_CONNECTIONS_BY_CA, rootCert);
-      break;
-    case ct::CTPolicyCompliance::Unknown:
-    default:
-      MOZ_ASSERT_UNREACHABLE("Unexpected CTPolicyCompliance type");
+  if (info.policyCompliance.isSome() &&
+      *info.policyCompliance != ct::CTPolicyCompliance::Compliant) {
+    AccumulateTelemetryForRootCA(
+        Telemetry::SSL_CT_POLICY_NON_COMPLIANT_CONNECTIONS_BY_CA_2, rootCert);
   }
 }
 
@@ -548,7 +530,7 @@ static void CollectCertTelemetry(
   }
 
   if (aPinningTelemetryInfo.accumulateForRoot) {
-    Telemetry::Accumulate(Telemetry::CERT_PINNING_FAILURES_BY_CA,
+    Telemetry::Accumulate(Telemetry::CERT_PINNING_FAILURES_BY_CA_2,
                           aPinningTelemetryInfo.rootBucket);
   }
 
@@ -561,7 +543,7 @@ static void CollectCertTelemetry(
 
   if (aCertVerificationResult == Success && aBuiltCertChain.Length() > 0) {
     const nsTArray<uint8_t>& rootCert = aBuiltCertChain.LastElement();
-    AccumulateTelemetryForRootCA(Telemetry::CERT_VALIDATION_SUCCESS_BY_CA,
+    AccumulateTelemetryForRootCA(Telemetry::CERT_VALIDATION_SUCCESS_BY_CA_2,
                                  rootCert);
     GatherCertificateTransparencyTelemetry(rootCert, aEVStatus == EVStatus::EV,
                                            aCertificateTransparencyInfo);
@@ -697,12 +679,12 @@ PRErrorCode AuthCertificateParseResults(
 }
 
 static nsTArray<nsTArray<uint8_t>> CreateCertBytesArray(
-    const UniqueCERTCertList& aCertChain) {
+    const UniqueSECItemArray& aCertChain) {
   nsTArray<nsTArray<uint8_t>> certsBytes;
-  for (CERTCertListNode* n = CERT_LIST_HEAD(aCertChain);
-       !CERT_LIST_END(n, aCertChain); n = CERT_LIST_NEXT(n)) {
+  for (size_t i = 0; i < aCertChain->len; i++) {
     nsTArray<uint8_t> certBytes;
-    certBytes.AppendElements(n->cert->derCert.data, n->cert->derCert.len);
+    certBytes.AppendElements(aCertChain->items[i].data,
+                             aCertChain->items[i].len);
     certsBytes.AppendElement(std::move(certBytes));
   }
   return certsBytes;
@@ -759,17 +741,15 @@ SSLServerCertVerificationJob::Run() {
   // Runs on a cert verification thread and only on parent process.
   MOZ_ASSERT(XRE_IsParentProcess());
 
-  MOZ_LOG(
-      gPIPNSSLog, LogLevel::Debug,
-      ("[%" PRIx64 "] SSLServerCertVerificationJob::Run\n", mAddrForLogging));
+  MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+          ("[%" PRIx64 "] SSLServerCertVerificationJob::Run", mAddrForLogging));
 
   RefPtr<SharedCertVerifier> certVerifier(GetDefaultCertVerifier());
   if (!certVerifier) {
-    PR_SetError(SEC_ERROR_NOT_INITIALIZED, 0);
     // We can't release this off the STS thread because some parts of it
-    // are not threadsafe. Just leak the mResultTask
+    // are not threadsafe. Just leak mResultTask.
     Unused << mResultTask.forget();
-    return NS_OK;
+    return NS_ERROR_FAILURE;
   }
 
   TimeStamp jobStartTime = TimeStamp::Now();
@@ -779,34 +759,38 @@ SSLServerCertVerificationJob::Run() {
   bool madeOCSPRequests = false;
   nsTArray<nsTArray<uint8_t>> builtChainBytesArray;
   nsTArray<uint8_t> certBytes(mPeerCertChain.ElementAt(0).Clone());
-  Result rv = AuthCertificate(
+  Result result = AuthCertificate(
       *certVerifier, mPinArg, certBytes, mPeerCertChain, mHostName,
       mOriginAttributes, mStapledOCSPResponse, mSCTsFromTLSExtension, mDCInfo,
       mProviderFlags, mTime, mCertVerifierFlags, builtChainBytesArray, evStatus,
       certificateTransparencyInfo, isCertChainRootBuiltInRoot,
       madeOCSPRequests);
 
-  if (rv == Success) {
-    Telemetry::AccumulateTimeDelta(
-        Telemetry::SSL_SUCCESFUL_CERT_VALIDATION_TIME_MOZILLAPKIX, jobStartTime,
-        TimeStamp::Now());
+  TimeDuration elapsed = TimeStamp::Now() - jobStartTime;
+  if (result == Success) {
+    mozilla::glean::cert_verification_time::success.AccumulateRawDuration(
+        elapsed);
     Telemetry::Accumulate(Telemetry::SSL_CERT_ERROR_OVERRIDES, 1);
 
-    mResultTask->Dispatch(
+    nsresult rv = mResultTask->Dispatch(
         std::move(builtChainBytesArray), std::move(mPeerCertChain),
         TransportSecurityInfo::ConvertCertificateTransparencyInfoToStatus(
             certificateTransparencyInfo),
         evStatus, true, 0,
         nsITransportSecurityInfo::OverridableErrorCategory::ERROR_UNSET,
         isCertChainRootBuiltInRoot, mProviderFlags, madeOCSPRequests);
-    return NS_OK;
+    if (NS_FAILED(rv)) {
+      // We can't release this off the STS thread because some parts of it
+      // are not threadsafe. Just leak mResultTask.
+      Unused << mResultTask.forget();
+    }
+    return rv;
   }
 
-  Telemetry::AccumulateTimeDelta(
-      Telemetry::SSL_INITIAL_FAILED_CERT_VALIDATION_TIME_MOZILLAPKIX,
-      jobStartTime, TimeStamp::Now());
+  mozilla::glean::cert_verification_time::failure.AccumulateRawDuration(
+      elapsed);
 
-  PRErrorCode error = MapResultToPRErrorCode(rv);
+  PRErrorCode error = MapResultToPRErrorCode(result);
   nsITransportSecurityInfo::OverridableErrorCategory overridableErrorCategory =
       nsITransportSecurityInfo::OverridableErrorCategory::ERROR_UNSET;
   nsCOMPtr<nsIX509Cert> cert(new nsNSSCertificate(std::move(certBytes)));
@@ -815,16 +799,22 @@ SSLServerCertVerificationJob::Run() {
       overridableErrorCategory);
 
   // NB: finalError may be 0 here, in which the connection will continue.
-  mResultTask->Dispatch(
+  nsresult rv = mResultTask->Dispatch(
       std::move(builtChainBytesArray), std::move(mPeerCertChain),
       nsITransportSecurityInfo::CERTIFICATE_TRANSPARENCY_NOT_APPLICABLE,
       EVStatus::NotEV, false, finalError, overridableErrorCategory,
       // If the certificate verifier returned Result::ERROR_BAD_CERT_DOMAIN, a
       // chain was built, so isCertChainRootBuiltInRoot is valid and
       // potentially useful. Otherwise, assume no chain was built.
-      rv == Result::ERROR_BAD_CERT_DOMAIN ? isCertChainRootBuiltInRoot : false,
+      result == Result::ERROR_BAD_CERT_DOMAIN ? isCertChainRootBuiltInRoot
+                                              : false,
       mProviderFlags, madeOCSPRequests);
-  return NS_OK;
+  if (NS_FAILED(rv)) {
+    // We can't release this off the STS thread because some parts of it
+    // are not threadsafe. Just leak mResultTask.
+    Unused << mResultTask.forget();
+  }
+  return rv;
 }
 
 // Takes information needed for cert verification, does some consistency
@@ -921,11 +911,15 @@ SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
     return SECFailure;
   }
 
-  UniqueCERTCertList peerCertChain(SSL_PeerCertificateChain(fd));
-  if (!peerCertChain) {
+  UniqueSECItemArray peerCertChain;
+  SECStatus rv =
+      SSL_PeerCertificateChainDER(fd, TempPtrToSetter(&peerCertChain));
+  if (rv != SECSuccess) {
     PR_SetError(PR_INVALID_STATE_ERROR, 0);
     return SECFailure;
   }
+  MOZ_ASSERT(peerCertChain,
+             "AuthCertificateHook: peerCertChain unexpectedly null");
 
   nsTArray<nsTArray<uint8_t>> peerCertsBytes =
       CreateCertBytesArray(peerCertChain);
@@ -956,16 +950,16 @@ SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd, PRBool checkSig,
   socketInfo->GetProviderFlags(&providerFlags);
 
   uint32_t certVerifierFlags = 0;
-  if (!socketInfo->SharedState().IsOCSPStaplingEnabled() ||
-      !socketInfo->SharedState().IsOCSPMustStapleEnabled()) {
+  if (!StaticPrefs::security_ssl_enable_ocsp_stapling() ||
+      !StaticPrefs::security_ssl_enable_ocsp_must_staple()) {
     certVerifierFlags |= CertVerifier::FLAG_TLS_IGNORE_STATUS_REQUEST;
   }
 
   // Get DC information
   Maybe<DelegatedCredentialInfo> dcInfo;
   SSLPreliminaryChannelInfo channelPreInfo;
-  SECStatus rv = SSL_GetPreliminaryChannelInfo(fd, &channelPreInfo,
-                                               sizeof(channelPreInfo));
+  rv = SSL_GetPreliminaryChannelInfo(fd, &channelPreInfo,
+                                     sizeof(channelPreInfo));
   if (rv != SECSuccess) {
     PR_SetError(PR_INVALID_STATE_ERROR, 0);
     return SECFailure;
@@ -1015,11 +1009,8 @@ SECStatus AuthCertificateHookWithInfo(
   }
 
   uint32_t certVerifierFlags = 0;
-  // QuicSocketControl does not have a SharedState as NSSSocketControl.
-  // Here we need prefs for ocsp. This are prefs they are the same for
-  // PublicSSLState and PrivateSSLState, just take them from one of them.
-  if (!PublicSSLState()->IsOCSPStaplingEnabled() ||
-      !PublicSSLState()->IsOCSPMustStapleEnabled()) {
+  if (!StaticPrefs::security_ssl_enable_ocsp_stapling() ||
+      !StaticPrefs::security_ssl_enable_ocsp_must_staple()) {
     certVerifierFlags |= CertVerifier::FLAG_TLS_IGNORE_STATUS_REQUEST;
   }
 
@@ -1047,7 +1038,7 @@ SSLServerCertVerificationResult::SSLServerCertVerificationResult(
           nsITransportSecurityInfo::OverridableErrorCategory::ERROR_UNSET),
       mProviderFlags(0) {}
 
-void SSLServerCertVerificationResult::Dispatch(
+nsresult SSLServerCertVerificationResult::Dispatch(
     nsTArray<nsTArray<uint8_t>>&& aBuiltChain,
     nsTArray<nsTArray<uint8_t>>&& aPeerCertChain,
     uint16_t aCertificateTransparencyStatus, EVStatus aEVStatus,
@@ -1093,11 +1084,12 @@ void SSLServerCertVerificationResult::Dispatch(
   if (!stsTarget) {
     // This has to be released on STS; just leak it
     Unused << mSocketControl.forget();
-    return;
+    return NS_ERROR_FAILURE;
   }
   rv = stsTarget->Dispatch(this, NS_DISPATCH_NORMAL);
   MOZ_ASSERT(NS_SUCCEEDED(rv),
              "Failed to dispatch SSLServerCertVerificationResult");
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -1113,12 +1105,6 @@ SSLServerCertVerificationResult::Run() {
 
   MOZ_ASSERT(onSTSThread);
 #endif
-
-  if (mSucceeded && !XRE_IsSocketProcess() &&
-      !(mProviderFlags & nsISocketProvider::NO_PERMANENT_STORAGE)) {
-    // This dispatches an event that will run when the socket thread is idle.
-    SaveIntermediateCerts(mBuiltChain);
-  }
 
   mSocketControl->SetMadeOCSPRequests(mMadeOCSPRequests);
   mSocketControl->SetIsBuiltCertChainRootBuiltInRoot(

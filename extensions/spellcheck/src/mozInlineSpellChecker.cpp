@@ -52,9 +52,6 @@
 #include "mozilla/dom/MouseEvent.h"
 #include "mozilla/dom/Selection.h"
 #include "mozInlineSpellWordUtil.h"
-#ifdef ACCESSIBILITY
-#  include "nsAccessibilityService.h"
-#endif
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
 #include "nsGenericHTMLElement.h"
@@ -1488,7 +1485,7 @@ nsresult mozInlineSpellChecker::SpellCheckerSlice::Execute() {
         mSpellCheckSelection.GetRangesForInterval(
             *beginNode, AssertedCast<uint32_t>(beginOffset), *endNode,
             AssertedCast<uint32_t>(endOffset), true, ranges, erv);
-        ENSURE_SUCCESS(erv, erv.StealNSResult());
+        RETURN_NSRESULT_ON_FAILURE(erv);
         oldRangesToRemove.AppendElements(std::move(ranges));
       }
     }
@@ -1777,11 +1774,6 @@ nsresult mozInlineSpellChecker::RemoveRange(Selection* aSpellCheckSelection,
     if (mNumWordsInSpellSelection) {
       mNumWordsInSpellSelection--;
     }
-#ifdef ACCESSIBILITY
-    if (nsAccessibilityService* accService = GetAccService()) {
-      accService->SpellCheckRangeChanged(*aRange);
-    }
-#endif
   }
 
   return rv.StealNSResult();
@@ -1891,11 +1883,6 @@ nsresult mozInlineSpellChecker::AddRange(Selection* aSpellCheckSelection,
       rv = err.StealNSResult();
     } else {
       mNumWordsInSpellSelection++;
-#ifdef ACCESSIBILITY
-      if (nsAccessibilityService* accService = GetAccService()) {
-        accService->SpellCheckRangeChanged(*aRange);
-      }
-#endif
     }
   }
 

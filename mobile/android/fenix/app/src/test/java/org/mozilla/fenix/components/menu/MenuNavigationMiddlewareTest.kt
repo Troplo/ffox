@@ -6,6 +6,7 @@ package org.mozilla.fenix.components.menu
 
 import androidx.navigation.NavController
 import androidx.navigation.NavHostController
+import androidx.navigation.NavOptions
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
@@ -22,6 +23,7 @@ import mozilla.components.service.fxa.manager.AccountState.AuthenticationProblem
 import mozilla.components.service.fxa.manager.AccountState.NotAuthenticated
 import mozilla.components.support.test.rule.MainCoroutineRule
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.R
@@ -270,12 +272,14 @@ class MenuNavigationMiddlewareTest {
     @Test
     fun `GIVEN current site is installable WHEN navigate to add to home screen is dispatched THEN invoke add to home screen use case`() = runTest {
         val tab = createTab(url = "https://www.mozilla.org")
+        var dismissWasCalled = false
         val store = createStore(
             menuState = MenuState(
                 browserMenuState = BrowserMenuState(
                     selectedTab = tab,
                 ),
             ),
+            onDismiss = { dismissWasCalled = true },
         )
 
         every { webAppUseCases.isInstallable() } returns true
@@ -283,6 +287,7 @@ class MenuNavigationMiddlewareTest {
         store.dispatch(MenuAction.Navigate.AddToHomeScreen).join()
 
         coVerify(exactly = 1) { webAppUseCases.addToHomescreen() }
+        assertTrue(dismissWasCalled)
     }
 
     @Test
@@ -304,6 +309,9 @@ class MenuNavigationMiddlewareTest {
             navController.nav(
                 R.id.menuDialogFragment,
                 MenuDialogFragmentDirections.actionMenuDialogFragmentToCreateShortcutFragment(),
+                navOptions = NavOptions.Builder()
+                    .setPopUpTo(R.id.browserFragment, false)
+                    .build(),
             )
         }
     }
@@ -403,6 +411,9 @@ class MenuNavigationMiddlewareTest {
             navController.nav(
                 R.id.menuDialogFragment,
                 MenuDialogFragmentDirections.actionMenuDialogFragmentToTranslationsDialogFragment(),
+                navOptions = NavOptions.Builder()
+                    .setPopUpTo(R.id.browserFragment, false)
+                    .build(),
             )
         }
     }
@@ -440,6 +451,9 @@ class MenuNavigationMiddlewareTest {
                     ),
                     showPage = true,
                 ),
+                navOptions = NavOptions.Builder()
+                    .setPopUpTo(R.id.browserFragment, false)
+                    .build(),
             )
         }
     }
@@ -475,6 +489,9 @@ class MenuNavigationMiddlewareTest {
                     ),
                     showPage = true,
                 ),
+                navOptions = NavOptions.Builder()
+                    .setPopUpTo(R.id.browserFragment, false)
+                    .build(),
             )
         }
     }
@@ -504,6 +521,20 @@ class MenuNavigationMiddlewareTest {
         store.dispatch(MenuAction.Navigate.DiscoverMoreExtensions).join()
 
         assertEquals(AMO_HOMEPAGE_FOR_ANDROID, params?.url)
+    }
+
+    @Test
+    fun `WHEN navigate to extensions learn more action is dispatched THEN navigate to the SUMO page for installing add-ons`() = runTest {
+        var params: BrowserNavigationParams? = null
+        val store = createStore(
+            openToBrowser = {
+                params = it
+            },
+        )
+
+        store.dispatch(MenuAction.Navigate.ExtensionsLearnMore).join()
+
+        assertEquals(SumoTopic.FIND_INSTALL_ADDONS, params?.sumoTopic)
     }
 
     @Test
@@ -560,6 +591,7 @@ class MenuNavigationMiddlewareTest {
         menuState: MenuState = MenuState(),
         browsingModeManager: BrowsingModeManager = mockk(relaxed = true),
         openToBrowser: (params: BrowserNavigationParams) -> Unit = {},
+        onDismiss: suspend () -> Unit = {},
     ) = MenuStore(
         initialState = menuState,
         middleware = listOf(
@@ -570,6 +602,7 @@ class MenuNavigationMiddlewareTest {
                 openToBrowser = openToBrowser,
                 webAppUseCases = webAppUseCases,
                 settings = settings,
+                onDismiss = onDismiss,
                 scope = scope,
             ),
         ),

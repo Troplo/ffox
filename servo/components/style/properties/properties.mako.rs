@@ -93,11 +93,12 @@ pub mod longhands {
 }
 
 
-#[cfg(feature = "gecko")]
+% if engine == "gecko":
 #[allow(unsafe_code, missing_docs)]
 pub mod gecko {
     <%include file="/gecko.mako.rs" />
 }
+% endif
 
 
 macro_rules! unwrap_or_initial {
@@ -549,7 +550,8 @@ impl NonCustomPropertyId {
         debug_assert!(
             rule_types.contains(CssRuleType::Keyframe) ||
             rule_types.contains(CssRuleType::Page) ||
-            rule_types.contains(CssRuleType::Style),
+            rule_types.contains(CssRuleType::Style) ||
+            rule_types.contains(CssRuleType::PositionTry),
             "Declarations are only expected inside a keyframe, page, or style rule."
         );
 
@@ -819,7 +821,7 @@ impl LonghandIdSet {
 
     #[inline]
     pub(super) fn discrete_animatable() -> &'static Self {
-        ${static_longhand_id_set("DISCRETE_ANIMATABLE", lambda p: p.animation_value_type == "discrete")}
+        ${static_longhand_id_set("DISCRETE_ANIMATABLE", lambda p: p.animation_type == "discrete")}
         &DISCRETE_ANIMATABLE
     }
 
@@ -1613,14 +1615,23 @@ pub mod style_structs {
                 })
             }
 
+            /// Returns whether animation-timeline is initial value. We need this information to
+            /// resolve animation-duration.
+            #[cfg(feature = "servo")]
+            pub fn has_initial_animation_timeline(&self) -> bool {
+                self.animation_timeline_count() == 1 && self.animation_timeline_at(0).is_auto()
+            }
+
             /// Returns whether there is any named progress timeline specified with
             /// scroll-timeline-name other than `none`.
+            #[cfg(feature = "gecko")]
             pub fn specifies_scroll_timelines(&self) -> bool {
                 self.scroll_timeline_name_iter().any(|name| !name.is_none())
             }
 
             /// Returns whether there is any named progress timeline specified with
             /// view-timeline-name other than `none`.
+            #[cfg(feature = "gecko")]
             pub fn specifies_view_timelines(&self) -> bool {
                 self.view_timeline_name_iter().any(|name| !name.is_none())
             }

@@ -13,10 +13,11 @@ Services.scriptloader.loadSubScript(
  *
  * @param {string} url
  */
-async function addTab(url) {
+async function addTab(url, message, win = window) {
   logAction(url);
+  info(message);
   const tab = await BrowserTestUtils.openNewForegroundTab(
-    gBrowser,
+    win.gBrowser,
     url,
     true // Wait for load
   );
@@ -24,6 +25,37 @@ async function addTab(url) {
     tab,
     removeTab() {
       BrowserTestUtils.removeTab(tab);
+    },
+    /**
+     * Runs a callback in the content page. The function's contents are serialized as
+     * a string, and run in the page. The `translations-test.mjs` module is made
+     * available to the page.
+     *
+     * @param {(TranslationsTest: import("./translations-test.mjs")) => any} callback
+     * @returns {Promise<void>}
+     */
+    runInPage(callback, data = {}) {
+      // ContentTask.spawn runs the `Function.prototype.toString` on this function in
+      // order to send it into the content process. The following function is doing its
+      // own string manipulation in order to load in the TranslationsTest module.
+      const fn = new Function(/* js */ `
+        const TranslationsTest = ChromeUtils.importESModule(
+          "chrome://mochitests/content/browser/toolkit/components/translations/tests/browser/translations-test.mjs"
+        );
+
+        // Pass in the values that get injected by the task runner.
+        TranslationsTest.setup({Assert, ContentTaskUtils, content});
+
+        const data = ${JSON.stringify(data)};
+
+        return (${callback.toString()})(TranslationsTest, data);
+      `);
+
+      return ContentTask.spawn(
+        tab.linkedBrowser,
+        {}, // Data to inject.
+        fn
+      );
     },
   };
 }
@@ -60,6 +92,17 @@ function focusElementAndSynthesizeKey(element, key) {
   assertVisibility({ visible: { element } });
   element.focus();
   EventUtils.synthesizeKey(key);
+}
+
+/**
+ * Focuses the given window object, moving it to the top of all open windows.
+ *
+ * @param {Window} win
+ */
+async function focusWindow(win) {
+  const windowFocusPromise = BrowserTestUtils.waitForEvent(win, "focus");
+  win.focus();
+  await windowFocusPromise;
 }
 
 /**
@@ -197,6 +240,24 @@ function logAction(...params) {
       ""
     )}`
   );
+}
+
+/**
+ * Returns true if Full-Page Translations is currently active, otherwise false.
+ *
+ * @returns {boolean}
+ */
+function isFullPageTranslationsActive() {
+  try {
+    const { requestedTranslationPair } =
+      TranslationsParent.getTranslationsActor(
+        gBrowser.selectedBrowser
+      ).languageState;
+    return !!requestedTranslationPair;
+  } catch {
+    // Translations actor unavailable, continue on.
+  }
+  return false;
 }
 
 /**
@@ -344,14 +405,14 @@ class SharedTranslationsTestUtils {
       menuList.label,
       `The label for the menulist ${menuList.id} should not be empty.`
     );
-    if (langTag) {
+    if (langTag !== undefined) {
       is(
         menuList.value,
         langTag,
         `Expected ${menuList.id} selection to match '${langTag}'`
       );
     }
-    if (l10nId) {
+    if (l10nId !== undefined) {
       is(
         menuList.getAttribute("data-l10n-id"),
         l10nId,
@@ -712,8 +773,9 @@ class FullPageTranslationsTestUtils {
         errorMessage: false,
         errorMessageHint: false,
         errorHintAction: false,
-        fromMenuList: false,
         fromLabel: false,
+        fromMenuList: false,
+        fromMenuPopup: false,
         header: false,
         intro: false,
         introLearnMoreLink: false,
@@ -721,6 +783,7 @@ class FullPageTranslationsTestUtils {
         restoreButton: false,
         toLabel: false,
         toMenuList: false,
+        toMenuPopup: false,
         translateButton: false,
         unsupportedHeader: false,
         unsupportedHint: false,
@@ -929,9 +992,11 @@ class FullPageTranslationsTestUtils {
    * @param {object} options - Options containing 'langTag' and 'l10nId' to assert against.
    * @param {string} [options.langTag] - The BCP-47 language tag to match.
    * @param {string} [options.l10nId] - The localization Id to match.
+   * @param {ChromeWindow} [options.win]
+   *  - An optional ChromeWindow, for multi-window tests.
    */
-  static assertSelectedFromLanguage({ langTag, l10nId }) {
-    const { fromMenuList } = FullPageTranslationsPanel.elements;
+  static assertSelectedFromLanguage({ langTag, l10nId, win = window }) {
+    const { fromMenuList } = win.FullPageTranslationsPanel.elements;
     SharedTranslationsTestUtils._assertSelectedLanguage(fromMenuList, {
       langTag,
       l10nId,
@@ -944,9 +1009,11 @@ class FullPageTranslationsTestUtils {
    * @param {object} options - Options containing 'langTag' and 'l10nId' to assert against.
    * @param {string} [options.langTag] - The BCP-47 language tag to match.
    * @param {string} [options.l10nId] - The localization Id to match.
+   * @param {ChromeWindow} [options.win]
+   *  - An optional ChromeWindow, for multi-window tests.
    */
-  static assertSelectedToLanguage({ langTag, l10nId }) {
-    const { toMenuList } = FullPageTranslationsPanel.elements;
+  static assertSelectedToLanguage({ langTag, l10nId, win = window }) {
+    const { toMenuList } = win.FullPageTranslationsPanel.elements;
     SharedTranslationsTestUtils._assertSelectedLanguage(toMenuList, {
       langTag,
       l10nId,
@@ -1131,10 +1198,13 @@ class FullPageTranslationsTestUtils {
 
   /**
    * Simulates clicking the restore-page button.
+   *
+   * @param {ChromeWindow} [win]
+   *  - An optional ChromeWindow, for multi-window tests.
    */
-  static async clickRestoreButton() {
+  static async clickRestoreButton(win = window) {
     logAction();
-    const { restoreButton } = FullPageTranslationsPanel.elements;
+    const { restoreButton } = win.FullPageTranslationsPanel.elements;
     assertVisibility({ visible: { restoreButton } });
     await FullPageTranslationsTestUtils.waitForPanelPopupEvent(
       "popuphidden",
@@ -1206,6 +1276,8 @@ class FullPageTranslationsTestUtils {
    *  - Open the panel from the app menu. If false, uses the translations button.
    * @param {boolean} config.openWithKeyboard
    *  - Open the panel by synthesizing the keyboard. If false, synthesizes the mouse.
+   * @param {string} [config.expectedFromLanguage] - The expected from-language tag.
+   * @param {string} [config.expectedToLanguage] - The expected to-language tag.
    * @param {ChromeWindow} [config.win]
    *  - An optional window for multi-window tests.
    */
@@ -1213,6 +1285,8 @@ class FullPageTranslationsTestUtils {
     onOpenPanel = null,
     openFromAppMenu = false,
     openWithKeyboard = false,
+    expectedFromLanguage = undefined,
+    expectedToLanguage = undefined,
     win = window,
   }) {
     logAction();
@@ -1228,6 +1302,18 @@ class FullPageTranslationsTestUtils {
         win,
         onOpenPanel,
         openWithKeyboard,
+      });
+    }
+    if (expectedFromLanguage !== undefined) {
+      FullPageTranslationsTestUtils.assertSelectedFromLanguage({
+        win,
+        langTag: expectedFromLanguage,
+      });
+    }
+    if (expectedToLanguage !== undefined) {
+      FullPageTranslationsTestUtils.assertSelectedToLanguage({
+        win,
+        langTag: expectedToLanguage,
       });
     }
   }
@@ -1341,27 +1427,84 @@ class FullPageTranslationsTestUtils {
   }
 
   /**
+   * Changes the selected language by opening the dropdown menu for each provided language tag.
+   *
+   * @param {string} langTag - The BCP-47 language tag to select from the dropdown menu.
+   * @param {object} elements - Elements involved in the dropdown language selection process.
+   * @param {Element} elements.menuList - The element that triggers the dropdown menu.
+   * @param {Element} elements.menuPopup - The dropdown menu element containing selectable languages.
+   * @param {ChromeWindow} [win]
+   *  - An optional ChromeWindow, for multi-window tests.
+   *
+   * @returns {Promise<void>}
+   */
+  static async #changeSelectedLanguage(langTag, elements, win = window) {
+    const { menuList, menuPopup } = elements;
+
+    await FullPageTranslationsTestUtils.waitForPanelPopupEvent(
+      "popupshown",
+      () => click(menuList),
+      null /* postEventAssertion */,
+      win
+    );
+
+    const menuItem = menuPopup.querySelector(`[value="${langTag}"]`);
+    await FullPageTranslationsTestUtils.waitForPanelPopupEvent(
+      "popuphidden",
+      () => {
+        click(menuItem);
+        // Synthesizing a click on the menuitem isn't closing the popup
+        // as a click normally would, so this tab keypress is added to
+        // ensure the popup closes.
+        EventUtils.synthesizeKey("KEY_Tab", {}, win);
+      },
+      null /* postEventAssertion */,
+      win
+    );
+  }
+
+  /**
    * Switches the selected from-language to the provided language tag.
    *
-   * @param {string} langTag - A BCP-47 language tag.
+   * @param {object} options
+   * @param {string} options.langTag - A BCP-47 language tag.
+   * @param {ChromeWindow} [options.win]
+   *  - An optional ChromeWindow, for multi-window tests.
    */
-  static changeSelectedFromLanguage(langTag) {
+  static async changeSelectedFromLanguage({ langTag, win = window }) {
     logAction(langTag);
-    const { fromMenuList } = FullPageTranslationsPanel.elements;
-    fromMenuList.value = langTag;
-    fromMenuList.dispatchEvent(new Event("command"));
+    const { fromMenuList: menuList, fromMenuPopup: menuPopup } =
+      win.FullPageTranslationsPanel.elements;
+    await FullPageTranslationsTestUtils.#changeSelectedLanguage(
+      langTag,
+      {
+        menuList,
+        menuPopup,
+      },
+      win
+    );
   }
 
   /**
    * Switches the selected to-language to the provided language tag.
    *
-   * @param {string} langTag - A BCP-47 language tag.
+   * @param {object} options
+   * @param {string} options.langTag - A BCP-47 language tag.
+   * @param {ChromeWindow} [options.win]
+   *  - An optional ChromeWindow, for multi-window tests.
    */
-  static changeSelectedToLanguage(langTag) {
+  static async changeSelectedToLanguage({ langTag, win = window }) {
     logAction(langTag);
-    const { toMenuList } = FullPageTranslationsPanel.elements;
-    toMenuList.value = langTag;
-    toMenuList.dispatchEvent(new Event("command"));
+    const { toMenuList: menuList, toMenuPopup: menuPopup } =
+      win.FullPageTranslationsPanel.elements;
+    await FullPageTranslationsTestUtils.#changeSelectedLanguage(
+      langTag,
+      {
+        menuList,
+        menuPopup,
+      },
+      win
+    );
   }
 
   /**
@@ -1513,6 +1656,8 @@ class SelectTranslationsTestUtils {
       if (expectedTargetLanguage) {
         // Target language expected, check for the data-l10n-id with a `{$language}` argument.
         const expectedL10nId =
+          selectH1 ||
+          selectPdfSpan ||
           selectFrenchSection ||
           selectEnglishSection ||
           selectSpanishSection ||
@@ -1521,26 +1666,34 @@ class SelectTranslationsTestUtils {
           selectSpanishSentence
             ? "main-context-menu-translate-selection-to-language"
             : "main-context-menu-translate-link-text-to-language";
+
+        await waitForCondition(
+          () =>
+            menuItem.getAttribute("target-language") === expectedTargetLanguage,
+          `Waiting for translate-selection context menu item to match the expected target language ${expectedTargetLanguage}`
+        );
         await waitForCondition(
           () => menuItem.getAttribute("data-l10n-id") === expectedL10nId,
-          `Waiting for translate-selection context menu item to localize with target language ${expectedTargetLanguage}`
+          `Waiting for translate-selection context menu item to have the correct data-l10n-id '${expectedL10nId}`
         );
 
-        is(
-          menuItem.getAttribute("data-l10n-id"),
-          expectedL10nId,
-          "Expected the translate-selection context menu item to be localized with a target language."
-        );
-
-        const l10nArgs = JSON.parse(menuItem.getAttribute("data-l10n-args"));
-        is(
-          l10nArgs.language,
-          getIntlDisplayName(expectedTargetLanguage),
-          `Expected the translate-selection context menu item to have the target language '${expectedTargetLanguage}'.`
-        );
+        if (Services.locale.appLocaleAsBCP47 === "en-US") {
+          // We only want to test the localized name in CI if the current app locale is the default (en-US).
+          const expectedLanguageDisplayName = getIntlDisplayName(
+            expectedTargetLanguage
+          );
+          await waitForCondition(() => {
+            const l10nArgs = JSON.parse(
+              menuItem.getAttribute("data-l10n-args")
+            );
+            return l10nArgs.language === expectedLanguageDisplayName;
+          }, `Waiting for translate-selection context menu item to have the correct data-l10n-args '${expectedLanguageDisplayName}`);
+        }
       } else {
         // No target language expected, check for the data-l10n-id that has no `{$language}` argument.
         const expectedL10nId =
+          selectH1 ||
+          selectPdfSpan ||
           selectFrenchSection ||
           selectEnglishSection ||
           selectSpanishSection ||
@@ -1550,17 +1703,54 @@ class SelectTranslationsTestUtils {
             ? "main-context-menu-translate-selection"
             : "main-context-menu-translate-link-text";
         await waitForCondition(
-          () => menuItem.getAttribute("data-l10n-id") === expectedL10nId,
-          "Waiting for translate-selection context menu item to localize without target language."
+          () => !menuItem.getAttribute("target-language"),
+          "Waiting for translate-selection context menu item to remove its target-language attribute."
         );
-
-        is(
-          menuItem.getAttribute("data-l10n-id"),
-          expectedL10nId,
-          "Expected the translate-selection context menu item to be localized without a target language."
+        await waitForCondition(
+          () => menuItem.getAttribute("data-l10n-id") === expectedL10nId,
+          `Waiting for translate-selection context menu item to have the correct data-l10n-id '${expectedL10nId}`
         );
       }
     }
+  }
+
+  /**
+   * Tests that the context menu displays the expected target language for translation based on
+   * the provided configurations.
+   *
+   * @param {object} options - Options for configuring the test environment and expected language behavior.
+   * @param {Array.<string>} options.runInPage - A content-exposed function to run within the context of the page.
+   * @param {Array.<string>} [options.systemLocales=[]] - Locales to mock as system locales.
+   * @param {Array.<string>} [options.appLocales=[]] - Locales to mock as application locales.
+   * @param {Array.<string>} [options.webLanguages=[]] - Languages to mock as web languages.
+   * @param {string} options.expectedTargetLanguage - The expected target language for the translate-selection item.
+   */
+  static async testContextMenuItemWithLocales({
+    runInPage,
+    systemLocales = [],
+    appLocales = [],
+    webLanguages = [],
+    expectedTargetLanguage,
+  }) {
+    const cleanupLocales = await mockLocales({
+      systemLocales,
+      appLocales,
+      webLanguages,
+    });
+
+    await SelectTranslationsTestUtils.assertContextMenuTranslateSelectionItem(
+      runInPage,
+      {
+        selectSpanishSentence: true,
+        openAtSpanishSentence: true,
+        expectMenuItemVisible: true,
+        expectedTargetLanguage,
+      },
+      `The translate-selection context menu item should match the expected target language '${expectedTargetLanguage}'`
+    );
+
+    await closeAllOpenPanelsAndMenus();
+    await cleanupLocales();
   }
 
   /**
@@ -1660,14 +1850,20 @@ class SelectTranslationsTestUtils {
       textArea: true,
       toLabel: true,
       toMenuList: true,
-      translateFullPageButton: !isFullPageTranslationsRestrictedForPage,
+      translateFullPageButton: !(
+        isFullPageTranslationsRestrictedForPage ||
+        isFullPageTranslationsActive()
+      ),
     });
     SelectTranslationsTestUtils.#assertConditionalUIEnabled({
       copyButton: true,
       doneButtonPrimary: true,
       textArea: true,
-      translateFullPageButton:
-        !sameLanguageSelected && !isFullPageTranslationsRestrictedForPage,
+      translateFullPageButton: !(
+        sameLanguageSelected ||
+        isFullPageTranslationsRestrictedForPage ||
+        isFullPageTranslationsActive()
+      ),
     });
 
     await waitForCondition(
@@ -1683,7 +1879,11 @@ class SelectTranslationsTestUtils {
     await SelectTranslationsTestUtils.#assertPanelTextAreaOverflow();
 
     let footerButtons;
-    if (sameLanguageSelected || isFullPageTranslationsRestrictedForPage) {
+    if (
+      sameLanguageSelected ||
+      isFullPageTranslationsRestrictedForPage ||
+      isFullPageTranslationsActive()
+    ) {
       footerButtons = [copyButton, doneButtonPrimary];
     } else {
       footerButtons =
@@ -1914,7 +2114,10 @@ class SelectTranslationsTestUtils {
       textArea: true,
       toLabel: true,
       toMenuList: true,
-      translateFullPageButton: !isFullPageTranslationsRestrictedForPage,
+      translateFullPageButton: !(
+        isFullPageTranslationsRestrictedForPage ||
+        isFullPageTranslationsActive()
+      ),
     });
     SelectTranslationsTestUtils.#assertPanelHasTranslatingPlaceholder();
   }
@@ -1943,7 +2146,8 @@ class SelectTranslationsTestUtils {
       doneButtonPrimary: true,
       translateFullPageButton:
         fromMenuList.value !== toMenuList.value &&
-        !isFullPageTranslationsRestrictedForPage,
+        !isFullPageTranslationsRestrictedForPage &&
+        !isFullPageTranslationsActive(),
     });
   }
 
@@ -1965,7 +2169,9 @@ class SelectTranslationsTestUtils {
       copyButton: true,
       doneButtonPrimary: true,
       translateFullPageButton:
-        fromLanguage !== toLanguage && !isFullPageTranslationsRestrictedForPage,
+        fromLanguage !== toLanguage &&
+        !isFullPageTranslationsRestrictedForPage &&
+        !isFullPageTranslationsActive(),
     });
 
     if (fromLanguage === toLanguage) {
@@ -2516,7 +2722,7 @@ class SelectTranslationsTestUtils {
 
       menuList.focus();
       menuList.value = langTag;
-      menuList.dispatchEvent(new Event("command"));
+      menuList.dispatchEvent(new Event("command", { bubbles: true }));
       await menuListUpdated;
     }
 

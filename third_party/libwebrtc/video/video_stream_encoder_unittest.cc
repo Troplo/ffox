@@ -152,7 +152,7 @@ class TestBuffer : public webrtc::I420Buffer {
       : I420Buffer(width, height), event_(event) {}
 
  private:
-  friend class rtc::RefCountedObject<TestBuffer>;
+  friend class RefCountedObject<TestBuffer>;
   ~TestBuffer() override {
     if (event_)
       event_->Set();
@@ -184,7 +184,7 @@ class FakeNativeBuffer : public webrtc::VideoFrameBuffer {
   }
 
  private:
-  friend class rtc::RefCountedObject<FakeNativeBuffer>;
+  friend class RefCountedObject<FakeNativeBuffer>;
   ~FakeNativeBuffer() override {
     if (event_)
       event_->Set();
@@ -216,7 +216,7 @@ class FakeNV12NativeBuffer : public webrtc::VideoFrameBuffer {
   const NV12BufferInterface* GetNV12() const { return nv12_buffer_.get(); }
 
  private:
-  friend class rtc::RefCountedObject<FakeNV12NativeBuffer>;
+  friend class RefCountedObject<FakeNV12NativeBuffer>;
   ~FakeNV12NativeBuffer() override {
     if (event_)
       event_->Set();
@@ -516,6 +516,7 @@ class CroppingVideoStreamFactory
 
  private:
   std::vector<VideoStream> CreateEncoderStreams(
+      const FieldTrialsView& /*field_trials*/,
       int frame_width,
       int frame_height,
       const VideoEncoderConfig& encoder_config) override {
@@ -767,8 +768,10 @@ class SimpleVideoStreamEncoderFactory {
 
   test::ScopedKeyValueConfig field_trials_;
   GlobalSimulatedTimeController time_controller_{Timestamp::Zero()};
-  std::unique_ptr<TaskQueueFactory> task_queue_factory_{
-      time_controller_.CreateTaskQueueFactory()};
+  Environment env_ =
+      CreateEnvironment(&field_trials_,
+                        time_controller_.GetClock(),
+                        time_controller_.CreateTaskQueueFactory());
   std::unique_ptr<MockableSendStatisticsProxy> stats_proxy_ =
       std::make_unique<MockableSendStatisticsProxy>(
           time_controller_.GetClock(),
@@ -779,7 +782,7 @@ class SimpleVideoStreamEncoderFactory {
       CreateBuiltinVideoBitrateAllocatorFactory();
   VideoStreamEncoderSettings encoder_settings_{
       VideoEncoder::Capabilities(/*loss_notification=*/false)};
-  MockFakeEncoder mock_fake_encoder_{time_controller_.GetClock()};
+  MockFakeEncoder mock_fake_encoder_{env_};
   test::VideoEncoderProxyFactory encoder_factory_{&mock_fake_encoder_};
   NullEncoderSink sink_;
 };
@@ -851,7 +854,7 @@ class VideoStreamEncoderTest : public ::testing::Test {
         codec_width_(320),
         codec_height_(240),
         max_framerate_(kDefaultFramerate),
-        fake_encoder_(&time_controller_),
+        fake_encoder_(env_),
         encoder_factory_(&fake_encoder_),
         stats_proxy_(new MockableSendStatisticsProxy(
             time_controller_.GetClock(),
@@ -1063,11 +1066,7 @@ class VideoStreamEncoderTest : public ::testing::Test {
 
   class TestEncoder : public test::FakeEncoder {
    public:
-    explicit TestEncoder(TimeController* time_controller)
-        : FakeEncoder(time_controller->GetClock()),
-          time_controller_(time_controller) {
-      RTC_DCHECK(time_controller_);
-    }
+    explicit TestEncoder(const Environment& env) : FakeEncoder(env) {}
 
     VideoEncoder::EncoderInfo GetEncoderInfo() const override {
       MutexLock lock(&local_mutex_);
@@ -1343,7 +1342,6 @@ class VideoStreamEncoderTest : public ::testing::Test {
       FakeEncoder::SetRates(adjusted_paramters);
     }
 
-    TimeController* const time_controller_;
     mutable Mutex local_mutex_;
     enum class EncoderState {
       kUninitialized,
@@ -1603,11 +1601,12 @@ class VideoStreamEncoderTest : public ::testing::Test {
         : bitrate_allocator_factory_(
               CreateBuiltinVideoBitrateAllocatorFactory()) {}
 
-    std::unique_ptr<VideoBitrateAllocator> CreateVideoBitrateAllocator(
+    std::unique_ptr<VideoBitrateAllocator> Create(
+        const Environment& env,
         const VideoCodec& codec) override {
       MutexLock lock(&mutex_);
       codec_config_ = codec;
-      return bitrate_allocator_factory_->CreateVideoBitrateAllocator(codec);
+      return bitrate_allocator_factory_->Create(env, codec);
     }
 
     VideoCodec codec_config() const {
@@ -4782,7 +4781,7 @@ TEST_F(VideoStreamEncoderTest, ReportsVideoBitrateAllocation) {
 
   const int kDefaultFps = 30;
   const VideoBitrateAllocation expected_bitrate =
-      SimulcastRateAllocator(fake_encoder_.config())
+      SimulcastRateAllocator(env_, fake_encoder_.config())
           .Allocate(VideoBitrateAllocationParameters(kLowTargetBitrate.bps(),
                                                      kDefaultFps));
 
@@ -6330,82 +6329,6 @@ TEST_F(VideoStreamEncoderTest,
   video_stream_encoder_->Stop();
 }
 
-TEST_F(VideoStreamEncoderTest, RampsUpInQualityWhenBwIsHigh) {
-  webrtc::test::ScopedKeyValueConfig field_trials(
-      field_trials_,
-      "WebRTC-Video-QualityRampupSettings/"
-      "min_pixels:921600,min_duration_ms:2000/");
-
-  const int kWidth = 1280;
-  const int kHeight = 720;
-  const int kFps = 10;
-  max_framerate_ = kFps;
-
-  // Reset encoder for field trials to take effect.
-  VideoEncoderConfig config = video_encoder_config_.Copy();
-  config.max_bitrate_bps = kTargetBitrate.bps();
-  DataRate max_bitrate = DataRate::BitsPerSec(config.max_bitrate_bps);
-  ConfigureEncoder(std::move(config));
-  fake_encoder_.SetQp(kQpLow);
-
-  // Enable MAINTAIN_FRAMERATE preference.
-  AdaptingFrameForwarder source(&time_controller_);
-  source.set_adaptation_enabled(true);
-  video_stream_encoder_->SetSource(&source,
-                                   DegradationPreference::MAINTAIN_FRAMERATE);
-
-  // Start at low bitrate.
-  const DataRate kLowBitrate = DataRate::KilobitsPerSec(200);
-  video_stream_encoder_->OnBitrateUpdatedAndWaitForManagedResources(
-      kLowBitrate, kLowBitrate, kLowBitrate, 0, 0, 0);
-
-  // Expect first frame to be dropped and resolution to be limited.
-  const int64_t kFrameIntervalMs = 1000 / kFps;
-  int64_t timestamp_ms = kFrameIntervalMs;
-  source.IncomingCapturedFrame(CreateFrame(timestamp_ms, kWidth, kHeight));
-  ExpectDroppedFrame();
-  EXPECT_TRUE_WAIT(source.sink_wants().max_pixel_count < kWidth * kHeight,
-                   5000);
-
-  // Increase bitrate to encoder max.
-  video_stream_encoder_->OnBitrateUpdatedAndWaitForManagedResources(
-      max_bitrate, max_bitrate, max_bitrate, 0, 0, 0);
-
-  // Insert frames and advance `min_duration_ms`.
-  const int64_t start_bw_high_ms = CurrentTimeMs();
-  for (size_t i = 1; i <= 10; i++) {
-    timestamp_ms += kFrameIntervalMs;
-    source.IncomingCapturedFrame(CreateFrame(timestamp_ms, kWidth, kHeight));
-    WaitForEncodedFrame(timestamp_ms);
-  }
-
-  // Advance to `min_duration_ms` - 1, frame should not trigger high BW.
-  int64_t elapsed_bw_high_ms = CurrentTimeMs() - start_bw_high_ms;
-  AdvanceTime(TimeDelta::Millis(2000 - elapsed_bw_high_ms - 1));
-  timestamp_ms += kFrameIntervalMs;
-  source.IncomingCapturedFrame(CreateFrame(timestamp_ms, kWidth, kHeight));
-  WaitForEncodedFrame(timestamp_ms);
-  EXPECT_TRUE(stats_proxy_->GetStats().bw_limited_resolution);
-  EXPECT_LT(source.sink_wants().max_pixel_count, kWidth * kHeight);
-
-  // Frame should trigger high BW and release quality limitation.
-  timestamp_ms += kFrameIntervalMs;
-  source.IncomingCapturedFrame(CreateFrame(timestamp_ms, kWidth, kHeight));
-  WaitForEncodedFrame(timestamp_ms);
-  // The ramp-up code involves the adaptation queue, give it time to execute.
-  // TODO(hbos): Can we await an appropriate event instead?
-  video_stream_encoder_->WaitUntilTaskQueueIsIdle();
-  EXPECT_THAT(source.sink_wants(), UnlimitedSinkWants());
-
-  // Frame should not be adapted.
-  timestamp_ms += kFrameIntervalMs;
-  source.IncomingCapturedFrame(CreateFrame(timestamp_ms, kWidth, kHeight));
-  WaitForEncodedFrame(kWidth, kHeight);
-  EXPECT_FALSE(stats_proxy_->GetStats().bw_limited_resolution);
-
-  video_stream_encoder_->Stop();
-}
-
 TEST_F(VideoStreamEncoderTest,
        QualityScalerAdaptationsRemovedWhenQualityScalingDisabled) {
   webrtc::test::ScopedKeyValueConfig field_trials(
@@ -7377,8 +7300,7 @@ TEST_F(VideoStreamEncoderTest, DropsFramesWhenEncoderOvershoots) {
   // of video, verify number of drops. Rate needs to be slightly changed in
   // order to force the rate to be reconfigured.
   double overshoot_factor = 2.0;
-  const RateControlSettings trials =
-      RateControlSettings::ParseFromFieldTrials();
+  const RateControlSettings trials(env_.field_trials());
   if (trials.UseEncoderBitrateAdjuster()) {
     // With bitrate adjuster, when need to overshoot even more to trigger
     // frame dropping since the adjuter will try to just lower the target
@@ -8090,65 +8012,6 @@ TEST_F(VideoStreamEncoderTest,
       /*cwnd_reduce_ratio=*/0);
   video_stream_encoder_->WaitUntilTaskQueueIsIdle();
   EXPECT_EQ(1, fake_encoder_.GetNumSetRates());
-  video_stream_encoder_->Stop();
-}
-
-TEST_F(VideoStreamEncoderTest, AutomaticAnimationDetection) {
-  test::ScopedKeyValueConfig field_trials(
-      field_trials_,
-      "WebRTC-AutomaticAnimationDetectionScreenshare/"
-      "enabled:true,min_fps:20,min_duration_ms:1000,min_area_ratio:0.8/");
-  const int kFramerateFps = 30;
-  const int kWidth = 1920;
-  const int kHeight = 1080;
-  const int kNumFrames = 2 * kFramerateFps;  // >1 seconds of frames.
-  ASSERT_EQ(video_encoder_config_.simulcast_layers.size(), 1u);
-  // Works on screenshare mode.
-  ResetEncoder("VP8", 1, 1, 1, /*screenshare*/ true,
-               /*max_frame_rate=*/kFramerateFps);
-  // We rely on the automatic resolution adaptation, but we handle framerate
-  // adaptation manually by mocking the stats proxy.
-  video_source_.set_adaptation_enabled(true);
-
-  // BALANCED degradation preference is required for this feature.
-  video_stream_encoder_->OnBitrateUpdatedAndWaitForManagedResources(
-      kTargetBitrate, kTargetBitrate, kTargetBitrate, 0, 0, 0);
-  video_stream_encoder_->SetSource(&video_source_,
-                                   webrtc::DegradationPreference::BALANCED);
-  EXPECT_THAT(video_source_.sink_wants(), WantsFps(Eq(kFramerateFps)));
-
-  VideoFrame frame = CreateFrame(1, kWidth, kHeight);
-  frame.set_update_rect(VideoFrame::UpdateRect{0, 0, kWidth, kHeight});
-
-  // Pass enough frames with the full update to trigger animation detection.
-  for (int i = 0; i < kNumFrames; ++i) {
-    int64_t timestamp_ms = CurrentTimeMs();
-    frame.set_ntp_time_ms(timestamp_ms);
-    frame.set_timestamp_us(timestamp_ms * 1000);
-    video_source_.IncomingCapturedFrame(frame);
-    WaitForEncodedFrame(timestamp_ms);
-  }
-
-  // Resolution should be limited.
-  rtc::VideoSinkWants expected;
-  expected.max_framerate_fps = kFramerateFps;
-  expected.max_pixel_count = 1280 * 720 + 1;
-  EXPECT_THAT(video_source_.sink_wants(), FpsEqResolutionLt(expected));
-
-  // Pass one frame with no known update.
-  //  Resolution cap should be removed immediately.
-  int64_t timestamp_ms = CurrentTimeMs();
-  frame.set_ntp_time_ms(timestamp_ms);
-  frame.set_timestamp_us(timestamp_ms * 1000);
-  frame.clear_update_rect();
-
-  video_source_.IncomingCapturedFrame(frame);
-  WaitForEncodedFrame(timestamp_ms);
-
-  // Resolution should be unlimited now.
-  EXPECT_THAT(video_source_.sink_wants(),
-              FpsMatchesResolutionMax(Eq(kFramerateFps)));
-
   video_stream_encoder_->Stop();
 }
 
@@ -9410,8 +9273,7 @@ TEST(VideoStreamEncoderSimpleTest, CreateDestroy) {
       &env.clock(), VideoSendStream::Config(nullptr),
       webrtc::VideoEncoderConfig::ContentType::kRealtimeVideo,
       env.field_trials());
-  SimpleVideoStreamEncoderFactory::MockFakeEncoder mock_fake_encoder(
-      time_controller.GetClock());
+  SimpleVideoStreamEncoderFactory::MockFakeEncoder mock_fake_encoder(env);
   test::VideoEncoderProxyFactory encoder_factory(&mock_fake_encoder);
   std::unique_ptr<VideoBitrateAllocatorFactory> bitrate_allocator_factory =
       CreateBuiltinVideoBitrateAllocatorFactory();
@@ -9705,9 +9567,7 @@ TEST(VideoStreamEncoderFrameCadenceTest,
       factory.GetTimeController()->GetTaskQueueFactory()->CreateTaskQueue(
           "EncoderQueue", TaskQueueFactory::Priority::NORMAL);
 
-  // Enables zero-hertz mode.
-  test::ScopedKeyValueConfig field_trials(
-      "WebRTC-ZeroHertzScreenshare/Enabled/");
+  test::ScopedKeyValueConfig field_trials;
   auto adapter = FrameCadenceAdapterInterface::Create(
       factory.GetTimeController()->GetClock(), encoder_queue.get(),
       /*metronome=*/nullptr, /*worker_queue=*/nullptr, field_trials);

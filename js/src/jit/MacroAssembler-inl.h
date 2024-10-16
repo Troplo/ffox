@@ -191,7 +191,11 @@ ABIFunctionType MacroAssembler::signature() const {
     case Args_Double_None:
     case Args_Int_Double:
     case Args_Float32_Float32:
+    case Args_Float32_Float64:
+    case Args_Float32_General:
+    case Args_Float32_Int32:
     case Args_Int_Float32:
+    case Args_Int32_Float32:
     case Args_Double_Double:
     case Args_Double_Int:
     case Args_Double_DoubleInt:
@@ -409,8 +413,12 @@ void MacroAssembler::addPtr(ImmPtr imm, Register dest) {
 // ===============================================================
 // Branch functions
 
-template <class L>
-void MacroAssembler::branchIfFalseBool(Register reg, L label) {
+void MacroAssembler::branchTest64(Condition cond, Register64 lhs,
+                                  Register64 rhs, Label* success, Label* fail) {
+  branchTest64(cond, lhs, rhs, InvalidReg, success, fail);
+}
+
+void MacroAssembler::branchIfFalseBool(Register reg, Label* label) {
   // Note that C++ bool is only 1 byte, so ignore the higher-order bits.
   branchTest32(Assembler::Zero, reg, Imm32(0xFF), label);
 }

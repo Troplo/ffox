@@ -107,35 +107,32 @@ enum ReactionJobSlots {
   ReactionJobSlot_ReactionRecord = 0,
 };
 
+// Extended function slots used to pass arguments through to either
+// PromiseResolveThenableJob, or PromiseResolveBuiltinThenableJob when calling
+// the built-in `then`.
 enum ThenableJobSlots {
-  // The handler to use as the Promise reaction. It is a callable object
-  // that's guaranteed to be from the same compartment as the
-  // PromiseReactionJob.
-  ThenableJobSlot_Handler = 0,
-
-  // JobData - a, potentially CCW-wrapped, dense list containing data
-  // required for proper execution of the reaction.
-  ThenableJobSlot_JobData,
-};
-
-enum ThenableJobDataIndices {
   // The Promise to resolve using the given thenable.
-  ThenableJobDataIndex_Promise = 0,
+  //
+  // This can be a CCW when used for PromiseResolveThenableJob, otherwise it is
+  // guaranteed not to be.
+  ThenableJobSlot_Promise = 0,
 
   // The thenable to use as the receiver when calling the `then` function.
-  ThenableJobDataIndex_Thenable,
+  //
+  // This can be a CCW when used for PromiseResolveThenableJob, otherwise it is
+  // guaranteed not to be.
+  ThenableJobSlot_Thenable,
 
-  ThenableJobDataLength,
+  // The handler to use as the Promise reaction, when not calling the built-in
+  // `then`. It is a callable object that's guaranteed to be from the same
+  // compartment as the PromiseReactionJob.
+  ThenableJobSlot_Handler,
+
+  ThenableJobSlot_Count
 };
 
-enum BuiltinThenableJobSlots {
-  // The Promise to resolve using the given thenable.
-  BuiltinThenableJobSlot_Promise = 0,
-
-  // The thenable to use as the receiver when calling the built-in `then`
-  // function.
-  BuiltinThenableJobSlot_Thenable,
-};
+static_assert(size_t(ThenableJobSlot_Count) <=
+              size_t(FunctionExtended::SlotCount));
 
 struct PromiseCapability {
   JSObject* promise = nullptr;
@@ -239,7 +236,9 @@ class PromiseCombinatorDataHolder : public NativeObject {
 };
 
 const JSClass PromiseCombinatorDataHolder::class_ = {
-    "PromiseCombinatorDataHolder", JSCLASS_HAS_RESERVED_SLOTS(SlotsCount)};
+    "PromiseCombinatorDataHolder",
+    JSCLASS_HAS_RESERVED_SLOTS(SlotsCount),
+};
 
 // Smart pointer to the "F.[[Values]]" part of the state of a Promise.all or
 // Promise.allSettled invocation, or the "F.[[Errors]]" part of the state of a
@@ -543,7 +542,9 @@ class PromiseDebugInfo : public NativeObject {
 };
 
 const JSClass PromiseDebugInfo::class_ = {
-    "PromiseDebugInfo", JSCLASS_HAS_RESERVED_SLOTS(SlotCount)};
+    "PromiseDebugInfo",
+    JSCLASS_HAS_RESERVED_SLOTS(SlotCount),
+};
 
 double PromiseObject::allocationTime() {
   auto debugInfo = PromiseDebugInfo::FromPromise(this);
@@ -612,8 +613,8 @@ static bool MaybeGetAndClearExceptionAndStack(
  * be tedious, so the check in step 1 and the entirety of step 2 aren't
  * included.
  */
-static bool AbruptRejectPromise(JSContext* cx, CallArgs& args,
-                                HandleObject promiseObj, HandleObject reject) {
+bool js::AbruptRejectPromise(JSContext* cx, CallArgs& args,
+                             HandleObject promiseObj, HandleObject reject) {
   // Step 1.a. Perform
   //           ? Call(capability.[[Reject]], undefined, « value.[[Value]] »).
   RootedValue reason(cx);
@@ -913,7 +914,9 @@ class PromiseReactionRecord : public NativeObject {
 };
 
 const JSClass PromiseReactionRecord::class_ = {
-    "PromiseReactionRecord", JSCLASS_HAS_RESERVED_SLOTS(ReactionRecordSlots)};
+    "PromiseReactionRecord",
+    JSCLASS_HAS_RESERVED_SLOTS(ReactionRecordSlots),
+};
 
 static void AddPromiseFlags(PromiseObject& promise, int32_t flag) {
   int32_t flags = promise.flags();
@@ -2287,17 +2290,11 @@ static bool PromiseResolveThenableJob(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
   RootedFunction job(cx, &args.callee().as<JSFunction>());
+  RootedObject promise(
+      cx, &job->getExtendedSlot(ThenableJobSlot_Promise).toObject());
+  RootedValue thenable(cx, job->getExtendedSlot(ThenableJobSlot_Thenable));
   RootedValue then(cx, job->getExtendedSlot(ThenableJobSlot_Handler));
   MOZ_ASSERT(then.isObject());
-  Rooted<NativeObject*> jobArgs(cx,
-                                &job->getExtendedSlot(ThenableJobSlot_JobData)
-                                     .toObject()
-                                     .as<NativeObject>());
-
-  RootedObject promise(
-      cx, &jobArgs->getDenseElement(ThenableJobDataIndex_Promise).toObject());
-  RootedValue thenable(cx,
-                       jobArgs->getDenseElement(ThenableJobDataIndex_Thenable));
 
   // Step 1.a. Let resolvingFunctions be
   //           CreateResolvingFunctions(promiseToResolve).
@@ -2357,8 +2354,8 @@ static bool PromiseResolveThenableJob(JSContext* cx, unsigned argc, Value* vp) {
  * extended JSFunction object, with all information required for the job's
  * execution stored in the function's extended slots.
  *
- * Usage of the function's extended slots is described in the
- * BuiltinThenableJobSlots enum.
+ * Usage of the function's extended slots is described in the ThenableJobSlots
+ * enum.
  */
 static bool PromiseResolveBuiltinThenableJob(JSContext* cx, unsigned argc,
                                              Value* vp) {
@@ -2366,9 +2363,11 @@ static bool PromiseResolveBuiltinThenableJob(JSContext* cx, unsigned argc,
 
   RootedFunction job(cx, &args.callee().as<JSFunction>());
   RootedObject promise(
-      cx, &job->getExtendedSlot(BuiltinThenableJobSlot_Promise).toObject());
+      cx, &job->getExtendedSlot(ThenableJobSlot_Promise).toObject());
   RootedObject thenable(
-      cx, &job->getExtendedSlot(BuiltinThenableJobSlot_Thenable).toObject());
+      cx, &job->getExtendedSlot(ThenableJobSlot_Thenable).toObject());
+  // The handler slot is not used for builtin `then`.
+  MOZ_ASSERT(job->getExtendedSlot(ThenableJobSlot_Handler).isUndefined());
 
   cx->check(promise, thenable);
   MOZ_ASSERT(promise->is<PromiseObject>());
@@ -2483,25 +2482,11 @@ static bool PromiseResolveBuiltinThenableJob(JSContext* cx, unsigned argc,
     return false;
   }
 
-  // Store the `then` function on the callback.
+  // Set the `promiseToResolve`, `thenable` and `then` arguments on the
+  // callback.
+  job->setExtendedSlot(ThenableJobSlot_Promise, promiseToResolve);
+  job->setExtendedSlot(ThenableJobSlot_Thenable, thenable);
   job->setExtendedSlot(ThenableJobSlot_Handler, ObjectValue(*then));
-
-  // Create a dense array to hold the data needed for the reaction job to
-  // work.
-  // The layout is described in the ThenableJobDataIndices enum.
-  Rooted<ArrayObject*> data(
-      cx, NewDenseFullyAllocatedArray(cx, ThenableJobDataLength));
-  if (!data) {
-    return false;
-  }
-
-  // Set the `promiseToResolve` and `thenable` arguments.
-  data->setDenseInitializedLength(ThenableJobDataLength);
-  data->initDenseElement(ThenableJobDataIndex_Promise, promiseToResolve);
-  data->initDenseElement(ThenableJobDataIndex_Thenable, thenable);
-
-  // Store the data array on the reaction job.
-  job->setExtendedSlot(ThenableJobSlot_JobData, ObjectValue(*data));
 
   // At this point the promise is guaranteed to be wrapped into the job's
   // compartment.
@@ -2550,9 +2535,8 @@ static bool PromiseResolveBuiltinThenableJob(JSContext* cx, unsigned argc,
   // thus `thenRealm` is also current realm, and we have nothing to do here.
 
   // Store the promise and the thenable on the reaction job.
-  job->setExtendedSlot(BuiltinThenableJobSlot_Promise,
-                       ObjectValue(*promiseToResolve));
-  job->setExtendedSlot(BuiltinThenableJobSlot_Thenable, ObjectValue(*thenable));
+  job->setExtendedSlot(ThenableJobSlot_Promise, ObjectValue(*promiseToResolve));
+  job->setExtendedSlot(ThenableJobSlot_Thenable, ObjectValue(*thenable));
 
   Rooted<GlobalObject*> incumbentGlobal(cx,
                                         cx->runtime()->getIncumbentGlobal(cx));
@@ -6979,10 +6963,14 @@ const JSJitInfo promise_catch_info = {
 static const JSFunctionSpec promise_methods[] = {
     JS_FNINFO("then", js::Promise_then, &promise_then_info, 2, 0),
     JS_FNINFO("catch", Promise_catch, &promise_catch_info, 1, 0),
-    JS_SELF_HOSTED_FN("finally", "Promise_finally", 1, 0), JS_FS_END};
+    JS_SELF_HOSTED_FN("finally", "Promise_finally", 1, 0),
+    JS_FS_END,
+};
 
 static const JSPropertySpec promise_properties[] = {
-    JS_STRING_SYM_PS(toStringTag, "Promise", JSPROP_READONLY), JS_PS_END};
+    JS_STRING_SYM_PS(toStringTag, "Promise", JSPROP_READONLY),
+    JS_PS_END,
+};
 
 static const JSFunctionSpec promise_static_methods[] = {
     JS_FN("all", Promise_static_all, 1, 0),
@@ -6992,10 +6980,13 @@ static const JSFunctionSpec promise_static_methods[] = {
     JS_FN("reject", Promise_reject, 1, 0),
     JS_FN("resolve", js::Promise_static_resolve, 1, 0),
     JS_FN("withResolvers", Promise_static_withResolvers, 0, 0),
-    JS_FS_END};
+    JS_FS_END,
+};
 
 static const JSPropertySpec promise_static_properties[] = {
-    JS_SYM_GET(species, js::Promise_static_species, 0), JS_PS_END};
+    JS_SYM_GET(species, js::Promise_static_species, 0),
+    JS_PS_END,
+};
 
 static const ClassSpec PromiseObjectClassSpec = {
     GenericCreateConstructor<PromiseConstructor, 1, gc::AllocKind::FUNCTION>,
@@ -7003,15 +6994,21 @@ static const ClassSpec PromiseObjectClassSpec = {
     promise_static_methods,
     promise_static_properties,
     promise_methods,
-    promise_properties};
+    promise_properties,
+};
 
 const JSClass PromiseObject::class_ = {
     "Promise",
     JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS) |
         JSCLASS_HAS_CACHED_PROTO(JSProto_Promise) |
         JSCLASS_HAS_XRAYED_CONSTRUCTOR,
-    JS_NULL_CLASS_OPS, &PromiseObjectClassSpec};
+    JS_NULL_CLASS_OPS,
+    &PromiseObjectClassSpec,
+};
 
 const JSClass PromiseObject::protoClass_ = {
-    "Promise.prototype", JSCLASS_HAS_CACHED_PROTO(JSProto_Promise),
-    JS_NULL_CLASS_OPS, &PromiseObjectClassSpec};
+    "Promise.prototype",
+    JSCLASS_HAS_CACHED_PROTO(JSProto_Promise),
+    JS_NULL_CLASS_OPS,
+    &PromiseObjectClassSpec,
+};

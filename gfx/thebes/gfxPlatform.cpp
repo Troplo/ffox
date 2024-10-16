@@ -752,8 +752,8 @@ WebRenderMemoryReporter::CollectReports(nsIHandleReportCallback* aHandleReport,
         helper.Report(aReport.swgl, "swgl");
         helper.Report(aReport.upload_staging_memory, "upload-stagin-memory");
 
-        WEBRENDER_FOR_EACH_INTERNER(REPORT_INTERNER);
-        WEBRENDER_FOR_EACH_INTERNER(REPORT_DATA_STORE);
+        WEBRENDER_FOR_EACH_INTERNER(REPORT_INTERNER, );
+        WEBRENDER_FOR_EACH_INTERNER(REPORT_DATA_STORE, );
 
         // GPU Memory.
         helper.ReportTexture(aReport.gpu_cache_textures, "gpu-cache");
@@ -1678,19 +1678,35 @@ already_AddRefed<DrawTarget> gfxPlatform::CreateDrawTargetForBackend(
 }
 
 already_AddRefed<DrawTarget> gfxPlatform::CreateOffscreenCanvasDrawTarget(
-    const IntSize& aSize, SurfaceFormat aFormat) {
+    const IntSize& aSize, SurfaceFormat aFormat, bool aRequireSoftwareRender) {
   NS_ASSERTION(mPreferredCanvasBackend != BackendType::NONE, "No backend.");
 
+  BackendType backend = mFallbackCanvasBackend;
   // If we are using remote canvas we don't want to use acceleration in
   // canvas DrawTargets we are not remoting, so we always use the fallback
   // software one.
   if (!gfxPlatform::UseRemoteCanvas() ||
       !gfxPlatform::IsBackendAccelerated(mPreferredCanvasBackend)) {
-    RefPtr<DrawTarget> target =
-        CreateDrawTargetForBackend(mPreferredCanvasBackend, aSize, aFormat);
-    if (target || mFallbackCanvasBackend == BackendType::NONE) {
-      return target.forget();
-    }
+    backend = mPreferredCanvasBackend;
+  }
+
+  if (aRequireSoftwareRender) {
+    backend = gfxPlatform::IsBackendAccelerated(mPreferredCanvasBackend)
+                  ? mFallbackCanvasBackend
+                  : mPreferredCanvasBackend;
+  }
+
+#ifdef XP_WIN
+  // On Windows, the fallback backend (Cairo) should use its image backend.
+  RefPtr<DrawTarget> target =
+      Factory::CreateDrawTarget(backend, aSize, aFormat);
+#else
+  RefPtr<DrawTarget> target =
+      CreateDrawTargetForBackend(backend, aSize, aFormat);
+#endif
+
+  if (target || mFallbackCanvasBackend == BackendType::NONE) {
+    return target.forget();
   }
 
 #ifdef XP_WIN
@@ -2517,6 +2533,17 @@ void gfxPlatform::InitAcceleration() {
                       "FEATURE_REMOTE_CANVAS_NO_GPU_PROCESS"_ns);
     }
 
+#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+    // If D2D is explicitly disabled on Windows, then don't use remote canvas.
+    // This prevents it from interfering with Accelerated Canvas2D.
+    if (StaticPrefs::gfx_direct2d_disabled_AtStartup() &&
+        !StaticPrefs::gfx_direct2d_force_enabled_AtStartup()) {
+      gfxConfig::ForceDisable(Feature::REMOTE_CANVAS, FeatureStatus::Blocked,
+                              "Disabled without Direct2D",
+                              "FEATURE_REMOTE_CANVAS_NO_DIRECT2D"_ns);
+    }
+#endif
+
 #ifndef XP_WIN
     gfxConfig::ForceDisable(Feature::REMOTE_CANVAS, FeatureStatus::Blocked,
                             "Platform not supported",
@@ -3325,10 +3352,9 @@ static void AcceleratedCanvas2DPrefChangeCallback(const char*, void*) {
     feature.Disable(FeatureStatus::Blocklisted, message.get(), failureId);
   }
 
-  if (StaticPrefs::gfx_canvas_remote_worker_threads_AtStartup() != 0) {
-    feature.ForceDisable(FeatureStatus::Failed,
-                         "Disabled with non-zero canvas worker threads",
-                         "FEATURE_FAILURE_DISABLE_BY_CANVAS_WORKER_THREADS"_ns);
+  if (gfxVars::RemoteCanvasEnabled()) {
+    feature.ForceDisable(FeatureStatus::Failed, "Disabled by Remote Canvas",
+                         "FEATURE_FAILURE_DISABLED_BY_REMOTE_CANVAS"_ns);
   }
 
   gfxVars::SetUseAcceleratedCanvas2D(feature.IsEnabled());

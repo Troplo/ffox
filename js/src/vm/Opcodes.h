@@ -2639,6 +2639,19 @@
      */ \
     MACRO(ThrowWithStack, throw_with_stack, NULL, 1, 2, 0, JOF_BYTE) \
     /*
+     * Create a suppressed error object and push it on the stack.
+     *
+     * Implements: [DisposeResources ( disposeCapability, completion )][1], step 3.e.iii.1.a-f.
+     *
+     * [1] https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-disposeresources
+     *
+     *   Category: Control flow
+     *   Type: Exceptions
+     *   Operands:
+     *   Stack: error, suppressed => suppressedError
+     */ \
+    IF_EXPLICIT_RESOURCE_MANAGEMENT(MACRO(CreateSuppressedError, create_suppressed_error, NULL, 1, 2, 1, JOF_BYTE)) \
+    /*
      * Create and throw an Error object.
      *
      * Sometimes we know at emit time that an operation always throws. For
@@ -2691,17 +2704,6 @@
      *   Stack: =>
      */ \
     MACRO(TryDestructuring, try_destructuring, NULL, 1, 0, 0, JOF_BYTE) \
-    /*
-     * No-op instruction used by the exception unwinder to determine the
-     * correct environment to unwind to when an exception occurs in a
-     * environment with disposables.
-     *
-     *   Category: Control flow
-     *   Type: Exceptions
-     *   Operands:
-     *   Stack: =>
-     */ \
-    IF_EXPLICIT_RESOURCE_MANAGEMENT(MACRO(TryUsing, try_using, NULL, 1, 0, 0, JOF_BYTE)) \
     /*
      * Push and clear the pending exception. ┬──┬◡ﾉ(° -°ﾉ)
      *
@@ -3399,33 +3401,34 @@
      */ \
     MACRO(LeaveWith, leave_with, NULL, 1, 0, 0, JOF_BYTE) \
     /*
-     * Append the object on the stack as a disposable to be disposed on
+     * Append the object and method on the stack as a disposable to be disposed on
      * to the current lexical environment object.
      *
-     * Implements: [AddDisposableResource ( disposeCapability, V, hint [ , method ] )][1], step 1, 3-4.
+     * Implements: [AddDisposableResource ( disposeCapability, V, hint [ , method ] )][1], steps 3-4.
      *
      * [1] https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-adddisposableresource
      *
      *   Category: Variables and scopes
      *   Type: Entering and leaving environments
-     *   Operands:
-     *   Stack: v => v
+     *   Operands: UsingHint hint
+     *   Stack: v, method, needsClosure =>
      */ \
-    IF_EXPLICIT_RESOURCE_MANAGEMENT(MACRO(AddDisposable, add_disposable, NULL, 1, 1, 1, JOF_BYTE)) \
+    IF_EXPLICIT_RESOURCE_MANAGEMENT(MACRO(AddDisposable, add_disposable, NULL, 2, 3, 0, JOF_UINT8)) \
     /*
-     * Retrieve the disposable objects from the currenct lexical environment object
-     * and dispose them.
-     *
-     * Implements: [DisposeResources ( disposeCapability, completion )][1], step 1-4
-     *
-     * [1] https://arai-a.github.io/ecma262-compare/?pr=3000&id=sec-disposeresources
+     * Get the dispose capability of the present environment object.
+     * In case the dispose capability of the environment
+     * has already been cleared or if no disposables have been
+     * pushed to the capability, it shall push undefined as the dispose
+     * capability. After extracting a non-empty dispose
+     * capability, the dispose capability is cleared from the present
+     * environment object by setting it to undefined value.
      *
      *   Category: Variables and scopes
      *   Type: Entering and leaving environments
-     *   Operands: DisposeJumpKind jumpKind
-     *   Stack: =>
+     *   Operands:
+     *   Stack: => disposeCapability
      */ \
-    IF_EXPLICIT_RESOURCE_MANAGEMENT(MACRO(DisposeDisposables, dispose_disposables, NULL, 2, 0, 0, JOF_UINT8)) \
+    IF_EXPLICIT_RESOURCE_MANAGEMENT(MACRO(TakeDisposeCapability, take_dispose_capability, NULL, 1, 0, 1, JOF_BYTE)) \
     /*
      * Push the current VariableEnvironment (the environment on the environment
      * chain designated to receive new variables).

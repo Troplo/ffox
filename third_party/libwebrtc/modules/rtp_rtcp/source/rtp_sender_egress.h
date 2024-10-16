@@ -25,7 +25,6 @@
 #include "api/units/data_rate.h"
 #include "api/units/time_delta.h"
 #include "api/units/timestamp.h"
-#include "modules/remote_bitrate_estimator/test/bwe_test_logging.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/packet_sequencer.h"
 #include "modules/rtp_rtcp/source/rtp_packet_history.h"
@@ -120,9 +119,6 @@ class RtpSenderEgress {
                       RtpPacketMediaType packet_type,
                       RtpPacketCounter counter,
                       size_t packet_size);
-#if BWE_TEST_LOGGING_COMPILE_TIME_ENABLE
-  void BweTestLoggingPlot(Timestamp now, uint32_t packet_ssrc);
-#endif
 
   // Called on a timer, once a second, on the worker_queue_.
   void PeriodicUpdate();
@@ -167,6 +163,7 @@ class RtpSenderEgress {
   RepeatingTaskHandle update_task_ RTC_GUARDED_BY(worker_queue_);
   std::vector<Packet> packets_to_send_ RTC_GUARDED_BY(worker_queue_);
   ScopedTaskSafety task_safety_;
+  const bool use_ntp_time_for_absolute_send_time_;
 };
 
 }  // namespace webrtc

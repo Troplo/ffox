@@ -281,7 +281,7 @@ pref("browser.shell.defaultBrowserCheckCount", 0);
 pref("browser.shell.setDefaultBrowserUserChoice", true);
 // When setting default via UserChoice, temporarily rename an ancestor registry key to
 // prevent kernel drivers from locking the UserChoice subkeys.
-pref("browser.shell.setDefaultBrowserUserChoice.regRename", false);
+pref("browser.shell.setDefaultBrowserUserChoice.regRename", true);
 // When setting the default browser on Windows 10 using the UserChoice
 // registry keys, also try to set Firefox as the default PDF handler.
 pref("browser.shell.setDefaultPDFHandler", true);
@@ -522,6 +522,13 @@ pref("browser.urlbar.quicksuggest.impressionCaps.nonSponsoredEnabled", false);
 // caps.
 pref("browser.urlbar.quicksuggest.impressionCaps.sponsoredEnabled", false);
 
+// When non-zero, this is the character-count threshold (inclusive) for showing
+// AMP suggestions as top picks. If an AMP suggestion is triggered by a keyword
+// at least this many characters long, it will be shown as a top pick. Full
+// keywords will also show AMP suggestions as top picks even if they have fewer
+// characters than this threshold.
+pref("browser.urlbar.quicksuggest.ampTopPickCharThreshold", 0);
+
 // Whether unit conversion is enabled.
 #ifdef NIGHTLY_BUILD
 pref("browser.urlbar.unitConversion.enabled", true);
@@ -650,6 +657,21 @@ pref("browser.urlbar.yelp.priority", false);
 // Yelp suggestions are turned on.
 pref("browser.urlbar.suggest.yelp", true);
 
+// Feature gate pref for Fakespot suggestions in the urlbar.
+pref("browser.urlbar.fakespot.featureGate", false);
+
+// The minimum prefix length of a Fakespot keyword the user must type to trigger
+// the suggestion. 0 means the min length should be taken from Nimbus.
+pref("browser.urlbar.fakespot.minKeywordLength", 4);
+
+// The index of Fakespot results within the Firefox Suggest section. A negative
+// index is relative to the end of the section.
+pref("browser.urlbar.fakespot.suggestedIndex", -1);
+
+// If `browser.urlbar.fakespot.featureGate` is true, this controls whether
+// Fakespot suggestions are turned on.
+pref("browser.urlbar.suggest.fakespot", true);
+
 // The minimum prefix length of addons keyword the user must type to trigger
 // the suggestion. 0 means the min length should be taken from Nimbus.
 pref("browser.urlbar.addons.minKeywordLength", 0);
@@ -728,9 +750,6 @@ pref("browser.search.openintab", false);
 // context menu searches open in the foreground
 pref("browser.search.context.loadInBackground", false);
 
-// Mirrors whether the search-container widget is in the navigation toolbar.
-pref("browser.search.widget.inNavBar", false);
-
 // Enables display of the options for the user using a separate default search
 // engine in private browsing mode.
 pref("browser.search.separatePrivateDefault.ui.enabled", false);
@@ -752,6 +771,10 @@ pref("browser.search.serpMetricsRecordedCounter", 0);
 // Search Bar removal from the toolbar for users who haven’t used it in 120
 // days
 pref("browser.search.widget.removeAfterDaysUnused", 120);
+
+// The number of times the search function in the URL bar has been used,
+// capped at 100.
+pref("browser.search.totalSearches", 0);
 
 // Enable new experimental shopping features. This is solely intended as a
 // rollout/"emergency stop" button - it will go away once the feature has
@@ -854,6 +877,20 @@ pref("permissions.desktop-notification.notNow.enabled", false);
 
 pref("permissions.fullscreen.allowed", false);
 
+#ifdef MOZ_WEBRTC
+  // When users grant camera or microphone through a permission prompt
+  // and leave "☐ Remember this decision" unchecked, Gecko persists
+  // their choice to "Always ask" for this permission going forward.
+  // This is exposed to websites through the permissions.query() API
+  // as "granted", to ward off well-meaning attempts to further escalate
+  // permission to always grant, to help sites respect this user choice.
+  //
+  // By default, these permissions are only visible in Tools / Page Info.
+  // But turning this pref on also makes them show up as "Always Ask ✖"
+  // in the more prominent site permissions dropdown.
+  pref("permissions.media.show_always_ask.enabled", false);
+#endif
+
 // Force external link opens into the default user context ID instead of guessing
 // the most appropriate one based on the URL (https://bugzilla.mozilla.org/show_bug.cgi?id=1874599#c8)
 pref("browser.link.force_default_user_context_id_for_external_opens", false);
@@ -900,8 +937,6 @@ pref("browser.tabs.warnOnClose", false);
 pref("browser.tabs.warnOnCloseOtherTabs", true);
 pref("browser.tabs.warnOnOpen", true);
 pref("browser.tabs.maxOpenBeforeWarn", 15);
-pref("browser.tabs.loadInBackground", true);
-pref("browser.tabs.opentabfor.middleclick", true);
 pref("browser.tabs.loadDivertedInBackground", false);
 pref("browser.tabs.loadBookmarksInBackground", false);
 pref("browser.tabs.loadBookmarksInTabs", false);
@@ -911,9 +946,6 @@ pref("browser.tabs.tabMinWidth", 76);
 // secondary text on tabs hidden due to size constraints and readability
 // of the text at small font sizes.
 pref("browser.tabs.secondaryTextUnsupportedLocales", "ar,bn,bo,ckb,fa,gu,he,hi,ja,km,kn,ko,lo,mr,my,ne,pa,si,ta,te,th,ur,zh");
-
-//Control the visibility of Tab Manager Menu.
-pref("browser.tabs.tabmanager.enabled", true);
 
 // When tabs opened by links in other tabs via a combination of
 // browser.link.open_newwindow being set to 3 and target="_blank" etc are
@@ -948,11 +980,7 @@ pref("browser.tabs.tooltipsShowPidAndActiveness", true);
 pref("browser.tabs.tooltipsShowPidAndActiveness", false);
 #endif
 
-#ifdef NIGHTLY_BUILD
 pref("browser.tabs.hoverPreview.enabled", true);
-#else
-pref("browser.tabs.hoverPreview.enabled", false);
-#endif
 pref("browser.tabs.hoverPreview.showThumbnails", true);
 
 pref("browser.tabs.firefox-view.logLevel", "Warn");
@@ -1197,18 +1225,12 @@ pref("network.manage-offline-status", true);
 
 // We want to make sure mail URLs are handled externally...
 pref("network.protocol-handler.external.mailto", true); // for mail
-pref("network.protocol-handler.external.news", true);   // for news
-pref("network.protocol-handler.external.snews", true);  // for secure news
-pref("network.protocol-handler.external.nntp", true);   // also news
 #ifdef XP_WIN
   pref("network.protocol-handler.external.ms-windows-store", true);
 #endif
 
 // ...without warning dialogs
 pref("network.protocol-handler.warn-external.mailto", false);
-pref("network.protocol-handler.warn-external.news", false);
-pref("network.protocol-handler.warn-external.snews", false);
-pref("network.protocol-handler.warn-external.nntp", false);
 #ifdef XP_WIN
   pref("network.protocol-handler.warn-external.ms-windows-store", false);
 #endif
@@ -1228,15 +1250,18 @@ pref("accessibility.typeaheadfind.timeout", 5000);
 pref("accessibility.typeaheadfind.linksonly", false);
 pref("accessibility.typeaheadfind.flashBar", 1);
 
-// Toggling Search bar on and off in about:preferences
-pref("browser.preferences.search", true);
-#if defined(NIGHTLY_BUILD)
+// Whether we can show the "Firefox Labs" section.
 pref("browser.preferences.experimental", true);
-#else
-pref("browser.preferences.experimental", false);
-#endif
-pref("browser.preferences.moreFromMozilla", true);
+// Whether we had to hide the "Firefox Labs" section because it would be empty.
 pref("browser.preferences.experimental.hidden", false);
+// Whether we show the "More from Mozilla" section.
+pref("browser.preferences.moreFromMozilla", true);
+
+// Used by settings to track whether the user customized advanced
+// performance settings. Not used directly elsewhere.
+// If set to false, we show advanced performance settings.
+// If reset to true **by checking the box in the settings page**,
+// we will revert those to the default settings.
 pref("browser.preferences.defaultPerformanceSettings.enabled", true);
 
 pref("browser.proton.toolbar.version", 0);
@@ -1447,7 +1472,7 @@ pref("browser.bookmarks.editDialog.maxRecentFolders", 7);
   // See - security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
   // SetSecurityLevelForContentProcess() for what the different settings mean.
   #if defined(NIGHTLY_BUILD)
-    pref("security.sandbox.content.level", 7);
+    pref("security.sandbox.content.level", 8);
   #else
     pref("security.sandbox.content.level", 7);
   #endif
@@ -1532,6 +1557,7 @@ pref("browser.bookmarks.editDialog.maxRecentFolders", 7);
   pref("browser.taskbar.lists.maxListItemCount", 7);
   pref("browser.taskbar.lists.tasks.enabled", true);
   pref("browser.taskbar.lists.refreshInSeconds", 120);
+  pref("browser.startMenu.msixPinnedWhenLastChecked", false);
 #endif
 
 // Preferences to be synced by default.
@@ -1616,7 +1642,7 @@ pref("services.sync.prefs.sync.extensions.activeThemeID", true);
 pref("services.sync.prefs.sync.general.autoScroll", true);
 // general.autoScroll has a different default on Linux vs elsewhere.
 pref("services.sync.prefs.sync-seen.general.autoScroll", false);
-pref("services.sync.prefs.sync.general.smoothScroll", true);
+// general.smoothScroll is not synced, bug 1851024
 pref("services.sync.prefs.sync.intl.accept_languages", true);
 pref("services.sync.prefs.sync.intl.regional_prefs.use_os_locales", true);
 pref("services.sync.prefs.sync.layout.spellcheckDefault", true);
@@ -1715,29 +1741,17 @@ pref("browser.newtabpage.activity-stream.weather.query", "");
 pref("browser.newtabpage.activity-stream.weather.display", "simple");
 
 // enable location search for newtab weather widget
-#ifdef NIGHTLY_BUILD
-  pref("browser.newtabpage.activity-stream.weather.locationSearchEnabled", true);
-#else
-  pref("browser.newtabpage.activity-stream.weather.locationSearchEnabled", true);
-#endif
+pref("browser.newtabpage.activity-stream.weather.locationSearchEnabled", true);
 
 // List of regions that get weather by default.
-#ifdef NIGHTLY_BUILD
-  pref("browser.newtabpage.activity-stream.discoverystream.region-weather-config", "US,CA");
-#else
-  pref("browser.newtabpage.activity-stream.discoverystream.region-weather-config", "");
-#endif
+pref("browser.newtabpage.activity-stream.discoverystream.region-weather-config", "US,CA");
+
 // List of locales that weather widget supports.
 pref("browser.newtabpage.activity-stream.discoverystream.locale-weather-config", "en-US,en-GB,en-CA");
 
 // Preference to enable wallpaper selection in the Customize Menu of new tab page
-#ifdef NIGHTLY_BUILD
-  pref("browser.newtabpage.activity-stream.newtabWallpapers.enabled", true);
-  pref("browser.newtabpage.activity-stream.newtabWallpapers.v2.enabled", true);
-#else
-  pref("browser.newtabpage.activity-stream.newtabWallpapers.v2.enabled", false);
-  pref("browser.newtabpage.activity-stream.newtabWallpapers.enabled", false);
-#endif
+pref("browser.newtabpage.activity-stream.newtabWallpapers.enabled", true);
+pref("browser.newtabpage.activity-stream.newtabWallpapers.v2.enabled", true);
 
 // Current new tab page background images.
 pref("browser.newtabpage.activity-stream.newtabWallpapers.wallpaper-light", "");
@@ -1753,6 +1767,10 @@ pref("browser.newtabpage.activity-stream.newtabWallpapers.highlightContentText",
 pref("browser.newtabpage.activity-stream.newtabWallpapers.highlightCtaText", "");
 
 pref("browser.newtabpage.activity-stream.newNewtabExperience.colors", "#0090ED,#FF4F5F,#2AC3A2,#FF7139,#A172FF,#FFA437,#FF2A8A");
+
+// Default layout experimentation
+pref("browser.newtabpage.activity-stream.newtabLayouts.variant-a", false);
+pref("browser.newtabpage.activity-stream.newtabLayouts.variant-b", false);
 
 // Activity Stream prefs that control to which page to redirect
 #ifndef RELEASE_OR_BETA
@@ -1837,12 +1855,24 @@ pref("browser.newtabpage.activity-stream.discoverystream.region-stories-block", 
 pref("browser.newtabpage.activity-stream.discoverystream.region-stories-config", "US,DE,CA,GB,IE,CH,AT,BE,IN,FR,IT,ES");
 // List of regions that support the new recommendations BFF, also requires region-stories-config
 pref("browser.newtabpage.activity-stream.discoverystream.region-bff-config", "US,DE,CA,GB,IE,CH,AT,BE,IN,FR,IT,ES");
-// Using merino for recommendations in nightly only
-#ifdef NIGHTLY_BUILD
-  pref("browser.newtabpage.activity-stream.discoverystream.merino-provider.enabled", true);
+pref("browser.newtabpage.activity-stream.discoverystream.merino-provider.enabled", true);
+
+// Merino & topic selection related prefs in nightly only
+#if defined(EARLY_BETA_OR_EARLIER)
+  // List of regions that get topics selection by default.
+  pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.region-topics-config", "US, CA");
+  pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.onboarding.enabled", true);
+  pref("browser.newtabpage.activity-stream.discoverystream.topicLabels.region-topic-label-config", "US, CA");
 #else
-  pref("browser.newtabpage.activity-stream.discoverystream.merino-provider.enabled", false);
+  pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.region-topics-config", "");
+  pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.onboarding.enabled", false);
+  pref("browser.newtabpage.activity-stream.discoverystream.topicLabels.region-topic-label-config", "");
 #endif
+
+// List of locales that get topics selection by default.
+pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.locale-topics-config", "en-US, en-GB, en-CA");
+pref("browser.newtabpage.activity-stream.discoverystream.topicLabels.locale-topic-label-config", "en-US, en-GB, en-CA");
+
 pref("browser.newtabpage.activity-stream.discoverystream.merino-provider.endpoint", "merino.services.mozilla.com");
 // List of regions that get spocs by default.
 pref("browser.newtabpage.activity-stream.discoverystream.region-spocs-config", "US,CA,DE,GB,FR,IT,ES");
@@ -1851,6 +1881,7 @@ pref("browser.newtabpage.activity-stream.discoverystream.region-basic-config", "
 
 // Add parameters to Pocket feed URL.
 pref("browser.newtabpage.activity-stream.discoverystream.pocket-feed-parameters", "");
+pref("browser.newtabpage.activity-stream.discoverystream.merino-feed-experiment", false);
 
 // Allows Pocket story collections to be dismissed.
 pref("browser.newtabpage.activity-stream.discoverystream.isCollectionDismissible", true);
@@ -1862,16 +1893,22 @@ pref("browser.newtabpage.activity-stream.discoverystream.recs.personalized", fal
 // System pref to allow Pocket sponsored content personalization to be turned on/off.
 pref("browser.newtabpage.activity-stream.discoverystream.spocs.personalized", true);
 
-// System pref to enable topic selection for pocket feed
-pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.enabled", false);
-
 // Flip this once the user has dismissed the Pocket onboarding experience,
 pref("browser.newtabpage.activity-stream.discoverystream.onboardingExperience.dismissed", false);
 pref("browser.newtabpage.activity-stream.discoverystream.onboardingExperience.enabled", false);
 
-// Allow users to give thumbs up/down on recommended stories
-pref("browser.newtabpage.activity-stream.discoverystream.thumbsUpDown.enabled", false);
-pref("browser.newtabpage.activity-stream.discoverystream.thumbsUpDown.searchTopsitesCompact", false);
+// List of locales that get thumbs up/down on recommended stories by default.
+pref("browser.newtabpage.activity-stream.discoverystream.thumbsUpDown.locale-thumbs-config", "en-US, en-GB, en-CA");
+
+// List of regions that get thumbs up/down on recommended stories by default.
+#ifdef EARLY_BETA_OR_EARLIER
+  pref("browser.newtabpage.activity-stream.discoverystream.thumbsUpDown.region-thumbs-config", "US, CA");
+#else
+  pref("browser.newtabpage.activity-stream.discoverystream.thumbsUpDown.region-thumbs-config", "");
+#endif
+
+// Shows users compact layout of Home New Tab page. Also requires region-thumbs-config.
+pref("browser.newtabpage.activity-stream.discoverystream.thumbsUpDown.searchTopsitesCompact", true);
 
 // User pref to show stories on newtab (feeds.system.topstories has to be set to true as well)
 pref("browser.newtabpage.activity-stream.feeds.section.topstories", true);
@@ -1936,11 +1973,19 @@ pref("sidebar.visibility", "always-show");
 
 pref("browser.ml.chat.enabled", false);
 pref("browser.ml.chat.hideLocalhost", true);
-pref("browser.ml.chat.prompt.prefix", 'I’m on page "%tabTitle%" with "%selection|12000%" selected. ');
-pref("browser.ml.chat.prompts.0", '{"label":"Summarize","value":"Please summarize the selection using precise and concise language. Use headers and bulleted lists in the summary, to make it scannable. Maintain the meaning and factual accuracy.","id":"summarize"}');
-pref("browser.ml.chat.prompts.1", '{"label":"Simplify Language","value":"Please rewrite the selection in plain, clear language suitable for a general audience without specialized knowledge. Use all of the following tactics: simple vocabulary; short sentences; active voice; headers and bulleted lists for scannability. Maintain meaning and factual accuracy.","id":"simplify"}');
-pref("browser.ml.chat.prompts.2", '{"label":"Quiz Me","value":"Please quiz me on this selection. Ask me a variety of types of questions, for example multiple choice, true or false, and short answer. Wait for my response before moving on to the next question.","id":"quiz","targeting":"!provider|regExpMatch(\'gemini\')"}');
+pref("browser.ml.chat.prompt.prefix", '{"l10nId":"genai-prompt-prefix-selection"}');
+pref("browser.ml.chat.prompts.0", '{"id":"summarize","l10nId":"genai-prompts-summarize"}');
+pref("browser.ml.chat.prompts.1", '{"id":"simplify","l10nId":"genai-prompts-simplify"}');
+pref("browser.ml.chat.prompts.2", '{"id":"quiz","l10nId":"genai-prompts-quiz","targeting":"!provider|regExpMatch(\'gemini\')"}');
+pref("browser.ml.chat.prompts.3", '{"id":"explain","l10nId":"genai-prompts-explain","targeting":"channel==\'nightly\'"}');
 pref("browser.ml.chat.provider", "");
+pref("browser.ml.chat.shortcuts", true);
+#ifdef NIGHTLY_BUILD
+pref("browser.ml.chat.shortcuts.custom", true);
+#else
+pref("browser.ml.chat.shortcuts.custom", false);
+#endif
+pref("browser.ml.chat.shortcuts.longPress", 60000);
 pref("browser.ml.chat.sidebar", true);
 
 pref("security.protectionspopup.recordEventTelemetry", true);
@@ -2024,11 +2069,11 @@ pref("identity.fxaccounts.commands.missed.fetch_interval", 86400);
 
 // Controls whether this client can send and receive "close tab"
 // commands from other FxA clients
-pref("identity.fxaccounts.commands.remoteTabManagement.enabled", false);
+pref("identity.fxaccounts.commands.remoteTabManagement.enabled", true);
 
 // Controls whether or not the client association ping has values set on it
 // when the sync-ui-state:update notification fires.
-pref("identity.fxaccounts.telemetry.clientAssociationPing.enabled", false);
+pref("identity.fxaccounts.telemetry.clientAssociationPing.enabled", true);
 
 // Note: when media.gmp-*.visible is true, provided we're running on a
 // supported platform/OS version, the corresponding CDM appears in the
@@ -2062,6 +2107,7 @@ pref("media.videocontrols.picture-in-picture.video-toggle.enabled", true);
 pref("media.videocontrols.picture-in-picture.video-toggle.visibility-threshold", "1.0");
 pref("media.videocontrols.picture-in-picture.keyboard-controls.enabled", true);
 pref("media.videocontrols.picture-in-picture.urlbar-button.enabled", true);
+pref("media.videocontrols.picture-in-picture.enable-when-switching-tabs.enabled", false);
 
 // TODO (Bug 1817084) - This pref is used for managing translation preferences
 // in the Firefox Translations addon. It should be removed when the addon is
@@ -3034,7 +3080,11 @@ pref("browser.firefox-view.feature-tour", "{\"screen\":\"FIREFOX_VIEW_SPOTLIGHT\
 // Number of times the user visited about:firefoxview
 pref("browser.firefox-view.view-count", 0);
 // Maximum number of rows to show on the "History" page.
-pref("browser.firefox-view.max-history-rows", 300);
+#ifdef NIGHTLY_BUILD
+  pref("browser.firefox-view.max-history-rows", 0);
+#else
+  pref("browser.firefox-view.max-history-rows", 300);
+#endif
 // Enables virtual list functionality in Firefox View.
 pref("browser.firefox-view.virtual-list.enabled", true);
 
@@ -3138,8 +3188,13 @@ pref("browser.backup.preferences.ui.enabled", false);
 pref("browser.backup.sqlite.pages_per_step", 50);
 // The delay between SQLite database backup steps in milliseconds.
 pref("browser.backup.sqlite.step_delay_ms", 50);
-pref("browser.backup.scheduled.idle-threshold-seconds", 300);
+pref("browser.backup.scheduled.idle-threshold-seconds", 15);
 pref("browser.backup.scheduled.minimum-time-between-backups-seconds", 3600);
+pref("browser.backup.template.fallback-download.release", "https://www.mozilla.org/firefox/download/thanks/?s=direct&utm_medium=firefox-desktop&utm_source=backup&utm_campaign=firefox-backup-2024&utm_content=control");
+pref("browser.backup.template.fallback-download.beta", "https://www.mozilla.org/firefox/channel/desktop/?utm_medium=firefox-desktop&utm_source=backup&utm_campaign=firefox-backup-2024&utm_content=control#beta");
+pref("browser.backup.template.fallback-download.aurora", "https://www.mozilla.org/firefox/channel/desktop/?utm_medium=firefox-desktop&utm_source=backup&utm_campaign=firefox-backup-2024&utm_content=control#developer");
+pref("browser.backup.template.fallback-download.nightly", "https://www.mozilla.org/firefox/channel/desktop/?utm_medium=firefox-desktop&utm_source=backup&utm_campaign=firefox-backup-2024&utm_content=control#nightly");
+pref("browser.backup.template.fallback-download.esr", "https://www.mozilla.org/firefox/enterprise/?utm_medium=firefox-desktop&utm_source=backup&utm_campaign=firefox-backup-2024&utm_content=control#download");
 
 // Pref to enable the new profiles
 pref("browser.profiles.enabled", false);

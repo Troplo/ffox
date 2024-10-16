@@ -535,7 +535,6 @@ var gMainPane = {
       Services.prefs.getBoolPref("browser.backup.preferences.ui.enabled", false)
     ) {
       let backupGroup = document.getElementById("dataBackupGroup");
-      backupGroup.hidden = false;
       backupGroup.removeAttribute("data-hidden-from-search");
     }
 
@@ -1876,6 +1875,18 @@ var gMainPane = {
     if (!selected) {
       // No locales were selected. Cancel the operation.
       return;
+    }
+
+    // Track how often locale fallback order is changed.
+    // Drop the first locale and filter to only include the overlapping set
+    const prevLocales = Services.locale.requestedLocales.filter(
+      lc => selected.indexOf(lc) > 0
+    );
+    const newLocales = selected.filter(
+      (lc, i) => i > 0 && prevLocales.includes(lc)
+    );
+    if (prevLocales.some((lc, i) => newLocales[i] != lc)) {
+      this.gBrowserLanguagesDialog.recordTelemetry("set_fallback");
     }
 
     switch (gMainPane.getLanguageSwitchTransitionType(selected)) {

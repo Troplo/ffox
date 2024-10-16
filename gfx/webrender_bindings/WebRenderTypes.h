@@ -22,10 +22,12 @@
 #include "Units.h"
 #include "nsIWidgetListener.h"
 
+#include <tuple>
+
 namespace mozilla {
 
 enum class StyleBorderStyle : uint8_t;
-enum class StyleBorderImageRepeat : uint8_t;
+enum class StyleBorderImageRepeatKeyword : uint8_t;
 enum class StyleImageRendering : uint8_t;
 
 namespace ipc {
@@ -55,6 +57,8 @@ typedef Maybe<FontInstancePlatformOptions> MaybeFontInstancePlatformOptions;
 struct ExternalImageKeyPair {
   ImageKey key;
   ExternalImageId id;
+
+  auto MutTiedFields() { return std::tie(key, id); }
 };
 
 /* Generate a brand new window id and return it. */
@@ -562,7 +566,7 @@ static inline wr::LayoutSideOffsets ToLayoutSideOffsets(float top, float right,
   return offset;
 }
 
-wr::RepeatMode ToRepeatMode(StyleBorderImageRepeat);
+wr::RepeatMode ToRepeatMode(StyleBorderImageRepeatKeyword);
 
 template <class S, class T>
 static inline wr::WrTransformProperty ToWrTransformProperty(

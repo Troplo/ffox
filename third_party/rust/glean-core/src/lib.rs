@@ -63,7 +63,9 @@ pub use crate::error::{Error, ErrorKind, Result};
 pub use crate::error_recording::{test_get_num_recorded_errors, ErrorType};
 pub use crate::histogram::HistogramType;
 pub use crate::metrics::labeled::{
-    AllowLabeled, LabeledBoolean, LabeledCounter, LabeledMetric, LabeledString,
+    AllowLabeled, LabeledBoolean, LabeledCounter, LabeledCustomDistribution,
+    LabeledMemoryDistribution, LabeledMetric, LabeledMetricData, LabeledString,
+    LabeledTimingDistribution,
 };
 pub use crate::metrics::{
     BooleanMetric, CounterMetric, CustomDistributionMetric, Datetime, DatetimeMetric,
@@ -129,7 +131,7 @@ pub struct InternalConfiguration {
     pub log_level: Option<LevelFilter>,
     /// The rate at which pings may be uploaded before they are throttled.
     pub rate_limit: Option<PingRateLimit>,
-    /// (Experimental) Whether to add a wallclock timestamp to all events.
+    /// Whether to add a wallclock timestamp to all events.
     pub enable_event_timestamps: bool,
     /// An experimentation identifier derived by the application to be sent with all pings, it should
     /// be noted that this has an underlying StringMetric and so should conform to the limitations that
@@ -141,6 +143,11 @@ pub struct InternalConfiguration {
     /// Maps a ping name to a list of pings to schedule along with it.
     /// Only used if the ping's own ping schedule list is empty.
     pub ping_schedule: HashMap<String, Vec<String>>,
+
+    /// Write count threshold when to auto-flush. `0` disables it.
+    pub ping_lifetime_threshold: u64,
+    /// After what time to auto-flush. 0 disables it.
+    pub ping_lifetime_max_time: u64,
 }
 
 /// How to specify the rate at which pings may be uploaded before they are throttled.
@@ -310,7 +317,7 @@ pub trait OnGleanEvents: Send {
 }
 
 /// A callback handler that receives the base identifier of recorded events
-/// The identifier is in the format: <category>.<name>
+/// The identifier is in the format: `<category>.<name>`
 pub trait GleanEventListener: Send {
     /// Called when an event is recorded, indicating the id of the event
     fn on_event_recorded(&self, id: String);

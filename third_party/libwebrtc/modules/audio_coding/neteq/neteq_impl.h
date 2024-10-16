@@ -13,6 +13,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,6 +25,7 @@
 #include "api/neteq/neteq_controller_factory.h"
 #include "api/neteq/tick_timer.h"
 #include "api/rtp_packet_info.h"
+#include "api/units/timestamp.h"
 #include "modules/audio_coding/neteq/audio_multi_vector.h"
 #include "modules/audio_coding/neteq/expand_uma_logger.h"
 #include "modules/audio_coding/neteq/packet.h"
@@ -127,13 +129,14 @@ class NetEqImpl : public webrtc::NetEq {
 
   // Inserts a new packet into NetEq. Returns 0 on success, -1 on failure.
   int InsertPacket(const RTPHeader& rtp_header,
-                   rtc::ArrayView<const uint8_t> payload) override;
+                   rtc::ArrayView<const uint8_t> payload,
+                   Timestamp receive_time) override;
 
   void InsertEmptyPacket(const RTPHeader& rtp_header) override;
 
   int GetAudio(
       AudioFrame* audio_frame,
-      bool* muted,
+      bool* muted = nullptr,
       int* current_sample_rate_hz = nullptr,
       absl::optional<Operation> action_override = absl::nullopt) override;
 
@@ -204,7 +207,8 @@ class NetEqImpl : public webrtc::NetEq {
   // above. Returns 0 on success, otherwise an error code.
   // TODO(hlundin): Merge this with InsertPacket above?
   int InsertPacketInternal(const RTPHeader& rtp_header,
-                           rtc::ArrayView<const uint8_t> payload)
+                           rtc::ArrayView<const uint8_t> payload,
+                           Timestamp receive_time)
       RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // Returns true if the payload type changed (this should be followed by
@@ -216,7 +220,6 @@ class NetEqImpl : public webrtc::NetEq {
   // Delivers 10 ms of audio data. The data is written to `audio_frame`.
   // Returns 0 on success, otherwise an error code.
   int GetAudioInternal(AudioFrame* audio_frame,
-                       bool* muted,
                        absl::optional<Operation> action_override)
       RTC_EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 

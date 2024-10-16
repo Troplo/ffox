@@ -6,7 +6,6 @@ package org.mozilla.fenix.components.toolbar
 
 import android.content.Context
 import android.graphics.Color
-import android.net.Uri
 import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
 import android.view.View
@@ -35,23 +34,35 @@ import org.mozilla.fenix.customtabs.CustomTabToolbarIntegration
 import org.mozilla.fenix.customtabs.CustomTabToolbarMenu
 import org.mozilla.fenix.ext.bookmarkStorage
 import org.mozilla.fenix.ext.components
-import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.theme.ThemeManager
 import org.mozilla.fenix.utils.Settings
 import org.mozilla.fenix.utils.ToolbarPopupWindow
 import java.lang.ref.WeakReference
 import mozilla.components.ui.widgets.behavior.ViewPosition as MozacToolbarPosition
 
+/**
+ * A wrapper over [BrowserToolbar] to allow extra customisation and behavior.
+ *
+ * @param context [Context] used for various system interactions.
+ * @param container [ViewGroup] which will serve as parent of this View.
+ * @param snackbarParent [ViewGroup] in which new snackbars will be shown.
+ * @param settings [Settings] object to get the toolbar position and other settings.
+ * @param interactor [BrowserToolbarInteractor] to handle toolbar interactions.
+ * @param customTabSession [CustomTabSessionState] if the toolbar is shown in a custom tab.
+ * @param lifecycleOwner View lifecycle owner used to determine when to cancel UI jobs.
+ * @param tabStripContent Composable content for the tab strip.
+ */
 @SuppressWarnings("LargeClass", "LongParameterList")
 class BrowserToolbarView(
     private val context: Context,
     container: ViewGroup,
+    private val snackbarParent: ViewGroup,
     private val settings: Settings,
     private val interactor: BrowserToolbarInteractor,
     private val customTabSession: CustomTabSessionState?,
     private val lifecycleOwner: LifecycleOwner,
     private val tabStripContent: @Composable () -> Unit,
-) {
+) : ScrollableToolbar {
 
     @LayoutRes
     private val toolbarLayout = when (settings.toolbarPosition) {
@@ -68,8 +79,6 @@ class BrowserToolbarView(
 
     var view: BrowserToolbar = layout
         .findViewById(R.id.toolbar)
-
-    private val isNavBarEnabled = context.settings().navigationToolbarEnabled
 
     val toolbarIntegration: ToolbarIntegration
     val menuToolbar: ToolbarMenu
@@ -95,6 +104,7 @@ class BrowserToolbarView(
         view.display.setOnUrlLongClickListener {
             ToolbarPopupWindow.show(
                 WeakReference(view),
+                WeakReference(snackbarParent),
                 customTabSession?.id,
                 interactor::onBrowserToolbarPasteAndGo,
                 interactor::onBrowserToolbarPaste,
@@ -125,11 +135,7 @@ class BrowserToolbarView(
                 }
 
                 display.urlFormatter = { url ->
-                    if (isNavBarEnabled) {
-                        Uri.parse(url.toString()).host ?: url
-                    } else {
-                        URLStringUtils.toDisplayUrl(url)
-                    }
+                    URLStringUtils.toDisplayUrl(url)
                 }
 
                 display.hint = context.getString(R.string.search_hint)
@@ -168,21 +174,21 @@ class BrowserToolbarView(
 
             toolbarIntegration = if (customTabSession != null) {
                 CustomTabToolbarIntegration(
-                    this,
-                    view,
-                    view as ScrollableToolbar,
-                    menuToolbar,
-                    customTabSession.id,
+                    context = this,
+                    toolbar = view,
+                    scrollableToolbar = view as ScrollableToolbar,
+                    toolbarMenu = menuToolbar,
+                    interactor = interactor,
+                    customTabId = customTabSession.id,
                     isPrivate = customTabSession.content.private,
                 )
             } else {
                 DefaultToolbarIntegration(
-                    this,
-                    view,
-                    layout as ScrollableToolbar,
-                    menuToolbar,
-                    lifecycleOwner,
-                    sessionId = null,
+                    context = this,
+                    toolbar = view,
+                    scrollableToolbar = layout as ScrollableToolbar,
+                    toolbarMenu = menuToolbar,
+                    lifecycleOwner = lifecycleOwner,
                     isPrivate = components.core.store.state.selectedTab?.content?.private ?: false,
                     interactor = interactor,
                 )
@@ -198,7 +204,7 @@ class BrowserToolbarView(
         layout.isVisible = true
     }
 
-    fun expand() {
+    override fun expand() {
         // expand only for normal tabs and custom tabs not for PWA or TWA
         if (isPwaTabOrTwaTab) {
             return
@@ -209,7 +215,7 @@ class BrowserToolbarView(
         }
     }
 
-    fun collapse() {
+    override fun collapse() {
         // collapse only for normal tabs and custom tabs not for PWA or TWA. Mirror expand()
         if (isPwaTabOrTwaTab) {
             return
@@ -217,6 +223,18 @@ class BrowserToolbarView(
 
         (layout.layoutParams as CoordinatorLayout.LayoutParams).apply {
             (behavior as? EngineViewScrollingBehavior)?.forceCollapse(layout)
+        }
+    }
+
+    override fun enableScrolling() {
+        (layout.layoutParams as CoordinatorLayout.LayoutParams).apply {
+            (behavior as? EngineViewScrollingBehavior)?.enableScrolling()
+        }
+    }
+
+    override fun disableScrolling() {
+        (layout.layoutParams as CoordinatorLayout.LayoutParams).apply {
+            (behavior as? EngineViewScrollingBehavior)?.disableScrolling()
         }
     }
 

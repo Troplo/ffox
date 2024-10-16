@@ -13,6 +13,7 @@
 
 #include "CompositorWidget.h"
 #include "MozContainer.h"
+#include "MozContainerSurfaceLock.h"
 #include "VsyncSource.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/Maybe.h"
@@ -54,6 +55,7 @@ extern mozilla::LazyLogModule gWidgetLog;
 extern mozilla::LazyLogModule gWidgetDragLog;
 extern mozilla::LazyLogModule gWidgetPopupLog;
 extern mozilla::LazyLogModule gWidgetVsync;
+extern mozilla::LazyLogModule gWidgetWaylandLog;
 
 #  define LOG(str, ...)                               \
     MOZ_LOG(IsPopup() ? gWidgetPopupLog : gWidgetLog, \
@@ -69,6 +71,8 @@ extern mozilla::LazyLogModule gWidgetVsync;
 #  define LOG_ENABLED()                                         \
     (MOZ_LOG_TEST(gWidgetPopupLog, mozilla::LogLevel::Debug) || \
      MOZ_LOG_TEST(gWidgetLog, mozilla::LogLevel::Debug))
+#  define LOG_WAYLAND(...) \
+    MOZ_LOG(gWidgetWaylandLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
 
 #else
 
@@ -315,20 +319,10 @@ class nsWindow final : public nsBaseWidget {
       const mozilla::WidgetKeyboardEvent& aEvent,
       nsTArray<mozilla::CommandInt>& aCommands) override;
 
-  // These methods are for toplevel windows only.
-  void ResizeTransparencyBitmap();
-  void ApplyTransparencyBitmap();
-  void ClearTransparencyBitmap();
-
   void SetTransparencyMode(TransparencyMode aMode) override;
   TransparencyMode GetTransparencyMode() override;
   void SetInputRegion(const InputRegion&) override;
-  nsresult UpdateTranslucentWindowAlphaInternal(const nsIntRect& aRect,
-                                                uint8_t* aAlphas,
-                                                int32_t aStride);
   void ReparentNativeWidget(nsIWidget* aNewParent) override;
-
-  void UpdateTitlebarTransparencyBitmap();
 
   nsresult SynthesizeNativeMouseEvent(LayoutDeviceIntPoint aPoint,
                                       NativeMouseMessage aNativeMessage,
@@ -413,13 +407,14 @@ class nsWindow final : public nsBaseWidget {
    */
   static GtkWindowDecoration GetSystemGtkWindowDecoration();
 
-  static bool TitlebarUseShapeMask();
-  bool IsRemoteContent() { return HasRemoteContent(); }
+  bool IsRemoteContent() const { return HasRemoteContent(); }
   void NativeMoveResizeWaylandPopupCallback(const GdkRectangle* aFinalSize,
                                             bool aFlippedX, bool aFlippedY);
   static bool IsToplevelWindowTransparent();
 
   static nsWindow* GetFocusedWindow();
+
+  mozilla::UniquePtr<MozContainerSurfaceLock> LockSurface();
 
 #ifdef MOZ_WAYLAND
   // Use xdg-activation protocol to transfer focus from gFocusWindow to aWindow.
@@ -468,6 +463,12 @@ class nsWindow final : public nsBaseWidget {
 
   static nsWindow* GetWindow(GdkWindow* window);
 
+  /**
+   * Dispatch accessible window activate event for the top level window
+   * accessible.
+   */
+  void DispatchActivateEventAccessible();
+
  protected:
   virtual ~nsWindow();
 
@@ -482,9 +483,6 @@ class nsWindow final : public nsBaseWidget {
   nsCOMPtr<nsIWidget> mParent;
   mozilla::Atomic<int, mozilla::Relaxed> mCeiledScaleFactor{1};
   double mFractionalScaleFactor = 0.0;
-
-  void UpdateAlpha(mozilla::gfx::SourceSurface* aSourceSurface,
-                   nsIntRect aBoundsRect);
 
   void NativeMoveResize(bool aMoved, bool aResized);
 
@@ -507,7 +505,6 @@ class nsWindow final : public nsBaseWidget {
   GtkWidget* GetToplevelWidget() const;
   nsWindow* GetContainerWindow() const;
   Window GetX11Window();
-  bool GetShapedState();
   void EnsureGdkWindow();
   void SetUrgencyHint(GtkWidget* top_window, bool state);
   void SetDefaultIcon(void);
@@ -662,7 +659,6 @@ class nsWindow final : public nsBaseWidget {
   bool mIsAlert : 1;
   bool mWindowShouldStartDragging : 1;
   bool mHasMappedToplevel : 1;
-  bool mRetryPointerGrab : 1;
   bool mPanInProgress : 1;
   // Draw titlebar with :backdrop css state (inactive/unfocused).
   bool mTitlebarBackdropState : 1;
@@ -717,10 +713,6 @@ class nsWindow final : public nsBaseWidget {
    * when the widget is shown.
    */
   bool mHiddenPopupPositioned : 1;
-
-  // The transparency bitmap is used instead of ARGB visual for toplevel
-  // window to draw titlebar.
-  bool mTransparencyBitmapForTitlebar : 1;
 
   // True when we're on compositing window manager and this
   // window is using visual with alpha channel.
@@ -783,13 +775,6 @@ class nsWindow final : public nsBaseWidget {
 
   // Whether we need to retry capturing the mouse because we' re not mapped yet.
   bool mNeedsToRetryCapturingMouse : 1;
-
-  // This bitmap tracks which pixels are transparent. We don't support
-  // full translucency at this time; each pixel is either fully opaque
-  // or fully transparent.
-  gchar* mTransparencyBitmap = nullptr;
-  int32_t mTransparencyBitmapWidth = 0;
-  int32_t mTransparencyBitmapHeight = 0;
 
   // all of our DND stuff
   void InitDragEvent(mozilla::WidgetDragEvent& aEvent);
@@ -950,12 +935,6 @@ class nsWindow final : public nsBaseWidget {
    * @param  aEventType  [in] the accessible event type to dispatch
    */
   void DispatchEventToRootAccessible(uint32_t aEventType);
-
-  /**
-   * Dispatch accessible window activate event for the top level window
-   * accessible.
-   */
-  void DispatchActivateEventAccessible();
 
   /**
    * Dispatch accessible window deactivate event for the top level window

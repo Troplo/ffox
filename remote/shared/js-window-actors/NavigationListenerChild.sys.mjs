@@ -81,7 +81,6 @@ export class NavigationListenerChild extends JSWindowActorChild {
    *       - browsingContextId: browsing context id
    *       - isTopBrowsingContext: flag that indicates if the browsing context is
    *         top level
-   *
    */
   #getBrowsingContextDetails(browsingContext) {
     return {
@@ -172,6 +171,7 @@ export class NavigationListenerChild extends JSWindowActorChild {
         // change from the correct process later.
         this.sendAsyncMessage("NavigationListenerChild:navigationStopped", {
           contextDetails: this.#getBrowsingContextDetails(context),
+          status,
           url: targetURI?.spec,
         });
       }

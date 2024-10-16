@@ -17,6 +17,73 @@ describe('AriaQueryHandler', () => {
   setupTestBrowserHooks();
 
   describe('parseAriaSelector', () => {
+    it('should handle non-breaking spaces', async () => {
+      const {page} = await getTestState();
+      await page.setContent(
+        '<button id="btn" role="button"><span>&nbsp;</span><span>&nbsp;</span>Submit button and some spaces</button>'
+      );
+      const expectFound = async (button: ElementHandle | null) => {
+        assert(button);
+        const id = await button.evaluate(button => {
+          return button.id;
+        });
+        expect(id).toBe('btn');
+      };
+      {
+        using button = await page.$(
+          'aria/\u00A0\u00A0Submit button and some spaces'
+        );
+        await expectFound(button);
+      }
+      {
+        using button = await page.$('aria/Submit button and some spaces');
+        expect(button).toBe(null);
+      }
+    });
+    it('should handle non-breaking spaces', async () => {
+      const {page} = await getTestState();
+      await page.setContent(
+        '<button id="btn" role="button">  Submit button and some spaces</button>'
+      );
+      const expectFound = async (button: ElementHandle | null) => {
+        assert(button);
+        const id = await button.evaluate(button => {
+          return button.id;
+        });
+        expect(id).toBe('btn');
+      };
+      {
+        using button = await page.$('aria/ubmit button and some spaces');
+        expect(button).toBe(null);
+      }
+      {
+        using button = await page.$('aria/Submit button and some spaces');
+        await expectFound(button);
+      }
+    });
+    it('should handle zero width spaces', async () => {
+      const {page} = await getTestState();
+      await page.setContent(
+        '<button id="btn" role="button"><span>&ZeroWidthSpace;</span><span>&ZeroWidthSpace;</span>Submit button and some spaces</button>'
+      );
+      const expectFound = async (button: ElementHandle | null) => {
+        assert(button);
+        const id = await button.evaluate(button => {
+          return button.id;
+        });
+        expect(id).toBe('btn');
+      };
+      {
+        using button = await page.$(
+          'aria/\u200B\u200BSubmit button and some spaces'
+        );
+        await expectFound(button);
+      }
+      {
+        using button = await page.$('aria/Submit button and some spaces');
+        expect(button).toBe(null);
+      }
+    });
     it('should find button', async () => {
       const {page} = await getTestState();
       await page.setContent(
@@ -24,7 +91,7 @@ describe('AriaQueryHandler', () => {
       );
       const expectFound = async (button: ElementHandle | null) => {
         assert(button);
-        const id = await button.evaluate((button: Element) => {
+        const id = await button.evaluate(button => {
           return button.id;
         });
         expect(id).toBe('btn');
@@ -41,21 +108,23 @@ describe('AriaQueryHandler', () => {
         );
         await expectFound(button);
       }
-      using button = await page.$(
-        'aria/  Submit button and some spaces[role="button"]'
-      );
-      await expectFound(button);
+      {
+        using button = await page.$(
+          'aria/  Submit button and some spaces[role="button"]'
+        );
+        expect(button).toBe(null);
+      }
       {
         using button = await page.$(
           'aria/Submit button and some spaces  [role="button"]'
         );
-        await expectFound(button);
+        expect(button).toBe(null);
       }
       {
         using button = await page.$(
           'aria/Submit  button   and  some  spaces   [  role  =  "button" ] '
         );
-        await expectFound(button);
+        expect(button).toBe(null);
       }
       {
         using button = await page.$(
@@ -73,17 +142,17 @@ describe('AriaQueryHandler', () => {
         using button = await page.$(
           'aria/[name="  Submit  button and some  spaces"][role="button"]'
         );
-        await expectFound(button);
+        expect(button).toBe(null);
       }
       {
         using button = await page.$(
           "aria/[name='  Submit  button and some  spaces'][role='button']"
         );
-        await expectFound(button);
+        expect(button).toBe(null);
       }
       {
         using button = await page.$(
-          'aria/ignored[name="Submit  button and some  spaces"][role="button"]'
+          'aria/ignored[name="Submit button and some spaces"][role="button"]'
         );
         await expectFound(button);
         await expect(page.$('aria/smth[smth="true"]')).rejects.toThrow(
@@ -621,7 +690,7 @@ describe('AriaQueryHandler', () => {
         `
           <h2 id="shown">title</h2>
           <h2 id="hidden" aria-hidden="true">title</h2>
-          <div id="node1" aria-labeledby="node2"></div>
+          <div id="node1" aria-labelledby="node2"></div>
           <div id="node2" aria-label="bar"></div>
           <div id="node3" aria-label="foo"></div>
           <div id="node4" class="container">
@@ -651,12 +720,14 @@ describe('AriaQueryHandler', () => {
           <!-- Accessible name for the <input> is "Accessible Name" -->
           <input id="node23">
           <div id="node24" title="Accessible Name"></div>
+          <div role="tree">
           <div role="treeitem" id="node30">
           <div role="treeitem" id="node31">
           <div role="treeitem" id="node32">item1</div>
           <div role="treeitem" id="node33">item2</div>
           </div>
           <div role="treeitem" id="node34">item3</div>
+          </div>
           </div>
           <!-- Accessible name for the <div> is "item1 item2 item3" -->
           <div aria-describedby="node30"></div>
@@ -667,7 +738,7 @@ describe('AriaQueryHandler', () => {
     const getIds = async (elements: ElementHandle[]) => {
       return await Promise.all(
         elements.map(element => {
-          return element.evaluate((element: Element) => {
+          return element.evaluate(element => {
             return element.id;
           });
         })

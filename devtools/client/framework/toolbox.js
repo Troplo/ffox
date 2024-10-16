@@ -78,10 +78,17 @@ loader.lazyRequireGetter(
   "resource://devtools/shared/commands/target/actions/targets.js",
   true
 );
+loader.lazyRequireGetter(
+  this,
+  "TRACER_LOG_METHODS",
+  "resource://devtools/shared/specs/tracer.js",
+  true
+);
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   AppConstants: "resource://gre/modules/AppConstants.sys.mjs",
+  TYPES: "resource://devtools/shared/highlighters.mjs",
 });
 loader.lazyRequireGetter(this, "flags", "resource://devtools/shared/flags.js");
 loader.lazyRequireGetter(
@@ -233,6 +240,9 @@ const BOOLEAN_CONFIGURATION_PREFS = {
   "devtools.debugger.features.overlay": {
     name: "pauseOverlay",
     thread: true,
+  },
+  "devtools.debugger.features.javascript-tracing": {
+    name: "isTracerFeatureEnabled",
   },
 };
 
@@ -693,6 +703,28 @@ Toolbox.prototype = {
   },
 
   /**
+   * This listener is called by TracerCommand, sooner than the JSTRACER_STATE resource.
+   * This is called when the frontend toggles the tracer, before the server started interpreting the request.
+   * This allows to open the console before we start receiving traces.
+   */
+  async onTracerToggled() {
+    const { tracerCommand } = this.commands;
+    if (!tracerCommand.isTracingEnabled) {
+      return;
+    }
+    const { logMethod } = this.commands.tracerCommand.getTracingOptions();
+    if (
+      logMethod == TRACER_LOG_METHODS.CONSOLE &&
+      this.currentToolId !== "webconsole"
+    ) {
+      await this.openSplitConsole({ focusConsoleInput: false });
+    } else if (logMethod == TRACER_LOG_METHODS.DEBUGGER_SIDEBAR) {
+      const panel = await this.selectTool("jsdebugger");
+      panel.showTracerSidebar();
+    }
+  },
+
+  /**
    * Called on each new JSTRACER_STATE resource
    *
    * @param {Object} resource The JSTRACER_STATE resource
@@ -957,6 +989,8 @@ Toolbox.prototype = {
       ) {
         watchedResources.push(this.resourceCommand.TYPES.JSTRACER_STATE);
         tracerInitialization = this.commands.tracerCommand.initialize();
+        this.onTracerToggled = this.onTracerToggled.bind(this);
+        this.commands.tracerCommand.on("toggle", this.onTracerToggled);
       }
 
       if (!this.isBrowserToolbox) {
@@ -1622,9 +1656,17 @@ Toolbox.prototype = {
       // holding buttons. By default the buttons are placed in the end container.
       isInStartContainer: !!isInStartContainer,
       experimentalURL,
+      getContextMenu() {
+        if (options.getContextMenu) {
+          return options.getContextMenu(toolbox);
+        }
+        return null;
+      },
     };
     if (typeof setup == "function") {
-      const onChange = () => {
+      // Use async function as tracer's definition requires an async function to be passed
+      // for "toggle" event listener.
+      const onChange = async () => {
         button.emit("updatechecked");
       };
       setup(this, onChange);
@@ -2192,7 +2234,7 @@ Toolbox.prototype = {
    */
   _getPickerTooltip() {
     let shortcut = L10N.getStr("toolbox.elementPicker.key");
-    shortcut = KeyShortcuts.parseElectronKey(this.win, shortcut);
+    shortcut = KeyShortcuts.parseElectronKey(shortcut);
     shortcut = KeyShortcuts.stringify(shortcut);
     const shortcutMac = L10N.getStr("toolbox.elementPicker.mac.key");
     const isMac = Services.appinfo.OS === "Darwin";
@@ -2298,8 +2340,8 @@ Toolbox.prototype = {
     // on will-navigate, otherwise we hold on to the stale highlighter
     const hasHighlighters =
       inspectorFront &&
-      (inspectorFront.hasHighlighter("RulersHighlighter") ||
-        inspectorFront.hasHighlighter("MeasuringToolHighlighter"));
+      (inspectorFront.hasHighlighter(lazy.TYPES.RULERS) ||
+        inspectorFront.hasHighlighter(lazy.TYPES.MEASURING));
     if (hasHighlighters) {
       inspectorFront.destroyHighlighters();
       this.component.setToolboxButtons(this.toolbarButtons);
@@ -4175,6 +4217,16 @@ Toolbox.prototype = {
       watchedResources.push(this.resourceCommand.TYPES.NETWORK_EVENT);
     }
 
+    if (
+      Services.prefs.getBoolPref(
+        "devtools.debugger.features.javascript-tracing",
+        false
+      )
+    ) {
+      watchedResources.push(this.resourceCommand.TYPES.JSTRACER_STATE);
+      this.commands.tracerCommand.off("toggle", this.onTracerToggled);
+    }
+
     this.resourceCommand.unwatchResources(watchedResources, {
       onAvailable: this._onResourceAvailable,
     });
@@ -4701,9 +4753,7 @@ Toolbox.prototype = {
       }
 
       if (resourceType === TYPES.CONSOLE_MESSAGE) {
-        // @backward-compat { version 129 } Once Fx129 is release, CONSOLE_MESSAGE resource
-        // are no longer encapsulated into a sub "message" attribute.
-        const { level } = resource.message || resource;
+        const { level } = resource;
         if (level === "error" || level === "exception" || level === "assert") {
           errors++;
         }

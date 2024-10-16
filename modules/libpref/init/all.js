@@ -240,6 +240,7 @@ pref("media.videocontrols.keyboard-tab-to-all-controls", true);
   pref("media.navigator.video.use_transport_cc", true);
   pref("media.peerconnection.video.use_rtx", true);
   pref("media.peerconnection.video.use_rtx.blocklist", "doxy.me,*.doxy.me");
+  pref("media.peerconnection.sdp.quirk.duplicate_fingerprint.allowlist", "");
   pref("media.navigator.video.use_tmmbr", false);
   pref("media.navigator.audio.use_fec", true);
   pref("media.navigator.video.offer_rtcp_rsize", true);
@@ -330,8 +331,7 @@ pref("media.videocontrols.keyboard-tab-to-all-controls", true);
   pref("media.peerconnection.dtls.version.min", 771);
   pref("media.peerconnection.dtls.version.max", 772);
 
-#if defined(XP_MACOSX) && defined(NIGHTLY_BUILD)
-  // Nightly only due to bug 1908539
+#if defined(XP_MACOSX)
   pref("media.getusermedia.audio.processing.platform.enabled", true);
 #else
   pref("media.getusermedia.audio.processing.platform.enabled", false);
@@ -544,7 +544,7 @@ pref("toolkit.scrollbox.scrollIncrement", 20);
 pref("toolkit.scrollbox.clickToScroll.scrollDelay", 150);
 
 pref("toolkit.shopping.ohttpConfigURL", "https://prod.ohttp-gateway.prod.webservices.mozgcp.net/ohttp-configs");
-pref("toolkit.shopping.ohttpRelayURL", "https://mozilla-ohttp-fakespot.fastly-edge.com/");
+pref("toolkit.shopping.ohttpRelayURL", "https://mozilla-ohttp.fastly-edge.com/");
 pref("toolkit.shopping.environment", "prod");
 
 // Controls logging for Sqlite.sys.mjs.
@@ -565,6 +565,7 @@ pref("toolkit.telemetry.unified", true);
 
 // DAP related preferences
 pref("toolkit.telemetry.dap_enabled", false);
+pref("toolkit.telemetry.dap.logLevel", "Warn");
 // Verification tasks
 pref("toolkit.telemetry.dap_task1_enabled", false);
 pref("toolkit.telemetry.dap_task1_taskid", "");
@@ -573,14 +574,14 @@ pref("toolkit.telemetry.dap_visit_counting_enabled", false);
 // Note: format of patterns is "<proto>://<host>/<path>"
 // See https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Match_patterns
 pref("toolkit.telemetry.dap_visit_counting_experiment_list", "[]");
-// Leader endpoint for the DAP protocol
-pref("toolkit.telemetry.dap_leader", "https://dap-09-3.api.divviup.org/");
-// Not used for anything. Just additional information.
-pref("toolkit.telemetry.dap_leader_owner", "ISRG");
-// Second DAP server. Only two are currently supported.
-pref("toolkit.telemetry.dap_helper", "https://dap.services.mozilla.com");
-pref("toolkit.telemetry.dap_helper_owner", "Mozilla");
-pref("toolkit.telemetry.dap.logLevel", "Warn");
+// DAP protocol Leader endpoint. Operated by DivviUp/ISRG.
+// - HPKE key is base64url-encoded response of the /hpke_config path on server.
+pref("toolkit.telemetry.dap.leader.url", "https://dap-09-3.api.divviup.org");
+pref("toolkit.telemetry.dap.leader.hpke", "ACkAACAAAQABACDk8wgwe2-TqHyaL74uqjVWMcF1zi9pxiwQhu4aPwncYw");
+// DAP protocol Helper endpoint. Operated by Mozilla.
+// - HPKE key is base64url-encoded response of the /hpke_config path on server.
+pref("toolkit.telemetry.dap.helper.url", "https://dap.services.mozilla.com");
+pref("toolkit.telemetry.dap.helper.hpke", "ACkAACAAAQABACAucqWdIQRN6BxumPBRXIlg2JsxcznwWX7vyqzM3cjuQA");
 
 // Controls telemetry logs for the Translations feature throughout Firefox.
 pref("toolkit.telemetry.translations.logLevel", "Error");
@@ -918,6 +919,9 @@ pref("javascript.options.mem.gc_incremental_slice_ms", 5);
 // JSGC_COMPACTING_ENABLED
 pref("javascript.options.mem.gc_compacting", true);
 
+// JSGC_NURSERY_ENABLED
+pref("javascript.options.mem.gc_generational", true);
+
 #ifdef NIGHTLY_BUILD
 // JSGC_SEMISPACE_NURSERY_ENABLED
 pref("javascript.options.mem.gc_experimental_semispace_nursery", false);
@@ -1125,7 +1129,7 @@ pref("network.http.response.timeout", 300);
 // Note: the socket transport service will clamp the number below this if the OS
 // cannot allocate that many FDs
 #ifdef ANDROID
-  pref("network.http.max-connections", 40);
+  pref("network.http.max-connections", 128);
 #else
   pref("network.http.max-connections", 900);
 #endif
@@ -1345,34 +1349,6 @@ pref("network.websocket.delay-failed-reconnects", true);
 // Server-Sent Events
 // Equal to the DEFAULT_RECONNECTION_TIME_VALUE value in nsEventSource.cpp
 pref("dom.server-events.default-reconnection-time", 5000); // in milliseconds
-
-// TLDs are treated as IDN-unsafe and punycode will be used for displaying them
-// in the UI (e.g. URL bar), unless they conform to one of the profiles
-// specified in
-// https://www.unicode.org/reports/tr39/#Restriction_Level_Detection
-// If "network.IDN.restriction_profile" is "high", the Highly Restrictive
-// profile is used.
-// If "network.IDN.restriction_profile" is "moderate", the Moderately
-// Restrictive profile is used.
-// In all other cases, the ASCII-Only profile is used.
-// Note that these preferences are referred to ONLY when
-// "network.IDN_show_punycode" is false. In other words, all IDNs will be shown
-// in punycode if "network.IDN_show_punycode" is true.
-pref("network.IDN.restriction_profile", "high");
-
-// If a domain includes any of the blocklist characters, it may be a spoof
-// attempt and so we always display the domain name as punycode.
-// For a complete list of the blocked IDN characters see:
-//   netwerk/dns/IDNCharacterBlocklist.inc
-
-// This pref may contain characters that will override the hardcoded blocklist,
-// so their presence in a domain name will not cause it to be displayed as
-// punycode.
-// Note that this only removes the characters from the blocklist, but there may
-// be other rules in place that cause it to be displayed as punycode.
-pref("network.IDN.extra_allowed_chars", "");
-// This pref may contain additional blocklist characters
-pref("network.IDN.extra_blocked_chars", "");
 
 // This preference specifies a list of domains for which DNS lookups will be
 // IPv4 only. Works around broken DNS servers which can't handle IPv6 lookups
@@ -1597,6 +1573,7 @@ pref("intl.hyphenation-alias.af-*", "af");
 pref("intl.hyphenation-alias.bg-*", "bg");
 pref("intl.hyphenation-alias.bn-*", "bn");
 pref("intl.hyphenation-alias.ca-*", "ca");
+pref("intl.hyphenation-alias.cs-*", "cs");
 pref("intl.hyphenation-alias.cy-*", "cy");
 pref("intl.hyphenation-alias.da-*", "da");
 pref("intl.hyphenation-alias.eo-*", "eo");
@@ -1638,6 +1615,10 @@ pref("intl.hyphenation-alias.as-*", "bn");
 pref("intl.hyphenation-alias.mr", "hi");
 pref("intl.hyphenation-alias.mr-*", "hi");
 
+// Czech patterns are also used for Slovak
+pref("intl.hyphenation-alias.sk", "cs");
+pref("intl.hyphenation-alias.sk-*", "cs");
+
 // use reformed (1996) German patterns by default unless specifically tagged as de-1901
 // (these prefs may soon be obsoleted by better BCP47-based tag matching, but for now...)
 pref("intl.hyphenation-alias.de", "de-1996");
@@ -1662,12 +1643,18 @@ pref("intl.hyphenation-alias.no-*", "nb");
 pref("intl.hyphenation-alias.nb-*", "nb");
 pref("intl.hyphenation-alias.nn-*", "nn");
 
-// In German and Finnish, we allow hyphenation of capitalized words; otherwise not.
-// (Should this be extended to other languages? Should the default be changed?)
+// In German, where all proper nouns are capitalized, we allow hyphenation of
+// capitalized words.
 pref("intl.hyphenate-capitalized.de-1996", true);
 pref("intl.hyphenate-capitalized.de-1901", true);
 pref("intl.hyphenate-capitalized.de-CH", true);
+
+// Also allow hyphenation of capitalized words in some languages that tend to
+// have a a lot of long compound words.
+// (Should this be extended to other languages? Should the default be changed?)
+pref("intl.hyphenate-capitalized.af", true);
 pref("intl.hyphenate-capitalized.fi", true);
+pref("intl.hyphenate-capitalized.nl", true);
 
 // All prefs of default font should be "auto".
 pref("font.name.serif.ar", "");
@@ -1985,6 +1972,9 @@ pref("dom.ipc.processCount.webIsolated", 1);
 #else
 pref("dom.ipc.processCount.webIsolated", 4);
 #endif
+
+// For now we allow a single inference process
+pref("dom.ipc.processCount.inference", 1);
 
 // Keep a single privileged about process alive for performance reasons.
 // e.g. we do not want to throw content processes out every time we navigate
@@ -2474,9 +2464,9 @@ pref("font.size.monospace.x-math", 13);
   pref("font.name-list.sans-serif.th", "Thonburi");
   pref("font.name-list.monospace.th", "Menlo, Ayuthaya");
 
-  pref("font.name-list.serif.x-armn", "Mshtakan");
-  pref("font.name-list.sans-serif.x-armn", "Mshtakan");
-  pref("font.name-list.monospace.x-armn", "Menlo, Mshtakan");
+  pref("font.name-list.serif.x-armn", "Noto Sans Armenian");
+  pref("font.name-list.sans-serif.x-armn", "Noto Sans Armenian");
+  pref("font.name-list.monospace.x-armn", "Menlo, Noto Sans Armenian");
 
   // SolaimanLipi, Rupali http://ekushey.org/?page/mac_download
   pref("font.name-list.serif.x-beng", "Bangla MN");
@@ -2493,9 +2483,9 @@ pref("font.size.monospace.x-math", 13);
   pref("font.name-list.cursive.x-cyrillic", "Geneva");
   pref("font.name-list.fantasy.x-cyrillic", "Charcoal CY");
 
-  pref("font.name-list.serif.x-devanagari", "Devanagari MT");
-  pref("font.name-list.sans-serif.x-devanagari", "Devanagari Sangam MN, Devanagari MT");
-  pref("font.name-list.monospace.x-devanagari", "Menlo, Devanagari Sangam MN, Devanagari MT");
+  pref("font.name-list.serif.x-devanagari", "ITF Devanagari, Devanagari MT");
+  pref("font.name-list.sans-serif.x-devanagari", "Kohinoor Devanagari, Devanagari Sangam MN, Devanagari MT");
+  pref("font.name-list.monospace.x-devanagari", "Menlo, Kohinoor Devanagari, Devanagari Sangam MN, Devanagari MT");
 
   // Abyssinica SIL http://scripts.sil.org/AbyssinicaSIL_Download
   pref("font.name-list.serif.x-ethi", "Kefa, Abyssinica SIL");
@@ -2679,9 +2669,9 @@ pref("font.size.monospace.x-math", 13);
   pref("font.name-list.sans-serif.x-cyrillic", "Arial");
   pref("font.name-list.monospace.x-cyrillic", "Menlo");
 
-  pref("font.name-list.serif.x-devanagari", "Devanagari Sangam MN");
-  pref("font.name-list.sans-serif.x-devanagari", "Devanagari Sangam MN");
-  pref("font.name-list.monospace.x-devanagari", "Menlo, Devanagari Sangam MN");
+  pref("font.name-list.serif.x-devanagari", "Kohinoor Devanagari, Devanagari Sangam MN");
+  pref("font.name-list.sans-serif.x-devanagari", "Kohinoor Devanagari, Devanagari Sangam MN");
+  pref("font.name-list.monospace.x-devanagari", "Menlo, Kohinoor Devanagari, Devanagari Sangam MN");
 
   pref("font.name-list.serif.x-ethi", "Kefa");
   pref("font.name-list.sans-serif.x-ethi", "Kefa");
@@ -2767,7 +2757,6 @@ pref("font.size.monospace.x-math", 13);
 
   // Middle-mouse handling
   pref("middlemouse.paste", true);
-  pref("middlemouse.openNewWindow", true);
   pref("middlemouse.scrollbarPosition", true);
 
   // Tab focus model bit field:
@@ -2798,7 +2787,6 @@ pref("font.size.monospace.x-math", 13);
 
   // Middle-mouse handling
   pref("middlemouse.paste", true);
-  pref("middlemouse.openNewWindow", true);
   pref("middlemouse.scrollbarPosition", true);
 
   // Tab focus model bit field:
@@ -3199,7 +3187,6 @@ pref("network.psl.onUpdate_notify", false);
 
 #ifdef MOZ_WIDGET_GTK
   pref("widget.disable-workspace-management", false);
-  pref("widget.titlebar-x11-use-shape-mask", false);
 #endif
 
 // All the Geolocation preferences are here.
@@ -3218,10 +3205,6 @@ pref("geo.provider.network.timeout", 60000);
 // Set to false if things are really broken.
 #ifdef XP_WIN
   pref("geo.provider.ms-windows-location", true);
-#endif
-
-#if defined(MOZ_WIDGET_GTK) && defined(MOZ_GPSD)
-  pref("geo.provider.use_gpsd", true);
 #endif
 
 // Region
@@ -3538,11 +3521,7 @@ pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozil
 // Mozilla Safe Browsing provider (for tracking protection and plugin blocking)
 pref("browser.safebrowsing.provider.mozilla.pver", "2.2");
 pref("browser.safebrowsing.provider.mozilla.lists", "base-track-digest256,mozstd-trackwhite-digest256,google-trackwhite-digest256,content-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256,ads-track-digest256,social-track-digest256,analytics-track-digest256,base-fingerprinting-track-digest256,content-fingerprinting-track-digest256,base-cryptomining-track-digest256,content-cryptomining-track-digest256,fanboyannoyance-ads-digest256,fanboysocial-ads-digest256,easylist-ads-digest256,easyprivacy-ads-digest256,adguard-ads-digest256,social-tracking-protection-digest256,social-tracking-protection-facebook-digest256,social-tracking-protection-linkedin-digest256,social-tracking-protection-twitter-digest256,base-email-track-digest256,content-email-track-digest256");
-#ifdef NIGHTLY_BUILD
-  pref("browser.safebrowsing.provider.mozilla.updateURL", "moz-sbrs:://antitracking");
-#else
-  pref("browser.safebrowsing.provider.mozilla.updateURL", "https://shavar.services.mozilla.com/downloads?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
-#endif
+pref("browser.safebrowsing.provider.mozilla.updateURL", "moz-sbrs:://antitracking");
 pref("browser.safebrowsing.provider.mozilla.gethashURL", "https://shavar.services.mozilla.com/gethash?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
 // Set to a date in the past to force immediate download in new profiles.
 pref("browser.safebrowsing.provider.mozilla.nextupdatetime", "1");
@@ -3552,7 +3531,11 @@ pref("browser.safebrowsing.provider.mozilla.lists.base", "moz-std");
 pref("browser.safebrowsing.provider.mozilla.lists.content", "moz-full");
 
 // The table and global pref for blocking plugin content
-pref("urlclassifier.blockedTable", "moztest-block-simple,mozplugin-block-digest256");
+#ifdef NIGHTLY_BUILD
+  pref("urlclassifier.blockedTable", "moztest-block-simple,mozplugin-block-digest256");
+#else
+  pref("urlclassifier.blockedTable", "moztest-block-simple");
+#endif
 
 #ifdef XP_MACOSX
   #if !defined(RELEASE_OR_BETA) || defined(DEBUG)
@@ -3720,6 +3703,12 @@ pref("webextensions.tests", false);
 // 16MB default non-parseable upload limit for requestBody.raw.bytes
 pref("webextensions.webRequest.requestBodyMaxRawBytes", 16777216);
 
+#ifdef NIGHTLY_BUILD
+  pref("webextensions.storage.session.enforceQuota", true);
+#else
+  pref("webextensions.storage.session.enforceQuota", false);
+#endif
+
 pref("webextensions.storage.sync.enabled", true);
 // Should we use the old kinto-based implementation of storage.sync? To be removed in bug 1637465.
 pref("webextensions.storage.sync.kinto", false);
@@ -3760,6 +3749,10 @@ pref("browser.translations.select.enable", false);
 // the application logic logs, and not all of the translated messages, which can be
 // slow and overwhelming.
 pref("browser.translations.logLevel", "Error");
+// The BCP-47 language tags of the most recently translated-into target language.
+// This preference is considered when offering a specific language to translate into,
+// but is not considered as a "known" language when deciding whether to offer Translations at all.
+pref("browser.translations.mostRecentTargetLanguages", "");
 // A comma-separated list of BCP-47 language tags that affect the behavior of translations.
 // Languages listed in the alwaysTranslateLanguages list will trigger auto-translate on page load.
 pref("browser.translations.alwaysTranslateLanguages", "");
@@ -3791,6 +3784,8 @@ pref("browser.ml.logLevel", "Error");
 pref("browser.ml.modelHubRootUrl", "https://model-hub.mozilla.org/");
 // Model URL template
 pref("browser.ml.modelHubUrlTemplate", "{model}/{revision}");
+// Maximum disk size for ML model cache (in bytes)
+pref("browser.ml.modelCacheMaxSizeBytes", 1073741824);
 // Model cache timeout in ms
 pref("browser.ml.modelCacheTimeout", 120000);
 
@@ -4037,10 +4032,6 @@ pref("devtools.errorconsole.deprecation_warnings", true);
 
 // Disable service worker debugging on all channels (see Bug 1651605).
 pref("devtools.debugger.features.windowless-service-workers", false);
-
-// Bug 1824726 replaced client side throttling with server side throttling.
-// Use a preference in order to rollback in case of trouble.
-pref("devtools.client-side-throttling.enable", false);
 
 // Disable remote debugging protocol logging.
 pref("devtools.debugger.log", false);

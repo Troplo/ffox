@@ -58,7 +58,7 @@
 #include "pc/simulcast_sdp_serializer.h"
 #include "rtc_base/arraysize.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/helpers.h"
+#include "rtc_base/crypto_random.h"
 #include "rtc_base/ip_address.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/net_helper.h"
@@ -3633,7 +3633,7 @@ bool ParseRtpmapAttribute(absl::string_view line,
   }
 
   if (media_type == cricket::MEDIA_TYPE_VIDEO) {
-    for (const cricket::VideoCodec& existing_codec : media_desc->codecs()) {
+    for (const cricket::Codec& existing_codec : media_desc->codecs()) {
       if (!existing_codec.name.empty() && payload_type == existing_codec.id &&
           (!absl::EqualsIgnoreCase(encoding_name, existing_codec.name) ||
            clock_rate != existing_codec.clockrate)) {
@@ -3664,7 +3664,7 @@ bool ParseRtpmapAttribute(absl::string_view line,
       return ParseFailed(line, "At most 24 channels are supported.", error);
     }
 
-    for (const cricket::AudioCodec& existing_codec : media_desc->codecs()) {
+    for (const cricket::Codec& existing_codec : media_desc->codecs()) {
       // TODO(crbug.com/1338902) re-add checks for clockrate and number of
       // channels.
       if (!existing_codec.name.empty() && payload_type == existing_codec.id &&
@@ -3696,6 +3696,27 @@ bool ParseFmtpParam(absl::string_view line,
     return true;
   }
   // a=fmtp:<payload_type> <param1>=<value1>; <param2>=<value2>; ...
+  return true;
+}
+
+bool ParseFmtpParameterSet(absl::string_view line_params,
+                           webrtc::CodecParameterMap& codec_params,
+                           SdpParseError* error) {
+  // Parse out format specific parameters.
+  for (absl::string_view param :
+       rtc::split(line_params, kSdpDelimiterSemicolonChar)) {
+    std::string name;
+    std::string value;
+    if (!ParseFmtpParam(absl::StripAsciiWhitespace(param), &name, &value,
+                        error)) {
+      return false;
+    }
+    if (codec_params.find(name) != codec_params.end()) {
+      RTC_LOG(LS_INFO) << "Overwriting duplicate fmtp parameter with key \""
+                       << name << "\".";
+    }
+    codec_params[name] = value;
+  }
   return true;
 }
 
@@ -3736,19 +3757,8 @@ bool ParseFmtpAttributes(absl::string_view line,
 
   // Parse out format specific parameters.
   webrtc::CodecParameterMap codec_params;
-  for (absl::string_view param :
-       rtc::split(line_params, kSdpDelimiterSemicolonChar)) {
-    std::string name;
-    std::string value;
-    if (!ParseFmtpParam(absl::StripAsciiWhitespace(param), &name, &value,
-                        error)) {
-      return false;
-    }
-    if (codec_params.find(name) != codec_params.end()) {
-      RTC_LOG(LS_INFO) << "Overwriting duplicate fmtp parameter with key \""
-                       << name << "\".";
-    }
-    codec_params[name] = value;
+  if (!ParseFmtpParameterSet(line_params, codec_params, error)) {
+    return false;
   }
 
   if (media_type == cricket::MEDIA_TYPE_AUDIO ||

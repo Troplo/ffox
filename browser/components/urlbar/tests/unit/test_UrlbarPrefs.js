@@ -57,6 +57,10 @@ add_task(function makeResultGroups_true() {
             { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_BOOKMARK_KEYWORD },
             { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_AUTOFILL },
             { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE },
+            {
+              group:
+                UrlbarUtils.RESULT_GROUP.HEURISTIC_RESTRICT_KEYWORD_AUTOFILL,
+            },
             { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_HISTORY_URL },
             { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_FALLBACK },
           ],
@@ -119,6 +123,10 @@ add_task(function makeResultGroups_true() {
                       flex: 2,
                       group: UrlbarUtils.RESULT_GROUP.ABOUT_PAGES,
                     },
+                    {
+                      flex: 99,
+                      group: UrlbarUtils.RESULT_GROUP.RESTRICT_SEARCH_KEYWORD,
+                    },
                   ],
                 },
                 {
@@ -152,6 +160,10 @@ add_task(function makeResultGroups_false() {
             { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_BOOKMARK_KEYWORD },
             { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_AUTOFILL },
             { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_TOKEN_ALIAS_ENGINE },
+            {
+              group:
+                UrlbarUtils.RESULT_GROUP.HEURISTIC_RESTRICT_KEYWORD_AUTOFILL,
+            },
             { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_HISTORY_URL },
             { group: UrlbarUtils.RESULT_GROUP.HEURISTIC_FALLBACK },
           ],
@@ -187,6 +199,10 @@ add_task(function makeResultGroups_false() {
                     {
                       flex: 2,
                       group: UrlbarUtils.RESULT_GROUP.ABOUT_PAGES,
+                    },
+                    {
+                      flex: 99,
+                      group: UrlbarUtils.RESULT_GROUP.RESTRICT_SEARCH_KEYWORD,
                     },
                   ],
                 },

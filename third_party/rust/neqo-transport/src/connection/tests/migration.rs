@@ -9,7 +9,7 @@ use std::{
     mem,
     net::{IpAddr, Ipv6Addr, SocketAddr},
     rc::Rc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use neqo_common::{Datagram, Decoder};
@@ -28,7 +28,7 @@ use crate::{
     connection::tests::send_something_paced,
     frame::FRAME_TYPE_NEW_CONNECTION_ID,
     packet::PacketBuilder,
-    path::{PATH_MTU_V4, PATH_MTU_V6},
+    pmtud::Pmtud,
     tparams::{self, PreferredAddress, TransportParameter},
     CloseReason, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator, ConnectionIdRef,
     ConnectionParameters, EmptyConnectionIdGenerator, Error,
@@ -53,30 +53,16 @@ fn loopback() -> SocketAddr {
 }
 
 fn change_path(d: &Datagram, a: SocketAddr) -> Datagram {
-    Datagram::new(a, a, d.tos(), d.ttl(), &d[..])
+    Datagram::new(a, a, d.tos(), &d[..])
 }
 
-fn new_port(a: SocketAddr) -> SocketAddr {
+const fn new_port(a: SocketAddr) -> SocketAddr {
     let (port, _) = a.port().overflowing_add(410);
     SocketAddr::new(a.ip(), port)
 }
 
 fn change_source_port(d: &Datagram) -> Datagram {
-    Datagram::new(
-        new_port(d.source()),
-        d.destination(),
-        d.tos(),
-        d.ttl(),
-        &d[..],
-    )
-}
-
-/// As these tests use a new path, that path often has a non-zero RTT.
-/// Pacing can be a problem when testing that path.  This skips time forward.
-fn skip_pacing(c: &mut Connection, now: Instant) -> Instant {
-    let pacing = c.process_output(now).callback();
-    assert_ne!(pacing, Duration::new(0, 0));
-    now + pacing
+    Datagram::new(new_port(d.source()), d.destination(), d.tos(), &d[..])
 }
 
 #[test]
@@ -106,7 +92,7 @@ fn path_forwarding_attack() {
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
-    let mut now = now();
+    let now = now();
 
     let dgram = send_something(&mut client, now);
     let dgram = change_path(&dgram, DEFAULT_ADDR_V4);
@@ -166,16 +152,15 @@ fn path_forwarding_attack() {
     assert_v6_path(&client_data2, false);
 
     // The server keeps sending on the new path.
-    now = skip_pacing(&mut server, now);
     let server_data2 = send_something(&mut server, now);
     assert_v4_path(&server_data2, false);
 
     // Until new data is received from the client on the old path.
     server.process_input(&client_data2, now);
-    // The server sends a probe on the "old" path.
+    // The server sends a probe on the new path.
     let server_data3 = send_something(&mut server, now);
     assert_v4_path(&server_data3, true);
-    // But switches data transmission to the "new" path.
+    // But switches data transmission to the old path.
     let server_data4 = server.process_output(now).dgram().unwrap();
     assert_v6_path(&server_data4, false);
 }
@@ -470,10 +455,7 @@ fn fast_handshake(client: &mut Connection, server: &mut Connection) -> Option<Da
 }
 
 fn preferred_address(hs_client: SocketAddr, hs_server: SocketAddr, preferred: SocketAddr) {
-    let mtu = match hs_client.ip() {
-        IpAddr::V4(_) => PATH_MTU_V4,
-        IpAddr::V6(_) => PATH_MTU_V6,
-    };
+    let mtu = Pmtud::default_plpmtu(hs_client.ip());
     let assert_orig_path = |d: &Datagram, full_mtu: bool| {
         assert_eq!(
             d.destination(),

@@ -111,8 +111,9 @@ static DataTransfer::Mode ModeForEvent(EventMessage aEventMessage) {
   }
 }
 
-DataTransfer::DataTransfer(nsISupports* aParent, EventMessage aEventMessage,
-                           bool aIsExternal, int32_t aClipboardType)
+DataTransfer::DataTransfer(
+    nsISupports* aParent, EventMessage aEventMessage, bool aIsExternal,
+    mozilla::Maybe<nsIClipboard::ClipboardType> aClipboardType)
     : mParent(aParent),
       mDropEffect(nsIDragService::DRAGDROP_ACTION_NONE),
       mEffectAllowed(nsIDragService::DRAGDROP_ACTION_UNINITIALIZED),
@@ -153,7 +154,6 @@ DataTransfer::DataTransfer(nsISupports* aParent, EventMessage aEventMessage,
       mIsExternal(true),
       mUserCancelled(false),
       mIsCrossDomainSubFrameDrop(false),
-      mClipboardType(-1),
       mDragImageX(0),
       mDragImageY(0) {
   mItems = new DataTransferItemList(this);
@@ -187,7 +187,6 @@ DataTransfer::DataTransfer(nsISupports* aParent, EventMessage aEventMessage,
       mIsExternal(false),
       mUserCancelled(false),
       mIsCrossDomainSubFrameDrop(false),
-      mClipboardType(-1),
       mDragImageX(0),
       mDragImageY(0) {
   mItems = new DataTransferItemList(this);
@@ -202,13 +201,13 @@ DataTransfer::DataTransfer(nsISupports* aParent, EventMessage aEventMessage,
                        "Failed to set given string to the DataTransfer object");
 }
 
-DataTransfer::DataTransfer(nsISupports* aParent, EventMessage aEventMessage,
-                           const uint32_t aEffectAllowed, bool aCursorState,
-                           bool aIsExternal, bool aUserCancelled,
-                           bool aIsCrossDomainSubFrameDrop,
-                           int32_t aClipboardType, DataTransferItemList* aItems,
-                           Element* aDragImage, uint32_t aDragImageX,
-                           uint32_t aDragImageY, bool aShowFailAnimation)
+DataTransfer::DataTransfer(
+    nsISupports* aParent, EventMessage aEventMessage,
+    const uint32_t aEffectAllowed, bool aCursorState, bool aIsExternal,
+    bool aUserCancelled, bool aIsCrossDomainSubFrameDrop,
+    mozilla::Maybe<nsIClipboard::ClipboardType> aClipboardType,
+    DataTransferItemList* aItems, Element* aDragImage, uint32_t aDragImageX,
+    uint32_t aDragImageY, bool aShowFailAnimation)
     : mParent(aParent),
       mDropEffect(nsIDragService::DRAGDROP_ACTION_NONE),
       mEffectAllowed(aEffectAllowed),
@@ -245,7 +244,7 @@ already_AddRefed<DataTransfer> DataTransfer::Constructor(
     const GlobalObject& aGlobal) {
   RefPtr<DataTransfer> transfer =
       new DataTransfer(aGlobal.GetAsSupports(), eCopy, /* is external */ false,
-                       /* clipboard type */ -1);
+                       /* clipboard type */ Nothing());
   transfer->mEffectAllowed = nsIDragService::DRAGDROP_ACTION_NONE;
   return transfer.forget();
 }
@@ -641,6 +640,10 @@ void DataTransfer::GetExternalClipboardFormats(const bool& aPlainTextOnly,
 
   MOZ_ASSERT(!mClipboardDataSnapshot);
 
+  if (mClipboardType.isNothing()) {
+    return;
+  }
+
   RefPtr<WindowContext> wc = GetWindowContext();
   if (NS_WARN_IF(!wc)) {
     MOZ_ASSERT_UNREACHABLE(
@@ -650,7 +653,7 @@ void DataTransfer::GetExternalClipboardFormats(const bool& aPlainTextOnly,
 
   nsCOMPtr<nsIClipboard> clipboard =
       do_GetService("@mozilla.org/widget/clipboard;1");
-  if (!clipboard || mClipboardType < 0) {
+  if (!clipboard) {
     return;
   }
 
@@ -658,12 +661,12 @@ void DataTransfer::GetExternalClipboardFormats(const bool& aPlainTextOnly,
   nsCOMPtr<nsIClipboardDataSnapshot> clipboardDataSnapshot;
   if (aPlainTextOnly) {
     rv = clipboard->GetDataSnapshotSync(
-        AutoTArray<nsCString, 1>{nsLiteralCString(kTextMime)}, mClipboardType,
+        AutoTArray<nsCString, 1>{nsLiteralCString(kTextMime)}, *mClipboardType,
         wc, getter_AddRefs(clipboardDataSnapshot));
   } else {
     AutoTArray<nsCString, ArrayLength(kNonPlainTextExternalFormats)> formats;
     formats.AppendElements(Span<const nsCString>(kNonPlainTextExternalFormats));
-    rv = clipboard->GetDataSnapshotSync(formats, mClipboardType, wc,
+    rv = clipboard->GetDataSnapshotSync(formats, *mClipboardType, wc,
                                         getter_AddRefs(clipboardDataSnapshot));
   }
 
@@ -1473,29 +1476,23 @@ void DataTransfer::FillInExternalCustomTypes(uint32_t aIndex,
   FillInExternalCustomTypes(variant, aIndex, aPrincipal);
 }
 
-void DataTransfer::FillInExternalCustomTypes(nsIVariant* aData, uint32_t aIndex,
-                                             nsIPrincipal* aPrincipal) {
-  char* chrs;
-  uint32_t len = 0;
-  nsresult rv = aData->GetAsStringWithSize(&len, &chrs);
-  if (NS_FAILED(rv)) {
-    return;
-  }
-
-  CheckedInt<int32_t> checkedLen(len);
+/* static */ void DataTransfer::ParseExternalCustomTypesString(
+    mozilla::Span<const char> aString,
+    std::function<void(ParseExternalCustomTypesStringData&&)>&& aCallback) {
+  CheckedInt<int32_t> checkedLen(aString.Length());
   if (!checkedLen.isValid()) {
     return;
   }
 
   nsCOMPtr<nsIInputStream> stringStream;
-  NS_NewByteInputStream(getter_AddRefs(stringStream),
-                        Span(chrs, checkedLen.value()), NS_ASSIGNMENT_ADOPT);
+  NS_NewByteInputStream(getter_AddRefs(stringStream), aString,
+                        NS_ASSIGNMENT_DEPEND);
 
   nsCOMPtr<nsIObjectInputStream> stream = NS_NewObjectInputStream(stringStream);
 
   uint32_t type;
   do {
-    rv = stream->Read32(&type);
+    nsresult rv = stream->Read32(&type);
     NS_ENSURE_SUCCESS_VOID(rv);
     if (type == eCustomClipboardTypeId_String) {
       uint32_t formatLength;
@@ -1518,13 +1515,33 @@ void DataTransfer::FillInExternalCustomTypes(nsIVariant* aData, uint32_t aIndex,
       data.Adopt(reinterpret_cast<char16_t*>(dataBytes),
                  dataLength / sizeof(char16_t));
 
-      RefPtr<nsVariantCC> variant = new nsVariantCC();
-      rv = variant->SetAsAString(data);
-      NS_ENSURE_SUCCESS_VOID(rv);
-
-      SetDataWithPrincipal(format, variant, aIndex, aPrincipal);
+      aCallback(ParseExternalCustomTypesStringData(std::move(format),
+                                                   std::move(data)));
     }
   } while (type != eCustomClipboardTypeId_None);
+}
+
+void DataTransfer::FillInExternalCustomTypes(nsIVariant* aData, uint32_t aIndex,
+                                             nsIPrincipal* aPrincipal) {
+  char* chrs;
+  uint32_t len = 0;
+  nsresult rv = aData->GetAsStringWithSize(&len, &chrs);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+  auto freeChrs = MakeScopeExit([&]() { free(chrs); });
+
+  ParseExternalCustomTypesString(
+      mozilla::Span(chrs, len),
+      [&](ParseExternalCustomTypesStringData&& aData) {
+        auto [format, data] = std::move(aData);
+        RefPtr<nsVariantCC> variant = new nsVariantCC();
+        if (NS_FAILED(variant->SetAsAString(data))) {
+          return;
+        }
+
+        SetDataWithPrincipal(format, variant, aIndex, aPrincipal);
+      });
 }
 
 void DataTransfer::SetMode(DataTransfer::Mode aMode) {

@@ -23,6 +23,7 @@
 #include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/TaskQueue.h"
 #include "mozilla/Telemetry.h"
+#include "nsAboutProtocolUtils.h"
 #include "nsBufferedStreams.h"
 #include "nsCategoryCache.h"
 #include "nsComponentManagerUtils.h"
@@ -709,20 +710,6 @@ int32_t NS_GetRealPort(nsIURI* aURI) {
   if (NS_FAILED(rv)) return -1;
 
   return NS_GetDefaultPort(scheme.get());
-}
-
-nsresult NS_DomainToASCII(const nsACString& aHost, nsACString& aASCII) {
-  return nsStandardURL::GetIDNService()->ConvertUTF8toACE(aHost, aASCII);
-}
-
-nsresult NS_DomainToDisplay(const nsACString& aHost, nsACString& aDisplay) {
-  bool ignored;
-  return nsStandardURL::GetIDNService()->ConvertToDisplayIDN(aHost, &ignored,
-                                                             aDisplay);
-}
-
-nsresult NS_DomainToUnicode(const nsACString& aHost, nsACString& aUnicode) {
-  return nsStandardURL::GetIDNService()->ConvertACEtoUTF8(aHost, aUnicode);
 }
 
 nsresult NS_NewInputStreamChannelInternal(
@@ -2079,7 +2066,7 @@ nsresult NS_NewURI(nsIURI** aURI, const nsACString& aSpec,
 }
 
 nsresult NS_GetSanitizedURIStringFromURI(nsIURI* aUri,
-                                         nsAString& aSanitizedSpec) {
+                                         nsACString& aSanitizedSpec) {
   aSanitizedSpec.Truncate();
 
   nsCOMPtr<nsISensitiveInfoHiddenURI> safeUri = do_QueryInterface(aUri);
@@ -2092,7 +2079,7 @@ nsresult NS_GetSanitizedURIStringFromURI(nsIURI* aUri,
   }
 
   if (NS_SUCCEEDED(rv)) {
-    aSanitizedSpec.Assign(NS_ConvertUTF8toUTF16(cSpec));
+    aSanitizedSpec.Assign(cSpec);
   }
   return rv;
 }
@@ -2463,8 +2450,7 @@ bool NS_SecurityCompareURIs(nsIURI* aSourceURI, nsIURI* aTargetURI,
     return false;
   }
 
-  // For file scheme, reject unless the files are identical. See
-  // NS_RelaxStrictFileOriginPolicy for enforcing file same-origin checking
+  // For file scheme, reject unless the files are identical.
   if (targetScheme.EqualsLiteral("file")) {
     // in traditional unsafe behavior all files are the same origin
     if (!aStrictFileOriginPolicy) return true;
@@ -2531,50 +2517,6 @@ bool NS_URIIsLocalFile(nsIURI* aURI) {
          NS_SUCCEEDED(util->ProtocolHasFlags(
              aURI, nsIProtocolHandler::URI_IS_LOCAL_FILE, &isFile)) &&
          isFile;
-}
-
-bool NS_RelaxStrictFileOriginPolicy(nsIURI* aTargetURI, nsIURI* aSourceURI,
-                                    bool aAllowDirectoryTarget /* = false */) {
-  if (!NS_URIIsLocalFile(aTargetURI)) {
-    // This is probably not what the caller intended
-    MOZ_ASSERT_UNREACHABLE(
-        "NS_RelaxStrictFileOriginPolicy called with non-file URI");
-    return false;
-  }
-
-  if (!NS_URIIsLocalFile(aSourceURI)) {
-    // If the source is not also a file: uri then forget it
-    // (don't want resource: principals in a file: doc)
-    //
-    // note: we're not de-nesting jar: uris here, we want to
-    // keep archive content bottled up in its own little island
-    return false;
-  }
-
-  //
-  // pull out the internal files
-  //
-  nsCOMPtr<nsIFileURL> targetFileURL(do_QueryInterface(aTargetURI));
-  nsCOMPtr<nsIFileURL> sourceFileURL(do_QueryInterface(aSourceURI));
-  nsCOMPtr<nsIFile> targetFile;
-  nsCOMPtr<nsIFile> sourceFile;
-  bool targetIsDir;
-
-  // Make sure targetFile is not a directory (bug 209234)
-  // and that it exists w/out unescaping (bug 395343)
-  if (!sourceFileURL || !targetFileURL ||
-      NS_FAILED(targetFileURL->GetFile(getter_AddRefs(targetFile))) ||
-      NS_FAILED(sourceFileURL->GetFile(getter_AddRefs(sourceFile))) ||
-      !targetFile || !sourceFile || NS_FAILED(targetFile->Normalize()) ||
-#ifndef MOZ_WIDGET_ANDROID
-      NS_FAILED(sourceFile->Normalize()) ||
-#endif
-      (!aAllowDirectoryTarget &&
-       (NS_FAILED(targetFile->IsDirectory(&targetIsDir)) || targetIsDir))) {
-    return false;
-  }
-
-  return false;
 }
 
 bool NS_IsInternalSameURIRedirect(nsIChannel* aOldChannel,
@@ -2843,6 +2785,20 @@ bool NS_IsAboutBlank(nsIURI* uri) {
   return spec.EqualsLiteral("about:blank");
 }
 
+bool NS_IsAboutBlankAllowQueryAndFragment(nsIURI* uri) {
+  // GetSpec can be expensive for some URIs, so check the scheme first.
+  if (!uri->SchemeIs("about")) {
+    return false;
+  }
+
+  nsAutoCString name;
+  if (NS_FAILED(NS_GetAboutModuleName(uri, name))) {
+    return false;
+  }
+
+  return name.EqualsLiteral("blank");
+}
+
 bool NS_IsAboutSrcdoc(nsIURI* uri) {
   // GetSpec can be expensive for some URIs, so check the scheme first.
   if (!uri->SchemeIs("about")) {
@@ -2992,13 +2948,14 @@ static bool ShouldSecureUpgradeNoHSTS(nsIURI* aURI, nsILoadInfo* aLoadInfo) {
     AutoTArray<nsString, 2> params = {reportSpec, reportScheme};
     uint64_t innerWindowId = aLoadInfo->GetInnerWindowID();
     CSP_LogLocalizedStr("upgradeInsecureRequest", params,
-                        u""_ns,  // aSourceFile
+                        ""_ns,   // aSourceFile
                         u""_ns,  // aScriptSample
                         0,       // aLineNumber
                         1,       // aColumnNumber
                         nsIScriptError::warningFlag,
                         "upgradeInsecureRequest"_ns, innerWindowId,
                         aLoadInfo->GetOriginAttributes().IsPrivateBrowsing());
+    aLoadInfo->SetHttpsUpgradeTelemetry(nsILoadInfo::CSP_UIR);
     return true;
   }
   // 3. Mixed content auto upgrading
@@ -3025,7 +2982,7 @@ static bool ShouldSecureUpgradeNoHSTS(nsIURI* aURI, nsILoadInfo* aLoadInfo) {
     uint64_t innerWindowId = aLoadInfo->GetInnerWindowID();
     nsContentUtils::ReportToConsoleByWindowID(
         message, nsIScriptError::warningFlag, "Mixed Content Message"_ns,
-        innerWindowId, aURI);
+        innerWindowId, SourceLocation(aURI));
 
     // Set this flag so we know we'll upgrade because of
     // 'security.mixed_content.upgrade_display_content'.

@@ -19,7 +19,6 @@
 #include "wasm/WasmTable.h"
 
 #include "mozilla/CheckedInt.h"
-#include "mozilla/PodOperations.h"
 
 #include "vm/JSContext.h"
 #include "vm/Realm.h"
@@ -33,21 +32,22 @@
 using namespace js;
 using namespace js::wasm;
 using mozilla::CheckedInt;
-using mozilla::PodZero;
 
 Table::Table(JSContext* cx, const TableDesc& desc,
              Handle<WasmTableObject*> maybeObject, FuncRefVector&& functions)
     : maybeObject_(maybeObject),
       observers_(cx->zone()),
       functions_(std::move(functions)),
+      indexType_(desc.indexType()),
       elemType_(desc.elemType),
       isAsmJS_(desc.isAsmJS),
-      length_(desc.initialLength),
-      maximum_(desc.maximumLength) {
+      length_(desc.initialLength()),
+      maximum_(desc.maximumLength()) {
   // Acquire a strong reference to the type definition this table may be
   // referencing.
   elemType_.AddRef();
   MOZ_ASSERT(repr() == TableRepr::Func);
+  MOZ_ASSERT(length_ <= MaxTableElemsRuntime);
 }
 
 Table::Table(JSContext* cx, const TableDesc& desc,
@@ -55,14 +55,16 @@ Table::Table(JSContext* cx, const TableDesc& desc,
     : maybeObject_(maybeObject),
       observers_(cx->zone()),
       objects_(std::move(objects)),
+      indexType_(desc.indexType()),
       elemType_(desc.elemType),
       isAsmJS_(desc.isAsmJS),
-      length_(desc.initialLength),
-      maximum_(desc.maximumLength) {
+      length_(desc.initialLength()),
+      maximum_(desc.maximumLength()) {
   // Acquire a strong reference to the type definition this table may be
   // referencing.
   elemType_.AddRef();
   MOZ_ASSERT(repr() == TableRepr::Ref);
+  MOZ_ASSERT(length_ <= MaxTableElemsRuntime);
 }
 
 Table::~Table() {
@@ -79,7 +81,7 @@ SharedTable Table::create(JSContext* cx, const TableDesc& desc,
   switch (desc.elemType.tableRepr()) {
     case TableRepr::Func: {
       FuncRefVector functions;
-      if (!functions.resize(desc.initialLength)) {
+      if (!functions.resize(desc.initialLength())) {
         ReportOutOfMemory(cx);
         return nullptr;
       }
@@ -88,7 +90,7 @@ SharedTable Table::create(JSContext* cx, const TableDesc& desc,
     }
     case TableRepr::Ref: {
       TableAnyRefVector objects;
-      if (!objects.resize(desc.initialLength)) {
+      if (!objects.resize(desc.initialLength())) {
         ReportOutOfMemory(cx);
         return nullptr;
       }
@@ -381,7 +383,7 @@ uint32_t Table::grow(uint32_t delta) {
 
   CheckedInt<uint32_t> newLength = oldLength;
   newLength += delta;
-  if (!newLength.isValid() || newLength.value() > MaxTableLength) {
+  if (!newLength.isValid() || newLength.value() > MaxTableElemsRuntime) {
     return -1;
   }
 
@@ -494,7 +496,7 @@ void Table::assertRangeNotNull(uint32_t index, uint32_t length) const {
 }
 #endif  // DEBUG
 
-size_t Table::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const {
+size_t Table::sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
   if (isFunction()) {
     return functions_.sizeOfExcludingThis(mallocSizeOf);
   }

@@ -35,21 +35,20 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared {
   CodeGeneratorX86Shared(MIRGenerator* gen, LIRGraph* graph,
                          MacroAssembler* masm);
 
-  // Load a NaN or zero into a register for an out of bounds AsmJS or static
-  // typed array load.
-  class OutOfLineLoadTypedArrayOutOfBounds
+  // Load a NaN or zero into a register for an out of bounds AsmJS load.
+  class OutOfLineAsmJSLoadHeapOutOfBounds
       : public OutOfLineCodeBase<CodeGeneratorX86Shared> {
     AnyRegister dest_;
     Scalar::Type viewType_;
 
    public:
-    OutOfLineLoadTypedArrayOutOfBounds(AnyRegister dest, Scalar::Type viewType)
+    OutOfLineAsmJSLoadHeapOutOfBounds(AnyRegister dest, Scalar::Type viewType)
         : dest_(dest), viewType_(viewType) {}
 
     AnyRegister dest() const { return dest_; }
     Scalar::Type viewType() const { return viewType_; }
     void accept(CodeGeneratorX86Shared* codegen) override {
-      codegen->visitOutOfLineLoadTypedArrayOutOfBounds(this);
+      codegen->visitOutOfLineAsmJSLoadHeapOutOfBounds(this);
     }
   };
 
@@ -99,54 +98,15 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared {
     masm.test32(reg, Imm32(0xFF));
     bailoutIf(Assembler::Zero, snapshot);
   }
-  void bailoutCvttsd2si(FloatRegister src, Register dest, LSnapshot* snapshot) {
-    Label bail;
-    masm.truncateDoubleToInt32(src, dest, &bail);
-    bailoutFrom(&bail, snapshot);
-  }
-  void bailoutCvttss2si(FloatRegister src, Register dest, LSnapshot* snapshot) {
-    Label bail;
-    masm.truncateFloat32ToInt32(src, dest, &bail);
-    bailoutFrom(&bail, snapshot);
-  }
 
   bool generateOutOfLineCode();
-
-  void emitCompare(MCompare::CompareType type, const LAllocation* left,
-                   const LAllocation* right);
 
   // Emits a branch that directs control flow to the true block if |cond| is
   // true, and the false block if |cond| is false.
   void emitBranch(Assembler::Condition cond, MBasicBlock* ifTrue,
-                  MBasicBlock* ifFalse,
-                  Assembler::NaNCond ifNaN = Assembler::NaN_HandledByCond);
-  void emitBranch(Assembler::DoubleCondition cond, MBasicBlock* ifTrue,
                   MBasicBlock* ifFalse);
-
-  void testNullEmitBranch(Assembler::Condition cond, const ValueOperand& value,
-                          MBasicBlock* ifTrue, MBasicBlock* ifFalse) {
-    cond = masm.testNull(cond, value);
-    emitBranch(cond, ifTrue, ifFalse);
-  }
-  void testUndefinedEmitBranch(Assembler::Condition cond,
-                               const ValueOperand& value, MBasicBlock* ifTrue,
-                               MBasicBlock* ifFalse) {
-    cond = masm.testUndefined(cond, value);
-    emitBranch(cond, ifTrue, ifFalse);
-  }
-  void testObjectEmitBranch(Assembler::Condition cond,
-                            const ValueOperand& value, MBasicBlock* ifTrue,
-                            MBasicBlock* ifFalse) {
-    cond = masm.testObject(cond, value);
-    emitBranch(cond, ifTrue, ifFalse);
-  }
-
-  void testZeroEmitBranch(Assembler::Condition cond, Register reg,
-                          MBasicBlock* ifTrue, MBasicBlock* ifFalse) {
-    MOZ_ASSERT(cond == Assembler::Equal || cond == Assembler::NotEqual);
-    masm.cmpPtr(reg, ImmWord(0));
-    emitBranch(cond, ifTrue, ifFalse);
-  }
+  void emitBranch(Assembler::DoubleCondition cond, MBasicBlock* ifTrue,
+                  MBasicBlock* ifFalse, Assembler::NaNCond ifNaN);
 
   void emitTableSwitchDispatch(MTableSwitch* mir, Register index,
                                Register base);
@@ -166,8 +126,8 @@ class CodeGeneratorX86Shared : public CodeGeneratorShared {
   void visitModOverflowCheck(ModOverflowCheck* ool);
   void visitReturnZero(ReturnZero* ool);
   void visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool);
-  void visitOutOfLineLoadTypedArrayOutOfBounds(
-      OutOfLineLoadTypedArrayOutOfBounds* ool);
+  void visitOutOfLineAsmJSLoadHeapOutOfBounds(
+      OutOfLineAsmJSLoadHeapOutOfBounds* ool);
   void visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool);
 };
 

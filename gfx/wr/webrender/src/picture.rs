@@ -102,6 +102,7 @@ use api::units::*;
 use crate::command_buffer::PrimitiveCommand;
 use crate::box_shadow::BLUR_SAMPLE_SCALE;
 use crate::clip::{ClipStore, ClipChainInstance, ClipLeafId, ClipNodeId, ClipTreeBuilder};
+use crate::profiler::{self, TransactionProfile};
 use crate::spatial_tree::{SpatialTree, CoordinateSpaceMapping, SpatialNodeIndex, VisibleFace};
 use crate::composite::{CompositorKind, CompositeState, NativeSurfaceId, NativeTileId, CompositeTileSurface, tile_kind};
 use crate::composite::{ExternalSurfaceDescriptor, ExternalSurfaceDependency, CompositeTileDescriptor, CompositeTile};
@@ -3022,6 +3023,7 @@ impl TileCacheInstance {
         scratch: &mut PrimitiveScratchBuffer,
         is_root_tile_cache: bool,
         surfaces: &mut [SurfaceInfo],
+        profile: &mut TransactionProfile,
     ) {
         use crate::picture::SurfacePromotionFailure::*;
 
@@ -3278,6 +3280,7 @@ impl TileCacheInstance {
 
                     if kind == CompositorSurfaceKind::Overlay {
                         prim_instance.vis.state = VisibilityState::Culled;
+                        profile.inc(profiler::COMPOSITOR_SURFACE_OVERLAYS);
                         return;
                     }
 
@@ -3285,6 +3288,10 @@ impl TileCacheInstance {
                 } else {
                     // In Err case, we handle as a blit, and proceed.
                     *compositor_surface_kind = CompositorSurfaceKind::Blit;
+                }
+
+                if image_key.common.flags.contains(PrimitiveFlags::PREFER_COMPOSITOR_SURFACE) {
+                    profile.inc(profiler::COMPOSITOR_SURFACE_BLITS);
                 }
 
                 prim_info.images.push(ImageDependency {
@@ -3379,12 +3386,18 @@ impl TileCacheInstance {
                 if let Ok(kind) = promotion_result {
                     *compositor_surface_kind = kind;
                     if kind == CompositorSurfaceKind::Overlay {
+                        profile.inc(profiler::COMPOSITOR_SURFACE_OVERLAYS);
                         prim_instance.vis.state = VisibilityState::Culled;
                         return;
+                    } else {
+                        profile.inc(profiler::COMPOSITOR_SURFACE_UNDERLAYS);
                     }
                 } else {
                     // In Err case, we handle as a blit, and proceed.
                     *compositor_surface_kind = CompositorSurfaceKind::Blit;
+                    if prim_data.common.flags.contains(PrimitiveFlags::PREFER_COMPOSITOR_SURFACE) {
+                        profile.inc(profiler::COMPOSITOR_SURFACE_BLITS);
+                    }
                 }
 
                 if *compositor_surface_kind == CompositorSurfaceKind::Blit {
@@ -5194,17 +5207,17 @@ impl PicturePrimitive {
                             .intersection(&tile.current_descriptor.local_valid_rect)
                             .unwrap_or_else(|| { tile.is_valid = true; PictureRect::zero() });
 
-                        let scissor_rect = frame_state.composite_state.get_surface_rect(
-                            &tile.local_dirty_rect,
-                            &tile.local_tile_rect,
-                            tile_cache.transform_index,
-                        ).to_i32();
-
                         let valid_rect = frame_state.composite_state.get_surface_rect(
                             &tile.current_descriptor.local_valid_rect,
                             &tile.local_tile_rect,
                             tile_cache.transform_index,
                         ).to_i32();
+
+                        let scissor_rect = frame_state.composite_state.get_surface_rect(
+                            &tile.local_dirty_rect,
+                            &tile.local_tile_rect,
+                            tile_cache.transform_index,
+                        ).to_i32().intersection(&valid_rect).unwrap_or_else(|| { Box2D::zero() });
 
                         if tile.is_visible {
                             // Get the world space rect that this tile will actually occupy on screen
@@ -7840,7 +7853,7 @@ fn get_surface_rects(
     })
 }
 
-fn calculate_uv_rect_kind(
+pub fn calculate_uv_rect_kind(
     clipped: DeviceRect,
     unclipped: DeviceRect,
 ) -> UvRectKind {

@@ -1177,7 +1177,7 @@ class LInstructionHelper
     operands_[index] = alloc.value();
 #endif
   }
-  const LInt64Allocation getInt64Operand(size_t offset) {
+  LInt64Allocation getInt64Operand(size_t offset) const {
 #if JS_BITS_PER_WORD == 32
     return LInt64Allocation(operands_[offset + INT64HIGH_INDEX],
                             operands_[offset + INT64LOW_INDEX]);
@@ -1230,7 +1230,7 @@ class LBinaryCallInstructionHelper
 
 class LRecoverInfo : public TempObject {
  public:
-  typedef Vector<MNode*, 2, JitAllocPolicy> Instructions;
+  using Instructions = Vector<MNode*, 2, JitAllocPolicy>;
 
  private:
   // List of instructions needed to recover the stack frames.
@@ -1432,8 +1432,8 @@ class LSafepoint : public TempObject {
   using NunboxEntry = SafepointNunboxEntry;
 
  public:
-  typedef Vector<SlotEntry, 0, JitAllocPolicy> SlotList;
-  typedef Vector<NunboxEntry, 0, JitAllocPolicy> NunboxList;
+  using SlotList = Vector<SlotEntry, 0, JitAllocPolicy>;
+  using NunboxList = Vector<NunboxEntry, 0, JitAllocPolicy>;
 
  private:
   // The information in a safepoint describes the registers and gc related
@@ -1915,7 +1915,7 @@ class LIRGraph {
   // Values is safe because it is only used within the scope of an
   // AutoSuppressGC (in IonCompile), which inhibits GC.
   mozilla::Vector<Value, 0, JitAllocPolicy> constantPool_;
-  typedef HashMap<Value, uint32_t, ValueHasher, JitAllocPolicy> ConstantPoolMap;
+  using ConstantPoolMap = HashMap<Value, uint32_t, ValueHasher, JitAllocPolicy>;
   ConstantPoolMap constantPoolMap_;
   Vector<LInstruction*, 0, JitAllocPolicy> safepoints_;
   Vector<LInstruction*, 0, JitAllocPolicy> nonCallSafepoints_;

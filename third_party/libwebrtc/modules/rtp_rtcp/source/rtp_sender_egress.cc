@@ -26,6 +26,15 @@ constexpr uint32_t kTimestampTicksPerMs = 90;
 constexpr TimeDelta kBitrateStatisticsWindow = TimeDelta::Seconds(1);
 constexpr size_t kRtpSequenceNumberMapMaxEntries = 1 << 13;
 constexpr TimeDelta kUpdateInterval = kBitrateStatisticsWindow;
+
+bool GetUseNtpTimeForAbsoluteSendTime(const FieldTrialsView* field_trials) {
+  if (field_trials != nullptr &&
+      field_trials->IsDisabled("WebRTC-UseNtpTimeAbsoluteSendTime")) {
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 RtpSenderEgress::NonPacedPacketSender::NonPacedPacketSender(
@@ -104,7 +113,9 @@ RtpSenderEgress::RtpSenderEgress(const RtpRtcpInterface::Configuration& config,
       rtp_sequence_number_map_(need_rtp_packet_infos_
                                    ? std::make_unique<RtpSequenceNumberMap>(
                                          kRtpSequenceNumberMapMaxEntries)
-                                   : nullptr) {
+                                   : nullptr),
+      use_ntp_time_for_absolute_send_time_(
+          GetUseNtpTimeForAbsoluteSendTime(config.field_trials)) {
   RTC_DCHECK(worker_queue_);
   RTC_DCHECK(config.transport_feedback_callback == nullptr)
       << "transport_feedback_callback is no longer used and will soon be "
@@ -150,9 +161,6 @@ void RtpSenderEgress::SendPacket(std::unique_ptr<RtpPacketToSend> packet,
   }
 
   const Timestamp now = clock_->CurrentTime();
-#if BWE_TEST_LOGGING_COMPILE_TIME_ENABLE
-  BweTestLoggingPlot(now, packet->Ssrc());
-#endif
   if (need_rtp_packet_infos_ &&
       packet->packet_type() == RtpPacketToSend::Type::kVideo) {
     // Last packet of a frame, add it to sequence number info map.
@@ -209,7 +217,12 @@ void RtpSenderEgress::SendPacket(std::unique_ptr<RtpPacketToSend> packet,
     packet->SetExtension<TransmissionOffset>(kTimestampTicksPerMs * diff.ms());
   }
   if (packet->HasExtension<AbsoluteSendTime>()) {
-    packet->SetExtension<AbsoluteSendTime>(AbsoluteSendTime::To24Bits(now));
+    if (use_ntp_time_for_absolute_send_time_) {
+      packet->SetExtension<AbsoluteSendTime>(
+          AbsoluteSendTime::To24Bits(clock_->ConvertTimestampToNtpTime(now)));
+    } else {
+      packet->SetExtension<AbsoluteSendTime>(AbsoluteSendTime::To24Bits(now));
+    }
   }
   if (packet->HasExtension<TransportSequenceNumber>() &&
       packet->transport_sequence_number()) {
@@ -457,16 +470,16 @@ void RtpSenderEgress::UpdateRtpStats(Timestamp now,
   } else if (packet_type == RtpPacketMediaType::kRetransmission) {
     counters->retransmitted.Add(counter);
   }
-    counters->transmitted.Add(counter);
+  counters->transmitted.Add(counter);
 
-    send_rates_[static_cast<size_t>(packet_type)].Update(packet_size, now);
-    if (bitrate_callback_) {
+  send_rates_[static_cast<size_t>(packet_type)].Update(packet_size, now);
+  if (bitrate_callback_) {
     send_rates = GetSendRates(now);
-    }
+  }
 
-    if (rtp_stats_callback_) {
-      rtp_stats_callback_->DataCountersUpdated(*counters, packet_ssrc);
-    }
+  if (rtp_stats_callback_) {
+    rtp_stats_callback_->DataCountersUpdated(*counters, packet_ssrc);
+  }
 
   // The bitrate_callback_ and rtp_stats_callback_ pointers in practice point
   // to the same object, so these callbacks could be consolidated into one.
@@ -485,25 +498,4 @@ void RtpSenderEgress::PeriodicUpdate() {
       send_rates.Sum().bps(),
       send_rates[RtpPacketMediaType::kRetransmission].bps(), ssrc_);
 }
-
-#if BWE_TEST_LOGGING_COMPILE_TIME_ENABLE
-void RtpSenderEgress::BweTestLoggingPlot(Timestamp now, uint32_t packet_ssrc) {
-  RTC_DCHECK_RUN_ON(worker_queue_);
-
-  const auto rates = GetSendRates(now);
-  if (is_audio_) {
-    BWE_TEST_LOGGING_PLOT_WITH_SSRC(1, "AudioTotBitrate_kbps", now.ms(),
-                                    rates.Sum().kbps(), packet_ssrc);
-    BWE_TEST_LOGGING_PLOT_WITH_SSRC(
-        1, "AudioNackBitrate_kbps", now.ms(),
-        rates[RtpPacketMediaType::kRetransmission].kbps(), packet_ssrc);
-  } else {
-    BWE_TEST_LOGGING_PLOT_WITH_SSRC(1, "VideoTotBitrate_kbps", now.ms(),
-                                    rates.Sum().kbps(), packet_ssrc);
-    BWE_TEST_LOGGING_PLOT_WITH_SSRC(
-        1, "VideoNackBitrate_kbps", now.ms(),
-        rates[RtpPacketMediaType::kRetransmission].kbps(), packet_ssrc);
-  }
-}
-#endif  // BWE_TEST_LOGGING_COMPILE_TIME_ENABLE
 }  // namespace webrtc

@@ -6,6 +6,8 @@ package org.mozilla.fenix.components.appstate
 
 import io.mockk.mockk
 import mozilla.components.browser.state.state.createTab
+import mozilla.components.concept.storage.BookmarkNode
+import mozilla.components.concept.storage.BookmarkNodeType
 import mozilla.components.lib.crash.Crash.NativeCodeCrash
 import mozilla.components.support.test.ext.joinBlocking
 import org.junit.Assert.assertEquals
@@ -164,12 +166,98 @@ class AppStoreReducerTest {
     fun `WHEN bookmark added action is dispatched THEN snackbar state is updated`() {
         val appStore = AppStore()
         val guidToEdit = "guidToEdit"
+        val parentNode = BookmarkNode(
+            type = BookmarkNodeType.FOLDER,
+            guid = "456",
+            parentGuid = "123",
+            position = 0u,
+            title = "Mozilla",
+            url = null,
+            dateAdded = 0,
+            children = listOf(),
+        )
 
-        appStore.dispatch(AppAction.BookmarkAction.BookmarkAdded(guidToEdit = guidToEdit))
+        appStore.dispatch(
+            AppAction.BookmarkAction.BookmarkAdded(
+                guidToEdit = guidToEdit,
+                parentNode = parentNode,
+            ),
+        )
             .joinBlocking()
 
         assertEquals(
-            SnackbarState.BookmarkAdded(guidToEdit = guidToEdit),
+            SnackbarState.BookmarkAdded(
+                guidToEdit = guidToEdit,
+                parentNode = parentNode,
+            ),
+            appStore.state.snackbarState,
+        )
+    }
+
+    @Test
+    fun `WHEN bookmark deleted action is dispatched THEN snackbar state is updated`() {
+        val appStore = AppStore()
+        val bookmarkTitle = "test"
+
+        appStore.dispatch(AppAction.BookmarkAction.BookmarkDeleted(title = bookmarkTitle))
+            .joinBlocking()
+
+        assertEquals(
+            SnackbarState.BookmarkDeleted(title = bookmarkTitle),
+            appStore.state.snackbarState,
+        )
+    }
+
+    @Test
+    fun `WHEN delete and quit selected action is dispatched THEN snackbar state is updated`() {
+        val appStore = AppStore()
+
+        appStore.dispatch(
+            AppAction.DeleteAndQuitStarted,
+        ).joinBlocking()
+
+        assertEquals(
+            SnackbarState.DeletingBrowserDataInProgress,
+            appStore.state.snackbarState,
+        )
+    }
+
+    @Test
+    fun `WHEN open in firefox started action is dispatched THEN open in firefox requested is true`() {
+        val appStore = AppStore()
+        assertFalse(appStore.state.openInFirefoxRequested)
+
+        appStore.dispatch(AppAction.OpenInFirefoxStarted)
+            .joinBlocking()
+
+        assertTrue(appStore.state.openInFirefoxRequested)
+    }
+
+    @Test
+    fun `WHEN open in firefox finished action is dispatched THEN open in firefox requested is false`() {
+        val appStore = AppStore(
+            initialState = AppState(
+                openInFirefoxRequested = true,
+            ),
+        )
+        assertTrue(appStore.state.openInFirefoxRequested)
+
+        appStore.dispatch(AppAction.OpenInFirefoxFinished)
+            .joinBlocking()
+
+        assertFalse(appStore.state.openInFirefoxRequested)
+    }
+
+    @Test
+    fun `WHEN UserAccountAuthenticated action is dispatched THEN snackbar state is updated`() {
+        val appStore = AppStore()
+
+        appStore.dispatch(
+            AppAction.UserAccountAuthenticated,
+        ).joinBlocking()
+
+        assertEquals(
+            SnackbarState.UserAccountAuthenticated,
             appStore.state.snackbarState,
         )
     }

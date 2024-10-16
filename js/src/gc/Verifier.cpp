@@ -25,13 +25,12 @@
 
 #include "gc/ArenaList-inl.h"
 #include "gc/GC-inl.h"
+#include "gc/Heap-inl.h"
 #include "gc/Marking-inl.h"
 #include "gc/PrivateIterators-inl.h"
 
 using namespace js;
 using namespace js::gc;
-
-using mozilla::DebugOnly;
 
 #ifdef JS_GC_ZEAL
 
@@ -484,8 +483,6 @@ void js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session) {
   /*
    * Perform a non-incremental mark for all collecting zones and record
    * the results for later comparison.
-   *
-   * Currently this does not validate gray marking.
    */
 
   JSRuntime* runtime = gc->rt;
@@ -514,11 +511,7 @@ void js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session) {
         return;
       }
       UniquePtr<MarkBitmap> entry(new (buffer) MarkBitmap);
-
-      MarkBitmap* bitmap = &chunk->markBits;
-      memcpy((void*)entry->bitmap, (void*)bitmap->bitmap,
-             sizeof(bitmap->bitmap));
-
+      entry->copyFrom(chunk->markBits);
       if (!map.putNew(chunk, std::move(entry))) {
         return;
       }
@@ -614,9 +607,13 @@ void js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session) {
       zone->changeGCState(zone->initialMarkingState(), Zone::MarkBlackAndGray);
     }
 
-    AutoSetMarkColor setColorGray(*gcmarker, MarkColor::Gray);
-
+    /*
+     * markAllGrayReferences may mark both gray and black, so it manages the
+     * mark color internally.
+     */
     gc->markAllGrayReferences(gcstats::PhaseKind::MARK_GRAY);
+
+    AutoSetMarkColor setColorGray(*gcmarker, MarkColor::Gray);
     gc->markAllWeakReferences();
 
     /* Restore zone state. */
@@ -635,11 +632,10 @@ void js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session) {
       auto ptr = map.lookup(chunk);
       MOZ_RELEASE_ASSERT(ptr, "Chunk not found in map");
       MarkBitmap* entry = ptr->value().get();
-      for (size_t i = 0; i < MarkBitmap::WordCount; i++) {
-        uintptr_t v = entry->bitmap[i];
-        entry->bitmap[i] = uintptr_t(bitmap->bitmap[i]);
-        bitmap->bitmap[i] = v;
-      }
+      MarkBitmap temp;
+      temp.copyFrom(*entry);
+      entry->copyFrom(*bitmap);
+      bitmap->copyFrom(temp);
     }
   }
 
@@ -703,7 +699,7 @@ void js::gc::MarkingValidator::validate() {
       if (!arena->allocated()) {
         continue;
       }
-      if (!arena->zone->isGCSweeping()) {
+      if (!arena->zone()->isGCSweeping()) {
         continue;
       }
 
@@ -714,44 +710,53 @@ void js::gc::MarkingValidator::validate() {
         auto* cell = reinterpret_cast<TenuredCell*>(thing);
 
         /*
-         * If a non-incremental GC wouldn't have collected a cell, then
-         * an incremental GC won't collect it.
+         * If a non-incremental GC wouldn't have collected a cell, then an
+         * incremental GC should not collect it either. However incremental
+         * marking is conservative and is allowed to mark things that
+         * non-incremental marking would not have marked.
+         *
+         * Further, incremental marking should not result in a cell that is
+         * "less marked" than non-incremental marking. For example where
+         * non-incremental marking would have marked a cell black incremental
+         * marking is not allowed to mark it gray, since the cycle collector
+         * could then consider paths through it to be part of garbage
+         * cycles. It's OK for a cell that would have been marked gray by
+         * non-incremental marking to be marked black by incremental marking.
+         *
+         * It's OK for a cell that would not be marked by non-incremental
+         * marking to end up gray. Since the cell is unreachable according to
+         * the non-incremental marking then the cycle collector will not find
+         * it. This can happen when a barrier marks a weak map key black and the
+         * map is gray, resulting in the value being marked gray.
+         *
+         * In summary:
+         *
+         *   Non-incremental   Incremental:   Outcome:
+         *       result:         result:
+         *
+         *   White              White         OK
+         *                      Gray          OK, conservative
+         *                      Black         OK, conservative
+         *   Gray               White         Fail
+         *                      Gray          OK
+         *                      Black         OK, conservative
+         *   Black              White         Fail
+         *                      Gray          Fail
+         *                      Black         OK
          */
-        if (bitmap->isMarkedAny(cell)) {
-          if (!incBitmap->isMarkedAny(cell)) {
-            ok = false;
-            const char* color =
-                CellColorName(TenuredCell::getColor(bitmap, cell));
-            fprintf(stderr,
-                    "%p: cell not marked, but would be marked %s by "
-                    "non-incremental marking\n",
-                    cell, color);
-#  ifdef DEBUG
-            cell->dump();
-            fprintf(stderr, "\n");
-#  endif
-          }
-        }
 
-        /*
-         * If the cycle collector isn't allowed to collect an object
-         * after a non-incremental GC has run, then it isn't allowed to
-         * collected it after an incremental GC.
-         */
-        if (!bitmap->isMarkedGray(cell)) {
-          if (incBitmap->isMarkedGray(cell)) {
-            ok = false;
-            const char* color =
-                CellColorName(TenuredCell::getColor(bitmap, cell));
-            fprintf(stderr,
-                    "%p: cell marked gray, but would be marked %s by "
-                    "non-incremental marking\n",
-                    cell, color);
+        CellColor incColor = TenuredCell::getColor(incBitmap, cell);
+        CellColor nonIncColor = TenuredCell::getColor(bitmap, cell);
+        if (incColor < nonIncColor) {
+          ok = false;
+          fprintf(stderr,
+                  "%p: cell was marked %s, but would be marked %s by "
+                  "non-incremental marking\n",
+                  cell, CellColorName(incColor), CellColorName(nonIncColor));
 #  ifdef DEBUG
-            cell->dump();
-            fprintf(stderr, "\n");
+          cell->dump();
+          fprintf(stderr, "\n");
 #  endif
-          }
         }
 
         thing += Arena::thingSize(kind);

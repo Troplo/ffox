@@ -8,8 +8,17 @@
 
 ChromeUtils.defineESModuleGetters(this, {
   AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
+  AddonTestUtils: "resource://testing-common/AddonTestUtils.sys.mjs",
   ExtensionTestCommon: "resource://testing-common/ExtensionTestCommon.sys.mjs",
 });
+
+AddonTestUtils.init(this, false);
+AddonTestUtils.createAppInfo(
+  "xpcshell@tests.mozilla.org",
+  "XPCShell",
+  "42",
+  "42"
+);
 
 // TODO: Firefox no longer uses `rating` and `number_of_ratings` but they are
 // still present in Merino and RS suggestions, so they are included here for
@@ -85,6 +94,8 @@ const REMOTE_SETTINGS_RESULTS = [
 ];
 
 add_setup(async function init() {
+  await AddonTestUtils.promiseStartupManager();
+
   // Disable search suggestions so we don't hit the network.
   Services.prefs.setBoolPref("browser.search.suggest.enabled", false);
 
@@ -525,27 +536,14 @@ add_task(async function rustProviders() {
 });
 
 function makeExpectedResult({ suggestion, source, setUtmParams = true }) {
-  if (
-    source == "remote-settings" &&
-    UrlbarPrefs.get("quicksuggest.rustEnabled")
-  ) {
-    source = "rust";
-  }
-
   let provider;
-  switch (source) {
-    case "remote-settings":
-      provider = "AddonSuggestions";
-      break;
-    case "rust":
-      provider = "Amo";
-      break;
-    case "merino":
-      provider = "amo";
-      break;
+  if (source == "merino") {
+    provider = "amo";
+  } else {
+    source = undefined;
   }
 
-  return makeAmoResult({
+  return QuickSuggestTestUtils.amoResult({
     source,
     provider,
     setUtmParams,

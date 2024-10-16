@@ -154,7 +154,7 @@ function getNodeInfo(node, elementStyle) {
   } else if (
     declaration &&
     (classList.contains("ruleview-variable") ||
-      classList.contains("ruleview-unmatched-variable"))
+      classList.contains("ruleview-unmatched"))
   ) {
     type = VIEW_NODE_VARIABLE_TYPE;
     value = {
@@ -166,12 +166,15 @@ function getNodeInfo(node, elementStyle) {
       sheetHref: rule.domRule.href,
       textProperty: declaration,
       variable: node.dataset.variable,
+      variableComputed: node.dataset.variableComputed,
       startingStyleVariable: node.dataset.startingStyleVariable,
       registeredProperty: {
         initialValue: node.dataset.registeredPropertyInitialValue,
         syntax: node.dataset.registeredPropertySyntax,
         inherits: node.dataset.registeredPropertyInherits,
       },
+      outputParserOptions: declaration.editor.outputParserOptions,
+      cssProperties: declaration.editor.ruleView.cssProperties,
     };
   } else if (
     declaration &&

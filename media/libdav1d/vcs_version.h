@@ -1,2 +1,2 @@
 /* auto-generated, do not edit */
-#define DAV1D_VERSION "92f592ed104ba92ad35c781ee93f354525eef503"
+#define DAV1D_VERSION "5ef6b241f05a2b9058b58136da4b25842aefba96"

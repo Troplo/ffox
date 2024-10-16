@@ -51,7 +51,11 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
 
-            buildConfigField("String", "VCS_HASH", "\"" + getVcsHash() + "\"")
+            if (gradle.ext.vcsHashFileContent) {
+                buildConfigField("String", "VCS_HASH", "\"" + gradle.ext.vcsHashFileContent + "\"")
+            } else {
+                buildConfigField("String", "VCS_HASH", "\"" + getVcsHash() + "\"")
+            }
         }
     }
 
@@ -74,6 +78,7 @@ android {
 
 dependencies {
     implementation ComponentsDependencies.kotlin_coroutines
+    implementation ComponentsDependencies.androidx_activity
     implementation ComponentsDependencies.androidx_core_ktx
     implementation ComponentsDependencies.androidx_lifecycle_viewmodel
 

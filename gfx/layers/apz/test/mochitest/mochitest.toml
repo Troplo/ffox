@@ -53,6 +53,8 @@ run-if = [ # FIXME: enable on more desktop platforms (see bug 1608506 comment 4)
   "os == 'mac'",
 ]
 
+["test_group_fission.html"]
+
 ["test_group_fullscreen.html"]
 run-if = ["os == 'android'"]
 
@@ -155,6 +157,8 @@ skip-if = ["display == 'wayland' && os_version == '22.04'"]  # Bug 1857059
 
 ["test_group_touchevents-5.html"]
 skip-if = ["display == 'wayland' && os_version == '22.04'"]  # Bug 1857059
+
+["test_group_touchevents-6.html"]
 
 ["test_group_touchevents.html"]
 

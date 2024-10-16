@@ -24,9 +24,12 @@ import {
   type NewDocumentScriptEvaluation,
   type ScreenshotOptions,
 } from '../api/Page.js';
-import {Accessibility} from '../cdp/Accessibility.js';
 import {Coverage} from '../cdp/Coverage.js';
 import {EmulationManager} from '../cdp/EmulationManager.js';
+import type {
+  InternalNetworkConditions,
+  NetworkConditions,
+} from '../cdp/NetworkManager.js';
 import {Tracing} from '../cdp/Tracing.js';
 import type {
   Cookie,
@@ -47,6 +50,7 @@ import {
 import type {Viewport} from '../common/Viewport.js';
 import {assert} from '../util/assert.js';
 import {bubble} from '../util/decorators.js';
+import {stringToTypedArray} from '../util/encoding.js';
 import {isErrorLike} from '../util/ErrorLike.js';
 
 import type {BidiBrowser} from './Browser.js';
@@ -86,10 +90,11 @@ export class BidiPage extends Page {
   readonly keyboard: BidiKeyboard;
   readonly mouse: BidiMouse;
   readonly touchscreen: BidiTouchscreen;
-  readonly accessibility: Accessibility;
   readonly tracing: Tracing;
   readonly coverage: Coverage;
   readonly #cdpEmulationManager: EmulationManager;
+
+  #emulatedNetworkConditions?: InternalNetworkConditions;
 
   _client(): BidiCdpSession {
     return this.#frame.client;
@@ -104,7 +109,6 @@ export class BidiPage extends Page {
     this.#frame = BidiFrame.from(this, browsingContext);
 
     this.#cdpEmulationManager = new EmulationManager(this.#frame.client);
-    this.accessibility = new Accessibility(this.#frame.client);
     this.tracing = new Tracing(this.#frame.client);
     this.coverage = new Coverage(this.#frame.client);
     this.keyboard = new BidiKeyboard(this);
@@ -264,6 +268,7 @@ export class BidiPage extends Page {
   }
 
   override async close(options?: {runBeforeUnload?: boolean}): Promise<void> {
+    using _guard = await this.#browserContext.waitForScreenshotOperations();
     try {
       await this.#frame.browsingContext.close(options?.runBeforeUnload);
     } catch {
@@ -341,17 +346,17 @@ export class BidiPage extends Page {
     return await this.#cdpEmulationManager.emulateVisionDeficiency(type);
   }
 
-  override async setViewport(viewport: Viewport): Promise<void> {
+  override async setViewport(viewport: Viewport | null): Promise<void> {
     if (!this.browser().cdpSupported) {
       await this.#frame.browsingContext.setViewport({
         viewport:
-          viewport.width && viewport.height
+          viewport?.width && viewport?.height
             ? {
                 width: viewport.width,
                 height: viewport.height,
               }
             : null,
-        devicePixelRatio: viewport.deviceScaleFactor
+        devicePixelRatio: viewport?.deviceScaleFactor
           ? viewport.deviceScaleFactor
           : null,
       });
@@ -370,7 +375,7 @@ export class BidiPage extends Page {
     return this.#viewport;
   }
 
-  override async pdf(options: PDFOptions = {}): Promise<Buffer> {
+  override async pdf(options: PDFOptions = {}): Promise<Uint8Array> {
     const {timeout: ms = this._timeoutSettings.timeout(), path = undefined} =
       options;
     const {
@@ -412,21 +417,21 @@ export class BidiPage extends Page {
       ).pipe(raceWith(timeout(ms)))
     );
 
-    const buffer = Buffer.from(data, 'base64');
+    const typedArray = stringToTypedArray(data, true);
 
-    await this._maybeWriteBufferToFile(path, buffer);
+    await this._maybeWriteTypedArrayToFile(path, typedArray);
 
-    return buffer;
+    return typedArray;
   }
 
   override async createPDFStream(
     options?: PDFOptions | undefined
   ): Promise<ReadableStream<Uint8Array>> {
-    const buffer = await this.pdf(options);
+    const typedArray = await this.pdf(options);
 
     return new ReadableStream({
       start(controller) {
-        controller.enqueue(buffer);
+        controller.enqueue(typedArray);
         controller.close();
       },
     });
@@ -534,6 +539,12 @@ export class BidiPage extends Page {
   }
 
   override async setCacheEnabled(enabled?: boolean): Promise<void> {
+    if (!this.#browserContext.browser().cdpSupported) {
+      await this.#frame.browsingContext.setCacheBehavior(
+        enabled ? 'default' : 'bypass'
+      );
+      return;
+    }
     // TODO: handle CDP-specific cases such as mprach.
     await this._client().send('Network.setCacheDisabled', {
       cacheDisabled: !enabled,
@@ -648,12 +659,59 @@ export class BidiPage extends Page {
     throw new UnsupportedOperation();
   }
 
-  override setOfflineMode(): never {
-    throw new UnsupportedOperation();
+  override async setOfflineMode(enabled: boolean): Promise<void> {
+    if (!this.#browserContext.browser().cdpSupported) {
+      throw new UnsupportedOperation();
+    }
+
+    if (!this.#emulatedNetworkConditions) {
+      this.#emulatedNetworkConditions = {
+        offline: false,
+        upload: -1,
+        download: -1,
+        latency: 0,
+      };
+    }
+    this.#emulatedNetworkConditions.offline = enabled;
+    return await this.#applyNetworkConditions();
   }
 
-  override emulateNetworkConditions(): never {
-    throw new UnsupportedOperation();
+  override async emulateNetworkConditions(
+    networkConditions: NetworkConditions | null
+  ): Promise<void> {
+    if (!this.#browserContext.browser().cdpSupported) {
+      throw new UnsupportedOperation();
+    }
+    if (!this.#emulatedNetworkConditions) {
+      this.#emulatedNetworkConditions = {
+        offline: false,
+        upload: -1,
+        download: -1,
+        latency: 0,
+      };
+    }
+    this.#emulatedNetworkConditions.upload = networkConditions
+      ? networkConditions.upload
+      : -1;
+    this.#emulatedNetworkConditions.download = networkConditions
+      ? networkConditions.download
+      : -1;
+    this.#emulatedNetworkConditions.latency = networkConditions
+      ? networkConditions.latency
+      : 0;
+    return await this.#applyNetworkConditions();
+  }
+
+  async #applyNetworkConditions(): Promise<void> {
+    if (!this.#emulatedNetworkConditions) {
+      return;
+    }
+    await this._client().send('Network.emulateNetworkConditions', {
+      offline: this.#emulatedNetworkConditions.offline,
+      latency: this.#emulatedNetworkConditions.latency,
+      uploadThroughput: this.#emulatedNetworkConditions.upload,
+      downloadThroughput: this.#emulatedNetworkConditions.download,
+    });
   }
 
   override async setCookie(...cookies: CookieParam[]): Promise<void> {
@@ -770,14 +828,19 @@ export class BidiPage extends Page {
     delta: number,
     options: WaitForOptions
   ): Promise<HTTPResponse | null> {
+    const controller = new AbortController();
+
     try {
       const [response] = await Promise.all([
-        this.waitForNavigation(options),
+        this.waitForNavigation({
+          ...options,
+          signal: controller.signal,
+        }),
         this.#frame.browsingContext.traverseHistory(delta),
       ]);
       return response;
     } catch (error) {
-      // TODO: waitForNavigation should be cancelled if an error happens.
+      controller.abort();
       if (isErrorLike(error)) {
         if (error.message.includes('no such history entry')) {
           return null;
@@ -852,6 +915,22 @@ function testUrlMatchCookie(cookie: Cookie, url: URL): boolean {
 }
 
 function bidiToPuppeteerCookie(bidiCookie: Bidi.Network.Cookie): Cookie {
+  const partitionKey = bidiCookie[CDP_SPECIFIC_PREFIX + 'partitionKey'];
+
+  function getParitionKey(): {partitionKey?: string} {
+    if (typeof partitionKey === 'string') {
+      return {partitionKey};
+    }
+    if (typeof partitionKey === 'object' && partitionKey !== null) {
+      return {
+        // TODO: a breaking change in Puppeteer is required to change
+        // partitionKey type and report the composite partition key.
+        partitionKey: partitionKey.topLevelSite,
+      };
+    }
+    return {};
+  }
+
   return {
     name: bidiCookie.name,
     // Presents binary value as base64 string.
@@ -869,10 +948,10 @@ function bidiToPuppeteerCookie(bidiCookie: Bidi.Network.Cookie): Cookie {
       bidiCookie,
       'sameParty',
       'sourceScheme',
-      'partitionKey',
       'partitionKeyOpaque',
       'priority'
     ),
+    ...getParitionKey(),
   };
 }
 

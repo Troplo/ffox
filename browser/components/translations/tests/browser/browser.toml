@@ -85,7 +85,11 @@ skip-if = ["os == 'linux' && !debug"] # Bug 1863227
 
 ["browser_translations_full_page_panel_switch_languages.js"]
 
+["browser_translations_full_page_panel_switch_tabs_before_engine_ready.js"]
+
 ["browser_translations_full_page_panel_unsupported_lang.js"]
+
+["browser_translations_full_page_panel_weblanguage_differs_from_app.js"]
 
 ["browser_translations_full_page_reader_mode.js"]
 
@@ -99,6 +103,8 @@ skip-if = ["os == 'linux' && !debug"] # Bug 1863227
 
 ["browser_translations_full_page_telemetry_panel_auto_offer_settings.js"]
 
+["browser_translations_full_page_telemetry_retranslate.js"]
+
 ["browser_translations_full_page_telemetry_switch_languages.js"]
 
 ["browser_translations_full_page_telemetry_translation_failure.js"]
@@ -107,9 +113,29 @@ skip-if = ["os == 'linux' && !debug"] # Bug 1863227
 
 ["browser_translations_full_page_telemetry_unsupported_lang.js"]
 
+["browser_translations_recent_language_memory_auto_translate.js"]
+
+["browser_translations_recent_language_memory_full_page_and_select.js"]
+
+["browser_translations_recent_language_memory_full_page_and_select_multi_window.js"]
+
+["browser_translations_recent_language_memory_full_page_multi_window.js"]
+
+["browser_translations_recent_language_memory_full_page_multi_window_multi_tab.js"]
+
+["browser_translations_recent_language_memory_full_page_navigate.js"]
+
+["browser_translations_recent_language_memory_full_page_retranslate.js"]
+
 ["browser_translations_select_context_menu_engine_unsupported.js"]
 
 ["browser_translations_select_context_menu_feature_disabled.js"]
+
+["browser_translations_select_context_menu_preferred_app_locales.js"]
+
+["browser_translations_select_context_menu_preferred_language_edge_cases.js"]
+
+["browser_translations_select_context_menu_preferred_web_languages.js"]
 
 ["browser_translations_select_context_menu_with_full_page_translations_active.js"]
 
@@ -206,5 +232,9 @@ skip-if = ["os == 'linux' && !debug"] # Bug 1863227
 ["browser_translations_select_telemetry_translation_failure_ui_then_cancel.js"]
 
 ["browser_translations_select_telemetry_translation_failure_ui_then_succeed.js"]
+
+["browser_translations_select_telemetry_translation_failure_with_full_page_translations_active.js"]
+
+["browser_translations_select_telemetry_translation_success_with_full_page_translations_active.js"]
 
 ["browser_translations_select_telemetry_unsupported_language_ui.js"]

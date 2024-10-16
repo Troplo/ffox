@@ -46,6 +46,7 @@ class BrowserToolbarViewTest {
             context = testContext,
             settings = settings,
             container = CoordinatorLayout(testContext),
+            snackbarParent = mockk(),
             interactor = mockk(),
             customTabSession = mockk(relaxed = true),
             lifecycleOwner = mockk(),
@@ -283,5 +284,19 @@ class BrowserToolbarViewTest {
         toolbarViewSpy.collapse()
 
         verify { behavior.forceCollapse(toolbarView.layout) }
+    }
+
+    @Test
+    fun `enable scrolling is forwarded to the toolbar behavior`() {
+        toolbarView.enableScrolling()
+
+        verify { behavior.enableScrolling() }
+    }
+
+    @Test
+    fun `disable scrolling is forwarded to the toolbar behavior`() {
+        toolbarView.disableScrolling()
+
+        verify { behavior.disableScrolling() }
     }
 }

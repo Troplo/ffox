@@ -36,6 +36,12 @@ loader.lazyRequireGetter(
   true
 );
 const ZoomKeys = require("resource://devtools/client/shared/zoom-keys.js");
+loader.lazyRequireGetter(
+  this,
+  "TRACER_LOG_METHODS",
+  "resource://devtools/shared/specs/tracer.js",
+  true
+);
 
 const PREF_SIDEBAR_ENABLED = "devtools.webconsole.sidebarToggle";
 const PREF_BROWSERTOOLBOX_SCOPE = "devtools.browsertoolbox.scope";
@@ -472,6 +478,8 @@ class WebConsoleUI {
       return;
     }
 
+    const { logMethod } = this.hud.commands.tracerCommand.getTracingOptions();
+
     const messages = [];
     for (const resource of resources) {
       const { TYPES } = this.hud.resourceCommand;
@@ -504,15 +512,17 @@ class WebConsoleUI {
       if (
         (this.isBrowserToolboxConsole || this.isBrowserConsole) &&
         resource.isAlreadyExistingResource &&
-        (resource.pageError?.private ||
-          // @backward-compat { version 129 } Once Fx129 is release, CONSOLE_MESSAGE resource
-          // are no longer encapsulated into a sub "message" attribute.
-          // (we can keep `resource?.private` and drop `resource.message?.private`)
-          (resource.message || resource)?.private)
+        (resource.pageError?.private || resource.private)
       ) {
         continue;
       }
 
+      if (
+        resource.resourceType === TYPES.JSTRACER_TRACE &&
+        logMethod != TRACER_LOG_METHODS.CONSOLE
+      ) {
+        continue;
+      }
       if (resource.resourceType === TYPES.NETWORK_EVENT_STACKTRACE) {
         this.networkDataProvider?.onStackTraceAvailable(resource);
         continue;

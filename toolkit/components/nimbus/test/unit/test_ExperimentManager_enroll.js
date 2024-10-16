@@ -3,6 +3,10 @@
 const { Sampling } = ChromeUtils.importESModule(
   "resource://gre/modules/components-utils/Sampling.sys.mjs"
 );
+
+const { ClientID } = ChromeUtils.importESModule(
+  "resource://gre/modules/ClientID.sys.mjs"
+);
 const { ClientEnvironment } = ChromeUtils.importESModule(
   "resource://normandy/lib/ClientEnvironment.sys.mjs"
 );
@@ -577,7 +581,7 @@ add_task(async function test_sampling_check() {
   sandbox.replaceGetter(ClientEnvironment, "userId", () => 42);
 
   Assert.ok(
-    !manager.isInBucketAllocation(recipe.bucketConfig),
+    !(await manager.isInBucketAllocation(recipe.bucketConfig)),
     "fails for no bucket config"
   );
 
@@ -586,7 +590,7 @@ add_task(async function test_sampling_check() {
   });
 
   Assert.ok(
-    !manager.isInBucketAllocation(recipe.bucketConfig),
+    !(await manager.isInBucketAllocation(recipe.bucketConfig)),
     "fails for unknown randomizationUnit"
   );
 
@@ -625,7 +629,7 @@ add_task(async function test_sampling_check() {
 
   await assertEmptyStore(manager.store);
 
-  sandbox.reset();
+  sandbox.restore();
 });
 
 add_task(async function enroll_in_reference_aw_experiment() {
@@ -1001,4 +1005,120 @@ add_task(async function test_reEnroll() {
 
   manager.unenroll(rollout.slug);
   await assertEmptyStore(store);
+});
+
+add_task(async function test_randomizationUnit() {
+  const ENROLL = "cedc1378-b806-4664-8c3e-2090f2f46e00";
+  const NOT_ENROLL = "b502506a-416c-40ea-9f96-c6feaf451470";
+
+  const normandyIdBucketing = ExperimentFakes.recipe.bucketConfig;
+  const groupIdBucketing = {
+    ...ExperimentFakes.recipe.bucketConfig,
+    randomizationUnit: "group_id",
+  };
+
+  Services.prefs.setStringPref("app.normandy.user_id", ENROLL);
+  await ClientID.setProfileGroupID(NOT_ENROLL);
+
+  const manager = ExperimentFakes.manager();
+
+  Assert.ok(
+    await manager.isInBucketAllocation(normandyIdBucketing),
+    "in bucketing using normandy_id"
+  );
+  Assert.ok(
+    !(await manager.isInBucketAllocation(groupIdBucketing)),
+    "not in bucketing using group_id"
+  );
+
+  Services.prefs.setStringPref("app.normandy.user_id", NOT_ENROLL);
+  await ClientID.setProfileGroupID(ENROLL);
+
+  Assert.ok(
+    !(await manager.isInBucketAllocation(normandyIdBucketing)),
+    "not in bucketing using normandy_id"
+  );
+  Assert.ok(
+    await manager.isInBucketAllocation(groupIdBucketing),
+    "in bucketing using group_id"
+  );
+});
+
+add_task(async function test_group_enrollment() {
+  // We need multiple instances of manager to simulate multiple profiles
+  const store1 = ExperimentFakes.store();
+  const manager1 = ExperimentFakes.manager(store1);
+
+  const enrollPromise1 = new Promise(resolve =>
+    manager1.store.on("update:group_enroll", resolve)
+  );
+
+  await manager1.onStartup();
+
+  const groupId = "cedc1378-b806-4664-8c3e-2090f2f46e00";
+  const clientId1 = "clientid1";
+  const clientId2 = "clientid2";
+  const branchA = {
+    slug: "branchA",
+    features: [{ featureId: "pink", value: {} }],
+  };
+  const branchB = {
+    slug: "branchB",
+    features: [{ featureId: "pink", value: {} }],
+  };
+  const recipe = {
+    ...ExperimentFakes.recipe("group_enroll"),
+    branches: [branchA, branchB],
+    isRollout: false,
+    active: true,
+    bucketConfig: {
+      namespace: "nimbus-test-utils",
+      randomizationUnit: "group_id",
+      start: 0,
+      count: 1000,
+      total: 1000,
+    },
+  };
+
+  // set the group ID
+  await ClientID.setProfileGroupID(groupId);
+  // enroll the first clientID in the experiment
+  Services.prefs.setStringPref("app.normandy.user_id", clientId1);
+
+  await manager1.enroll(recipe, "test_group_enrollment");
+  await enrollPromise1;
+
+  const experiment1 = manager1.store.get("group_enroll");
+  let clientId1branch = experiment1.branch;
+
+  // create the second manager && enroll the second clientID
+  const store2 = ExperimentFakes.store();
+  const manager2 = ExperimentFakes.manager(store2);
+
+  const enrollPromise2 = new Promise(resolve =>
+    manager2.store.on("update:group_enroll", resolve)
+  );
+
+  await manager2.onStartup();
+
+  Services.prefs.setStringPref("app.normandy.user_id", clientId2);
+
+  await manager2.enroll(recipe, "test_group_enrollment");
+  await enrollPromise2;
+
+  const experiment2 = manager2.store.get("group_enroll");
+  let clientId2branch = experiment2.branch;
+
+  Assert.equal(
+    clientId1branch,
+    clientId2branch,
+    "should have enrolled in the same branch"
+  );
+
+  // Cleanup
+  manager1.unenroll("group_enroll", "test-cleanup");
+  await assertEmptyStore(manager1.store);
+
+  manager2.unenroll("group_enroll", "test-cleanup");
+  await assertEmptyStore(manager2.store);
 });

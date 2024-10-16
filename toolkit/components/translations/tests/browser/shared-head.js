@@ -66,11 +66,6 @@ const NEVER_TRANSLATE_LANGS_PREF =
  * The data must support structural cloning and will be passed into the
  * content process.
  *
- * @param {(args: { dataForContent: T, selectors: Record<string, string> }) => Promise<void>} options.runInPage
- * This function must not capture any values, as it will be cloned in the content process.
- * Any required data should be passed in using the "dataForContent" parameter. The
- * "selectors" property contains any useful selectors for the content.
- *
  * @param {boolean} [options.disabled]
  * Disable the panel through a pref.
  *
@@ -79,19 +74,37 @@ const NEVER_TRANSLATE_LANGS_PREF =
  *
  * @param {Array<[string, string]>} options.prefs
  * Prefs to push on for the test.
+ *
+ * @param {boolean} [options.autoDownloadFromRemoteSettings=true]
+ * Initiate the mock model downloads when this function is invoked instead of
+ * waiting for the resolveDownloads or rejectDownloads to be externally invoked
+ *
+ * @returns {object} object
+ *
+ * @returns {(args: { dataForContent: T, selectors: Record<string, string> }) => Promise<void>} object.runInPage
+ * This function must not capture any values, as it will be cloned in the content process.
+ * Any required data should be passed in using the "dataForContent" parameter. The
+ * "selectors" property contains any useful selectors for the content.
+ *
+ * @returns {() => Promise<void>} object.cleanup
+ *
+ * @returns {(count: number) => Promise<void>} object.resolveDownloads
+ *
+ * @returns {(count: number) => Promise<void>} object.rejectDownloads
  */
 async function openAboutTranslations({
   dataForContent,
   disabled,
-  runInPage,
   languagePairs = LANGUAGE_PAIRS,
   prefs,
+  autoDownloadFromRemoteSettings = false,
 }) {
   await SpecialPowers.pushPrefEnv({
     set: [
       // Enabled by default.
       ["browser.translations.enable", !disabled],
       ["browser.translations.logLevel", "All"],
+      ["browser.translations.mostRecentTargetLanguages", ""],
       ...(prefs ?? []),
     ],
   });
@@ -107,6 +120,7 @@ async function openAboutTranslations({
     translationResult: "#translation-to",
     translationResultBlank: "#translation-to-blank",
     translationInfo: "#translation-info",
+    translationResultsPlaceholder: "#translation-results-placeholder",
     noSupportMessage: "[data-l10n-id='about-translations-no-support']",
   };
 
@@ -119,9 +133,7 @@ async function openAboutTranslations({
 
   const { removeMocks, remoteClients } = await createAndMockRemoteSettings({
     languagePairs,
-    // TODO(Bug 1814168) - Do not test download behavior as this is not robustly
-    // handled for about:translations yet.
-    autoDownloadFromRemoteSettings: true,
+    autoDownloadFromRemoteSettings,
   });
 
   // Now load the about:translations page, since the actor could be mocked.
@@ -131,24 +143,46 @@ async function openAboutTranslations({
   );
   await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
 
-  await remoteClients.translationsWasm.resolvePendingDownloads(1);
-  await remoteClients.translationModels.resolvePendingDownloads(
-    languagePairs.length * FILES_PER_LANGUAGE_PAIR
-  );
+  /**
+   * @param {number} count - Count of the language pairs expected.
+   */
+  const resolveDownloads = async count => {
+    await remoteClients.translationsWasm.resolvePendingDownloads(1);
+    await remoteClients.translationModels.resolvePendingDownloads(
+      FILES_PER_LANGUAGE_PAIR * count
+    );
+  };
 
-  await ContentTask.spawn(
-    tab.linkedBrowser,
-    { dataForContent, selectors },
-    runInPage
-  );
+  /**
+   * @param {number} count - Count of the language pairs expected.
+   */
+  const rejectDownloads = async count => {
+    await remoteClients.translationsWasm.rejectPendingDownloads(1);
+    await remoteClients.translationModels.rejectPendingDownloads(
+      FILES_PER_LANGUAGE_PAIR * count
+    );
+  };
 
-  await loadBlankPage();
-  BrowserTestUtils.removeTab(tab);
+  return {
+    runInPage(callback) {
+      return ContentTask.spawn(
+        tab.linkedBrowser,
+        { dataForContent, selectors }, // Data to inject.
+        callback
+      );
+    },
+    async cleanup() {
+      await loadBlankPage();
+      BrowserTestUtils.removeTab(tab);
 
-  await removeMocks();
-  await EngineProcess.destroyTranslationsEngine();
+      await removeMocks();
+      await EngineProcess.destroyTranslationsEngine();
 
-  await SpecialPowers.popPrefEnv();
+      await SpecialPowers.popPrefEnv();
+    },
+    resolveDownloads,
+    rejectDownloads,
+  };
 }
 
 /**
@@ -627,6 +661,7 @@ async function loadTestPage({
         ["browser.translations.automaticallyPopup", true],
         ["browser.translations.alwaysTranslateLanguages", ""],
         ["browser.translations.neverTranslateLanguages", ""],
+        ["browser.translations.mostRecentTargetLanguages", ""],
         // Bug 1893100 - This is needed to ensure that switching focus
         // with tab works in tests independent of macOS settings that
         // would otherwise disable keyboard navigation at the OS level.
@@ -685,6 +720,11 @@ async function loadTestPage({
     remoteClients,
 
     /**
+     * Resolves the downloads for the pending count of requested language pairs.
+     * This should be used when resolving downloads immediately after requesting them.
+     *
+     * @see {resolveBulkDownloads} for requesting multiple translations prior to resolving.
+     *
      * @param {number} count - Count of the language pairs expected.
      */
     async resolveDownloads(count) {
@@ -695,12 +735,63 @@ async function loadTestPage({
     },
 
     /**
+     * Rejects the downloads for the pending count of requested language pairs.
+     * This should be used when rejecting downloads immediately after requesting them.
+     *
+     * @see {resolveBulkDownloads} for requesting multiple translations prior to rejecting.
+     *
      * @param {number} count - Count of the language pairs expected.
      */
     async rejectDownloads(count) {
       await remoteClients.translationsWasm.rejectPendingDownloads(1);
       await remoteClients.translationModels.rejectPendingDownloads(
         FILES_PER_LANGUAGE_PAIR * count
+      );
+    },
+
+    /**
+     * Resolves downloads for multiple pending translation requests.
+     *
+     * @see {resolveDownloads} for resolving downloads for just a single request.
+     *
+     * @param {object} expectations
+     * @param {number} expectations.expectedWasmDownloads
+     *  - The expected count of pending WASM binary download requests.
+     * @param {number} expectations.expectedLanguagePairDownloads
+     *  - The expected count of language-pair model-download requests.
+     */
+    async resolveBulkDownloads({
+      expectedWasmDownloads,
+      expectedLanguagePairDownloads,
+    }) {
+      await remoteClients.translationsWasm.resolvePendingDownloads(
+        expectedWasmDownloads
+      );
+      await remoteClients.translationModels.resolvePendingDownloads(
+        FILES_PER_LANGUAGE_PAIR * expectedLanguagePairDownloads
+      );
+    },
+
+    /**
+     * Rejects downloads for multiple pending translation requests.
+     *
+     * @see {rejectDownloads} for rejecting downloads for just a single request.
+     *
+     * @param {object} expectations
+     * @param {number} expectations.expectedWasmDownloads
+     *  - The expected count of pending WASM binary download requests.
+     * @param {number} expectations.expectedLanguagePairDownloads
+     *  - The expected count of language-pair model-download requests.
+     */
+    async rejectBulkDownloads({
+      expectedWasmDownloads,
+      expectedLanguagePairDownloads,
+    }) {
+      await remoteClients.translationsWasm.rejectPendingDownloads(
+        expectedWasmDownloads
+      );
+      await remoteClients.translationModels.rejectPendingDownloads(
+        FILES_PER_LANGUAGE_PAIR * expectedLanguagePairDownloads
       );
     },
 
@@ -1301,6 +1392,14 @@ async function setupAboutPreferences(
     true // waitForLoad
   );
 
+  let initTranslationsEvent;
+  if (Services.prefs.getBoolPref("browser.translations.newSettingsUI.enable")) {
+    initTranslationsEvent = BrowserTestUtils.waitForEvent(
+      document,
+      "translationsSettingsInit"
+    );
+  }
+
   const { remoteClients, removeMocks } = await createAndMockRemoteSettings({
     languagePairs,
   });
@@ -1312,6 +1411,10 @@ async function setupAboutPreferences(
   await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
 
   const elements = await selectAboutPreferencesElements();
+
+  if (Services.prefs.getBoolPref("browser.translations.newSettingsUI.enable")) {
+    await initTranslationsEvent;
+  }
 
   async function cleanup() {
     await closeAllOpenPanelsAndMenus();

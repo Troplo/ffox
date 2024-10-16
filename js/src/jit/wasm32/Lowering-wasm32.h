@@ -62,14 +62,6 @@ class LIRGeneratorWasm32 : public LIRGeneratorShared {
                           MDefinition* v = nullptr) {
     MOZ_CRASH();
   }
-  void lowerForBitAndAndBranch(LBitAndAndBranch*, MInstruction*, MDefinition*,
-                               MDefinition*) {
-    MOZ_CRASH();
-  }
-  void lowerForCompareI64AndBranch(MTest*, MCompare*, JSOp, MDefinition*,
-                                   MDefinition*, MBasicBlock*, MBasicBlock*) {
-    MOZ_CRASH();
-  }
 
   void lowerConstantDouble(double, MInstruction*) { MOZ_CRASH(); }
   void lowerConstantFloat32(float, MInstruction*) { MOZ_CRASH(); }
@@ -121,7 +113,7 @@ class LIRGeneratorWasm32 : public LIRGeneratorShared {
   LTableSwitchV* newLTableSwitchV(MTableSwitch*) { MOZ_CRASH(); }
 };
 
-typedef LIRGeneratorWasm32 LIRGeneratorSpecific;
+using LIRGeneratorSpecific = LIRGeneratorWasm32;
 
 }  // namespace js::jit
 

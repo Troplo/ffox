@@ -99,7 +99,7 @@ nsresult ContentPrincipal::GenerateOriginNoSuffixFromURI(
     return NS_ERROR_FAILURE;
   }
 
-  MOZ_ASSERT(!NS_IsAboutBlank(origin),
+  MOZ_ASSERT(!NS_IsAboutBlankAllowQueryAndFragment(origin),
              "The inner URI for about:blank must be moz-safe-about:blank");
 
   // Handle non-strict file:// uris.
@@ -302,14 +302,6 @@ bool ContentPrincipal::MayLoadInternal(nsIURI* aURI) {
   }
 
   if (nsScriptSecurityManager::SecurityCompareURIs(mURI, aURI)) {
-    return true;
-  }
-
-  // If strict file origin policy is in effect, local files will always fail
-  // SecurityCompareURIs unless they are identical. Explicitly check file origin
-  // policy, in that case.
-  if (nsScriptSecurityManager::GetStrictFileOriginPolicy() &&
-      NS_URIIsLocalFile(aURI) && NS_RelaxStrictFileOriginPolicy(aURI, mURI)) {
     return true;
   }
 

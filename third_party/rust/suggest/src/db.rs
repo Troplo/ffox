@@ -3,27 +3,29 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 
 use interrupt_support::{SqlInterruptHandle, SqlInterruptScope};
 use parking_lot::{Mutex, MutexGuard};
+use remote_settings::RemoteSettingsResponse;
 use rusqlite::{
     named_params,
     types::{FromSql, ToSql},
-    Connection, OpenFlags,
+    Connection, OpenFlags, OptionalExtension,
 };
 use sql_support::{open_database::open_database_with_flags, ConnExt};
 
 use crate::{
     config::{SuggestGlobalConfig, SuggestProviderConfig},
     error::RusqliteResultExt,
+    fakespot,
     keyword::full_keyword,
     pocket::{split_keyword, KeywordConfidence},
     provider::SuggestionProvider,
     rs::{
         DownloadedAmoSuggestion, DownloadedAmpSuggestion, DownloadedAmpWikipediaSuggestion,
-        DownloadedMdnSuggestion, DownloadedPocketSuggestion, DownloadedWeatherData,
-        DownloadedWikipediaSuggestion, Record, SuggestRecordId,
+        DownloadedFakespotSuggestion, DownloadedMdnSuggestion, DownloadedPocketSuggestion,
+        DownloadedWeatherData, DownloadedWikipediaSuggestion, Record, SuggestRecordId,
     },
     schema::{clear_database, SuggestConnectionInitializer},
     suggestion::{cook_raw_suggestion_url, AmpSuggestionType, Suggestion},
@@ -66,6 +68,12 @@ impl From<ConnectionType> for OpenFlags {
     }
 }
 
+#[derive(Default, Clone)]
+pub struct Sqlite3Extension {
+    pub library: String,
+    pub entry_point: Option<String>,
+}
+
 /// A thread-safe wrapper around an SQLite connection to the Suggest database,
 /// and its interrupt handle.
 pub(crate) struct SuggestDb {
@@ -82,8 +90,16 @@ pub(crate) struct SuggestDb {
 impl SuggestDb {
     /// Opens a read-only or read-write connection to a Suggest database at the
     /// given path.
-    pub fn open(path: impl AsRef<Path>, type_: ConnectionType) -> Result<Self> {
-        let conn = open_database_with_flags(path, type_.into(), &SuggestConnectionInitializer)?;
+    pub fn open(
+        path: impl AsRef<Path>,
+        extensions_to_load: &[Sqlite3Extension],
+        type_: ConnectionType,
+    ) -> Result<Self> {
+        let conn = open_database_with_flags(
+            path,
+            type_.into(),
+            &SuggestConnectionInitializer::new(extensions_to_load),
+        )?;
         Ok(Self::with_connection(conn))
     }
 
@@ -144,6 +160,15 @@ impl WriteScope<'_> {
         Ok(result)
     }
 
+    /// Accesses the Suggest database in a transaction for reading only
+    pub fn read<T>(&mut self, op: impl FnOnce(&SuggestDao) -> Result<T>) -> Result<T> {
+        let tx = self.conn.transaction()?;
+        let dao = SuggestDao::new(&tx, &self.scope);
+        let result = op(&dao)?;
+        tx.commit()?;
+        Ok(result)
+    }
+
     pub fn err_if_interrupted(&self) -> Result<()> {
         Ok(self.scope.err_if_interrupted()?)
     }
@@ -169,64 +194,116 @@ impl<'a> SuggestDao<'a> {
     //
     //  These methods combine several low-level calls into one logical operation.
 
-    pub fn handle_ingested_record(&mut self, last_ingest_key: &str, record: &Record) -> Result<()> {
-        // Advance the last fetch time, so that we can resume
-        // fetching after this record if we're interrupted.
-        self.put_last_ingest_if_newer(last_ingest_key, record.last_modified)
-    }
-
-    pub fn handle_deleted_record(&mut self, last_ingest_key: &str, record: &Record) -> Result<()> {
-        let record_id = SuggestRecordId::from(&record.id);
+    pub fn delete_record_data(&mut self, record_id: &SuggestRecordId) -> Result<()> {
         // Drop either the icon or suggestions, records only contain one or the other
         match record_id.as_icon_id() {
             Some(icon_id) => self.drop_icon(icon_id)?,
-            None => self.drop_suggestions(&record_id)?,
+            None => self.drop_suggestions(record_id)?,
         };
-        // Advance the last fetch time, so that we can resume
-        // fetching after this record if we're interrupted.
-        self.put_last_ingest_if_newer(last_ingest_key, record.last_modified)
+        Ok(())
     }
 
     // =============== Low level API ===============
     //
     //  These methods implement CRUD operations
 
+    pub fn read_cached_rs_data(&self, collection: &str) -> Option<RemoteSettingsResponse> {
+        match self.try_read_cached_rs_data(collection) {
+            Ok(result) => result,
+            Err(e) => {
+                // Return None on failure . If the cached data is corrupted, maybe because the
+                // RemoteSettingsResponse schema changed, then we want to just continue on.  This also matches
+                // the proposed API from #6328, so it should be easier to adapt this code once
+                // that's merged.
+                error_support::report_error!("suggest-rs-cache-read", "{e}");
+                None
+            }
+        }
+    }
+
+    pub fn write_cached_rs_data(&mut self, collection: &str, data: &RemoteSettingsResponse) {
+        if let Err(e) = self.try_write_cached_rs_data(collection, data) {
+            // Return None on failure for the same reason as in [Self::read_cached_rs_data]
+            error_support::report_error!("suggest-rs-cache-write", "{e}");
+        }
+    }
+
+    fn try_read_cached_rs_data(&self, collection: &str) -> Result<Option<RemoteSettingsResponse>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT data FROM rs_cache WHERE collection = ?")?;
+        let data = stmt
+            .query_row((collection,), |row| row.get::<_, Vec<u8>>(0))
+            .optional()?;
+        match data {
+            Some(data) => Ok(Some(rmp_serde::decode::from_slice(data.as_slice())?)),
+            None => Ok(None),
+        }
+    }
+
+    fn try_write_cached_rs_data(
+        &mut self,
+        collection: &str,
+        data: &RemoteSettingsResponse,
+    ) -> Result<()> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("INSERT OR REPLACE INTO rs_cache(collection, data) VALUES(?, ?)")?;
+        stmt.execute((collection, rmp_serde::encode::to_vec(data)?))?;
+        Ok(())
+    }
+
+    pub fn get_ingested_records(&self) -> Result<Vec<IngestedRecord>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT id, collection, type, last_modified FROM ingested_records")?;
+        let rows = stmt.query_and_then((), IngestedRecord::from_row)?;
+        rows.collect()
+    }
+
+    pub fn update_ingested_records(
+        &mut self,
+        collection: &str,
+        new_records: &[&Record],
+        updated_records: &[&Record],
+        deleted_records: &[&IngestedRecord],
+    ) -> Result<()> {
+        let mut delete_stmt = self
+            .conn
+            .prepare_cached("DELETE FROM ingested_records WHERE collection = ? AND id = ?")?;
+        for deleted in deleted_records {
+            delete_stmt.execute((collection, deleted.id.as_str()))?;
+        }
+
+        let mut insert_stmt = self.conn.prepare_cached(
+            "INSERT OR REPLACE INTO ingested_records(id, collection, type, last_modified) VALUES(?, ?, ?, ?)",
+        )?;
+        for record in new_records.iter().chain(updated_records) {
+            insert_stmt.execute((
+                record.id.as_str(),
+                collection,
+                record.record_type().as_str(),
+                record.last_modified,
+            ))?;
+        }
+        Ok(())
+    }
+
+    /// Update the DB so that we re-ingest all records on the next ingestion.
+    ///
+    /// We hack this by setting the last_modified time to 1 so that the next time around we always
+    /// re-ingest the record.
+    pub fn force_reingest(&mut self) -> Result<()> {
+        self.conn
+            .prepare_cached("UPDATE ingested_records SET last_modified=1")?
+            .execute(())?;
+        Ok(())
+    }
+
     pub fn suggestions_table_empty(&self) -> Result<bool> {
         Ok(self
             .conn
             .query_one::<bool>("SELECT NOT EXISTS (SELECT 1 FROM suggestions)")?)
-    }
-
-    /// Fetches suggestions that match the given query from the database.
-    pub fn fetch_suggestions(&self, query: &SuggestionQuery) -> Result<Vec<Suggestion>> {
-        let unique_providers = query.providers.iter().collect::<HashSet<_>>();
-        unique_providers
-            .iter()
-            .try_fold(vec![], |mut acc, provider| {
-                let suggestions = match provider {
-                    SuggestionProvider::Amp => {
-                        self.fetch_amp_suggestions(query, AmpSuggestionType::Desktop)
-                    }
-                    SuggestionProvider::AmpMobile => {
-                        self.fetch_amp_suggestions(query, AmpSuggestionType::Mobile)
-                    }
-                    SuggestionProvider::Wikipedia => self.fetch_wikipedia_suggestions(query),
-                    SuggestionProvider::Amo => self.fetch_amo_suggestions(query),
-                    SuggestionProvider::Pocket => self.fetch_pocket_suggestions(query),
-                    SuggestionProvider::Yelp => self.fetch_yelp_suggestions(query),
-                    SuggestionProvider::Mdn => self.fetch_mdn_suggestions(query),
-                    SuggestionProvider::Weather => self.fetch_weather_suggestions(query),
-                }?;
-                acc.extend(suggestions);
-                Ok(acc)
-            })
-            .map(|mut suggestions| {
-                suggestions.sort();
-                if let Some(limit) = query.limit.and_then(|limit| usize::try_from(limit).ok()) {
-                    suggestions.truncate(limit);
-                }
-                suggestions
-            })
     }
 
     /// Fetches Suggestions of type Amp provider that match the given query
@@ -672,6 +749,62 @@ impl<'a> SuggestDao<'a> {
         Ok(suggestions)
     }
 
+    /// Fetches fakespot suggestions
+    pub fn fetch_fakespot_suggestions(&self, query: &SuggestionQuery) -> Result<Vec<Suggestion>> {
+        self.conn.query_rows_and_then_cached(
+            r#"
+            SELECT
+                s.title,
+                s.url,
+                s.score,
+                f.fakespot_grade,
+                f.product_id,
+                f.rating,
+                f.total_reviews,
+                i.data,
+                i.mimetype,
+                f.keywords,
+                f.product_type
+            FROM
+                suggestions s
+            JOIN
+                fakespot_fts fts
+                ON fts.rowid = s.id
+            JOIN
+                fakespot_custom_details f
+                ON f.suggestion_id = s.id
+            LEFT JOIN
+                icons i
+                ON i.id = f.icon_id
+            WHERE
+                fakespot_fts MATCH ?
+            ORDER BY
+                s.score DESC
+            "#,
+            (&query.fts_query(),),
+            |row| {
+                let score = fakespot::FakespotScore::new(
+                    &query.keyword,
+                    row.get(9)?,
+                    row.get(10)?,
+                    row.get(2)?,
+                )
+                .as_suggest_score();
+                Ok(Suggestion::Fakespot {
+                    title: row.get(0)?,
+                    url: row.get(1)?,
+                    score,
+                    fakespot_grade: row.get(3)?,
+                    product_id: row.get(4)?,
+                    rating: row.get(5)?,
+                    total_reviews: row.get(6)?,
+                    icon: row.get(7)?,
+                    icon_mimetype: row.get(8)?,
+                })
+            },
+        )
+    }
+
     /// Inserts all suggestions from a downloaded AMO attachment into
     /// the database.
     pub fn insert_amo_suggestions(
@@ -878,6 +1011,27 @@ impl<'a> SuggestDao<'a> {
         Ok(())
     }
 
+    /// Inserts all suggestions from a downloaded Fakespot attachment into the database.
+    pub fn insert_fakespot_suggestions(
+        &mut self,
+        record_id: &SuggestRecordId,
+        suggestions: &[DownloadedFakespotSuggestion],
+    ) -> Result<()> {
+        let mut suggestion_insert = SuggestionInsertStatement::new(self.conn)?;
+        let mut fakespot_insert = FakespotInsertStatement::new(self.conn)?;
+        for suggestion in suggestions {
+            let suggestion_id = suggestion_insert.execute(
+                record_id,
+                &suggestion.title,
+                &suggestion.url,
+                suggestion.score,
+                SuggestionProvider::Fakespot,
+            )?;
+            fakespot_insert.execute(suggestion_id, suggestion)?;
+        }
+        Ok(())
+    }
+
     /// Inserts weather record data into the database.
     pub fn insert_weather_data(
         &mut self,
@@ -945,34 +1099,53 @@ impl<'a> SuggestDao<'a> {
     /// Deletes all suggestions associated with a Remote Settings record from
     /// the database.
     pub fn drop_suggestions(&mut self, record_id: &SuggestRecordId) -> Result<()> {
+        // Call `err_if_interrupted` before each statement since these have historically taken a
+        // long time and caused shutdown hangs.
+
+        self.scope.err_if_interrupted()?;
         self.conn.execute_cached(
             "DELETE FROM keywords WHERE suggestion_id IN (SELECT id from suggestions WHERE record_id = :record_id)",
             named_params! { ":record_id": record_id.as_str() },
         )?;
+        self.scope.err_if_interrupted()?;
         self.conn.execute_cached(
             "DELETE FROM full_keywords WHERE suggestion_id IN (SELECT id from suggestions WHERE record_id = :record_id)",
             named_params! { ":record_id": record_id.as_str() },
         )?;
+        self.scope.err_if_interrupted()?;
         self.conn.execute_cached(
             "DELETE FROM prefix_keywords WHERE suggestion_id IN (SELECT id from suggestions WHERE record_id = :record_id)",
             named_params! { ":record_id": record_id.as_str() },
         )?;
+        self.scope.err_if_interrupted()?;
+        self.conn.execute_cached(
+            "
+            DELETE FROM fakespot_fts
+            WHERE rowid IN (SELECT id from suggestions WHERE record_id = :record_id)
+            ",
+            named_params! { ":record_id": record_id.as_str() },
+        )?;
+        self.scope.err_if_interrupted()?;
         self.conn.execute_cached(
             "DELETE FROM suggestions WHERE record_id = :record_id",
             named_params! { ":record_id": record_id.as_str() },
         )?;
+        self.scope.err_if_interrupted()?;
         self.conn.execute_cached(
             "DELETE FROM yelp_subjects WHERE record_id = :record_id",
             named_params! { ":record_id": record_id.as_str() },
         )?;
+        self.scope.err_if_interrupted()?;
         self.conn.execute_cached(
             "DELETE FROM yelp_modifiers WHERE record_id = :record_id",
             named_params! { ":record_id": record_id.as_str() },
         )?;
+        self.scope.err_if_interrupted()?;
         self.conn.execute_cached(
             "DELETE FROM yelp_location_signs WHERE record_id = :record_id",
             named_params! { ":record_id": record_id.as_str() },
         )?;
+        self.scope.err_if_interrupted()?;
         self.conn.execute_cached(
             "DELETE FROM yelp_custom_details WHERE record_id = :record_id",
             named_params! { ":record_id": record_id.as_str() },
@@ -1012,33 +1185,6 @@ impl<'a> SuggestDao<'a> {
         Ok(())
     }
 
-    #[cfg(feature = "benchmark_api")]
-    /// Clears the value for a metadata key.
-    ///
-    /// This is currently only used for the benchmarks.
-    pub fn clear_meta(&mut self, key: &str) -> Result<()> {
-        self.conn.execute_cached(
-            "DELETE FROM meta WHERE key = :key",
-            named_params! { ":key": key },
-        )?;
-        Ok(())
-    }
-
-    /// Updates the last ingest timestamp if the given last modified time is
-    /// newer than the existing one recorded.
-    pub fn put_last_ingest_if_newer(
-        &mut self,
-        last_ingest_key: &str,
-        record_last_modified: u64,
-    ) -> Result<()> {
-        let last_ingest = self.get_meta::<u64>(last_ingest_key)?.unwrap_or_default();
-        if record_last_modified > last_ingest {
-            self.put_meta(last_ingest_key, record_last_modified)?;
-        }
-
-        Ok(())
-    }
-
     /// Stores global Suggest configuration data.
     pub fn put_global_config(&mut self, config: &SuggestGlobalConfig) -> Result<()> {
         self.put_meta(GLOBAL_CONFIG_META_KEY, serde_json::to_string(config)?)
@@ -1074,6 +1220,25 @@ impl<'a> SuggestDao<'a> {
     ) -> Result<Option<SuggestProviderConfig>> {
         self.get_meta::<String>(&provider_config_meta_key(provider))?
             .map_or_else(|| Ok(None), |json| Ok(serde_json::from_str(&json)?))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct IngestedRecord {
+    pub id: SuggestRecordId,
+    pub collection: String,
+    pub record_type: String,
+    pub last_modified: u64,
+}
+
+impl IngestedRecord {
+    fn from_row(row: &rusqlite::Row) -> Result<Self> {
+        Ok(Self {
+            id: SuggestRecordId::new(row.get("id")?),
+            collection: row.get("collection")?,
+            record_type: row.get("type")?,
+            last_modified: row.get("last_modified")?,
+        })
     }
 }
 
@@ -1284,6 +1449,51 @@ impl<'conn> MdnInsertStatement<'conn> {
         self.0
             .execute((suggestion_id, &mdn.description))
             .with_context("mdn insert")?;
+        Ok(())
+    }
+}
+
+struct FakespotInsertStatement<'conn>(rusqlite::Statement<'conn>);
+
+impl<'conn> FakespotInsertStatement<'conn> {
+    fn new(conn: &'conn Connection) -> Result<Self> {
+        Ok(Self(conn.prepare(
+            "INSERT INTO fakespot_custom_details(
+                 suggestion_id,
+                 fakespot_grade,
+                 product_id,
+                 keywords,
+                 product_type,
+                 rating,
+                 total_reviews,
+                 icon_id
+             )
+             VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+             ",
+        )?))
+    }
+
+    fn execute(
+        &mut self,
+        suggestion_id: i64,
+        fakespot: &DownloadedFakespotSuggestion,
+    ) -> Result<()> {
+        let icon_id = fakespot
+            .product_id
+            .split_once('-')
+            .map(|(vendor, _)| format!("fakespot-{vendor}"));
+        self.0
+            .execute((
+                suggestion_id,
+                &fakespot.fakespot_grade,
+                &fakespot.product_id,
+                &fakespot.keywords.to_lowercase(),
+                &fakespot.product_type.to_lowercase(),
+                fakespot.rating,
+                fakespot.total_reviews,
+                icon_id,
+            ))
+            .with_context("fakespot insert")?;
         Ok(())
     }
 }

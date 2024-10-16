@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { Module } from "chrome://remote/content/shared/messagehandler/Module.sys.mjs";
+import { RootBiDiModule } from "chrome://remote/content/webdriver-bidi/modules/RootBiDiModule.sys.mjs";
 
 const lazy = {};
 
@@ -10,11 +10,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
   assert: "chrome://remote/content/shared/webdriver/Assert.sys.mjs",
   error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
   permissions: "chrome://remote/content/shared/Permissions.sys.mjs",
+  pprint: "chrome://remote/content/shared/Format.sys.mjs",
   UserContextManager:
     "chrome://remote/content/shared/UserContextManager.sys.mjs",
 });
 
-class PermissionsModule extends Module {
+class PermissionsModule extends RootBiDiModule {
   constructor(messageHandler) {
     super(messageHandler);
   }
@@ -74,18 +75,18 @@ class PermissionsModule extends Module {
 
     lazy.assert.string(
       origin,
-      `Expected "origin" to be a string, got ${origin}`
+      lazy.pprint`Expected "origin" to be a string, got ${origin}`
     );
     lazy.assert.that(
       origin => URL.canParse(origin),
-      `Expected "origin" to be a valid URL, got ${origin}`
+      lazy.pprint`Expected "origin" to be a valid URL, got ${origin}`
     )(origin);
 
     let userContext;
     if (userContextId !== null) {
       lazy.assert.string(
         userContextId,
-        `Expected "userContext" to be a string, got ${userContextId}`
+        lazy.pprint`Expected "userContext" to be a string, got ${userContextId}`
       );
 
       if (!lazy.UserContextManager.hasUserContextId(userContextId)) {

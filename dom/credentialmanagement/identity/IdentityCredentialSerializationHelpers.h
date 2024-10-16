@@ -10,6 +10,7 @@
 #include "mozilla/dom/BindingIPCUtils.h"
 #include "mozilla/dom/IdentityCredential.h"
 #include "mozilla/dom/IdentityCredentialBinding.h"
+#include "mozilla/dom/CredentialManagementBinding.h"
 
 namespace IPC {
 
@@ -25,6 +26,7 @@ struct ParamTraits<mozilla::dom::IdentityProviderConfig> {
     WriteParam(aWriter, aParam.mLoginURL);
     WriteParam(aWriter, aParam.mLoginTarget);
     WriteParam(aWriter, aParam.mEffectiveQueryURL);
+    WriteParam(aWriter, aParam.mEffectiveType);
   }
 
   static bool Read(MessageReader* aReader, paramType* aResult) {
@@ -34,7 +36,8 @@ struct ParamTraits<mozilla::dom::IdentityProviderConfig> {
            ReadParam(aReader, &aResult->mOrigin) &&
            ReadParam(aReader, &aResult->mLoginURL) &&
            ReadParam(aReader, &aResult->mLoginTarget) &&
-           ReadParam(aReader, &aResult->mEffectiveQueryURL);
+           ReadParam(aReader, &aResult->mEffectiveQueryURL) &&
+           ReadParam(aReader, &aResult->mEffectiveType);
   }
 };
 
@@ -42,6 +45,11 @@ template <>
 struct ParamTraits<mozilla::dom::IdentityLoginTargetType>
     : public mozilla::dom::WebIDLEnumSerializer<
           mozilla::dom::IdentityLoginTargetType> {};
+
+template <>
+struct ParamTraits<mozilla::dom::CredentialMediationRequirement>
+    : public mozilla::dom::WebIDLEnumSerializer<
+          mozilla::dom::CredentialMediationRequirement> {};
 
 template <>
 struct ParamTraits<mozilla::dom::IdentityCredentialRequestOptions> {

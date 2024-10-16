@@ -7,6 +7,7 @@
 #ifndef nsGlobalWindowOuter_h___
 #define nsGlobalWindowOuter_h___
 
+#include "nsNodeInfoManager.h"
 #include "nsPIDOMWindow.h"
 
 #include "nsTHashtable.h"
@@ -81,6 +82,8 @@ namespace mozilla {
 class AbstractThread;
 class DOMEventTargetHelper;
 class ErrorResult;
+template <typename V, typename E>
+class Result;
 class ThrottledEventQueue;
 class ScrollContainerFrame;
 namespace dom {
@@ -251,7 +254,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   mozilla::dom::ChromeMessageBroadcaster* GetGroupMessageManager(
       const nsAString& aGroup);
 
-  nsresult OpenJS(const nsAString& aUrl, const nsAString& aName,
+  nsresult OpenJS(const nsACString& aUrl, const nsAString& aName,
                   const nsAString& aOptions,
                   mozilla::dom::BrowsingContext** _retval);
 
@@ -431,7 +434,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
 
   virtual bool TakeFocus(bool aFocus, uint32_t aFocusMethod) override;
   virtual void SetReadyForFocus() override;
-  virtual void PageHidden() override;
+  virtual void PageHidden(bool aIsEnteringBFCacheInParent) override;
 
   /**
    * Set a arguments for this window. This will be set on the window
@@ -553,7 +556,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
   mozilla::dom::Nullable<mozilla::dom::WindowProxyHolder> OpenOuter(
       const nsAString& aUrl, const nsAString& aName, const nsAString& aOptions,
       mozilla::ErrorResult& aError);
-  nsresult Open(const nsAString& aUrl, const nsAString& aName,
+  nsresult Open(const nsACString& aUrl, const nsAString& aName,
                 const nsAString& aOptions, nsDocShellLoadState* aLoadState,
                 bool aForceNoOpener,
                 mozilla::dom::BrowsingContext** _retval) override;
@@ -623,8 +626,8 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
       const nsAString& aOptions,
       const mozilla::dom::Sequence<JS::Value>& aExtraArgument,
       mozilla::ErrorResult& aError);
-  nsresult OpenDialog(const nsAString& aUrl, const nsAString& aName,
-                      const nsAString& aOptions, nsISupports* aExtraArgument,
+  nsresult OpenDialog(const nsACString& aUrl, const nsAString& aName,
+                      const nsAString& aOptions, nsIArray* aArguments,
                       mozilla::dom::BrowsingContext** _retval) override;
   void UpdateCommands(const nsAString& anAction) override;
 
@@ -687,7 +690,7 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
 
   // Outer windows only.
   virtual nsresult OpenNoNavigate(
-      const nsAString& aUrl, const nsAString& aName, const nsAString& aOptions,
+      const nsACString& aUrl, const nsAString& aName, const nsAString& aOptions,
       mozilla::dom::BrowsingContext** _retval) override;
 
  private:
@@ -725,12 +728,10 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
    *        security check, on the assumption that whoever *actually* loads this
    *        page will do their own security check.
    *
-   * @param argv The arguments to pass to the new window.  The first
-   *        three args, if present, will be aUrl, aName, and aOptions.  So this
-   *        param only matters if there are more than 3 arguments.
-   *
-   * @param aExtraArgument Another way to pass arguments in.  This is mutually
-   *        exclusive with the argv approach.
+   * @param aArguments The arguments to pass to the new window. The first three
+   *                   args, if present, will be aUrl, aName, and aOptions. So
+   *                   this param only matters if there are more than 3
+   *                   arguments.
    *
    * @param aLoadState to be passed on along to the windowwatcher.
    *
@@ -747,21 +748,21 @@ class nsGlobalWindowOuter final : public mozilla::dom::EventTarget,
    *
    * Outer windows only.
    */
-  nsresult OpenInternal(const nsAString& aUrl, const nsAString& aName,
+  nsresult OpenInternal(const nsACString& aUrl, const nsAString& aName,
                         const nsAString& aOptions, bool aDialog,
-                        bool aContentModal, bool aCalledNoScript,
-                        bool aDoJSFixups, bool aNavigate, nsIArray* argv,
-                        nsISupports* aExtraArgument,
-                        nsDocShellLoadState* aLoadState, bool aForceNoOpener,
-                        PrintKind aPrintKind,
+                        bool aCalledNoScript, bool aDoJSFixups, bool aNavigate,
+                        nsIArray* aArguments, nsDocShellLoadState* aLoadState,
+                        bool aForceNoOpener, PrintKind aPrintKind,
                         mozilla::dom::BrowsingContext** aReturn);
 
- public:
-  nsresult SecurityCheckURL(const char* aURL, nsIURI** aURI);
+  mozilla::Result<already_AddRefed<nsIURI>, nsresult>
+  URIfromURLAndMaybeDoSecurityCheck(const nsACString& aURL,
+                                    bool aSecurityCheck);
 
+ public:
   mozilla::dom::PopupBlocker::PopupControlState RevisePopupAbuseLevel(
       mozilla::dom::PopupBlocker::PopupControlState aState);
-  void FireAbuseEvents(const nsAString& aPopupURL,
+  void FireAbuseEvents(const nsACString& aPopupURL,
                        const nsAString& aPopupWindowName,
                        const nsAString& aPopupWindowFeatures);
 
