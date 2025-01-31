@@ -129,7 +129,7 @@ static mozilla::LazyLogModule sGVSupportLog("GeckoViewSupport");
 // All the toplevel windows that have been created; these are in
 // stacking order, so the window at gTopLevelWindows[0] is the topmost
 // one.
-static nsTArray<nsWindow*> gTopLevelWindows;
+MOZ_RUNINIT static nsTArray<nsWindow*> gTopLevelWindows;
 
 static bool sFailedToCreateGLContext = false;
 
@@ -1747,7 +1747,7 @@ class LayerViewSupport final
       return;
     }
 
-    ScreenIntMargin safeAreaInsets(aTop, aRight, aBottom, aLeft);
+    LayoutDeviceIntMargin safeAreaInsets(aTop, aRight, aBottom, aLeft);
     gkWindow->UpdateSafeAreaInsets(safeAreaInsets);
   }
 };
@@ -1959,10 +1959,12 @@ void GeckoViewSupport::AttachAccessibility(
           sessionAccessibility);
 }
 
-auto GeckoViewSupport::OnLoadRequest(
-    mozilla::jni::String::Param aUri, int32_t aWindowType, int32_t aFlags,
-    mozilla::jni::String::Param aTriggeringUri, bool aHasUserGesture,
-    bool aIsTopLevel) const -> java::GeckoResult::LocalRef {
+auto GeckoViewSupport::OnLoadRequest(mozilla::jni::String::Param aUri,
+                                     int32_t aWindowType, int32_t aFlags,
+                                     mozilla::jni::String::Param aTriggeringUri,
+                                     bool aHasUserGesture,
+                                     bool aIsTopLevel) const
+    -> java::GeckoResult::LocalRef {
   GeckoSession::Window::LocalRef window(mGeckoViewWindow);
   if (!window) {
     return nullptr;
@@ -2250,8 +2252,6 @@ void nsWindow::Destroy() {
   // Stuff below may release the last ref to this
   nsCOMPtr<nsIWidget> kungFuDeathGrip(this);
 
-  RemoveAllChildren();
-
   // Ensure the compositor has been shutdown before this nsWindow is potentially
   // deleted
   nsBaseWidget::DestroyCompositor();
@@ -2304,7 +2304,7 @@ void nsWindow::OnGeckoViewReady() {
   acc->OnReady();
 }
 
-void nsWindow::DidChangeParent(nsIWidget*) {
+void nsWindow::DidClearParent(nsIWidget*) {
   // if we are now in the toplevel window's hierarchy, schedule a redraw
   if (FindTopLevel() == nsWindow::TopWindow()) {
     RedrawAll();
@@ -3275,9 +3275,12 @@ void nsWindow::KeyboardHeightChanged(ScreenIntCoord aHeight) {
   }
 }
 
-ScreenIntMargin nsWindow::GetSafeAreaInsets() const { return mSafeAreaInsets; }
+LayoutDeviceIntMargin nsWindow::GetSafeAreaInsets() const {
+  return mSafeAreaInsets;
+}
 
-void nsWindow::UpdateSafeAreaInsets(const ScreenIntMargin& aSafeAreaInsets) {
+void nsWindow::UpdateSafeAreaInsets(
+    const LayoutDeviceIntMargin& aSafeAreaInsets) {
   mSafeAreaInsets = aSafeAreaInsets;
 
   if (mWidgetListener) {

@@ -7,11 +7,11 @@
 newtab-page-title = New Tab
 newtab-settings-button =
     .title = Customize your New Tab page
-newtab-personalize-icon-label =
-    .title = Personalize new tab
-    .aria-label = Personalize new tab
-newtab-personalize-dialog-label =
-    .aria-label = Personalize
+newtab-personalize-settings-icon-label =
+    .title = Personalize New Tab
+    .aria-label = Settings
+newtab-settings-dialog-label =
+    .aria-label = Settings
 newtab-logo-and-wordmark =
     .aria-label = { -brand-full-name }
 
@@ -117,6 +117,12 @@ newtab-menu-delete-pocket = Delete from { -pocket-brand-name }
 newtab-menu-archive-pocket = Archive in { -pocket-brand-name }
 newtab-menu-show-privacy-info = Our sponsors & your privacy
 newtab-menu-about-fakespot = About { -fakespot-brand-name }
+# Context menu option to personalize New Tab recommended stories by blocking a section of stories,
+# e.g. "Sports". "Block" is a verb here.
+newtab-menu-section-block = Block
+# "Follow", "unfollow", and "following" are social media terms that refer to subscribing to or unsubscribing from a section of stories.
+# e.g. Following the travel section of stories.
+newtab-menu-section-unfollow = Unfollow Topic
 
 ## Message displayed in a modal window to explain privacy and provide context for sponsored content.
 
@@ -228,15 +234,6 @@ newtab-discovery-empty-section-topstories-loading = Loading…
 newtab-discovery-empty-section-topstories-timed-out = Oops! We almost loaded this section, but not quite.
 
 ## Pocket Content Section.
-
-# This is shown at the bottom of the trending stories section and precedes a list of links to popular topics.
-newtab-pocket-read-more = Popular Topics:
-newtab-pocket-new-topics-title = Want even more stories? See these popular topics from { -pocket-brand-name }
-newtab-pocket-more-recommendations = More Recommendations
-newtab-pocket-learn-more = Learn more
-newtab-pocket-cta-button = Get { -pocket-brand-name }
-newtab-pocket-cta-text = Save the stories you love in { -pocket-brand-name }, and fuel your mind with fascinating reads.
-newtab-pocket-pocket-firefox-family = { -pocket-brand-name } is part of the { -brand-product-name } family
 
 # A save to Pocket button that shows over the card thumbnail on hover.
 newtab-pocket-image =
@@ -439,3 +436,18 @@ newtab-topic-selection-button-maybe-later = Maybe later
 newtab-topic-selection-privacy-link = Learn how we protect and manage data
 newtab-topic-selection-button-update-interests = Update your interests
 newtab-topic-selection-button-pick-interests = Pick your interests
+
+## Content Feed Sections
+## "Follow", "unfollow", and "following" are social media terms that refer to subscribing to or unsubscribing from a section of stories.
+## e.g. Following the travel section of stories.
+
+newtab-section-follow-button = Follow
+newtab-section-following-button = Following
+newtab-section-unfollow-button = Unfollow
+
+## Confirmation modal for blocking a section
+
+newtab-section-confirm-block-section-p1 = Are you sure you want to block this section?
+newtab-section-confirm-block-section-p2 = Blocked section will no longer appear in your feed.
+newtab-section-block-section-button = Block this section
+newtab-section-cancel-button = Not now

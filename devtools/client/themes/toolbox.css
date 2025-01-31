@@ -125,7 +125,7 @@
 /*
  * XXX: This was added to match the padding 8px used by the reload button.
  * This padding makes the debug target component taller and also creates
- * spacing with the debug-target-title separator.
+ * spacing with the debug-descriptor-title separator.
  * See Bug 1641920 for improving the CSS of the DebugTargetInfo component.
  */
 .debug-target-info .debug-target-url-readonly {
@@ -305,6 +305,7 @@
 
 .devtools-tab:hover {
   background-color: var(--theme-toolbar-hover);
+  color: var(--theme-toolbar-hover-color);
 }
 
 /* Remove system control border from devtools-tab. */
@@ -318,6 +319,12 @@
 
 .devtools-tab.selected {
   color: var(--theme-toolbar-selected-color);
+  background-color: var(--theme-toolbar-selected-background);
+
+  &:hover {
+    background-color: var(--theme-toolbar-selected-hover);
+    color: var(--theme-toolbar-selected-hover-color);
+  }
 }
 
 .devtools-tab > img {
@@ -330,6 +337,10 @@
   flex-shrink: 0;
   -moz-context-properties: fill;
   fill: var(--theme-icon-color);
+}
+
+.devtools-tab:hover > img {
+  fill: var(--theme-toolbar-hover-color);
 }
 
 .devtools-tab.selected > img {
@@ -376,18 +387,14 @@
   background-repeat: no-repeat;
 }
 
-.devtools-tabbar-button::-moz-focus-inner {
-  border: none;
-}
-
-.devtools-tabbar-button:hover,
-.devtools-tabbar-button.checked {
+.devtools-tabbar-button:hover {
   background-color: var(--theme-toolbar-hover);
+  color: var(--theme-toolbar-hover-color);
 }
 
-.devtools-tabbar-button.checked,
-.devtools-tabbar-button:active {
-  color: var(--theme-icon-checked-color);
+.devtools-tabbar-button.checked {
+  color: var(--toolbarbutton-checked-color);
+  background-color: var(--toolbarbutton-checked-background);
 }
 
 .devtools-tabbar-button:disabled {
@@ -673,6 +680,7 @@
 }
 
 #toolbox-container.tabs-reordering .devtools-tab.selected {
-  background-color: var(--theme-toolbar-hover);
+  background-color: var(--theme-toolbar-reordering-background);
+  color: var(--theme-toolbar-reordering-color);
   z-index: 1;
 }

@@ -7,12 +7,14 @@ package org.mozilla.fenix.home.store
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import mozilla.components.feature.top.sites.TopSite
+import org.mozilla.fenix.browser.browsingmode.BrowsingModeManager
 import org.mozilla.fenix.components.appstate.AppState
 import org.mozilla.fenix.components.components
 import org.mozilla.fenix.ext.shouldShowRecentSyncedTabs
 import org.mozilla.fenix.ext.shouldShowRecentTabs
 import org.mozilla.fenix.home.bookmarks.Bookmark
 import org.mozilla.fenix.home.collections.CollectionsState
+import org.mozilla.fenix.home.pocket.PocketState
 import org.mozilla.fenix.home.recentsyncedtabs.RecentSyncedTab
 import org.mozilla.fenix.home.recentsyncedtabs.RecentSyncedTabState
 import org.mozilla.fenix.home.recenttabs.RecentTab
@@ -43,11 +45,13 @@ internal sealed class HomepageState {
      * @property bookmarks List of [Bookmark] to display.
      * @property recentlyVisited List of [RecentlyVisitedItem] to display.
      * @property collectionsState State of the collections section to display.
+     * @property pocketState State of the pocket section to display.
      * @property showTopSites Whether to show top sites or not.
      * @property showRecentTabs Whether to show recent tabs or not.
      * @property showRecentSyncedTab Whether to show recent synced tab or not.
      * @property showBookmarks Whether to show bookmarks.
      * @property showRecentlyVisited Whether to show recent history section.
+     * @property showPocketStories Whether to show the pocket stories section.
      * @property topSiteColors The color set defined by [TopSiteColors] used to style a top site.
      * @property cardBackgroundColor Background color for card items.
      * @property buttonBackgroundColor Background [Color] for buttons.
@@ -60,16 +64,25 @@ internal sealed class HomepageState {
         val bookmarks: List<Bookmark>,
         val recentlyVisited: List<RecentlyVisitedItem>,
         val collectionsState: CollectionsState,
+        val pocketState: PocketState,
         val showTopSites: Boolean,
         val showRecentTabs: Boolean,
         val showRecentSyncedTab: Boolean,
         val showBookmarks: Boolean,
         val showRecentlyVisited: Boolean,
+        val showPocketStories: Boolean,
         val topSiteColors: TopSiteColors,
         val cardBackgroundColor: Color,
         val buttonBackgroundColor: Color,
         val buttonTextColor: Color,
-    ) : HomepageState()
+    ) : HomepageState() {
+
+        /**
+         * Whether to show customize home button.
+         */
+        val showCustomizeHome: Boolean
+            get() = showTopSites || showRecentTabs || showBookmarks || showRecentlyVisited || showPocketStories
+    }
 
     companion object {
 
@@ -77,11 +90,13 @@ internal sealed class HomepageState {
          * Builds a new [HomepageState] from the current [AppState] and [Settings].
          *
          * @param appState State to build the [HomepageState] from.
-         * @param settings Settings corresponding to how the homepage should be displayed.
+         * @param browsingModeManager Manager holding current state of whether the browser is in private mode or not.
+         * @param settings [Settings] corresponding to how the homepage should be displayed.
          */
         @Composable
         internal fun build(
             appState: AppState,
+            browsingModeManager: BrowsingModeManager,
             settings: Settings,
         ): HomepageState {
             return with(appState) {
@@ -97,6 +112,7 @@ internal sealed class HomepageState {
                             RecentSyncedTabState.None,
                             RecentSyncedTabState.Loading,
                             -> null
+
                             is RecentSyncedTabState.Success -> recentSyncedTabState.tabs.firstOrNull()
                         },
                         bookmarks = bookmarks,
@@ -104,12 +120,16 @@ internal sealed class HomepageState {
                         collectionsState = CollectionsState.build(
                             appState = appState,
                             browserState = components.core.store.state,
+                            browsingModeManager = browsingModeManager,
                         ),
+                        pocketState = PocketState.build(appState, settings),
                         showTopSites = settings.showTopSitesFeature && topSites.isNotEmpty(),
                         showRecentTabs = shouldShowRecentTabs(settings),
                         showBookmarks = settings.showBookmarksHomeFeature && bookmarks.isNotEmpty(),
                         showRecentSyncedTab = shouldShowRecentSyncedTabs(),
                         showRecentlyVisited = settings.historyMetadataUIFeature && recentHistory.isNotEmpty(),
+                        showPocketStories = settings.showPocketRecommendationsFeature &&
+                            recommendationState.pocketStories.isNotEmpty(),
                         topSiteColors = TopSiteColors.colors(wallpaperState = wallpaperState),
                         cardBackgroundColor = wallpaperState.cardBackgroundColor,
                         buttonBackgroundColor = wallpaperState.buttonBackgroundColor,

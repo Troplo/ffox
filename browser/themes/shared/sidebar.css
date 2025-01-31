@@ -3,9 +3,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #sidebar-box {
-  background-color: var(--sidebar-background-color);
-  color: var(--sidebar-text-color);
-  text-shadow: none;
   max-width: 75vw;
   min-width: 14em;
   width: 18em;
@@ -37,21 +34,18 @@
   }
 }
 
-/* Note that with sidebar.revamp we apply the --sidebar-background-color to the
- * #sidebar browser. We still need the #sidebar-box background to match the
- * toolbar tho */
-/* stylelint-disable-next-line media-query-no-invalid */
-@media (-moz-bool-pref: "sidebar.revamp") {
-  #sidebar-main,
-  #sidebar-box {
-    background-color: var(--toolbar-bgcolor);
-    color: var(--toolbar-color);
-    text-shadow: none;
+#sidebar-main,
+#sidebar-box {
+  text-shadow: none;
+  max-width: 75vw;
 
-    :root[lwtheme] & {
-      background-color: var(--lwt-accent-color);
-      background-image: linear-gradient(var(--toolbar-bgcolor), var(--toolbar-bgcolor));
-    }
+  /* stylelint-disable-next-line media-query-no-invalid */
+  @media not (-moz-bool-pref: "sidebar.revamp") {
+    background-color: var(--sidebar-background-color);
+    color: var(--sidebar-text-color);
+    /* Note that with sidebar.revamp we apply the --sidebar-background-color to the
+     * #sidebar browser. We still need the #sidebar-box background to match the
+     * toolbar tho - this background is set on the #browser ancestor rather than here */
   }
 }
 
@@ -109,12 +103,16 @@
 
   /* stylelint-disable-next-line media-query-no-invalid */
   @media (-moz-bool-pref: "sidebar.revamp") {
-    --splitter-width: 6px;
+    --splitter-width: 4px;
     transition: background-color 0.5s ease-in-out;
     border-style: none;
 
     &:hover {
       background-color: var(--focus-outline-color);
+    }
+
+    @media (-moz-overlay-scrollbars) {
+      --splitter-width: 2px;
     }
   }
 }

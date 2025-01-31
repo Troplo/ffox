@@ -10,14 +10,15 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "resource://messaging-system/lib/SpecialMessageActions.sys.mjs",
   ASRouter: "resource:///modules/asrouter/ASRouter.sys.mjs",
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.sys.mjs",
+  NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
 });
 
 export const BookmarksBarButton = {
   async showBookmarksBarButton(browser, message) {
     const { label, action, logo } = message.content;
     let { gBrowser } = browser.ownerGlobal;
-    const surfaceName = "fxms-bmb-button";
-    const widgetId = message.id;
+    const featureId = "fxms_bmb_button";
+    const widgetId = "fxms-bmb-button";
     const supportedActions = ["OPEN_URL", "SET_PREF", "MULTI_ACTION"];
 
     const fxmsBookmarksBarBtn = {
@@ -28,8 +29,19 @@ export const BookmarksBarButton = {
       defaultArea: lazy.CustomizableUI.AREA_BOOKMARKS,
       type: "button",
 
+      handleExperimentUpdate() {
+        const value = lazy.NimbusFeatures[featureId].getAllVariables() || {};
+
+        if (!Object.keys(value).length) {
+          lazy.CustomizableUI.removeWidgetFromArea(widgetId);
+        }
+      },
+
       onCreated(aNode) {
-        aNode.className = `bookmark-item chromeclass-toolbar-additional ${surfaceName}`;
+        // This surface is for first-run experiments only
+        // Once the button is removed by the user or experiment unenrollment, it cannot be added again
+        lazy.NimbusFeatures[featureId].onUpdate(this.handleExperimentUpdate);
+        aNode.className = `bookmark-item chromeclass-toolbar-additional`;
         if (logo?.imageURL) {
           aNode.style.listStyleImage = `url(${logo.imageURL})`;
         }

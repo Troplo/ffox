@@ -1223,16 +1223,13 @@ pub extern "C" fn Servo_ComputedValues_ShouldTransition(
     // For main thread animations, it's fine to use |old_value| because it represents the value in
     // before-change style [1] if not transitions and animations, or the current value [2] if it
     // has a running transition.
-    // If this property has a running transition on the compositor, |old_value| may be invalid, and
-    // we have to compute the current value here to make sure the check of
-    // `current_or_old_value == new_value` below makes sense.
     //
-    // Note: For compositor animaitons, in we may only compose the transition rule only once when
-    // creating the transition on the main thread. And then we throttle the animations, so the
-    // transition rules in |old| are out-of-date. This means |old_value| is not equal to current
-    // value. In some cases, it could be equal to the start value of the running transition. This
-    // situation prevent us from creating a reversing transition. Therefore, it's necessay to
-    // compute current value if needed, for compositor animations.
+    // If this property is replacing a running or pending transition, we might want to compute a
+    // more accurate current value, to make sure the check of `current_or_old_value == new_value`
+    // below makes sense. |old_value| might be stale, even being the initial value of the
+    // transition (if we've throttled the animation on the main thread, due to it being off-screen,
+    // or a compositor animation). This prevents us from creating a reversing transition
+    // incorrectly.
     //
     // [1] https://drafts.csswg.org/css-transitions-1/#before-change-style
     // [2] https://drafts.csswg.org/css-transitions-1/#current-value
@@ -1253,8 +1250,8 @@ pub extern "C" fn Servo_ComputedValues_ShouldTransition(
     //    transition-property value, and the end value is not equal to the value of the property
     //    in the after-change style. Also, if the **current value** of the property in the
     //    running transition is equal to the value of the property in the after-change style, or
-    //    if these two values are not transitionable. In this case, we don't create new
-    //    transition and we will cancel the running transition.
+    //    if these two values are not transitionable. In this case, we don't create new transition
+    //    and we will cancel the running transition.
     let current_or_old_value = current_value.unwrap_or(old_value);
     if current_or_old_value == new_value ||
         matches!(behavior, computed::TransitionBehavior::Normal if !current_or_old_value.interpolable_with(&new_value))
@@ -5400,7 +5397,7 @@ pub extern "C" fn Servo_DeclarationBlock_SetKeywordValue(
     use style::values::generics::font::FontStyle;
     use style::values::specified::{
         table::CaptionSide, BorderStyle, Clear, Display, Float, TextAlign, TextEmphasisPosition,
-        TextTransform, UserModify,
+        TextTransform,
     };
 
     fn get_from_computed<T>(value: u32) -> T
@@ -5415,7 +5412,6 @@ pub extern "C" fn Servo_DeclarationBlock_SetKeywordValue(
     let value = value as u32;
 
     let prop = match_wrap_declared! { long,
-        MozUserModify => UserModify::from_u32(value).unwrap(),
         Direction => get_from_computed::<longhands::direction::SpecifiedValue>(value),
         Display => get_from_computed::<Display>(value),
         Float => get_from_computed::<Float>(value),
@@ -6143,8 +6139,8 @@ pub extern "C" fn Servo_ResolveStyleLazily(
         get_functional_pseudo_parameter_atom(functional_pseudo_parameter),
     );
 
-    let matching_fn = |pseudo: &PseudoElement| match pseudo_element {
-        Some(ref p) => *pseudo == *p,
+    let matching_fn = |pseudo_selector: &PseudoElement| match pseudo_element {
+        Some(ref p) => p.matches(pseudo_selector),
         _ => false,
     };
 
@@ -6166,7 +6162,7 @@ pub extern "C" fn Servo_ResolveStyleLazily(
                     /* inherited_styles = */ None,
                     &stylist,
                     is_probe,
-                    if pseudo.is_highlight() {
+                    if pseudo.is_highlight() || pseudo.is_named_view_transition() {
                         Some(&matching_fn)
                     } else {
                         None
@@ -6348,7 +6344,7 @@ struct PropertyAndIndex {
 
 struct PrioritizedPropertyIter<'a> {
     properties: &'a [PropertyValuePair],
-    sorted_property_indices: Vec<PropertyAndIndex>,
+    sorted_property_indices: Box<[PropertyAndIndex]>,
     curr: usize,
 }
 
@@ -6359,7 +6355,7 @@ impl<'a> PrioritizedPropertyIter<'a> {
         // If we fail to convert a nsCSSPropertyID into a PropertyId we
         // shouldn't fail outright but instead by treating that property as the
         // 'all' property we make it sort last.
-        let mut sorted_property_indices: Vec<PropertyAndIndex> = properties
+        let mut sorted_property_indices: Box<[PropertyAndIndex]> = properties
             .iter()
             .enumerate()
             .map(|(index, pair)| {
@@ -7501,15 +7497,26 @@ pub extern "C" fn Servo_StyleSet_MaybeInvalidateRelativeSelectorEmptyDependency(
     );
 }
 
+/// Which edge side should the invalidation run for?
+#[repr(u8)]
+pub enum RelativeSelectorNthEdgeInvalidateFor {
+    First,
+    Last
+}
+
 #[no_mangle]
 pub extern "C" fn Servo_StyleSet_MaybeInvalidateRelativeSelectorNthEdgeDependency(
     raw_data: &PerDocumentStyleData,
     element: &RawGeckoElement,
+    invalidate_for: RelativeSelectorNthEdgeInvalidateFor,
 ) {
     invalidate_relative_selector_ts_dependency(
         &raw_data.borrow().stylist,
         GeckoElement(element),
-        TSStateForInvalidation::NTH_EDGE,
+        match invalidate_for {
+            RelativeSelectorNthEdgeInvalidateFor::First => TSStateForInvalidation::NTH_EDGE_FIRST,
+            RelativeSelectorNthEdgeInvalidateFor::Last => TSStateForInvalidation::NTH_EDGE_LAST,
+        },
     );
 }
 
@@ -7659,28 +7666,10 @@ pub extern "C" fn Servo_StyleSet_MaybeInvalidateRelativeSelectorForAppend(
     }
 }
 
-fn get_siblings_of_element<'e>(
-    element: GeckoElement<'e>,
-    following_node: &'e Option<GeckoNode<'e>>,
-) -> (Option<GeckoElement<'e>>, Option<GeckoElement<'e>>) {
-    let node = match following_node {
-        Some(n) => n,
-        None => {
-            return match element.as_node().parent_node() {
-                Some(p) => (p.last_child_element(), None),
-                None => (None, None),
-            }
-        },
-    };
-
-    (node.prev_sibling_element(), node.next_sibling_element())
-}
-
 #[no_mangle]
 pub extern "C" fn Servo_StyleSet_MaybeInvalidateRelativeSelectorForRemoval(
     raw_data: &PerDocumentStyleData,
     element: &RawGeckoElement,
-    following_node: Option<&RawGeckoNode>,
 ) {
     let element = GeckoElement(element);
 
@@ -7690,8 +7679,9 @@ pub extern "C" fn Servo_StyleSet_MaybeInvalidateRelativeSelectorForRemoval(
     if element.relative_selector_search_direction().is_empty() {
         return;
     }
-    let following_node = following_node.map(GeckoNode);
-    let (prev_sibling, next_sibling) = get_siblings_of_element(element, &following_node);
+    let node = element.as_node();
+    let (prev_sibling, next_sibling) =
+        (node.prev_sibling_element(), node.next_sibling_element());
 
     let inherited =
         inherit_relative_selector_search_direction(element.parent_element(), prev_sibling);
@@ -7704,16 +7694,25 @@ pub extern "C" fn Servo_StyleSet_MaybeInvalidateRelativeSelectorForRemoval(
     // Same comment as insertion applies.
     match (prev_sibling, next_sibling) {
         (Some(prev_sibling), Some(next_sibling)) => {
+            // Pretend the element isn't there.
             invalidate_relative_selector_prev_sibling_side_effect(
                 prev_sibling,
                 quirks_mode,
-                SiblingTraversalMap::default(),
+                SiblingTraversalMap::new(
+                    prev_sibling,
+                    prev_sibling.prev_sibling_element(),
+                    Some(next_sibling),
+                ),
                 &data.stylist,
             );
             invalidate_relative_selector_next_sibling_side_effect(
                 next_sibling,
                 quirks_mode,
-                SiblingTraversalMap::default(),
+                SiblingTraversalMap::new(
+                    next_sibling,
+                    Some(prev_sibling),
+                    next_sibling.next_sibling_element(),
+                ),
                 &data.stylist,
             );
         },
@@ -7723,7 +7722,7 @@ pub extern "C" fn Servo_StyleSet_MaybeInvalidateRelativeSelectorForRemoval(
         element,
         quirks_mode,
         snapshot_table: None,
-        sibling_traversal_map: SiblingTraversalMap::new(element, prev_sibling, next_sibling),
+        sibling_traversal_map: SiblingTraversalMap::default(),
         invalidated: relative_selector_invalidated_at,
         _marker: std::marker::PhantomData,
     };
@@ -9008,16 +9007,16 @@ pub unsafe extern "C" fn Servo_InvalidateForViewportUnits(
 #[no_mangle]
 pub extern "C" fn Servo_InterpolateColor(
     interpolation: ColorInterpolationMethod,
-    left: &AbsoluteColor,
-    right: &AbsoluteColor,
+    start_color: &AbsoluteColor,
+    end_color: &AbsoluteColor,
     progress: f32,
 ) -> AbsoluteColor {
     style::color::mix::mix(
         interpolation,
-        left,
-        progress,
-        right,
+        start_color,
         1.0 - progress,
+        end_color,
+        progress,
         ColorMixFlags::empty(),
     )
 }

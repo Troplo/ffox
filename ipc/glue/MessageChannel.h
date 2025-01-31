@@ -13,6 +13,7 @@
 #include "mozilla/BaseProfilerMarkers.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/Monitor.h"
+#include "mozilla/MoveOnlyFunction.h"
 #include "mozilla/Vector.h"
 #if defined(XP_WIN)
 #  include "mozilla/ipc/Neutering.h"
@@ -93,9 +94,9 @@ enum class ResponseRejectReason {
 };
 
 template <typename T>
-using ResolveCallback = std::function<void(T&&)>;
+using ResolveCallback = MoveOnlyFunction<void(T&&)>;
 
-using RejectCallback = std::function<void(ResponseRejectReason)>;
+using RejectCallback = MoveOnlyFunction<void(ResponseRejectReason)>;
 
 enum ChannelState {
   ChannelClosed,
@@ -316,8 +317,6 @@ class MessageChannel : HasResultCodes {
   void ReportConnectionError(const char* aFunctionName,
                              const uint32_t aMsgTyp) const
       MOZ_REQUIRES(*mMonitor);
-  void ReportMessageRouteError(const char* channelName) const
-      MOZ_EXCLUDES(*mMonitor);
   bool MaybeHandleError(Result code, const Message& aMsg,
                         const char* channelName) MOZ_EXCLUDES(*mMonitor);
 

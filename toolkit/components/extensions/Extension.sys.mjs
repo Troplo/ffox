@@ -54,6 +54,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "resource://gre/modules/ExtensionScriptingStore.sys.mjs",
   ExtensionStorage: "resource://gre/modules/ExtensionStorage.sys.mjs",
   ExtensionStorageIDB: "resource://gre/modules/ExtensionStorageIDB.sys.mjs",
+  ExtensionUserScripts: "resource://gre/modules/ExtensionUserScripts.sys.mjs",
   ExtensionTelemetry: "resource://gre/modules/ExtensionTelemetry.sys.mjs",
   LightweightThemeManager:
     "resource://gre/modules/LightweightThemeManager.sys.mjs",
@@ -109,6 +110,17 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "dnrEnabled",
   "extensions.dnr.enabled",
   true
+);
+
+// All functionality is gated by the "userScripts" permission, and forgetting
+// about its existence is enough to hide all userScripts functionality.
+// MV3 userScripts API in development (bug 1875475), off by default.
+// Not to be confused with MV2 and extensions.webextensions.userScripts.enabled!
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "userScriptsMV3Enabled",
+  "extensions.userScripts.mv3.enabled",
+  false
 );
 
 // This pref modifies behavior for MV2.  MV3 is enabled regardless.
@@ -247,6 +259,13 @@ if (
   }
 }
 
+// Permissions that are not available in manifest version 2.
+const PERMS_NOT_IN_MV2 = new Set([
+  // MV2 had a userScripts API, tied to "user_scripts" manifest key. In MV3 the
+  // userScripts API availability is gated by the "userScripts" permission.
+  "userScripts",
+]);
+
 // Message included in warnings and errors related to privileged permissions and
 // privileged manifest properties. Provides a link to the firefox-source-docs.mozilla.org
 // section related to developing and sign Privileged Add-ons.
@@ -364,6 +383,8 @@ function classifyPermission(perm, restrictSchemes, isPrivileged) {
   } else if (!isPrivileged && PRIVILEGED_PERMS.has(match[1])) {
     return { invalid: perm, privileged: true };
   } else if (perm.startsWith("declarativeNetRequest") && !lazy.dnrEnabled) {
+    return { invalid: perm };
+  } else if (perm === "userScripts" && !lazy.userScriptsMV3Enabled) {
     return { invalid: perm };
   }
   return { permission: perm };
@@ -591,6 +612,12 @@ var ExtensionAddonObserver = {
       lazy.ExtensionScriptingStore.clearOnUninstall(addonId)
     );
 
+    // Clear MV3 userScripts API data, if any.
+    addShutdownBlocker(
+      `Clear user scripts for ${addonId}`,
+      lazy.ExtensionUserScripts.clearOnUninstall(addonId)
+    );
+
     // Clear the DNR API's rules data persisted on disk (if any).
     addShutdownBlocker(
       `Clear declarativeNetRequest store for ${addonId}`,
@@ -670,7 +697,11 @@ var ExtensionAddonObserver = {
 
   onPropertyChanged(addon, properties) {
     let extension = GlobalManager.extensionMap.get(addon.id);
-    if (extension && properties.includes("quarantineIgnoredByUser")) {
+    if (!extension) {
+      return;
+    }
+
+    if (properties.includes("quarantineIgnoredByUser")) {
       extension.ignoreQuarantine = addon.quarantineIgnoredByUser;
       extension.policy.ignoreQuarantine = addon.quarantineIgnoredByUser;
 
@@ -682,6 +713,11 @@ var ExtensionAddonObserver = {
         id: extension.id,
         ignoreQuarantine: addon.quarantineIgnoredByUser,
       });
+    }
+
+    if (properties.includes("blocklistState")) {
+      extension.blocklistState = addon.blocklistState;
+      extension.emit("update-blocklist-state");
     }
   },
 };
@@ -1158,7 +1194,7 @@ export class ExtensionData {
     return {
       page,
       open_in_tab: this.manifest.options_ui
-        ? this.manifest.options_ui.open_in_tab ?? false
+        ? (this.manifest.options_ui.open_in_tab ?? false)
         : true,
       // `options_ui.browser_style` is assigned the proper default value
       // (true for MV2 and false for MV3 when not explicitly set),
@@ -1180,12 +1216,17 @@ export class ExtensionData {
     let permissions = new Set();
     let origins = new Set();
     let { restrictSchemes, isPrivileged } = this;
+    let isMV2 = this.manifestVersion === 2;
 
     for (let perm of permissionsArray.concat(hostPermissions)) {
       let type = classifyPermission(perm, restrictSchemes, isPrivileged);
       if (type.origin) {
         origins.add(perm);
       } else if (type.permission) {
+        if (isMV2 && PERMS_NOT_IN_MV2.has(perm)) {
+          // Skip, without warning (parseManifest warns if needed).
+          continue;
+        }
         permissions.add(perm);
       }
     }
@@ -1674,6 +1715,8 @@ export class ExtensionData {
 
     manifest = normalized.value;
 
+    const isMV2 = this.manifestVersion < 3;
+
     // `browser_specific_settings` is the recommended key to use in the
     // manifest, and the only possible choice in MV3+. For MV2 extensions, we
     // still allow `applications`, though. Because `applications` used to be
@@ -1839,11 +1882,40 @@ export class ExtensionData {
           }
           this.manifestWarning(`Invalid extension permission: ${perm}`);
           continue;
+        } else if (type.permission && isMV2 && PERMS_NOT_IN_MV2.has(perm)) {
+          this.manifestWarning(
+            `Permission "${perm}" requires Manifest Version 3.`
+          );
+          continue;
         }
 
         // Unfortunately, we treat <all_urls> as an API permission as well.
         if (!type.origin || (perm === "<all_urls>" && !result.originControls)) {
           permissions.add(perm);
+        }
+      }
+
+      const shouldIgnorePermission = (perm, verbose = true) => {
+        if (perm === "userScripts" && !lazy.userScriptsMV3Enabled) {
+          if (verbose) {
+            this.manifestWarning(`Unavailable extension permission: ${perm}`);
+          }
+          return true;
+        }
+        if (isMV2 && PERMS_NOT_IN_MV2.has(perm)) {
+          if (verbose) {
+            this.manifestWarning(
+              `Permission "${perm}" requires Manifest Version 3.`
+            );
+          }
+          return true;
+        }
+        return false;
+      };
+
+      for (let i = manifest.optional_permissions.length - 1; i >= 0; --i) {
+        if (shouldIgnorePermission(manifest.optional_permissions[i])) {
+          manifest.optional_permissions.splice(i, 1);
         }
       }
 
@@ -1853,8 +1925,12 @@ export class ExtensionData {
         originPermissions.add(matcher.pattern);
 
         // Apply optional permissions
+        // TODO bug 1766915: Validate that the permissions are available.
         let perms = await lazy.ExtensionPermissions.get(this.id);
         for (let perm of perms.permissions) {
+          if (shouldIgnorePermission(perm, /* verbose */ false)) {
+            continue;
+          }
           permissions.add(perm);
         }
         for (let origin of perms.origins) {
@@ -2976,6 +3052,7 @@ export class Extension extends ExtensionData {
 
     this.addonData = addonData;
     this.startupData = addonData.startupData || {};
+    this.blocklistState = addonData.blocklistState;
     this.startupReason = startupReason;
     this.updateReason = updateReason;
     this.temporarilyInstalled = !!addonData.temporarilyInstalled;
@@ -3134,6 +3211,10 @@ export class Extension extends ExtensionData {
       }
     }
     return undefined;
+  }
+
+  get isSoftBlocked() {
+    return this.blocklistState === Ci.nsIBlocklistService.STATE_SOFTBLOCKED;
   }
 
   on(hook, f) {
@@ -3406,6 +3487,18 @@ export class Extension extends ExtensionData {
     this.updateContentScripts();
   }
 
+  shouldSendSharedData() {
+    return (
+      // If not started or already shutdown, don't bother.
+      !!this.policy?.active &&
+      // If startup() has been called but we have not reached the end of
+      // runManifest() yet, then we have not notified the content process of
+      // via "Extension:Startup", and therefore do not need to notify of
+      // updated sharedData.
+      !pendingExtensions.has(this.id)
+    );
+  }
+
   updateContentScripts() {
     this.setSharedData("contentScripts", this.registeredContentScripts);
   }
@@ -3660,6 +3753,17 @@ export class Extension extends ExtensionData {
           this.state = "Startup: Scripting store initialized";
         } catch (err) {
           this.logError(`Failed to initialize scripting store: ${err}`);
+        }
+      }
+
+      if (this.hasPermission("userScripts")) {
+        this.state = "Startup: Initialize user scripts";
+        // TODO: Parallelize with ExtensionScriptingStore.initExtension?
+        try {
+          await lazy.ExtensionUserScripts.initExtension(this);
+          this.state = "Startup: User scripts initialized";
+        } catch (err) {
+          this.logError(`Failed to initialize user scripts: ${err}`);
         }
       }
 

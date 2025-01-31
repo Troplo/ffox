@@ -468,10 +468,25 @@ nsCSPContext::AppendPolicy(const nsAString& aPolicyString, bool aReportOnly,
            "self-uri=%s referrer=%s",
            selfURIspec.get(), mReferrer.get()));
     }
+    if (policy->hasDirective(
+            nsIContentSecurityPolicy::REQUIRE_TRUSTED_TYPES_FOR_DIRECTIVE)) {
+      mHasPolicyWithRequireTrustedTypesForDirective = true;
+      if (nsCOMPtr<Document> doc = do_QueryReferent(mLoadingContext)) {
+        doc->SetHasPolicyWithRequireTrustedTypesForDirective(true);
+      }
+    }
 
     mPolicies.AppendElement(policy);
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsCSPContext::GetHasPolicyWithRequireTrustedTypesForDirective(
+    bool* aHasPolicyWithRequireTrustedTypesForDirective) {
+  *aHasPolicyWithRequireTrustedTypesForDirective =
+      mHasPolicyWithRequireTrustedTypesForDirective;
   return NS_OK;
 }
 
@@ -1328,6 +1343,7 @@ nsresult nsCSPContext::SendReportsToURIs(
     rv = reportChannel->GetLoadFlags(&flags);
     NS_ENSURE_SUCCESS(rv, rv);
     flags |= nsIRequest::LOAD_ANONYMOUS;
+    flags |= nsIChannel::LOAD_BYPASS_SERVICE_WORKER;
     rv = reportChannel->SetLoadFlags(flags);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1353,8 +1369,7 @@ nsresult nsCSPContext::SendReportsToURIs(
     NS_ASSERTION(sis,
                  "nsIStringInputStream is needed but not available to send CSP "
                  "violation reports");
-    nsAutoCString utf8CSPReport = NS_ConvertUTF16toUTF8(csp_report);
-    rv = sis->SetData(utf8CSPReport.get(), utf8CSPReport.Length());
+    rv = sis->SetUTF8Data(NS_ConvertUTF16toUTF8(csp_report));
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsCOMPtr<nsIUploadChannel> uploadChannel(do_QueryInterface(reportChannel));

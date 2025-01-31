@@ -7,10 +7,17 @@
 
 var gProfiles = {
   async init() {
-    this.handleEvent.bind(this);
-    this.launchProfile.bind(this);
-    this.toggleProfileButtonVisibility.bind(this);
-    this.updateView.bind(this);
+    this.createNewProfile = this.createNewProfile.bind(this);
+    this.handleCommand = this.handleCommand.bind(this);
+    this.launchProfile = this.launchProfile.bind(this);
+    this.manageProfiles = this.manageProfiles.bind(this);
+    this.onAppMenuViewHiding = this.onAppMenuViewHiding.bind(this);
+    this.onAppMenuViewShowing = this.onAppMenuViewShowing.bind(this);
+    this.onFxAMenuViewShowing = this.onFxAMenuViewShowing.bind(this);
+    this.onFxAMenuViewHiding = this.onFxAMenuViewHiding.bind(this);
+    this.onPopupShowing = this.onPopupShowing.bind(this);
+    this.toggleProfileMenus = this.toggleProfileMenus.bind(this);
+    this.updateView = this.updateView.bind(this);
 
     this.bundle = Services.strings.createBundle(
       "chrome://browser/locale/browser.properties"
@@ -21,34 +28,93 @@ var gProfiles = {
       "PROFILES_ENABLED",
       "browser.profiles.enabled",
       false,
-      this.toggleProfileButtonVisibility.bind(this)
+      this.toggleProfileMenus,
+      () => SelectableProfileService?.isEnabled
     );
 
-    if (!this.PROFILES_ENABLED) {
-      return;
-    }
-
-    await this.toggleProfileButtonVisibility();
+    this.toggleProfileMenus();
   },
 
-  async toggleProfileButtonVisibility() {
-    let profilesButton = PanelMultiView.getViewNode(
+  toggleProfileMenus() {
+    let profilesMenu = document.getElementById("profiles-menu");
+    profilesMenu.hidden = !this.PROFILES_ENABLED;
+
+    this.emptyProfilesButton = PanelMultiView.getViewNode(
+      document,
+      "appMenu-empty-profiles-button"
+    );
+    this.profilesButton = PanelMultiView.getViewNode(
       document,
       "appMenu-profiles-button"
     );
-    let subview = PanelMultiView.getViewNode(document, "PanelUI-profiles");
+    this.fxaMenuEmptyProfilesButton = PanelMultiView.getViewNode(
+      document,
+      "PanelUI-fxa-menu-empty-profiles-button"
+    );
+    this.fxaMenuProfilesButton = PanelMultiView.getViewNode(
+      document,
+      "PanelUI-fxa-menu-profiles-button"
+    );
+    this.subview = PanelMultiView.getViewNode(document, "PanelUI-profiles");
 
-    profilesButton.hidden = !this.PROFILES_ENABLED;
+    this.toggleAppMenuButton();
+    this.toggleFxAMenuButton();
+  },
 
+  toggleAppMenuButton() {
     if (!this.PROFILES_ENABLED) {
-      document.l10n.setAttributes(profilesButton, "appmenu-profiles");
-      profilesButton.classList.remove("subviewbutton-iconic");
-      profilesButton.removeEventListener("command", this);
-      subview.removeEventListener("command", this);
+      PanelUI.mainView.removeEventListener(
+        "ViewShowing",
+        this.onAppMenuViewShowing
+      );
+      PanelUI.mainView.removeEventListener(
+        "ViewHiding",
+        this.onAppMenuViewHiding
+      );
+    } else {
+      PanelUI.mainView.addEventListener(
+        "ViewShowing",
+        this.onAppMenuViewShowing
+      );
+      PanelUI.mainView.addEventListener("ViewHiding", this.onAppMenuViewHiding);
+    }
+  },
+
+  toggleFxAMenuButton() {
+    let fxaPanelView = PanelMultiView.getViewNode(document, "PanelUI-fxa");
+    if (!this.PROFILES_ENABLED) {
+      fxaPanelView.removeEventListener(
+        "ViewShowing",
+        this.onFxAMenuViewShowing
+      );
+      fxaPanelView.removeEventListener("ViewHiding", this.onFxAMenuViewHiding);
+      fxaPanelView.removeEventListener("command", this.handleCommand);
+    } else {
+      fxaPanelView.addEventListener("ViewShowing", this.onFxAMenuViewShowing);
+      fxaPanelView.addEventListener("ViewHiding", this.onFxAMenuViewHiding);
+      fxaPanelView.addEventListener("command", this.handleCommand);
+    }
+  },
+
+  onAppMenuViewShowing() {
+    this._onPanelShowing(this.profilesButton, this.emptyProfilesButton);
+  },
+
+  onFxAMenuViewShowing() {
+    this._onPanelShowing(
+      this.fxaMenuProfilesButton,
+      this.fxaMenuEmptyProfilesButton
+    );
+  },
+
+  async _onPanelShowing(profilesButton, emptyProfilesButton) {
+    if (!this.PROFILES_ENABLED) {
+      profilesButton.hidden = true;
+      emptyProfilesButton.hidden = true;
       return;
     }
-    profilesButton.addEventListener("command", this);
-    subview.addEventListener("command", this);
+    profilesButton.addEventListener("command", this.handleCommand);
+    this.subview.addEventListener("command", this.handleCommand);
 
     // If the feature is preffed on, but we haven't created profiles yet, the
     // service will not be initialized.
@@ -56,15 +122,17 @@ var gProfiles = {
       ? await SelectableProfileService.getAllProfiles()
       : [];
     if (profiles.length < 2) {
-      profilesButton.classList.remove("subviewbutton-iconic");
-      document.l10n.setAttributes(profilesButton, "appmenu-profiles");
+      profilesButton.hidden = true;
+      emptyProfilesButton.hidden = false;
+      emptyProfilesButton.addEventListener("command", this.handleCommand);
       return;
     }
-
+    emptyProfilesButton.hidden = true;
+    profilesButton.hidden = false;
+    profilesButton.addEventListener("command", this.handleCommand);
     let { themeBg, themeFg } = SelectableProfileService.currentProfile.theme;
-    profilesButton.style.cssText = `--themeBg: ${themeBg}; --themeFg: ${themeFg};`;
-
-    profilesButton.classList.add("subviewbutton-iconic");
+    profilesButton.style.setProperty("--appmenu-profiles-theme-bg", themeBg);
+    profilesButton.style.setProperty("--appmenu-profiles-theme-fg", themeFg);
     profilesButton.setAttribute(
       "label",
       SelectableProfileService.currentProfile.name
@@ -76,13 +144,114 @@ var gProfiles = {
     );
   },
 
-  updateView(panel) {
-    this.populateSubView();
-    PanelUI.showSubView("PanelUI-profiles", panel);
+  onAppMenuViewHiding() {
+    this.profilesButton.removeEventListener("command", this.handleCommand);
+    this.emptyProfilesButton.removeEventListener("command", this.handleCommand);
+
+    // If the user closes the app menu by opening the FxA menu, the FxA showing
+    // handler will run before this code runs. To avoid disconnecting the
+    // subview handlers in the FxA panel, bail out if the FxA panel is visible.
+    if (document.getElementById("PanelUI-fxa")?.getAttribute("visible")) {
+      return;
+    }
+    this.subview.removeEventListener("command", this.handleCommand);
   },
 
-  // Note: Not async because the browser-sets.js handler is not async.
-  // This will be an issue when we add menubar menuitems.
+  onFxAMenuViewHiding() {
+    this.fxaMenuProfilesButton.removeEventListener(
+      "command",
+      this.handleCommand
+    );
+    this.fxaMenuEmptyProfilesButton.removeEventListener(
+      "command",
+      this.handleCommand
+    );
+
+    // If the app menu is already open, don't disconnect the subview listeners.
+    // (See related comment inside `onAppMenuViewHiding`.)
+    if (PanelUI.mainView.getAttribute("visible")) {
+      return;
+    }
+    this.subview.removeEventListener("command", this.handleCommand);
+  },
+
+  /**
+   * Draws the menubar panel contents.
+   */
+  async onPopupShowing() {
+    let menuPopup = document.getElementById("menu_ProfilesPopup");
+    while (menuPopup.hasChildNodes()) {
+      menuPopup.firstChild.remove();
+    }
+
+    let profiles = await SelectableProfileService.getAllProfiles();
+    let currentProfile = SelectableProfileService.currentProfile;
+
+    for (let profile of profiles) {
+      let menuitem = document.createXULElement("menuitem");
+      let { themeBg, themeFg } = profile.theme;
+      menuitem.setAttribute("profileid", profile.id);
+      menuitem.setAttribute("command", "Profiles:LaunchProfile");
+      menuitem.setAttribute("label", profile.name);
+      menuitem.style.setProperty("--menu-profiles-theme-bg", themeBg);
+      menuitem.style.setProperty("--menu-profiles-theme-fg", themeFg);
+      menuitem.style.listStyleImage = `url(chrome://browser/content/profiles/assets/48_${profile.avatar}.svg)`;
+      menuitem.classList.add("menuitem-iconic", "menuitem-iconic-profile");
+
+      if (profile.id === currentProfile.id) {
+        menuitem.classList.add("current");
+        menuitem.setAttribute("type", "checkbox");
+        menuitem.setAttribute("checked", "true");
+      }
+
+      menuPopup.appendChild(menuitem);
+    }
+
+    let newProfile = document.createXULElement("menuitem");
+    newProfile.id = "menu_newProfile";
+    newProfile.setAttribute("command", "Profiles:CreateProfile");
+    newProfile.setAttribute("data-l10n-id", "menu-profiles-new-profile");
+    menuPopup.appendChild(newProfile);
+
+    let separator = document.createXULElement("menuseparator");
+    separator.id = "profilesSeparator";
+    menuPopup.appendChild(separator);
+
+    let manageProfiles = document.createXULElement("menuitem");
+    manageProfiles.id = "menu_manageProfiles";
+    manageProfiles.setAttribute("command", "Profiles:ManageProfiles");
+    manageProfiles.setAttribute(
+      "data-l10n-id",
+      "menu-profiles-manage-profiles"
+    );
+    menuPopup.appendChild(manageProfiles);
+  },
+
+  manageProfiles() {
+    return SelectableProfileService.maybeSetupDataStore().then(() => {
+      toOpenWindowByType(
+        "about:profilemanager",
+        "about:profilemanager",
+        "chrome,extrachrome,menubar,resizable,scrollbars,status,toolbar,centerscreen"
+      );
+    });
+  },
+
+  createNewProfile() {
+    SelectableProfileService.createNewProfile();
+  },
+
+  async updateView(target) {
+    await this.populateSubView();
+    PanelUI.showSubView("PanelUI-profiles", target);
+  },
+
+  async updateFxAView() {
+    await this.populateSubView();
+    let fxaAnchor = document.getElementById("customizationui-widget-multiview");
+    PanelUI.showSubView("PanelUI-profiles", fxaAnchor);
+  },
+
   launchProfile(aEvent) {
     SelectableProfileService.getProfile(
       aEvent.target.getAttribute("profileid")
@@ -91,32 +260,66 @@ var gProfiles = {
     });
   },
 
-  async handleEvent(aEvent) {
-    let id = aEvent.target.id;
-    switch (aEvent.type) {
-      case "command": {
-        if (id == "appMenu-profiles-button") {
-          this.updateView(aEvent.target);
-        } else if (id == "profiles-appmenu-back-button") {
-          aEvent.target.closest("panelview").panelMultiView.goBack();
-          aEvent.target.blur();
-        } else if (id == "profiles-edit-this-profile-button") {
-          openTrustedLinkIn("about:editprofile", "tab");
-        } else if (id == "profiles-manage-profiles-button") {
-          // TODO: (Bug 1924827) Open in a dialog, not a tab.
-          openTrustedLinkIn("about:profilemanager", "tab");
-        } else if (id == "profiles-create-profile-button") {
-          SelectableProfileService.createNewProfile();
-        } else if (aEvent.target.classList.contains("profile-item")) {
-          // moved to a helper to expose to the menubar commands
-          this.launchProfile(aEvent);
-        }
+  async handleCommand(aEvent) {
+    switch (aEvent.target.id) {
+      /* App menu button events */
+      case "appMenu-profiles-button":
+      // deliberate fallthrough
+      case "appMenu-empty-profiles-button": {
+        this.updateView(aEvent.target);
+        break;
+      }
+      /* FxA menu button events */
+      case "PanelUI-fxa-menu-empty-profiles-button":
+      // deliberate fallthrough
+      case "PanelUI-fxa-menu-profiles-button": {
+        aEvent.stopPropagation();
+        this.updateFxAView();
+        break;
+      }
+      /* Subpanel events that may be triggered in FxA menu or app menu */
+      case "profiles-appmenu-back-button": {
+        aEvent.target.closest("panelview").panelMultiView.goBack();
+        aEvent.target.blur();
+        break;
+      }
+      case "profiles-edit-this-profile-button": {
+        openTrustedLinkIn("about:editprofile", "tab");
+        break;
+      }
+      case "profiles-manage-profiles-button": {
+        this.manageProfiles();
+        break;
+      }
+      case "profiles-create-profile-button": {
+        this.createNewProfile();
+        break;
+      }
 
+      /* Menubar events */
+      case "Profiles:CreateProfile": {
+        this.createNewProfile();
+        break;
+      }
+      case "Profiles:ManageProfiles": {
+        this.manageProfiles();
+        break;
+      }
+      case "Profiles:LaunchProfile": {
+        this.launchProfile(aEvent.sourceEvent);
         break;
       }
     }
+    /* Subpanel profile events that may be triggered in FxA menu or app menu */
+    if (aEvent.target.classList.contains("profile-item")) {
+      this.launchProfile(aEvent);
+    }
   },
 
+  /**
+   * Inserts the subpanel contents for the PanelUI subpanel, which may be shown
+   * either in the app menu or the FxA toolbar button menu.
+   */
   async populateSubView() {
     let profiles = [];
     let currentProfile = null;
@@ -155,14 +358,15 @@ var gProfiles = {
       profilesHeader.removeAttribute("style");
       editButton.hidden = true;
     } else {
-      profilesHeader.style.backgroundColor = "var(--themeBg)";
+      profilesHeader.style.backgroundColor = "var(--appmenu-profiles-theme-bg)";
       editButton.hidden = false;
     }
 
     if (currentProfile && profiles.length > 1) {
       let subview = PanelMultiView.getViewNode(document, "PanelUI-profiles");
       let { themeBg, themeFg } = currentProfile.theme;
-      subview.style.cssText = `--themeBg: ${themeBg}; --themeFg: ${themeFg};`;
+      subview.style.setProperty("--appmenu-profiles-theme-bg", themeBg);
+      subview.style.setProperty("--appmenu-profiles-theme-fg", themeFg);
 
       let headerText = PanelMultiView.getViewNode(
         document,
@@ -174,7 +378,14 @@ var gProfiles = {
         document,
         "profile-icon-image"
       );
-      currentProfileCard.style.cssText = `--themeFg: ${themeFg}; --themeBg: ${themeBg};`;
+      currentProfileCard.style.setProperty(
+        "--appmenu-profiles-theme-bg",
+        themeBg
+      );
+      currentProfileCard.style.setProperty(
+        "--appmenu-profiles-theme-fg",
+        themeFg
+      );
 
       let avatar = currentProfile.avatar;
       profileIconEl.style.listStyleImage = `url("chrome://browser/content/profiles/assets/80_${avatar}.svg")`;
@@ -197,7 +408,8 @@ var gProfiles = {
       button.setAttribute("label", profile.name);
       button.className = "subviewbutton subviewbutton-iconic profile-item";
       let { themeFg, themeBg } = profile.theme;
-      button.style.cssText = `--themeBg: ${themeBg}; --themeFg: ${themeFg};`;
+      button.style.setProperty("--appmenu-profiles-theme-bg", themeBg);
+      button.style.setProperty("--appmenu-profiles-theme-fg", themeFg);
       button.setAttribute(
         "image",
         `chrome://browser/content/profiles/assets/16_${profile.avatar}.svg`

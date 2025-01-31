@@ -2507,6 +2507,52 @@ bool WarpCacheIRTranspiler::emitLoadStringCodePointResult(
   return true;
 }
 
+bool WarpCacheIRTranspiler::emitNewMapObjectResult(
+    uint32_t templateObjectOffset) {
+  JSObject* templateObj = tenuredObjectStubField(templateObjectOffset);
+
+  auto* obj = MNewMapObject::New(alloc(), templateObj);
+  addEffectful(obj);
+
+  pushResult(obj);
+  return resumeAfter(obj);
+}
+
+bool WarpCacheIRTranspiler::emitNewSetObjectResult(
+    uint32_t templateObjectOffset) {
+  JSObject* templateObj = tenuredObjectStubField(templateObjectOffset);
+
+  auto* obj = MNewSetObject::New(alloc(), templateObj);
+  addEffectful(obj);
+
+  pushResult(obj);
+  return resumeAfter(obj);
+}
+
+bool WarpCacheIRTranspiler::emitNewMapObjectFromIterableResult(
+    uint32_t templateObjectOffset, ValOperandId iterableId) {
+  JSObject* templateObj = tenuredObjectStubField(templateObjectOffset);
+  MDefinition* iterable = getOperand(iterableId);
+
+  auto* obj = MNewMapObjectFromIterable::New(alloc(), iterable, templateObj);
+  addEffectful(obj);
+
+  pushResult(obj);
+  return resumeAfter(obj);
+}
+
+bool WarpCacheIRTranspiler::emitNewSetObjectFromIterableResult(
+    uint32_t templateObjectOffset, ValOperandId iterableId) {
+  JSObject* templateObj = tenuredObjectStubField(templateObjectOffset);
+  MDefinition* iterable = getOperand(iterableId);
+
+  auto* obj = MNewSetObjectFromIterable::New(alloc(), iterable, templateObj);
+  addEffectful(obj);
+
+  pushResult(obj);
+  return resumeAfter(obj);
+}
+
 bool WarpCacheIRTranspiler::emitNewStringObjectResult(
     uint32_t templateObjectOffset, StringOperandId strId) {
   JSObject* templateObj = tenuredObjectStubField(templateObjectOffset);
@@ -3487,8 +3533,9 @@ bool WarpCacheIRTranspiler::emitBigIntPtrNot(IntPtrOperandId inputId,
   return defineOperand(resultId, ins);
 }
 
-bool WarpCacheIRTranspiler::emitCallStringConcatResult(StringOperandId lhsId,
-                                                       StringOperandId rhsId) {
+bool WarpCacheIRTranspiler::emitConcatStringsResult(StringOperandId lhsId,
+                                                    StringOperandId rhsId,
+                                                    uint32_t stubOffset) {
   MDefinition* lhs = getOperand(lhsId);
   MDefinition* rhs = getOperand(rhsId);
 
@@ -5111,6 +5158,14 @@ bool WarpCacheIRTranspiler::emitAtomicsIsLockFreeResult(
   return true;
 }
 
+bool WarpCacheIRTranspiler::emitAtomicsPauseResult() {
+  auto* ins = MAtomicPause::New(alloc());
+  add(ins);
+
+  pushResult(constant(UndefinedValue()));
+  return true;
+}
+
 bool WarpCacheIRTranspiler::emitBigIntAsIntNResult(Int32OperandId bitsId,
                                                    BigIntOperandId bigIntId) {
   MDefinition* bits = getOperand(bitsId);
@@ -5250,6 +5305,30 @@ bool WarpCacheIRTranspiler::emitSetHasResult(ObjOperandId setId,
 
   pushResult(ins);
   return true;
+}
+
+bool WarpCacheIRTranspiler::emitSetDeleteResult(ObjOperandId setId,
+                                                ValOperandId keyId) {
+  MDefinition* set = getOperand(setId);
+  MDefinition* key = getOperand(keyId);
+
+  auto* ins = MSetObjectDelete::New(alloc(), set, key);
+  addEffectful(ins);
+
+  pushResult(ins);
+  return resumeAfter(ins);
+}
+
+bool WarpCacheIRTranspiler::emitSetAddResult(ObjOperandId setId,
+                                             ValOperandId keyId) {
+  MDefinition* set = getOperand(setId);
+  MDefinition* key = getOperand(keyId);
+
+  auto* ins = MSetObjectAdd::New(alloc(), set, key);
+  addEffectful(ins);
+
+  pushResult(set);
+  return resumeAfter(ins);
 }
 
 bool WarpCacheIRTranspiler::emitSetSizeResult(ObjOperandId setId) {
@@ -5468,6 +5547,32 @@ bool WarpCacheIRTranspiler::emitMapGetResult(ObjOperandId mapId,
 
   pushResult(ins);
   return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapDeleteResult(ObjOperandId mapId,
+                                                ValOperandId keyId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* key = getOperand(keyId);
+
+  auto* ins = MMapObjectDelete::New(alloc(), map, key);
+  addEffectful(ins);
+
+  pushResult(ins);
+  return resumeAfter(ins);
+}
+
+bool WarpCacheIRTranspiler::emitMapSetResult(ObjOperandId mapId,
+                                             ValOperandId keyId,
+                                             ValOperandId valId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* key = getOperand(keyId);
+  MDefinition* val = getOperand(valId);
+
+  auto* ins = MMapObjectSet::New(alloc(), map, key, val);
+  addEffectful(ins);
+
+  pushResult(map);
+  return resumeAfter(ins);
 }
 
 bool WarpCacheIRTranspiler::emitMapSizeResult(ObjOperandId mapId) {

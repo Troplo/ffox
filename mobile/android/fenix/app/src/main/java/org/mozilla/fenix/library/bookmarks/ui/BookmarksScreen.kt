@@ -33,11 +33,6 @@ import androidx.compose.material.ButtonDefaults
 import androidx.compose.material.Icon
 import androidx.compose.material.IconButton
 import androidx.compose.material.Scaffold
-import androidx.compose.material.Snackbar
-import androidx.compose.material.SnackbarDuration
-import androidx.compose.material.SnackbarHost
-import androidx.compose.material.SnackbarHostState
-import androidx.compose.material.SnackbarResult
 import androidx.compose.material.Text
 import androidx.compose.material.TextButton
 import androidx.compose.material.TopAppBar
@@ -50,10 +45,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -63,6 +62,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.launch
 import mozilla.appservices.places.BookmarkRoot
+import mozilla.components.compose.base.annotation.FlexibleWindowLightDarkPreview
 import mozilla.components.lib.state.ext.observeAsState
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.ContextualMenu
@@ -70,11 +70,17 @@ import org.mozilla.fenix.compose.Favicon
 import org.mozilla.fenix.compose.MenuItem
 import org.mozilla.fenix.compose.TextField
 import org.mozilla.fenix.compose.TextFieldColors
-import org.mozilla.fenix.compose.annotation.FlexibleWindowLightDarkPreview
 import org.mozilla.fenix.compose.button.FloatingActionButton
+import org.mozilla.fenix.compose.core.Action
 import org.mozilla.fenix.compose.list.IconListItem
 import org.mozilla.fenix.compose.list.SelectableFaviconListItem
 import org.mozilla.fenix.compose.list.SelectableIconListItem
+import org.mozilla.fenix.compose.snackbar.AcornSnackbarHostState
+import org.mozilla.fenix.compose.snackbar.SnackbarHost
+import org.mozilla.fenix.compose.snackbar.SnackbarState
+import org.mozilla.fenix.library.bookmarks.BookmarksTestTag.addBookmarkFolderNameTextField
+import org.mozilla.fenix.library.bookmarks.BookmarksTestTag.editBookmarkedItemTileTextField
+import org.mozilla.fenix.library.bookmarks.BookmarksTestTag.editBookmarkedItemURLTextField
 import org.mozilla.fenix.theme.FirefoxTheme
 import mozilla.components.ui.icons.R as iconsR
 
@@ -143,7 +149,7 @@ private fun BookmarksList(
 ) {
     val state by store.observeAsState(store.state) { it }
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val snackbarHostState = remember { AcornSnackbarHostState() }
 
     val snackbarMessage = when (state.bookmarksSnackbarState) {
         BookmarksSnackbarState.CantEditDesktopFolders -> stringResource(R.string.bookmark_cannot_edit_root)
@@ -158,33 +164,38 @@ private fun BookmarksList(
         is BookmarksSnackbarState.UndoDeletion -> stringResource(R.string.bookmark_undo_deletion)
         else -> null
     }
+    val action: Action? = snackbarActionLabel?.let {
+        Action(
+            label = snackbarActionLabel,
+            onClick = {
+                store.dispatch(SnackbarAction.Undo)
+            },
+        )
+    }
 
     LaunchedEffect(state.bookmarksSnackbarState) {
         when (state.bookmarksSnackbarState) {
             BookmarksSnackbarState.None -> return@LaunchedEffect
             is BookmarksSnackbarState.UndoDeletion -> scope.launch {
-                val result = snackbarHostState.showSnackbar(
-                    message = snackbarMessage,
-                    actionLabel = snackbarActionLabel,
-                    duration = SnackbarDuration.Short,
+                snackbarHostState.showSnackbar(
+                    snackbarState = SnackbarState(
+                        message = snackbarMessage,
+                        action = action,
+                        onDismiss = {
+                            store.dispatch(SnackbarAction.Dismissed)
+                        },
+                    ),
                 )
-
-                when (result) {
-                    SnackbarResult.ActionPerformed -> store.dispatch(SnackbarAction.Undo)
-                    SnackbarResult.Dismissed -> store.dispatch(SnackbarAction.Dismissed)
-                    else -> {}
-                }
             }
             BookmarksSnackbarState.CantEditDesktopFolders -> scope.launch {
-                val result = snackbarHostState.showSnackbar(
-                    message = snackbarMessage,
-                    duration = SnackbarDuration.Short,
+                snackbarHostState.showSnackbar(
+                    snackbarState = SnackbarState(
+                        message = snackbarMessage,
+                        onDismiss = {
+                            store.dispatch(SnackbarAction.Dismissed)
+                        },
+                    ),
                 )
-
-                when (result) {
-                    SnackbarResult.Dismissed -> store.dispatch(SnackbarAction.Dismissed)
-                    else -> {}
-                }
             }
         }
     }
@@ -201,13 +212,10 @@ private fun BookmarksList(
 
     Scaffold(
         snackbarHost = {
-            SnackbarHost(hostState = snackbarHostState) { data ->
-                Snackbar(
-                    snackbarData = data,
-                    shape = RoundedCornerShape(4.dp),
-                    backgroundColor = FirefoxTheme.colors.actionPrimary,
-                    contentColor = FirefoxTheme.colors.textOnColorPrimary,
-                    actionColor = FirefoxTheme.colors.textOnColorPrimary,
+            Box(modifier = Modifier.fillMaxWidth()) {
+                SnackbarHost(
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    snackbarHostState = snackbarHostState,
                 )
             }
         },
@@ -414,7 +422,7 @@ private fun BookmarksListTopBar(
                     selectedItems.any { it is BookmarkItem.Folder } -> {
                         IconButton(onClick = { store.dispatch(BookmarksListMenuAction.MultiSelect.MoveClicked) }) {
                             Icon(
-                                painter = painterResource(R.drawable.mozac_ic_move_24),
+                                painter = painterResource(R.drawable.mozac_ic_folder_arrow_right_24),
                                 contentDescription = stringResource(R.string.bookmark_menu_move_button),
                                 tint = iconColor,
                             )
@@ -442,7 +450,7 @@ private fun BookmarksListTopBar(
                         }
                         IconButton(onClick = { store.dispatch(BookmarksListMenuAction.MultiSelect.MoveClicked) }) {
                             Icon(
-                                painter = painterResource(R.drawable.mozac_ic_move_24),
+                                painter = painterResource(R.drawable.mozac_ic_folder_arrow_right_24),
                                 contentDescription = stringResource(R.string.bookmark_menu_move_button),
                                 tint = iconColor,
                             )
@@ -749,6 +757,7 @@ private fun EmptyList(
 }
 
 @Composable
+@Suppress("Deprecation") // https://bugzilla.mozilla.org/show_bug.cgi?id=1927718
 private fun BookmarkListOverflowMenu(
     showMenu: Boolean,
     onDismissRequest: () -> Unit,
@@ -781,6 +790,7 @@ private fun BookmarkListOverflowMenu(
 }
 
 @Composable
+@Suppress("Deprecation") // https://bugzilla.mozilla.org/show_bug.cgi?id=1927718
 private fun BookmarkListItemMenu(
     showMenu: Boolean,
     onDismissRequest: () -> Unit,
@@ -822,6 +832,7 @@ private fun BookmarkListItemMenu(
 }
 
 @Composable
+@Suppress("Deprecation") // https://bugzilla.mozilla.org/show_bug.cgi?id=1927718
 private fun BookmarkListFolderMenu(
     showMenu: Boolean,
     onDismissRequest: () -> Unit,
@@ -945,6 +956,7 @@ private fun EditFolderTopBar(
     )
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun AddFolderScreen(
     store: BookmarksStore,
@@ -960,11 +972,17 @@ private fun AddFolderScreen(
                 onValueChange = { newText -> store.dispatch(AddFolderAction.TitleChanged(newText)) },
                 placeholder = "",
                 errorText = "",
-                modifier = Modifier.padding(
-                    start = 16.dp,
-                    end = 16.dp,
-                    top = 32.dp,
-                ),
+                modifier =
+                Modifier
+                    .padding(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 32.dp,
+                    )
+                    .semantics {
+                        testTagsAsResourceId = true
+                        testTag = addBookmarkFolderNameTextField
+                    },
                 label = stringResource(R.string.bookmark_name_label_normal_case),
             )
 
@@ -1046,6 +1064,7 @@ private fun EditBookmarkScreen(
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun BookmarkEditor(
     bookmarkItem: BookmarkItem.Bookmark,
@@ -1058,11 +1077,21 @@ private fun BookmarkEditor(
     ) {
         Favicon(url = bookmarkItem.previewImageUrl, size = 64.dp)
 
-        Column {
+        Column(
+            Modifier
+                .semantics {
+                    testTagsAsResourceId = true
+                },
+        ) {
             ClearableTextField(
                 value = bookmarkItem.title,
                 onValueChange = onTitleChanged,
                 placeholder = stringResource(R.string.bookmark_name_label_normal_case),
+                modifier =
+                Modifier
+                    .semantics {
+                        testTag = editBookmarkedItemTileTextField
+                    },
             )
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -1071,6 +1100,11 @@ private fun BookmarkEditor(
                 value = bookmarkItem.url,
                 onValueChange = onURLChanged,
                 placeholder = stringResource(R.string.bookmark_url_label),
+                modifier =
+                Modifier
+                    .semantics {
+                        testTag = editBookmarkedItemURLTextField
+                    },
             )
         }
     }

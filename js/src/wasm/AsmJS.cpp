@@ -2082,6 +2082,10 @@ class MOZ_STACK_CLASS ModuleValidator : public ModuleValidatorShared {
   }
   bool declareImport(TaggedParserAtomIndex name, FuncType&& sig,
                      unsigned ffiIndex, uint32_t* importIndex) {
+    if (sig.args().length() > MaxParams) {
+      return failCurrentOffset("too many parameters");
+    }
+
     FuncImportMap::AddPtr p =
         funcImportMap_.lookupForAdd(NamedSig::Lookup(name, sig));
     if (p) {
@@ -2123,7 +2127,7 @@ class MOZ_STACK_CLASS ModuleValidator : public ModuleValidatorShared {
                                                            : Shareable::False;
       limits.initial = memory_.minPages();
       limits.maximum = Nothing();
-      limits.indexType = IndexType::I32;
+      limits.addressType = AddressType::I32;
       if (!codeMeta_->memories.append(MemoryDesc(limits))) {
         return nullptr;
       }
@@ -2185,9 +2189,9 @@ class MOZ_STACK_CLASS ModuleValidator : public ModuleValidatorShared {
       codeSectionSize += func.bytes().length();
     }
 
-    codeMeta_->codeSection.emplace();
-    codeMeta_->codeSection->start = 0;
-    codeMeta_->codeSection->size = codeSectionSize;
+    codeMeta_->codeSectionRange.emplace();
+    codeMeta_->codeSectionRange->start = 0;
+    codeMeta_->codeSectionRange->size = codeSectionSize;
 
     // asm.js does not have any wasm bytecode to save; view-source is
     // provided through the ScriptSource.
@@ -7385,7 +7389,7 @@ bool js::IsValidAsmJSHeapLength(size_t length) {
   }
 
   // The heap length is limited by what a wasm memory32 can handle.
-  if (length > MaxMemoryBytes(IndexType::I32)) {
+  if (length > MaxMemoryBytes(AddressType::I32)) {
     return false;
   }
 

@@ -935,115 +935,24 @@ class AForm {
     this._color = color;
     this._dateFormats = ["m/d", "m/d/yy", "mm/dd/yy", "mm/yy", "d-mmm", "d-mmm-yy", "dd-mmm-yy", "yy-mm-dd", "mmm-yy", "mmmm-yy", "mmm d, yyyy", "mmmm d, yyyy", "m/d/yy h:MM tt", "m/d/yy HH:MM"];
     this._timeFormats = ["HH:MM", "h:MM tt", "HH:MM:ss", "h:MM:ss tt"];
-    this._dateActionsCache = new Map();
     this._emailRegex = new RegExp("^[a-zA-Z0-9.!#$%&'*+\\/=?^_`{|}~-]+" + "@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?" + "(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$");
   }
   _mkTargetName(event) {
     return event.target ? `[ ${event.target.name} ]` : "";
   }
-  _tryToGuessDate(cFormat, cDate) {
-    let actions = this._dateActionsCache.get(cFormat);
-    if (!actions) {
-      actions = [];
-      this._dateActionsCache.set(cFormat, actions);
-      cFormat.replaceAll(/(d+)|(m+)|(y+)|(H+)|(M+)|(s+)/g, function (match, d, m, y, H, M, s) {
-        if (d) {
-          actions.push((n, date) => {
-            if (n >= 1 && n <= 31) {
-              date.setDate(n);
-              return true;
-            }
-            return false;
-          });
-        } else if (m) {
-          actions.push((n, date) => {
-            if (n >= 1 && n <= 12) {
-              date.setMonth(n - 1);
-              return true;
-            }
-            return false;
-          });
-        } else if (y) {
-          actions.push((n, date) => {
-            if (n < 50) {
-              n += 2000;
-            } else if (n < 100) {
-              n += 1900;
-            }
-            date.setYear(n);
-            return true;
-          });
-        } else if (H) {
-          actions.push((n, date) => {
-            if (n >= 0 && n <= 23) {
-              date.setHours(n);
-              return true;
-            }
-            return false;
-          });
-        } else if (M) {
-          actions.push((n, date) => {
-            if (n >= 0 && n <= 59) {
-              date.setMinutes(n);
-              return true;
-            }
-            return false;
-          });
-        } else if (s) {
-          actions.push((n, date) => {
-            if (n >= 0 && n <= 59) {
-              date.setSeconds(n);
-              return true;
-            }
-            return false;
-          });
-        }
-        return "";
-      });
-    }
-    const number = /\d+/g;
-    let i = 0;
-    let array;
-    const date = new Date();
-    while ((array = number.exec(cDate)) !== null) {
-      if (i < actions.length) {
-        if (!actions[i++](parseInt(array[0]), date)) {
-          return null;
-        }
-      } else {
-        break;
-      }
-    }
-    if (i === 0) {
-      return null;
-    }
-    return date;
-  }
   _parseDate(cFormat, cDate, strict = false) {
     let date = null;
     try {
-      date = this._util.scand(cFormat, cDate);
+      date = this._util._scand(cFormat, cDate, strict);
     } catch {}
-    if (!date) {
-      if (strict) {
-        return null;
-      }
-      let format = cFormat;
-      if (/mm(?!m)/.test(format)) {
-        format = format.replace("mm", "m");
-      }
-      if (/dd(?!d)/.test(format)) {
-        format = format.replace("dd", "d");
-      }
-      try {
-        date = this._util.scand(format, cDate);
-      } catch {}
+    if (date) {
+      return date;
     }
-    if (!date) {
-      date = Date.parse(cDate);
-      date = isNaN(date) ? this._tryToGuessDate(cFormat, cDate) : new Date(date);
+    if (strict) {
+      return null;
     }
-    return date;
+    date = Date.parse(cDate);
+    return isNaN(date) ? null : new Date(date);
   }
   AFMergeChange(event = globalThis.event) {
     if (event.willCommit) {
@@ -2191,6 +2100,9 @@ class App extends PDFObject {
       cMsg = cMsg.cMsg;
     }
     cMsg = (cMsg || "").toString();
+    if (!cMsg) {
+      return 0;
+    }
     nType = typeof nType !== "number" || isNaN(nType) || nType < 0 || nType > 3 ? 0 : nType;
     if (nType >= 2) {
       return this._externalCall("confirm", [cMsg]) ? 4 : 3;
@@ -3420,6 +3332,7 @@ class ProxyHandler {
 ;// ./src/scripting_api/util.js
 
 class Util extends PDFObject {
+  #dateActionsCache = null;
   constructor(data) {
     super(data);
     this._scandCache = new Map();
@@ -3673,7 +3586,95 @@ class Util extends PDFObject {
     }
     return buf.join("");
   }
+  #tryToGuessDate(cFormat, cDate) {
+    let actions = (this.#dateActionsCache ||= new Map()).get(cFormat);
+    if (!actions) {
+      actions = [];
+      this.#dateActionsCache.set(cFormat, actions);
+      cFormat.replaceAll(/(d+)|(m+)|(y+)|(H+)|(M+)|(s+)/g, function (_match, d, m, y, H, M, s) {
+        if (d) {
+          actions.push((n, data) => {
+            if (n >= 1 && n <= 31) {
+              data.day = n;
+              return true;
+            }
+            return false;
+          });
+        } else if (m) {
+          actions.push((n, data) => {
+            if (n >= 1 && n <= 12) {
+              data.month = n - 1;
+              return true;
+            }
+            return false;
+          });
+        } else if (y) {
+          actions.push((n, data) => {
+            if (n < 50) {
+              n += 2000;
+            } else if (n < 100) {
+              n += 1900;
+            }
+            data.year = n;
+            return true;
+          });
+        } else if (H) {
+          actions.push((n, data) => {
+            if (n >= 0 && n <= 23) {
+              data.hours = n;
+              return true;
+            }
+            return false;
+          });
+        } else if (M) {
+          actions.push((n, data) => {
+            if (n >= 0 && n <= 59) {
+              data.minutes = n;
+              return true;
+            }
+            return false;
+          });
+        } else if (s) {
+          actions.push((n, data) => {
+            if (n >= 0 && n <= 59) {
+              data.seconds = n;
+              return true;
+            }
+            return false;
+          });
+        }
+        return "";
+      });
+    }
+    const number = /\d+/g;
+    let i = 0;
+    let array;
+    const data = {
+      year: new Date().getFullYear(),
+      month: 0,
+      day: 1,
+      hours: 12,
+      minutes: 0,
+      seconds: 0
+    };
+    while ((array = number.exec(cDate)) !== null) {
+      if (i < actions.length) {
+        if (!actions[i++](parseInt(array[0]), data)) {
+          return null;
+        }
+      } else {
+        break;
+      }
+    }
+    if (i === 0) {
+      return null;
+    }
+    return new Date(data.year, data.month, data.day, data.hours, data.minutes, data.seconds);
+  }
   scand(cFormat, cDate) {
+    return this._scand(cFormat, cDate);
+  }
+  _scand(cFormat, cDate, strict = false) {
     if (typeof cDate !== "string") {
       return new Date(cDate);
     }
@@ -3830,13 +3831,13 @@ class Util extends PDFObject {
     const [re, actions] = this._scandCache.get(cFormat);
     const matches = new RegExp(`^${re}$`, "g").exec(cDate);
     if (!matches || matches.length !== actions.length + 1) {
-      return null;
+      return strict ? null : this.#tryToGuessDate(cFormat, cDate);
     }
     const data = {
-      year: 2000,
+      year: new Date().getFullYear(),
       month: 0,
       day: 1,
-      hours: 0,
+      hours: 12,
       minutes: 0,
       seconds: 0,
       am: null
@@ -4028,8 +4029,8 @@ function initSandbox(params) {
 
 ;// ./src/pdf.scripting.js
 
-const pdfjsVersion = "4.8.30";
-const pdfjsBuild = "bde36f28b";
+const pdfjsVersion = "4.10.22";
+const pdfjsBuild = "4547f230b";
 globalThis.pdfjsScripting = {
   initSandbox: initSandbox
 };

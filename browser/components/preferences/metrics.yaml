@@ -52,6 +52,29 @@ privacy.ui.fpp.click:
         type: string
     telemetry_mirror: PrivacyUiFpp_Click_Menu
 
+network.proxy.settings:
+  proxy_type_preference:
+    type: event
+    description: >
+      This metric tracks what proxy types users are choosing in the Network Settings dialog
+      at the bottom of about:preferences#general.
+      It gets recorded when pressing OK in the dialog box.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1909436
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1909436
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - necko@mozilla.com
+      - omansfeld@mozilla.com
+    expires: never
+    extra_keys:
+      value:
+        description: >
+          Type of proxy that is selected (DIRECT, MANUAL, PAC, WPAD, SYSTEM, OTHER).
+        type: string
+
 security.doh.settings:
   mode_changed_button:
     type: event
@@ -144,6 +167,7 @@ intl.ui.browser_language:
       - https://bugzil.la/1796396
       - https://bugzil.la/1861299
       - https://bugzil.la/1911321
+      - https://bugzil.la/1928262
     data_reviews: &intl_ui_browserLanguage_manage_data_reviews
       - https://bugzil.la/1486507
       - https://bugzil.la/1553311
@@ -153,11 +177,12 @@ intl.ui.browser_language:
       - https://bugzil.la/1796396
       - https://bugzil.la/1861299
       - https://bugzil.la/1911321
+      - https://bugzil.la/1928262
     notification_emails: &intl_ui_browserLanguage_manage_emails
+      - earo@mozilla.com
       - flod@mozilla.com
       - mstriemer@mozilla.com
-      - earo@mozilla.com
-    expires: 135
+    expires: 148
     extra_keys: &intl_ui_browserLanguage_manage_extra
       value:
         description: >
@@ -180,7 +205,7 @@ intl.ui.browser_language:
     bugs: *intl_ui_browserLanguage_manage_bugs
     data_reviews: *intl_ui_browserLanguage_manage_data_reviews
     notification_emails: *intl_ui_browserLanguage_manage_emails
-    expires: 135
+    expires: 148
     extra_keys: *intl_ui_browserLanguage_manage_extra
     telemetry_mirror: IntlUiBrowserlanguage_Search_Dialog
 
@@ -198,7 +223,7 @@ intl.ui.browser_language:
     bugs: *intl_ui_browserLanguage_manage_bugs
     data_reviews: *intl_ui_browserLanguage_manage_data_reviews
     notification_emails: *intl_ui_browserLanguage_manage_emails
-    expires: 135
+    expires: 148
     extra_keys: *intl_ui_browserLanguage_manage_extra
     telemetry_mirror: IntlUiBrowserlanguage_Search_Main
 
@@ -216,7 +241,7 @@ intl.ui.browser_language:
     bugs: *intl_ui_browserLanguage_manage_bugs
     data_reviews: *intl_ui_browserLanguage_manage_data_reviews
     notification_emails: *intl_ui_browserLanguage_manage_emails
-    expires: 135
+    expires: 148
     extra_keys:
       value:
         description: >
@@ -243,7 +268,7 @@ intl.ui.browser_language:
     bugs: *intl_ui_browserLanguage_manage_bugs
     data_reviews: *intl_ui_browserLanguage_manage_data_reviews
     notification_emails: *intl_ui_browserLanguage_manage_emails
-    expires: 135
+    expires: 148
     extra_keys: *intl_ui_browserLanguage_manage_extra
     telemetry_mirror: IntlUiBrowserlanguage_Remove_Dialog
 
@@ -261,7 +286,7 @@ intl.ui.browser_language:
     bugs: *intl_ui_browserLanguage_manage_bugs
     data_reviews: *intl_ui_browserLanguage_manage_data_reviews
     notification_emails: *intl_ui_browserLanguage_manage_emails
-    expires: 135
+    expires: 148
     extra_keys: *intl_ui_browserLanguage_manage_extra
     telemetry_mirror: IntlUiBrowserlanguage_Reorder_Dialog
 
@@ -279,7 +304,7 @@ intl.ui.browser_language:
     bugs: *intl_ui_browserLanguage_manage_bugs
     data_reviews: *intl_ui_browserLanguage_manage_data_reviews
     notification_emails: *intl_ui_browserLanguage_manage_emails
-    expires: 135
+    expires: 148
     telemetry_mirror: IntlUiBrowserlanguage_Reorder_Main
 
   apply_main:
@@ -296,7 +321,7 @@ intl.ui.browser_language:
     bugs: *intl_ui_browserLanguage_manage_bugs
     data_reviews: *intl_ui_browserLanguage_manage_data_reviews
     notification_emails: *intl_ui_browserLanguage_manage_emails
-    expires: 135
+    expires: 148
     telemetry_mirror: IntlUiBrowserlanguage_Apply_Main
 
   accept_dialog:
@@ -313,7 +338,7 @@ intl.ui.browser_language:
     bugs: *intl_ui_browserLanguage_manage_bugs
     data_reviews: *intl_ui_browserLanguage_manage_data_reviews
     notification_emails: *intl_ui_browserLanguage_manage_emails
-    expires: 135
+    expires: 148
     extra_keys: *intl_ui_browserLanguage_manage_extra
     telemetry_mirror: IntlUiBrowserlanguage_Accept_Dialog
 
@@ -331,7 +356,7 @@ intl.ui.browser_language:
     bugs: *intl_ui_browserLanguage_manage_bugs
     data_reviews: *intl_ui_browserLanguage_manage_data_reviews
     notification_emails: *intl_ui_browserLanguage_manage_emails
-    expires: 135
+    expires: 148
     extra_keys: *intl_ui_browserLanguage_manage_extra
     telemetry_mirror: IntlUiBrowserlanguage_Cancel_Dialog
 
@@ -349,7 +374,7 @@ intl.ui.browser_language:
     bugs: *intl_ui_browserLanguage_manage_bugs
     data_reviews: *intl_ui_browserLanguage_manage_data_reviews
     notification_emails: *intl_ui_browserLanguage_manage_emails
-    expires: 135
+    expires: 148
     extra_keys: *intl_ui_browserLanguage_manage_extra
     telemetry_mirror: IntlUiBrowserlanguage_SetFallback_Dialog
 

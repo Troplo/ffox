@@ -22,6 +22,7 @@
 #  include "builtin/intl/Collator.h"
 #  include "builtin/intl/DateTimeFormat.h"
 #  include "builtin/intl/DisplayNames.h"
+#  include "builtin/intl/DurationFormat.h"
 #  include "builtin/intl/ListFormat.h"
 #  include "builtin/intl/Locale.h"
 #  include "builtin/intl/NumberFormat.h"
@@ -136,11 +137,6 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
     case JSProto_InternalError:
     case JSProto_Iterator:
     case JSProto_AggregateError:
-#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-    case JSProto_SuppressedError:
-    case JSProto_DisposableStack:
-    case JSProto_AsyncDisposableStack:
-#endif
     case JSProto_EvalError:
     case JSProto_RangeError:
     case JSProto_ReferenceError:
@@ -220,6 +216,13 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
 #  else
       return true;
 #  endif
+
+    case JSProto_DurationFormat:
+#  ifdef NIGHTLY_BUILD
+      return false;
+#  else
+      return true;
+#  endif
 #endif
 
 #ifdef JS_HAS_TEMPORAL_API
@@ -233,7 +236,7 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
     case JSProto_PlainYearMonth:
     case JSProto_TemporalNow:
     case JSProto_ZonedDateTime:
-      return false;
+      return !JS::Prefs::experimental_temporal();
 #endif
 
     // Return true if the given constructor has been disabled at run-time.
@@ -253,6 +256,13 @@ bool GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key) {
 
     case JSProto_Float16Array:
       return !JS::Prefs::experimental_float16array();
+
+#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+    case JSProto_SuppressedError:
+    case JSProto_DisposableStack:
+    case JSProto_AsyncDisposableStack:
+      return !JS::Prefs::experimental_explicit_resource_management();
+#endif
 
     default:
       MOZ_CRASH("unexpected JSProtoKey");
@@ -890,19 +900,6 @@ GlobalObject::getOrCreateFinalizationRegistryData() {
   return maybeFinalizationRegistryData();
 }
 
-#ifndef NIGHTLY_BUILD
-bool GlobalObject::addToVarNames(JSContext* cx, JS::Handle<JSAtom*> name) {
-  MOZ_ASSERT(name);
-
-  if (!data().varNames.put(name)) {
-    ReportOutOfMemory(cx);
-    return false;
-  }
-
-  return true;
-}
-#endif
-
 /* static */
 bool GlobalObject::createIntrinsicsHolder(JSContext* cx,
                                           Handle<GlobalObject*> global) {
@@ -1060,23 +1057,11 @@ void GlobalObject::releaseData(JS::GCContext* gcx) {
   gcx->delete_(this, data, MemoryUse::GlobalObjectData);
 }
 
-GlobalObjectData::GlobalObjectData(Zone* zone)
-#ifndef NIGHTLY_BUILD
-    : varNames(zone)
-#endif
-{
-}
+GlobalObjectData::GlobalObjectData(Zone* zone) {}
 
 GlobalObjectData::~GlobalObjectData() = default;
 
 void GlobalObjectData::trace(JSTracer* trc, GlobalObject* global) {
-#ifndef NIGHTLY_BUILD
-  // Atoms are always tenured so don't need to be traced during minor GC.
-  if (trc->runtime()->heapState() != JS::HeapState::MinorCollecting) {
-    varNames.trace(trc);
-  }
-#endif
-
   for (auto& ctorWithProto : builtinConstructors) {
     TraceNullableEdge(trc, &ctorWithProto.constructor, "global-builtin-ctor");
     TraceNullableEdge(trc, &ctorWithProto.prototype,
@@ -1121,6 +1106,9 @@ void GlobalObjectData::trace(JSTracer* trc, GlobalObject* global) {
   TraceNullableEdge(trc, &unmappedArgumentsTemplate,
                     "unmapped-arguments-template");
 
+  TraceNullableEdge(trc, &mapObjectTemplate, "map-object-template");
+  TraceNullableEdge(trc, &setObjectTemplate, "set-object-template");
+
   TraceNullableEdge(trc, &iterResultTemplate, "iter-result-template_");
   TraceNullableEdge(trc, &iterResultWithoutPrototypeTemplate,
                     "iter-result-without-prototype-template");
@@ -1141,9 +1129,4 @@ void GlobalObjectData::addSizeOfIncludingThis(
     info->objectsMallocHeapGlobalData +=
         regExpRealm.regExpStatics->sizeOfIncludingThis(mallocSizeOf);
   }
-
-#ifndef NIGHTLY_BUILD
-  info->objectsMallocHeapGlobalVarNamesSet +=
-      varNames.shallowSizeOfExcludingThis(mallocSizeOf);
-#endif
 }

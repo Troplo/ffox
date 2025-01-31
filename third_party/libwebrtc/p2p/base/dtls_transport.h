@@ -143,7 +143,7 @@ class DtlsTransport : public DtlsTransportInternal {
       absl::string_view digest_alg,
       const uint8_t* digest,
       size_t digest_len,
-      absl::optional<rtc::SSLRole> role) override;
+      std::optional<rtc::SSLRole> role) override;
 
   // Called to send a packet (via DTLS, if turned on).
   int SendPacket(const char* data,
@@ -156,7 +156,7 @@ class DtlsTransport : public DtlsTransportInternal {
   // Find out which TLS version was negotiated
   bool GetSslVersionBytes(int* version) const override;
   // Find out which DTLS-SRTP cipher was negotiated
-  bool GetSrtpCryptoSuite(int* cipher) override;
+  bool GetSrtpCryptoSuite(int* cipher) const override;
 
   // Find out which signature algorithm was used by the peer. Returns values
   // from
@@ -168,7 +168,8 @@ class DtlsTransport : public DtlsTransportInternal {
   bool SetDtlsRole(rtc::SSLRole role) override;
 
   // Find out which DTLS cipher was negotiated
-  bool GetSslCipherSuite(int* cipher) override;
+  bool GetSslCipherSuite(int* cipher) const override;
+  std::optional<absl::string_view> GetTlsCipherSuiteName() const override;
 
   // Once DTLS has been established, this method retrieves the certificate
   // chain in use by the remote peer, for use in external identity
@@ -198,7 +199,7 @@ class DtlsTransport : public DtlsTransportInternal {
 
   int GetError() override;
 
-  absl::optional<rtc::NetworkRoute> network_route() const override;
+  std::optional<rtc::NetworkRoute> network_route() const override;
 
   int SetOption(rtc::Socket::Option opt, int value) override;
 
@@ -222,7 +223,7 @@ class DtlsTransport : public DtlsTransportInternal {
   void OnReadyToSend(rtc::PacketTransportInternal* transport);
   void OnReceivingState(rtc::PacketTransportInternal* transport);
   void OnDtlsEvent(int sig, int err);
-  void OnNetworkRouteChanged(absl::optional<rtc::NetworkRoute> network_route);
+  void OnNetworkRouteChanged(std::optional<rtc::NetworkRoute> network_route);
   bool SetupDtls();
   void MaybeStartDtls();
   bool HandleDtlsPacket(rtc::ArrayView<const uint8_t> payload);
@@ -246,7 +247,7 @@ class DtlsTransport : public DtlsTransportInternal {
   const std::vector<int> srtp_ciphers_;  // SRTP ciphers to use with DTLS.
   bool dtls_active_ = false;
   rtc::scoped_refptr<rtc::RTCCertificate> local_certificate_;
-  absl::optional<rtc::SSLRole> dtls_role_;
+  std::optional<rtc::SSLRole> dtls_role_;
   const rtc::SSLProtocolVersion ssl_max_version_;
   rtc::Buffer remote_fingerprint_value_;
   std::string remote_fingerprint_algorithm_;

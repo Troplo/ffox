@@ -215,10 +215,6 @@ void JSRuntime::destroyRuntime() {
 
   watchtowerTestingLog.ref().reset();
 
-  // Caches might hold on ScriptData which are saved in the ScriptDataTable.
-  // Clear all stencils from caches to remove ScriptDataTable entries.
-  caches().purgeStencils();
-
   if (gc.wasInitialized()) {
     /*
      * Finish any in-progress GCs first.
@@ -293,6 +289,8 @@ void JSRuntime::setTelemetryCallback(
 
 void JSRuntime::setUseCounter(JSObject* obj, JSUseCounter counter) {
   if (useCounterCallback) {
+    // A use counter callback cannot GC.
+    JS::AutoSuppressGCAnalysis suppress;
     (*useCounterCallback)(obj, counter);
   }
 }
@@ -571,22 +569,16 @@ SharedScriptDataTableHolder& JSRuntime::scriptDataTableHolder() {
   return scriptDataTableHolder_;
 }
 
-GlobalObject* JSRuntime::getIncumbentGlobal(JSContext* cx) {
+bool JSRuntime::getHostDefinedData(JSContext* cx,
+                                   JS::MutableHandle<JSObject*> data) const {
   MOZ_ASSERT(cx->jobQueue);
 
-  JSObject* obj = cx->jobQueue->getIncumbentGlobal(cx);
-  if (!obj) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(obj->is<GlobalObject>(),
-             "getIncumbentGlobalCallback must return a global!");
-  return &obj->as<GlobalObject>();
+  return cx->jobQueue->getHostDefinedData(cx, data);
 }
 
 bool JSRuntime::enqueuePromiseJob(JSContext* cx, HandleFunction job,
                                   HandleObject promise,
-                                  Handle<GlobalObject*> incumbentGlobal) {
+                                  HandleObject hostDefinedData) {
   MOZ_ASSERT(cx->jobQueue,
              "Must select a JobQueue implementation using JS::JobQueue "
              "or js::UseInternalJobQueues before using Promises");
@@ -609,7 +601,7 @@ bool JSRuntime::enqueuePromiseJob(JSContext* cx, HandleFunction job,
     }
   }
   return cx->jobQueue->enqueuePromiseJob(cx, promise, job, allocationSite,
-                                         incumbentGlobal);
+                                         hostDefinedData);
 }
 
 void JSRuntime::addUnhandledRejectedPromise(JSContext* cx,
@@ -858,4 +850,10 @@ void JSRuntime::ensureRealmIsRecordingAllocations(
     // debuggers and runtime profiling.
     global->realm()->chooseAllocationSamplingProbability();
   }
+}
+
+void js::HasSeenObjectEmulateUndefinedFuse::popFuse(JSContext* cx) {
+  js::InvalidatingRuntimeFuse::popFuse(cx);
+  MOZ_ASSERT(cx->global());
+  cx->runtime()->setUseCounter(cx->global(), JSUseCounter::ISHTMLDDA_FUSE);
 }

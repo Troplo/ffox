@@ -158,7 +158,7 @@ class nsDisplayTextOverflowMarker final : public nsPaintedDisplayItem {
     MOZ_COUNT_CTOR(nsDisplayTextOverflowMarker);
   }
 
-  MOZ_COUNTED_DTOR_OVERRIDE(nsDisplayTextOverflowMarker)
+  MOZ_COUNTED_DTOR_FINAL(nsDisplayTextOverflowMarker)
 
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override {
@@ -750,7 +750,7 @@ void TextOverflow::ProcessLine(const nsDisplayListSet& aLists, nsLineBox* aLine,
 
   // Clip and remove display items as needed at the final marker edges.
   nsDisplayList* lists[] = {aLists.Content(), aLists.PositionedDescendants()};
-  for (uint32_t i = 0; i < ArrayLength(lists); ++i) {
+  for (uint32_t i = 0; i < std::size(lists); ++i) {
     PruneDisplayListContents(lists[i], framesToHide, insideMarkersArea);
   }
   CreateMarkers(aLine, needIStart, needIEnd, insideMarkersArea, contentArea,

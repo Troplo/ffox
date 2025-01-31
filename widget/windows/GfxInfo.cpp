@@ -483,8 +483,8 @@ nsresult GfxInfo::Init() {
   }
 
   // make sure the string is nullptr terminated
-  if (wcsnlen(displayDevice.DeviceKey, ArrayLength(displayDevice.DeviceKey)) ==
-      ArrayLength(displayDevice.DeviceKey)) {
+  if (wcsnlen(displayDevice.DeviceKey, std::size(displayDevice.DeviceKey)) ==
+      std::size(displayDevice.DeviceKey)) {
     // we did not find a nullptr
     return rv;
   }
@@ -501,13 +501,12 @@ nsresult GfxInfo::Init() {
    */
   if (displayDevice.DeviceKey[0] != '\0') {
     if (_wcsnicmp(displayDevice.DeviceKey, DEVICE_KEY_PREFIX,
-                  ArrayLength(DEVICE_KEY_PREFIX) - 1) != 0) {
+                  std::size(DEVICE_KEY_PREFIX) - 1) != 0) {
       return rv;
     }
 
     // chop off DEVICE_KEY_PREFIX
-    mDeviceKey[0] =
-        displayDevice.DeviceKey + ArrayLength(DEVICE_KEY_PREFIX) - 1;
+    mDeviceKey[0] = displayDevice.DeviceKey + std::size(DEVICE_KEY_PREFIX) - 1;
   } else {
     mDeviceKey[0].Truncate();
   }
@@ -1806,6 +1805,18 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
         nsIGfxInfo::FEATURE_REUSE_DECODER_DEVICE,
         nsIGfxInfo::FEATURE_BLOCKED_DEVICE, DRIVER_COMPARISON_IGNORED,
         V(0, 0, 0, 0), "FEATURE_FAILURE_BUG_1896823");
+
+    APPEND_TO_DRIVER_BLOCKLIST2(
+        OperatingSystem::Windows, DeviceFamily::IntelMeteorLake,
+        nsIGfxInfo::FEATURE_REUSE_DECODER_DEVICE,
+        nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION, DRIVER_GREATER_THAN,
+        V(32, 0, 101, 5972), "FEATURE_FAILURE_BUG_1933755");
+
+    APPEND_TO_DRIVER_BLOCKLIST2(
+        OperatingSystem::Windows, DeviceFamily::IntelArrowlake,
+        nsIGfxInfo::FEATURE_REUSE_DECODER_DEVICE,
+        nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION, DRIVER_GREATER_THAN,
+        V(32, 0, 101, 5972), "FEATURE_FAILURE_BUG_1933755");
 
     ////////////////////////////////////
     // FEATURE_OVERLAY_VP_AUTO_HDR

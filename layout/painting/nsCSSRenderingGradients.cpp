@@ -258,7 +258,7 @@ static StyleAbsoluteColor Interpolate(const StyleAbsoluteColor& aLeft,
       StyleColorSpace::Srgb,
       StyleHueInterpolationMethod::Shorter,
   };
-  return Servo_InterpolateColor(kMethod, &aRight, &aLeft, aFrac);
+  return Servo_InterpolateColor(kMethod, &aLeft, &aRight, aFrac);
 }
 
 static nscoord FindTileStart(nscoord aDirtyCoord, nscoord aTilePos,
@@ -1015,9 +1015,9 @@ void nsCSSGradientRenderer::Paint(gfxContext& aContext, const nsRect& aDest,
       GradientStopInterpolator(
           const nsTArray<ColorStop>& aStops,
           const StyleColorInterpolationMethod& aStyleColorInterpolationMethod,
-          bool aExtendLastStop, nsTArray<gfx::GradientStop>& aResult)
+          bool aExtend, nsTArray<gfx::GradientStop>& aResult)
           : ColorStopInterpolator(aStops, aStyleColorInterpolationMethod,
-                                  aExtendLastStop),
+                                  aExtend),
             mStops(aResult) {}
       void CreateStop(float aPosition, gfx::DeviceColor aColor) {
         mStops.AppendElement(gfx::GradientStop{aPosition, aColor});
@@ -1027,10 +1027,10 @@ void nsCSSGradientRenderer::Paint(gfxContext& aContext, const nsRect& aDest,
       nsTArray<gfx::GradientStop>& mStops;
     };
 
-    bool extendLastStop = !isRepeat && styleColorInterpolationMethod.hue ==
-                                           StyleHueInterpolationMethod::Longer;
+    bool extend = !isRepeat && styleColorInterpolationMethod.hue ==
+                                   StyleHueInterpolationMethod::Longer;
     GradientStopInterpolator interpolator(mStops, styleColorInterpolationMethod,
-                                          extendLastStop, rawStops);
+                                          extend, rawStops);
     interpolator.CreateStops();
   } else {
     rawStops.SetLength(mStops.Length());
@@ -1051,7 +1051,9 @@ void nsCSSGradientRenderer::Paint(gfxContext& aContext, const nsRect& aDest,
   // up by drawing tiles into temporary surfaces and copying those to the
   // destination, but after pixel-snapping tiles may not all be the same size.
   nsRect dirty;
-  if (!dirty.IntersectRect(aDirtyRect, aFillArea)) return;
+  if (!dirty.IntersectRect(aDirtyRect, aFillArea)) {
+    return;
+  }
 
   gfxRect areaToFill =
       nsLayoutUtils::RectToGfxRect(aFillArea, appUnitsPerDevPixel);
@@ -1224,9 +1226,8 @@ class MOZ_STACK_CLASS WrColorStopInterpolator
   WrColorStopInterpolator(
       const nsTArray<ColorStop>& aStops,
       const StyleColorInterpolationMethod& aStyleColorInterpolationMethod,
-      float aOpacity, nsTArray<wr::GradientStop>& aResult, bool aExtendLastStop)
-      : ColorStopInterpolator(aStops, aStyleColorInterpolationMethod,
-                              aExtendLastStop),
+      float aOpacity, nsTArray<wr::GradientStop>& aResult, bool aExtend)
+      : ColorStopInterpolator(aStops, aStyleColorInterpolationMethod, aExtend),
         mResult(aResult),
         mOpacity(aOpacity),
         mOutputStop(0) {}
@@ -1302,11 +1303,11 @@ void nsCSSGradientRenderer::BuildWebRenderParameters(
     // gradient, we have to pretend there is another stop at position=1.0 that
     // duplicates the last stop, this is probably only used for things like a
     // color wheel.  No such problem for SVG as it doesn't have that complexity.
-    bool extendLastStop = aMode == wr::ExtendMode::Clamp &&
-                          styleColorInterpolationMethod.hue ==
-                              StyleHueInterpolationMethod::Longer;
+    bool extend = aMode == wr::ExtendMode::Clamp &&
+                  styleColorInterpolationMethod.hue ==
+                      StyleHueInterpolationMethod::Longer;
     WrColorStopInterpolator interpolator(mStops, styleColorInterpolationMethod,
-                                         aOpacity, aStops, extendLastStop);
+                                         aOpacity, aStops, extend);
     interpolator.CreateStops();
   } else {
     aStops.SetLength(mStops.Length());

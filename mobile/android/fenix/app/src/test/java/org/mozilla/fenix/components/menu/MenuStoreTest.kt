@@ -299,6 +299,7 @@ class MenuStoreTest {
 
             assertEquals(null, store.state.extensionMenuState.addonInstallationInProgress)
             assertEquals(1, store.state.extensionMenuState.recommendedAddons.size)
+            assertEquals(1, store.state.extensionMenuState.availableAddons.size)
         }
 
     @Test
@@ -329,7 +330,7 @@ class MenuStoreTest {
             val initialState = MenuState()
             val store = MenuStore(initialState = initialState)
             val webExtensionMenuItemList = listOf(
-                WebExtensionMenuItem.WebExtensionBrowserMenuItem(
+                WebExtensionMenuItem(
                     label = "label",
                     enabled = true,
                     icon = null,
@@ -344,31 +345,6 @@ class MenuStoreTest {
 
             assertEquals(
                 store.state.extensionMenuState.browserWebExtensionMenuItem,
-                webExtensionMenuItemList,
-            )
-        }
-
-    @Test
-    fun `WHEN update page web extension menu items is dispatched THEN extension state is updated`() =
-        runTest {
-            val initialState = MenuState()
-            val store = MenuStore(initialState = initialState)
-            val webExtensionMenuItemList = listOf(
-                WebExtensionMenuItem.WebExtensionPageMenuItem(
-                    label = "label",
-                    enabled = true,
-                    icon = null,
-                    badgeText = "1",
-                    badgeTextColor = Color.White.toArgb(),
-                    badgeBackgroundColor = Color.Gray.toArgb(),
-                    onClick = {
-                    },
-                ),
-            )
-            store.dispatch(MenuAction.UpdateWebExtensionPageMenuItems(webExtensionMenuItemList)).join()
-
-            assertEquals(
-                store.state.toolsMenuState.pageWebExtensionMenuItem,
                 webExtensionMenuItemList,
             )
         }

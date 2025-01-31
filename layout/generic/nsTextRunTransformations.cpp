@@ -681,14 +681,7 @@ bool nsCaseTransformTextRunFactory::TransformString(
             break;
           }
 
-          // Bug 1476304: we exclude Georgian letters U+10D0..10FF because of
-          // lack of widespread font support for the corresponding Mtavruli
-          // characters at this time (July 2018).
-          // This condition is to be removed once the major platforms ship with
-          // fonts that support U+1C90..1CBF.
-          if (ch < 0x10D0 || ch > 0x10FF) {
-            ch = ToUpperCase(ch);
-          }
+          ch = ToUpperCase(ch);
           break;
 
         case StyleTextTransform::CAPITALIZE._0: {
@@ -832,7 +825,7 @@ bool nsCaseTransformTextRunFactory::TransformString(
           // clang-format on
 
           size_t index;
-          const uint16_t len = MOZ_ARRAY_LENGTH(kSmallKanas);
+          const uint16_t len = std::size(kSmallKanas);
           if (mozilla::BinarySearch(kSmallKanas, 0, len, ch, &index)) {
             ch = kFullSizeKanas[index];
           }

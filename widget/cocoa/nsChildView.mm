@@ -152,7 +152,8 @@ extern nsIArray* gDraggedTransferables;
 ChildView* ChildViewMouseTracker::sLastMouseEventView = nil;
 NSEvent* ChildViewMouseTracker::sLastMouseMoveEvent = nil;
 NSWindow* ChildViewMouseTracker::sWindowUnderMouse = nil;
-NSPoint ChildViewMouseTracker::sLastScrollEventScreenLocation = NSZeroPoint;
+MOZ_RUNINIT NSPoint ChildViewMouseTracker::sLastScrollEventScreenLocation =
+    NSZeroPoint;
 
 #ifdef INVALIDATE_DEBUGGING
 static void blinkRect(Rect* r);
@@ -248,7 +249,7 @@ nsChildView::~nsChildView() {
   // mGeckoChild are used throughout the ChildView class to tell if it's safe
   // to use a ChildView object.
   [mView widgetDestroyed];  // Safe if mView is nil.
-  SetParent(nullptr);
+  ClearParent();
   TearDownView();  // Safe if called twice.
 }
 
@@ -358,7 +359,9 @@ nsCocoaWindow* nsChildView::GetAppWindowWidget() const {
 void nsChildView::Destroy() {
   NS_OBJC_BEGIN_TRY_IGNORE_BLOCK;
 
-  if (mOnDestroyCalled) return;
+  if (mOnDestroyCalled) {
+    return;
+  }
   mOnDestroyCalled = true;
 
   // Stuff below may delete the last ref to this
@@ -523,23 +526,15 @@ void nsChildView::Show(bool aState) {
 }
 
 // Change the parent of this widget
-void nsChildView::DidChangeParent(nsIWidget*) {
+void nsChildView::DidClearParent(nsIWidget*) {
   NS_OBJC_BEGIN_TRY_IGNORE_BLOCK;
 
   if (mOnDestroyCalled) {
     return;
   }
 
-  nsCOMPtr<nsIWidget> kungFuDeathGrip(this);
-
   // we hold a ref to mView, so this is safe
   [mView removeFromSuperview];
-  mParentView = mParent
-                    ? (NSView<mozView>*)mParent->GetNativeData(NS_NATIVE_WIDGET)
-                    : nullptr;
-  if (mParentView) {
-    [mParentView addSubview:mView];
-  }
 
   NS_OBJC_END_TRY_IGNORE_BLOCK;
 }
@@ -636,7 +631,7 @@ void nsChildView::BackingScaleFactorChanged() {
 
   SuspendAsyncCATransactions();
   mBackingScaleFactor = newScale;
-  NSRect frame = [mView frame];
+  NSRect frame = mView.frame;
   mBounds = nsCocoaUtils::CocoaRectToGeckoRectDevPix(frame, newScale);
 
   mNativeLayerRoot->SetBackingScale(mBackingScaleFactor);
@@ -1473,7 +1468,7 @@ uint32_t nsChildView::GetCurrentInputEventCount() {
                                            kCGEventOtherMouseDragged};
 
   uint32_t eventCount = 0;
-  for (uint32_t i = 0; i < ArrayLength(eventTypes); ++i) {
+  for (uint32_t i = 0; i < std::size(eventTypes); ++i) {
     eventCount += CGEventSourceCounterForEventType(
         kCGEventSourceStateCombinedSessionState, eventTypes[i]);
   }
@@ -1507,17 +1502,6 @@ void nsChildView::SetInputContext(const InputContext& aContext,
   // IMEInputHandler::IsEditableContent() too.
   mInputContext = aContext;
 
-  // Actually we turn on text substitution by preferences.
-  // If we support autocorrect attribute, we have to consider it.
-  bool enableTextSubstitution =
-      (StaticPrefs::ui_autocorrectDefault() == 1 &&
-       (aContext.mHTMLInputType.IsEmpty() ||
-        aContext.mHTMLInputType.EqualsLiteral("textarea"))) ||
-      (StaticPrefs::ui_autocorrectDefault() == 2 &&
-       (aContext.mHTMLInputType.IsEmpty() ||
-        aContext.mHTMLInputType.EqualsLiteral("textarea") ||
-        aContext.mHTMLInputType.EqualsLiteral("text")));
-
   switch (aContext.mIMEState.mEnabled) {
     case IMEEnabled::Enabled:
       mTextInputHandler->SetASCIICapableOnly(false);
@@ -1526,7 +1510,7 @@ void nsChildView::SetInputContext(const InputContext& aContext,
         mTextInputHandler->SetIMEOpenState(mInputContext.mIMEState.mOpen ==
                                            IMEState::OPEN);
       }
-      mTextInputHandler->EnableTextSubstitution(enableTextSubstitution);
+      mTextInputHandler->EnableTextSubstitution(aContext.mAutocorrect);
       break;
     case IMEEnabled::Disabled:
       mTextInputHandler->SetASCIICapableOnly(false);
@@ -1536,9 +1520,7 @@ void nsChildView::SetInputContext(const InputContext& aContext,
     case IMEEnabled::Password:
       mTextInputHandler->SetASCIICapableOnly(true);
       mTextInputHandler->EnableIME(false);
-      // Disable autocorrect since dash, comma or etc is replaced with other
-      // character
-      mTextInputHandler->EnableTextSubstitution(false);
+      mTextInputHandler->EnableTextSubstitution(aContext.mAutocorrect);
       break;
     default:
       NS_ERROR("not implemented!");
@@ -4436,21 +4418,15 @@ static CFTypeRefPtr<CFURLRef> GetPasteLocation(NSPasteboard* aPasteboard) {
                          [UTIHelper
                              stringFromPboardType:
                                  (NSString*)kPasteboardTypeFileURLPromise]]) {
-        nsCOMPtr<nsIFile> targFile;
-        NS_NewLocalFile(u""_ns, getter_AddRefs(targFile));
-        nsCOMPtr<nsILocalFileMac> macLocalFile = do_QueryInterface(targFile);
-        if (!macLocalFile) {
-          NS_ERROR("No Mac local file");
-          continue;
-        }
-
         CFTypeRefPtr<CFURLRef> url = GetPasteLocation(aPasteboard);
         if (!url) {
           continue;
         }
 
-        if (!NS_SUCCEEDED(macLocalFile->InitWithCFURL(url.get()))) {
-          NS_ERROR("failed InitWithCFURL");
+        nsCOMPtr<nsILocalFileMac> macLocalFile;
+        if (NS_FAILED(NS_NewLocalFileWithCFURL(url.get(),
+                                               getter_AddRefs(macLocalFile)))) {
+          NS_ERROR("failed NS_NewLocalFileWithCFURL");
           continue;
         }
 
@@ -4863,7 +4839,7 @@ nsresult nsChildView::RestoreHiDPIMode() {
 
 + (NSMutableDictionary*)sNativeKeyEventsMap {
   // This dictionary is "leaked".
-  static NSMutableDictionary* sNativeKeyEventsMap =
+  MOZ_RUNINIT static NSMutableDictionary* sNativeKeyEventsMap =
       [[NSMutableDictionary alloc] init];
   return sNativeKeyEventsMap;
 }

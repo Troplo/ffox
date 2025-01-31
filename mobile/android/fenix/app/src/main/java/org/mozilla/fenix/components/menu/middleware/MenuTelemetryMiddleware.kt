@@ -10,7 +10,6 @@ import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.fenix.GleanMetrics.AppMenu
 import org.mozilla.fenix.GleanMetrics.Events
 import org.mozilla.fenix.GleanMetrics.HomeMenu
-import org.mozilla.fenix.GleanMetrics.HomeScreen
 import org.mozilla.fenix.GleanMetrics.Menu
 import org.mozilla.fenix.GleanMetrics.ReaderMode
 import org.mozilla.fenix.GleanMetrics.Translations
@@ -88,10 +87,7 @@ class MenuTelemetryMiddleware(
                 ),
             )
 
-            MenuAction.Navigate.CustomizeHomepage -> {
-                AppMenu.customizeHomepage.record(NoExtras())
-                HomeScreen.customizeHomeClicked.record(NoExtras())
-            }
+            MenuAction.Navigate.CustomizeHomepage -> AppMenu.customizeHomepage.record(NoExtras())
 
             MenuAction.Navigate.Downloads -> Events.browserMenuAction.record(
                 Events.BrowserMenuActionExtra(
@@ -142,7 +138,11 @@ class MenuTelemetryMiddleware(
                 ),
             )
 
-            MenuAction.Navigate.ReleaseNotes -> Events.whatsNewTapped.record(NoExtras())
+            MenuAction.Navigate.ReleaseNotes -> Events.whatsNewTapped.record(
+                Events.WhatsNewTappedExtra(
+                    source = "MENU",
+                ),
+            )
 
             MenuAction.Navigate.Settings -> {
                 when (accessPoint) {
@@ -191,10 +191,6 @@ class MenuTelemetryMiddleware(
                     item = "find_in_page",
                 ),
             )
-
-            MenuAction.ShowCFR -> Menu.showCfr.record(NoExtras())
-
-            MenuAction.DismissCFR -> Menu.dismissCfr.record(NoExtras())
 
             MenuAction.CustomizeReaderView -> ReaderMode.appearance.record(NoExtras())
 
@@ -258,19 +254,35 @@ class MenuTelemetryMiddleware(
                 )
             }
 
+            is MenuAction.Navigate.WebCompatReporter -> {
+                // https://bugzilla.mozilla.org/show_bug.cgi?id=1932462
+            }
+
+            MenuAction.OpenInRegularTab -> {
+                Events.browserMenuAction.record(
+                    Events.BrowserMenuActionExtra(
+                        item = "open_in_regular_tab",
+                    ),
+                )
+            }
+
+            MenuAction.ShowCFR -> Menu.showCfr.record(NoExtras())
+
+            MenuAction.DismissCFR -> Menu.dismissCfr.record(NoExtras())
+
             MenuAction.InitAction,
             is MenuAction.CustomMenuItemAction,
             is MenuAction.UpdateBookmarkState,
             is MenuAction.UpdateExtensionState,
             is MenuAction.UpdatePinnedState,
             is MenuAction.UpdateWebExtensionBrowserMenuItems,
-            is MenuAction.UpdateWebExtensionPageMenuItems,
             is MenuAction.InstallAddonFailed,
             is MenuAction.InstallAddonSuccess,
             is MenuAction.UpdateInstallAddonInProgress,
             is MenuAction.UpdateShowExtensionsOnboarding,
             is MenuAction.UpdateShowDisabledExtensionsOnboarding,
             is MenuAction.UpdateManageExtensionsMenuItemVisibility,
+            is MenuAction.UpdateAvailableAddons,
             -> Unit
         }
     }

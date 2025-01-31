@@ -8,22 +8,22 @@ add_setup(async function () {
   });
 });
 
-async function removeTabGroup(group) {
-  if (!group.parentNode) {
-    ok(false, "group was already removed");
-    return;
-  }
-  let removePromise = BrowserTestUtils.waitForEvent(group, "TabGroupRemove");
-  group.ownerGlobal.gBrowser.removeTabGroup(group, { animate: false });
-  await removePromise;
-}
-
 function createManyTabs(number) {
   return Array.from({ length: number }, () => {
     return BrowserTestUtils.addTab(gBrowser, "about:blank", {
       skipAnimation: true,
     });
   });
+}
+
+async function waitForAndAcceptGroupPanel(actionCallback) {
+  let tabgroupPanel = document.getElementById("tab-group-editor").panel;
+  let panelShown = BrowserTestUtils.waitForPopupEvent(tabgroupPanel, "shown");
+  let panelHidden = BrowserTestUtils.waitForPopupEvent(tabgroupPanel, "hidden");
+  await actionCallback();
+  await panelShown;
+  EventUtils.synthesizeKey("VK_RETURN");
+  await panelHidden;
 }
 
 add_task(async function test_tabGroupCreateAndAddTab() {
@@ -37,7 +37,7 @@ add_task(async function test_tabGroupCreateAndAddTab() {
   group.addTabs([tab2]);
 
   Assert.equal(group.tabs.length, 2, "group has 2 tabs");
-  Assert.ok(group.tabs.includes(tab2), "tab1 is in group");
+  Assert.ok(group.tabs.includes(tab2), "tab2 is in group");
 
   await removeTabGroup(group);
 });
@@ -53,6 +53,29 @@ add_task(async function test_tabGroupCreateAndAddTabAtPosition() {
   tabs.forEach(t => {
     BrowserTestUtils.removeTab(t);
   });
+});
+
+add_task(async function test_pinned() {
+  let tab1 = BrowserTestUtils.addTab(gBrowser, "about:blank");
+  gBrowser.pinTab(tab1);
+  let group = gBrowser.addTabGroup([tab1]);
+  Assert.ok(
+    !group,
+    "addTabGroup shouldn't create a group when only supplied with pinned tabs"
+  );
+
+  let tab2 = BrowserTestUtils.addTab(gBrowser, "about:blank");
+  group = gBrowser.addTabGroup([tab1, tab2]);
+  Assert.ok(
+    group,
+    "addTabGroup should create a group when supplied with both pinned and non-pinned tabs"
+  );
+
+  Assert.equal(group.tabs.length, 1, "group has only the non-pinned tab");
+  Assert.equal(group.tabs[0], tab2, "tab2 is in group");
+
+  BrowserTestUtils.removeTab(tab1);
+  await removeTabGroup(group);
 });
 
 add_task(async function test_getTabGroups() {
@@ -111,6 +134,7 @@ add_task(async function test_tabGroupUniqueColors() {
 
 add_task(async function test_tabGroupCollapseAndExpand() {
   let tab1 = BrowserTestUtils.addTab(gBrowser, "about:blank");
+  let tab2 = BrowserTestUtils.addTab(gBrowser, "about:blank");
   let group = gBrowser.addTabGroup([tab1]);
 
   Assert.ok(!group.collapsed, "group is expanded by default");
@@ -125,6 +149,11 @@ add_task(async function test_tabGroupCollapseAndExpand() {
   Assert.ok(group.collapsed, "group is collapsed via API");
   gBrowser.selectedTab = group.tabs[0];
   Assert.ok(!group.collapsed, "group is expanded after selecting tab");
+
+  group.collapsed = true;
+  Assert.ok(group.collapsed, "group is collapsed via API");
+  gBrowser.moveTabToGroup(tab2, group);
+  Assert.ok(!group.collapsed, "group is expanded after moving tab into group");
 
   await removeTabGroup(group);
 });
@@ -241,30 +270,162 @@ add_task(async function test_tabGroupCollapseCreatesNewTabIfAllTabsInGroup() {
   await BrowserTestUtils.closeWindow(fgWindow);
 });
 
+add_task(async function test_collapseAllGroups() {
+  // When collapsing a group and no tabs exist outside of collapsed groups, a
+  // new tab should be opened.
+  let fgWindow = await BrowserTestUtils.openNewBrowserWindow();
+
+  Assert.equal(fgWindow.gBrowser.tabs.length, 1, "only one tab exists");
+  let [tab1] = fgWindow.gBrowser.tabs;
+  let tab2 = BrowserTestUtils.addTab(fgWindow.gBrowser, "about:blank", {
+    skipAnimation: true,
+  });
+  let group1 = fgWindow.gBrowser.addTabGroup([tab1]);
+  let group2 = fgWindow.gBrowser.addTabGroup([tab2]);
+
+  Assert.ok(tab1.selected, "tab1 is selected initially");
+  group1.collapsed = true;
+  Assert.ok(tab2.selected, "tab2 is selected after collapsing group1");
+
+  let newTabPromise = BrowserTestUtils.waitForEvent(fgWindow, "TabOpen");
+  group2.collapsed = true;
+  info("Waiting for new tab to open");
+  let { target: newTab } = await newTabPromise;
+  Assert.ok(group2.collapsed, "successfully collapsed group2");
+  Assert.ok(group1.collapsed, "group1 is still collapsed");
+  Assert.ok(
+    newTab.selected,
+    "opened a new tab and selected it after collapsing group2"
+  );
+
+  await BrowserTestUtils.closeWindow(fgWindow);
+});
+
+add_task(async function test_closingLastTabBeforeCollapsedTabGroup() {
+  // If there is one standalone tab that's active and there is a collapsed
+  // tab group, and the user closes the standalone tab, the first tab of
+  // the collapsed tab group should become the active tab (also expanding
+  // the tab group in the process)
+  let fgWindow = await BrowserTestUtils.openNewBrowserWindow();
+
+  Assert.equal(fgWindow.gBrowser.tabs.length, 1, "only one tab exists");
+  let [standaloneTab] = fgWindow.gBrowser.tabs;
+
+  let groupedTab1 = BrowserTestUtils.addTab(fgWindow.gBrowser, "about:blank", {
+    skipAnimation: true,
+  });
+  let groupedTab2 = BrowserTestUtils.addTab(fgWindow.gBrowser, "about:blank", {
+    skipAnimation: true,
+  });
+  let group = fgWindow.gBrowser.addTabGroup([groupedTab1, groupedTab2]);
+  group.collapsed = true;
+
+  fgWindow.gBrowser.selectedTab = standaloneTab;
+
+  let waitForClose = BrowserTestUtils.waitForTabClosing(standaloneTab);
+  BrowserTestUtils.removeTab(standaloneTab);
+  await waitForClose;
+
+  Assert.equal(
+    fgWindow.gBrowser.selectedTab,
+    groupedTab1,
+    "first tab in the group should be the active tab"
+  );
+  Assert.ok(!group.collapsed, "tab group should now be expanded");
+
+  await BrowserTestUtils.closeWindow(fgWindow);
+});
+
+add_task(async function test_closingLastTabAfterCollapsedTabGroup() {
+  // If there is a collapsed tab group followed by a single standalone tab,
+  // and the user closes the standalone tab, the last tab of the collapsed
+  // tab group should become the active tab (also expanding the tab group
+  // in the process)
+  let fgWindow = await BrowserTestUtils.openNewBrowserWindow();
+
+  Assert.equal(fgWindow.gBrowser.tabs.length, 1, "only one tab exists");
+  let [standaloneTab] = fgWindow.gBrowser.tabs;
+
+  let groupedTab1 = BrowserTestUtils.addTab(fgWindow.gBrowser, "about:blank", {
+    skipAnimation: true,
+  });
+  let groupedTab2 = BrowserTestUtils.addTab(fgWindow.gBrowser, "about:blank", {
+    skipAnimation: true,
+  });
+  let group = fgWindow.gBrowser.addTabGroup([groupedTab1, groupedTab2], {
+    insertBefore: standaloneTab,
+  });
+  group.collapsed = true;
+
+  fgWindow.gBrowser.selectedTab = standaloneTab;
+
+  let waitForClose = BrowserTestUtils.waitForTabClosing(standaloneTab);
+  BrowserTestUtils.removeTab(standaloneTab);
+  await waitForClose;
+
+  Assert.equal(
+    fgWindow.gBrowser.selectedTab,
+    groupedTab2,
+    "last tab in the group should be the active tab"
+  );
+  Assert.ok(!group.collapsed, "tab group should now be expanded");
+
+  await BrowserTestUtils.closeWindow(fgWindow);
+});
+
 add_task(async function test_tabUngroup() {
   let extraTab1 = BrowserTestUtils.addTab(gBrowser, "about:blank");
 
-  let groupedTab = BrowserTestUtils.addTab(gBrowser, "about:blank");
-  let group = gBrowser.addTabGroup([groupedTab]);
+  let groupedTab1 = BrowserTestUtils.addTab(gBrowser, "about:blank");
+  let groupedTab2 = BrowserTestUtils.addTab(gBrowser, "about:blank");
+  let group = gBrowser.addTabGroup([groupedTab1, groupedTab2]);
 
   let extraTab2 = BrowserTestUtils.addTab(gBrowser, "about:blank");
+  let group2 = gBrowser.addTabGroup([extraTab2]);
 
-  Assert.equal(groupedTab._tPos, 2, "grouped tab starts in correct position");
-  Assert.equal(groupedTab.group, group, "tab belongs to group");
+  Assert.equal(
+    groupedTab1._tPos,
+    2,
+    "grouped tab 1 starts in correct position"
+  );
+  Assert.equal(
+    groupedTab2._tPos,
+    3,
+    "grouped tab 2 starts in correct position"
+  );
+  Assert.equal(groupedTab1.group, group, "tab 1 belongs to group");
+  Assert.equal(groupedTab2.group, group, "tab 2 belongs to group");
 
-  info("Calling ungroupTabs and waiting for TabGroupRemove event.");
-  let removePromise = BrowserTestUtils.waitForEvent(group, "TabGroupRemove");
+  info("Calling ungroupTabs and waiting for TabGroupRemoved event.");
+  let removePromise = BrowserTestUtils.waitForEvent(group, "TabGroupRemoved");
   group.ungroupTabs();
   await removePromise;
 
   Assert.equal(
-    groupedTab._tPos,
+    groupedTab1._tPos,
     2,
-    "tab is in the same position as before ungroup"
+    "tab 1 is in the same position as before ungroup"
   );
-  Assert.equal(groupedTab.group, null, "tab no longer belongs to group");
+  Assert.equal(
+    groupedTab2._tPos,
+    3,
+    "tab 2 is in the same position as before ungroup"
+  );
+  Assert.equal(groupedTab1.group, null, "tab 1 no longer belongs to group");
+  Assert.equal(groupedTab2.group, null, "tab 2 no longer belongs to group");
+  Assert.equal(
+    groupedTab1.nextElementSibling,
+    groupedTab2,
+    "tab 1 moved before tab 2"
+  );
+  Assert.equal(
+    groupedTab2.nextElementSibling,
+    group2,
+    "tab 2 moved before the next group"
+  );
 
-  BrowserTestUtils.removeTab(groupedTab);
+  BrowserTestUtils.removeTab(groupedTab1);
+  BrowserTestUtils.removeTab(groupedTab2);
   BrowserTestUtils.removeTab(extraTab1);
   BrowserTestUtils.removeTab(extraTab2);
 });
@@ -290,14 +451,14 @@ add_task(async function test_tabGroupDeletesWhenLastTabClosed() {
 
 add_task(async function test_tabGroupMoveToNewWindow() {
   let tabUri = "https://example.com/tab-group-test";
-  let groupedTab = BrowserTestUtils.addTab(gBrowser, tabUri);
+  let groupedTab = await addTab(tabUri);
   let group = gBrowser.addTabGroup([groupedTab], {
     color: "blue",
     label: "test",
   });
 
-  info("Calling adoptTabGroup and waiting for TabGroupRemove event.");
-  let removePromise = BrowserTestUtils.waitForEvent(group, "TabGroupRemove");
+  info("Calling adoptTabGroup and waiting for TabGroupRemoved event.");
+  let removePromise = BrowserTestUtils.waitForEvent(group, "TabGroupRemoved");
 
   let fgWindow = await BrowserTestUtils.openNewBrowserWindow();
   fgWindow.gBrowser.adoptTabGroup(group, 0);
@@ -393,7 +554,7 @@ add_task(async function test_TabGroupEvents() {
     "TabUngrouped fired with correct group"
   );
 
-  let tabGroupRemoved = BrowserTestUtils.waitForEvent(group, "TabGroupRemove");
+  let tabGroupRemoved = BrowserTestUtils.waitForEvent(group, "TabGroupRemoved");
   await removeTabGroup(group);
   await tabGroupRemoved;
 
@@ -439,9 +600,40 @@ add_task(async function test_moveTabBetweenGroups() {
   await removeTabGroup(group2);
 });
 
+add_task(async function test_tabGroupSelect() {
+  let tab1 = BrowserTestUtils.addTab(gBrowser, "about:blank");
+  let tab2 = BrowserTestUtils.addTab(gBrowser, "about:blank");
+  let tab3 = BrowserTestUtils.addTab(gBrowser, "about:blank");
+  let tab1Added = BrowserTestUtils.waitForEvent(tab1, "TabGrouped");
+  let tab2Added = BrowserTestUtils.waitForEvent(tab2, "TabGrouped");
+  let group = gBrowser.addTabGroup([tab1, tab2]);
+  await Promise.allSettled([tab1Added, tab2Added]);
+  gBrowser.selectTabAtIndex(tab3._tPos);
+  Assert.ok(tab3.selected, "Tab 3 is selected");
+  group.select();
+  Assert.ok(group.tabs[0].selected, "First tab is selected");
+  gBrowser.selectTabAtIndex(group.tabs[1]._tPos);
+  Assert.ok(group.tabs[1].selected, "Second tab is selected");
+  group.select();
+  Assert.ok(group.tabs[1].selected, "Second tab is still selected");
+  group.collapsed = true;
+  Assert.ok(group.collapsed, "Group is collapsed");
+  Assert.ok(tab3.selected, "Tab 3 is selected");
+  group.select();
+  Assert.ok(!group.collapsed, "Group is no longer collapsed");
+  Assert.ok(group.tabs[0].selected, "First tab in group is selected");
+
+  await removeTabGroup(group);
+  BrowserTestUtils.removeTab(tab3);
+});
+
 // Context menu tests
 // ---
 
+/**
+ * @param {MozTabbrowserTab} tab
+ * @param {function(Element?, Element?, Element?):void} callback
+ */
 const withTabMenu = async function (tab, callback) {
   const tabContextMenu = document.getElementById("tabContextMenu");
   Assert.equal(
@@ -470,6 +662,21 @@ const withTabMenu = async function (tab, callback) {
 
   tabContextMenu.hidePopup();
 };
+
+/**
+ * @param {MozTabbrowserTab} tab
+ * @param {function(MozTabbrowserTab):void} callback
+ */
+async function withNewTabFromTabMenu(tab, callback) {
+  await withTabMenu(tab, async () => {
+    const newTabPromise = BrowserTestUtils.waitForEvent(document, "TabOpen");
+    const newTabToRight = document.getElementById("context_openANewTab");
+    newTabToRight.click();
+    const { target: newTab } = await newTabPromise;
+    await callback(newTab);
+    BrowserTestUtils.removeTab(newTab);
+  });
+}
 
 /*
  * Tests that the context menu options do not appear if the tab group pref is
@@ -514,16 +721,22 @@ add_task(async function test_tabGroupContextMenuMoveTabToNewGroup() {
     skipAnimation: true,
   });
 
-  await withTabMenu(tab, async (moveTabToNewGroupItem, moveTabToGroupItem) => {
-    Assert.equal(tab.group, null, "tab is not in group");
-    Assert.ok(
-      !moveTabToNewGroupItem.hidden,
-      "moveTabToNewGroupItem is visible"
-    );
-    Assert.ok(moveTabToGroupItem.hidden, "moveTabToGroupItem is hidden");
+  await waitForAndAcceptGroupPanel(
+    async () =>
+      await withTabMenu(
+        tab,
+        async (moveTabToNewGroupItem, moveTabToGroupItem) => {
+          Assert.equal(tab.group, null, "tab is not in group");
+          Assert.ok(
+            !moveTabToNewGroupItem.hidden,
+            "moveTabToNewGroupItem is visible"
+          );
+          Assert.ok(moveTabToGroupItem.hidden, "moveTabToGroupItem is hidden");
 
-    moveTabToNewGroupItem.click();
-  });
+          moveTabToNewGroupItem.click();
+        }
+      )
+  );
 
   Assert.ok(tab.group, "tab is in group");
   Assert.equal(tab.group.label, "", "tab group label is empty");
@@ -553,17 +766,26 @@ add_task(async function test_tabGroupContextMenuMoveTabsToNewGroup() {
 
   let tabToClick = tabs[2];
 
-  await withTabMenu(
-    tabToClick,
-    async (moveTabToNewGroupItem, moveTabToGroupItem) => {
-      Assert.ok(
-        !moveTabToNewGroupItem.hidden,
-        "moveTabToNewGroupItem is visible"
-      );
-      Assert.ok(moveTabToGroupItem.hidden, "moveTabToGroupItem is hidden");
+  await waitForAndAcceptGroupPanel(
+    async () =>
+      await waitForAndAcceptGroupPanel(
+        async () =>
+          await withTabMenu(
+            tabToClick,
+            async (moveTabToNewGroupItem, moveTabToGroupItem) => {
+              Assert.ok(
+                !moveTabToNewGroupItem.hidden,
+                "moveTabToNewGroupItem is visible"
+              );
+              Assert.ok(
+                moveTabToGroupItem.hidden,
+                "moveTabToGroupItem is hidden"
+              );
 
-      moveTabToNewGroupItem.click();
-    }
+              moveTabToNewGroupItem.click();
+            }
+          )
+      )
   );
 
   let group = tabs[0].group;
@@ -594,22 +816,28 @@ add_task(
 
     EventUtils.synthesizeMouseAtCenter(otherTab, {});
 
-    await withTabMenu(
-      tab,
-      async (moveTabToNewGroupItem, moveTabToGroupItem) => {
-        Assert.equal(
-          gBrowser.selectedTabs.includes(TabContextMenu.contextTab),
-          false,
-          "context menu tab is not selected"
-        );
-        Assert.ok(
-          !moveTabToNewGroupItem.hidden,
-          "moveTabToNewGroupItem is visible"
-        );
-        Assert.ok(moveTabToGroupItem.hidden, "moveTabToGroupItem is hidden");
+    await waitForAndAcceptGroupPanel(
+      async () =>
+        await withTabMenu(
+          tab,
+          async (moveTabToNewGroupItem, moveTabToGroupItem) => {
+            Assert.equal(
+              gBrowser.selectedTabs.includes(TabContextMenu.contextTab),
+              false,
+              "context menu tab is not selected"
+            );
+            Assert.ok(
+              !moveTabToNewGroupItem.hidden,
+              "moveTabToNewGroupItem is visible"
+            );
+            Assert.ok(
+              moveTabToGroupItem.hidden,
+              "moveTabToGroupItem is hidden"
+            );
 
-        moveTabToNewGroupItem.click();
-      }
+            moveTabToNewGroupItem.click();
+          }
+        )
     );
 
     Assert.ok(tab.group, "tab is in group");
@@ -642,22 +870,28 @@ add_task(
       );
     });
 
-    await withTabMenu(
-      tab,
-      async (moveTabToNewGroupItem, moveTabToGroupItem) => {
-        Assert.equal(
-          gBrowser.selectedTabs.includes(TabContextMenu.contextTab),
-          false,
-          "context menu tab is not selected"
-        );
-        Assert.ok(
-          !moveTabToNewGroupItem.hidden,
-          "moveTabToNewGroupItem is visible"
-        );
-        Assert.ok(moveTabToGroupItem.hidden, "moveTabToGroupItem is hidden");
+    await waitForAndAcceptGroupPanel(
+      async () =>
+        await withTabMenu(
+          tab,
+          async (moveTabToNewGroupItem, moveTabToGroupItem) => {
+            Assert.equal(
+              gBrowser.selectedTabs.includes(TabContextMenu.contextTab),
+              false,
+              "context menu tab is not selected"
+            );
+            Assert.ok(
+              !moveTabToNewGroupItem.hidden,
+              "moveTabToNewGroupItem is visible"
+            );
+            Assert.ok(
+              moveTabToGroupItem.hidden,
+              "moveTabToGroupItem is hidden"
+            );
 
-        moveTabToNewGroupItem.click();
-      }
+            moveTabToNewGroupItem.click();
+          }
+        )
     );
 
     Assert.ok(tab.group, "tab is in group");
@@ -781,9 +1015,14 @@ add_task(async function test_tabGroupContextMenuMoveTabToGroupNewGroup() {
     skipAnimation: true,
   });
 
-  await withTabMenu(tab, async (_, moveTabToGroupItem) => {
-    moveTabToGroupItem.querySelector("#context_moveTabToGroupNewGroup").click();
-  });
+  await waitForAndAcceptGroupPanel(
+    async () =>
+      await withTabMenu(tab, async (_, moveTabToGroupItem) => {
+        moveTabToGroupItem
+          .querySelector("#context_moveTabToGroupNewGroup")
+          .click();
+      })
+  );
 
   Assert.ok(tab.group, "tab is in group");
   Assert.notEqual(
@@ -818,6 +1057,32 @@ add_task(async function test_tabGroupContextMenuMoveTabToExistingGroup() {
 
   await removeTabGroup(group);
 });
+
+/*
+ * Same as above, but for groups in different windows
+ */
+add_task(
+  async function test_tabGroupContextMenuMoveTabToExistingGroupInDifferentWindow() {
+    let otherWindow = await BrowserTestUtils.openNewBrowserWindow();
+    let otherTab = await addTabTo(otherWindow.gBrowser, "about:blank", {
+      skipAnimation: true,
+    });
+    let group = otherWindow.gBrowser.addTabGroup([otherTab]);
+
+    let tab = await addTab("about:blank", {
+      skipAnimation: true,
+    });
+
+    let tabGrouped = BrowserTestUtils.waitForEvent(otherWindow, "TabGrouped");
+    await withTabMenu(tab, async (_, moveTabToGroupItem) => {
+      moveTabToGroupItem.querySelector(`[tab-group-id="${group.id}"]`).click();
+    });
+    await tabGrouped;
+    Assert.equal(group.tabs.length, 2, "group has 2 tabs");
+
+    await BrowserTestUtils.closeWindow(otherWindow);
+  }
+);
 
 /*
  * Tests that when groups exist, and the context menu tab has a group,
@@ -1036,7 +1301,14 @@ add_task(async function test_removeFromGroupForSingleTab() {
 add_task(async function test_removeFromGroupForMultipleTabs() {
   // initial tab strip: [group1, group1, group1, none, none, group2, group2, none, group3, none]
   let tabs = createManyTabs(10);
+  [tabs[0], tabs[1], tabs[2]].forEach(t => {
+    gBrowser.addToMultiSelectedTabs(t);
+    ok(t.multiselected, "added tab to mutliselection");
+  });
   gBrowser.addTabGroup([tabs[0], tabs[1], tabs[2]], { insertBefore: tabs[0] });
+  [tabs[0], tabs[1], tabs[2]].forEach(t => {
+    ok(!t.multiselected, "tab no longer multiselected after adding to group");
+  });
   gBrowser.addTabGroup([tabs[5], tabs[6]], { insertBefore: tabs[5] });
   gBrowser.addTabGroup([tabs[8]], { insertBefore: tabs[8] });
 
@@ -1082,6 +1354,160 @@ add_task(async function test_removeFromGroupForMultipleTabs() {
   });
 });
 
+// Context menu tests: "new tab to right" option
+// ---
+
+/**
+ * Tests that the "new tab to right" context menu option will create the new
+ * tab inside of the same tab group as the context menu tab when the insertion
+ * point is between two tabs within the same tab group
+ */
+add_task(async function test_newTabToRightInsideGroup() {
+  let [tab1, tab2, tab3] = createManyTabs(3);
+  let group = gBrowser.addTabGroup([tab1, tab2, tab3]);
+
+  await withNewTabFromTabMenu(tab2, newTab => {
+    Assert.equal(newTab.group, group, "new tab should be in the tab group");
+  });
+
+  await removeTabGroup(group);
+});
+
+/**
+ * Tests that the "new tab to right" context menu option will create the new
+ * tab inside of the same tab group as the context menu tab when the context
+ * menu tab is the last tab in the tab group
+ */
+add_task(async function test_newTabToRightAtEndOfGroup() {
+  let [tab1, tab2, tab3] = createManyTabs(3);
+  let group = gBrowser.addTabGroup([tab1, tab2, tab3]);
+
+  await withNewTabFromTabMenu(tab3, newTab => {
+    Assert.equal(newTab.group, group, "new tab should be in the tab group");
+  });
+
+  await removeTabGroup(group);
+});
+
+/**
+ * Tests that the "new tab to right" context menu option will create the new
+ * tab outside of any tab group when then context menu tab is to the left of
+ * a tab that is inside of a tab group
+ */
+add_task(async function test_newTabToRightBeforeGroup() {
+  let [tab1, tab2, tab3] = createManyTabs(3);
+  let group = gBrowser.addTabGroup([tab2, tab3], { insertBefore: tab2 });
+
+  await withNewTabFromTabMenu(tab1, async newTab => {
+    Assert.ok(!newTab.group, "new tab should not be in a tab group");
+  });
+
+  await removeTabGroup(group);
+  await BrowserTestUtils.removeTab(tab1);
+});
+
+// Opening new tabs from links around/within tab groups
+// ---
+
+const PAGE_WITH_LINK_URI =
+  "https://example.com/browser/browser/components/tabbrowser/test/browser/tabs/file_new_tab_page.html";
+const LINK_ID_SELECTOR = "#link_to_example_com";
+
+/**
+ * @returns {Promise<MozTabbrowserTab>}
+ */
+async function getNewTabFromLink() {
+  await SpecialPowers.pushPrefEnv({
+    set: [
+      ["browser.tabs.opentabfor.middleclick", true],
+      ["browser.tabs.insertRelatedAfterCurrent", true],
+    ],
+  });
+
+  let newTabPromise = BrowserTestUtils.waitForNewTab(gBrowser, null, true);
+  await BrowserTestUtils.synthesizeMouseAtCenter(
+    LINK_ID_SELECTOR,
+    { button: 1 },
+    gBrowser.selectedBrowser
+  );
+  let newTab = await newTabPromise;
+
+  return newTab;
+}
+
+/**
+ * Tests that for a tab inside of a tab group, opening a link on the
+ * page in a new tab will open the new tab inside the tab group
+ */
+add_task(async function test_openLinkInNewTabInsideGroup() {
+  let tab1 = BrowserTestUtils.addTab(gBrowser, "about:blank", {
+    skipAnimation: true,
+  });
+  let tabWithLink = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    PAGE_WITH_LINK_URI
+  );
+  let tab2 = BrowserTestUtils.addTab(gBrowser, "about:blank", {
+    skipAnimation: true,
+  });
+  let group = gBrowser.addTabGroup([tab1, tabWithLink, tab2]);
+
+  const newTab = await getNewTabFromLink();
+  Assert.equal(
+    newTab.group,
+    group,
+    "new tab should be in the same tab group as the opening page"
+  );
+
+  await removeTabGroup(group);
+});
+
+/**
+ * Tests that for the last tab inside of a tab group, opening a link on the
+ * page in a new tab will open the new tab inside the tab group
+ */
+add_task(async function test_openLinkInNewTabAtEndOfGroup() {
+  let [tab1, tab2] = createManyTabs(2);
+  let tabWithLink = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    PAGE_WITH_LINK_URI
+  );
+  let group = gBrowser.addTabGroup([tab1, tab2, tabWithLink]);
+
+  const newTab = await getNewTabFromLink();
+  Assert.equal(
+    newTab.group,
+    group,
+    "new tab should be in the same tab group as the opening page"
+  );
+
+  await removeTabGroup(group);
+});
+
+/**
+ * Tests that for a standalone tab to the left of a tab group, opening a link
+ * on the page in a new tab will NOT open the new tab inside the tab group
+ */
+add_task(async function test_openLinkInNewTabBeforeGroup() {
+  let tabWithLink = await BrowserTestUtils.openNewForegroundTab(
+    gBrowser,
+    PAGE_WITH_LINK_URI
+  );
+  let [tab1, tab2] = createManyTabs(2);
+  let group = gBrowser.addTabGroup([tab1, tab2]);
+  gBrowser.selectedTab = tabWithLink;
+
+  const newTab = await getNewTabFromLink();
+  Assert.ok(
+    !newTab.group,
+    "new tab should not be in a group because the opening tab was not in a group"
+  );
+
+  await removeTabGroup(group);
+  BrowserTestUtils.removeTab(tabWithLink);
+  BrowserTestUtils.removeTab(newTab);
+});
+
 /*
  * Tests that gBrowser.tabs does not contain tab groups after tabs have been
  * moved between tab groups. Resolves bug1920731.
@@ -1121,8 +1547,13 @@ add_task(async function test_tabGroupCreatePanel() {
   let tab = BrowserTestUtils.addTab(gBrowser, "about:blank");
 
   let panelShown = BrowserTestUtils.waitForPopupEvent(tabgroupPanel, "shown");
-  let group = gBrowser.addTabGroup([tab], { color: "cyan", label: "Food" });
+  let group = gBrowser.addTabGroup([tab], {
+    color: "cyan",
+    label: "Food",
+    showCreateUI: true,
+  });
   await panelShown;
+  Assert.equal(tabgroupPanel.state, "open", "Create panel is visible");
   Assert.ok(tabgroupEditor.createMode, "Group editor is in create mode");
   // Edit panel should be populated with correct group details
   Assert.equal(
@@ -1147,8 +1578,18 @@ add_task(async function test_tabGroupCreatePanel() {
   await panelHidden;
   Assert.ok(!tab.group, "Tab is ungrouped after hitting Cancel");
 
+  // Group should be removed after hitting Esc
+  panelHidden = BrowserTestUtils.waitForPopupEvent(tabgroupPanel, "hidden");
+  EventUtils.synthesizeKey("KEY_Escape");
+  await panelHidden;
+  Assert.ok(!tab.group, "Tab is ungrouped after hitting Esc");
+
   panelShown = BrowserTestUtils.waitForPopupEvent(tabgroupPanel, "shown");
-  group = gBrowser.addTabGroup([tab], { color: "cyan", label: "Food" });
+  group = gBrowser.addTabGroup([tab], {
+    color: "cyan",
+    label: "Food",
+    showCreateUI: true,
+  });
   await panelShown;
 
   // Panel inputs should work correctly
@@ -1210,26 +1651,27 @@ add_task(async function test_tabGroupCreatePanel() {
   Assert.equal(tabgroupPanel.state, "closed", "Tabgroup edit panel is closed");
   Assert.equal(group.label, "Shopping");
   Assert.equal(group.color, "red");
-  gBrowser.removeTabGroup(group, { animate: false });
+
+  await rightClickGroupLabel();
+  info("Removing group via delete button");
+  panelHidden = BrowserTestUtils.waitForPopupEvent(tabgroupPanel, "hidden");
+  let removePromise = BrowserTestUtils.waitForEvent(group, "TabGroupRemoved");
+  tabgroupPanel.querySelector("#tabGroupEditor_deleteGroup").click();
+  await Promise.all([panelHidden, removePromise]);
 });
 
-async function createTabGroupAndOpenEditPanel() {
+async function createTabGroupAndOpenEditPanel(tabs = []) {
   let tabgroupEditor = document.getElementById("tab-group-editor");
   let tabgroupPanel = tabgroupEditor.panel;
-  let tab = BrowserTestUtils.addTab(gBrowser, "about:blank", {
-    animate: false,
-  });
+  if (!tabs.length) {
+    let tab = BrowserTestUtils.addTab(gBrowser, "about:blank", {
+      animate: false,
+    });
+    tabs = [tab];
+  }
+  let group = gBrowser.addTabGroup(tabs, { color: "cyan", label: "Food" });
 
   let panelShown = BrowserTestUtils.waitForPopupEvent(tabgroupPanel, "shown");
-  let group = gBrowser.addTabGroup([tab], { color: "cyan", label: "Food" });
-  await panelShown;
-
-  // Panel dismissed after clicking Create and group remains
-  let panelHidden = BrowserTestUtils.waitForPopupEvent(tabgroupPanel, "hidden");
-  tabgroupPanel.querySelector("#tab-group-editor-button-create").click();
-  await panelHidden;
-
-  panelShown = BrowserTestUtils.waitForPopupEvent(tabgroupPanel, "shown");
   EventUtils.synthesizeMouseAtCenter(
     group.querySelector(".tab-group-label"),
     { type: "contextmenu", button: 2 },
@@ -1237,13 +1679,14 @@ async function createTabGroupAndOpenEditPanel() {
   );
   return new Promise(resolve => {
     panelShown.then(() => {
-      resolve({ tabgroupEditor, tabgroupPanel, tab, group });
+      resolve({ tabgroupEditor, group });
     });
   });
 }
 
 add_task(async function test_tabGroupPanelAddTab() {
-  let { tabgroupPanel, group } = await createTabGroupAndOpenEditPanel();
+  let { tabgroupEditor, group } = await createTabGroupAndOpenEditPanel();
+  let tabgroupPanel = tabgroupEditor.panel;
 
   let addNewTabButton = tabgroupPanel.querySelector(
     "#tabGroupEditor_addNewTabInGroup"
@@ -1262,7 +1705,9 @@ add_task(async function test_tabGroupPanelAddTab() {
 });
 
 add_task(async function test_tabGroupPanelUngroupTabs() {
-  let { tabgroupPanel, tab, group } = await createTabGroupAndOpenEditPanel();
+  let { tabgroupEditor, group } = await createTabGroupAndOpenEditPanel();
+  let tabgroupPanel = tabgroupEditor.panel;
+  let tab = group.tabs[0];
   let ungroupTabsButton = tabgroupPanel.querySelector(
     "#tabGroupEditor_ungroupTabs"
   );
@@ -1274,4 +1719,185 @@ add_task(async function test_tabGroupPanelUngroupTabs() {
   Assert.ok(!tab.group, "Tab is no longer grouped");
 
   BrowserTestUtils.removeTab(tab);
+});
+
+/**
+ * Tests that the "move group to new window" correctly moves a group
+ * to a new window, preserving tab selection and order.
+ */
+add_task(async function test_moveGroupToNewWindow() {
+  let tabs = [
+    BrowserTestUtils.addTab(gBrowser, "about:cache", {
+      skipAnimation: true,
+    }),
+    BrowserTestUtils.addTab(gBrowser, "about:robots", {
+      skipAnimation: true,
+    }),
+    BrowserTestUtils.addTab(gBrowser, "about:mozilla", {
+      skipAnimation: true,
+    }),
+  ];
+  gBrowser.selectedTab = tabs[1];
+  let assertTabsInCorrectOrder = tabsToCheck => {
+    Assert.equal(
+      tabsToCheck[0].linkedBrowser.currentURI.spec,
+      "about:cache",
+      "about:cache is first"
+    );
+    Assert.equal(
+      tabsToCheck[1].linkedBrowser.currentURI.spec,
+      "about:robots",
+      "about:robots is second"
+    );
+    Assert.equal(
+      tabsToCheck[2].linkedBrowser.currentURI.spec,
+      "about:mozilla",
+      "about:mozilla is third"
+    );
+  };
+  let { group } = await createTabGroupAndOpenEditPanel(tabs);
+
+  let newWindowOpened = BrowserTestUtils.waitForNewWindow();
+  document.getElementById("tabGroupEditor_moveGroupToNewWindow").click();
+  let newWin = await newWindowOpened;
+  Assert.ok(newWin != window, "Group is moved to new window");
+
+  let movedTabs = newWin.gBrowser.tabs;
+  let movedGroup = movedTabs[0].group;
+  Assert.equal(movedGroup.id, group.id, "Tab is in original group");
+
+  Assert.equal(
+    newWin.gBrowser.selectedTab,
+    newWin.gBrowser.tabs[1],
+    "Second tab remains selected"
+  );
+  assertTabsInCorrectOrder(newWin.gBrowser.tabs);
+  let tabgroupEditor = newWin.document.getElementById("tab-group-editor");
+  let panelOpen = BrowserTestUtils.waitForPopupEvent(
+    tabgroupEditor.panel,
+    "shown"
+  );
+  tabgroupEditor.openEditModal(movedGroup);
+  await panelOpen;
+
+  let moveGroupButton = newWin.document.getElementById(
+    "tabGroupEditor_moveGroupToNewWindow"
+  );
+  Assert.ok(
+    moveGroupButton.disabled,
+    "Button is disabled when group is only thing in window"
+  );
+
+  let panelHidden = BrowserTestUtils.waitForPopupEvent(
+    tabgroupEditor.panel,
+    "hidden"
+  );
+  tabgroupEditor.panel.hidePopup();
+  await panelHidden;
+
+  BrowserTestUtils.addTab(newWin.gBrowser, "about:blank", {
+    skipAnimation: true,
+  });
+  panelOpen = BrowserTestUtils.waitForPopupEvent(tabgroupEditor.panel, "shown");
+  tabgroupEditor.openEditModal(movedGroup);
+  await panelOpen;
+  Assert.ok(
+    !moveGroupButton.disabled,
+    "Button is enabled again when additional tab present"
+  );
+
+  await BrowserTestUtils.closeWindow(newWin, { animate: false });
+});
+
+add_task(async function test_saveAndCloseGroup() {
+  let { tabgroupEditor, group } = await createTabGroupAndOpenEditPanel();
+  let tabgroupPanel = tabgroupEditor.panel;
+  let tab = group.tabs[0];
+  let saveAndCloseGroupButton = tabgroupPanel.querySelector(
+    "#tabGroupEditor_saveAndCloseGroup"
+  );
+
+  let groupMatch = gBrowser.getTabGroupById(group.id);
+  Assert.ok(groupMatch, "Group exists in browser");
+
+  let events = [
+    BrowserTestUtils.waitForPopupEvent(tabgroupPanel, "hidden"),
+    BrowserTestUtils.waitForEvent(group, "TabGroupRemoved"),
+  ];
+  saveAndCloseGroupButton.click();
+  await Promise.all(events);
+
+  groupMatch = gBrowser.getTabGroupById(group.id);
+  Assert.ok(!groupMatch, "Group was removed from browser");
+  let savedGroupMatch = SessionStore.getSavedTabGroup(group.id);
+  Assert.ok(savedGroupMatch, "Group is in savedGroups");
+
+  SessionStore.forgetSavedTabGroup(group.id);
+
+  BrowserTestUtils.removeTab(tab);
+});
+
+add_task(async function test_pinningInteractionsWithTabGroups() {
+  const tabs = createManyTabs(3);
+  let group = gBrowser.addTabGroup(tabs, { insertBefore: gBrowser.tabs[0] });
+  const workingTab = tabs[1];
+
+  Assert.equal(workingTab.group, group, "tab is in group");
+  gBrowser.pinTab(workingTab);
+  Assert.ok(!workingTab.group, "pinned tab is no longer in the tab group");
+  Assert.equal(
+    group.previousElementSibling,
+    workingTab,
+    "pinned tab should be before the tab group"
+  );
+
+  gBrowser.unpinTab(workingTab);
+  Assert.ok(!workingTab.group, "unpinned tab is still not in the tab group");
+  Assert.equal(
+    group.previousElementSibling,
+    workingTab,
+    "unpinned tab is still before before the tab group"
+  );
+
+  const moreTabs = createManyTabs(5);
+  moreTabs.forEach(tab => gBrowser.pinTab(tab));
+  Assert.ok(
+    !moreTabs.some(tab => !!tab.group),
+    "none of the new pinned tabs are in the tab group"
+  );
+
+  const firstPinnedTabToUnpin = gBrowser.tabs[0];
+  const lastPinnedTab = gBrowser.tabs[gBrowser.pinnedTabCount - 1];
+  gBrowser.unpinTab(firstPinnedTabToUnpin);
+  Assert.ok(
+    !firstPinnedTabToUnpin.group,
+    "unpinned tab is not in the tab group"
+  );
+  Assert.equal(
+    lastPinnedTab.nextElementSibling,
+    firstPinnedTabToUnpin,
+    "unpinned tab is the first tab after all of the pinned tabs"
+  );
+
+  moreTabs.concat(tabs).forEach(tab => BrowserTestUtils.removeTab(tab));
+});
+
+add_task(async function test_bug1936015() {
+  // Checks that groups are properly deleted if the group was created before
+  // the user switches between vertical and horizontal tabs.
+  const tabs = createManyTabs(3);
+  let group = gBrowser.addTabGroup(tabs);
+
+  SpecialPowers.pushPrefEnv({
+    set: [
+      ["sidebar.revamp", true],
+      ["sidebar.verticalTabs", true],
+    ],
+  });
+
+  await removeTabGroup(group);
+
+  Assert.ok(!group.parentNode, "Group has been fully removed from DOM");
+
+  await SpecialPowers.popPrefEnv();
 });

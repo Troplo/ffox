@@ -661,6 +661,128 @@ newtab:
     send_in_pings:
       - newtab
 
+  sections_impression:
+    type: event
+    description: >
+      Recorded when a section is viewport and triggers an impression event
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1927916
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1938215
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1927916
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - nbarrett@mozilla.com
+      - mcrawford@mozilla.com
+    expires: never
+    extra_keys:
+      newtab_visit_id: *newtab_visit_id
+      section:
+        description: >
+          section that had impression event
+        type: string
+      section_position:
+        description: >
+          position of section on newtab
+        type: string
+      is_secton_followed:
+        description: >
+          If click belongs in a section, if that section is followed
+        type: boolean
+    send_in_pings:
+      - newtab
+
+  sections_follow_section:
+    type: event
+    description: >
+      Recorded when a section is followed
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1932191
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1932191
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - mcrawford@mozilla.com
+    expires: never
+    extra_keys:
+      newtab_visit_id: *newtab_visit_id
+      section:
+        description: >
+          section that had impression event
+        type: string
+      section_position:
+        description: >
+          position of section on newtab
+        type: string
+      event_source:
+        description: >
+          Where the source of the event originated ("button", "context menu", etc.)
+        type: string
+    send_in_pings:
+      - newtab
+
+  sections_unfollow_section:
+    type: event
+    description: >
+      Recorded when a section is unfollowed
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1932191
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1932191
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - mcrawford@mozilla.com
+    expires: never
+    extra_keys:
+      newtab_visit_id: *newtab_visit_id
+      section:
+        description: >
+          section that had impression event
+        type: string
+      section_position:
+        description: >
+          position of section on newtab
+        type: string
+      event_source:
+        description: >
+          Where the source of the event originated ("button", "context menu", etc.)
+        type: string
+    send_in_pings:
+      - newtab
+
+  sections_block_section:
+    type: event
+    description: >
+      Recorded when a section is blocked
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1932191
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1932191
+    data_sensitivity:
+      - interaction
+    notification_emails:
+      - mcrawford@mozilla.com
+    expires: never
+    extra_keys:
+      newtab_visit_id: *newtab_visit_id
+      section:
+        description: >
+          section that had impression event
+        type: string
+      section_position:
+        description: >
+          position of section on newtab
+        type: string
+      event_source:
+        description: >
+          Where the source of the event originated ("button", "context menu", etc.)
+        type: string
+    send_in_pings:
+      - newtab
+
 newtab.search:
   enabled:
     lifetime: application
@@ -1081,6 +1203,7 @@ pocket:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1817105
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1854245
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1862670
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1937200
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1786612
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1817105#c11
@@ -1121,10 +1244,17 @@ pocket:
       scheduled_corpus_item_id: &scheduled_corpus_item_id
         description: >
           A content identifier.
-          For organic Pocket recommendations it is an opaque id produced by
-          Pocket's recommendation systems.
-          For sponsored Pocket content it is Kevel's "ad ID".
+          For organic Newtab recommendations it is an opaque id produced by
+          Newtab's recommendation systems that corresponds uniquely to
+          a piece of content scheduled for a specific day on a specific surface.
           This is the replacement for tile_id.
+        type: string
+      corpus_item_id: &corpus_item_id
+        description: >
+          A content identifier.
+          For organic Newtab recommendations it is an opaque id produced by
+          Newtab's recommendation systems that corresponds uniquely to the URL.
+          This is the replacement for tile_id and scheduled_corpus_item_id.
         type: string
       received_rank: &received_rank
         description: The rank or order of the recommendation at the time it was sent to the client.
@@ -1143,6 +1273,18 @@ pocket:
         description: >
           Where the article card is in the list component
         type: boolean
+      section:
+        description: >
+          If click belongs in a section, the name of the section
+        type: string
+      section_position:
+        description: >
+          If click belongs in a section, the numberic position of the section
+        type: string
+      is_secton_followed:
+        description: >
+          If click belongs in a section, if that section is followed
+        type: boolean
     send_in_pings:
       - newtab
 
@@ -1157,6 +1299,7 @@ pocket:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1817105
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1854245
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1862670
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1937200
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1786612
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1817105#c11
@@ -1170,6 +1313,7 @@ pocket:
       - najiang@mozilla.com
       - lina@mozilla.com
       - sdowne@mozilla.com
+      - mcrawford@mozilla.ccocm
     expires: never
     extra_keys:
       newtab_visit_id: *newtab_visit_id
@@ -1179,6 +1323,7 @@ pocket:
       recommendation_id: *recommendation_id
       tile_id: *pocket_tile_id
       scheduled_corpus_item_id: *scheduled_corpus_item_id
+      corpus_item_id: *corpus_item_id
       received_rank: *received_rank
       recommended_at: *recommended_at
       matches_selected_topic:
@@ -1197,6 +1342,18 @@ pocket:
         description: >
           Where the article card is in the list component
         type: boolean
+      section:
+        description: >
+          If click belongs in a section, the name of the section
+        type: string
+      section_position:
+        description: >
+          If click belongs in a section, the numberic position of the section
+        type: string
+      is_secton_followed:
+        description: >
+          If click belongs in a section, if that section is followed
+        type: boolean
     send_in_pings:
       - newtab
 
@@ -1206,12 +1363,14 @@ pocket:
       Recorded when a pocket tile is dismissed.
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1786612
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1937200
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1786612
     data_sensitivity:
       - interaction
     notification_emails:
       - sdowne@mozilla.com
+      - mcrawford@mozilla.com
     expires: never
     extra_keys:
       newtab_visit_id: *newtab_visit_id
@@ -1221,11 +1380,24 @@ pocket:
       recommendation_id: *recommendation_id
       tile_id: *pocket_tile_id
       scheduled_corpus_item_id: *scheduled_corpus_item_id
+      corpus_item_id: *corpus_item_id
       received_rank: *received_rank
       recommended_at: *recommended_at
       is_list_card:
         description: >
           Where the article card is in the list component
+        type: boolean
+      section:
+        description: >
+          If click belongs in a section, the name of the section
+        type: string
+      section_position:
+        description: >
+          If click belongs in a section, the numberic position of the section
+        type: string
+      is_secton_followed:
+        description: >
+          If click belongs in a section, if that section is followed
         type: boolean
     send_in_pings:
       - newtab
@@ -1242,6 +1414,7 @@ pocket:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1817105
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1854245
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1862670
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1937200
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1786612
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1817105#c11
@@ -1264,6 +1437,7 @@ pocket:
       recommendation_id: *recommendation_id
       tile_id: *pocket_tile_id
       scheduled_corpus_item_id: *scheduled_corpus_item_id
+      corpus_item_id: *corpus_item_id
       received_rank: *received_rank
       recommended_at: *recommended_at
       topic:
@@ -1282,7 +1456,18 @@ pocket:
         description: >
           Where the article card is in the list component
         type: boolean
-
+      section:
+        description: >
+          If click belongs in a section, the name of the section
+        type: string
+      section_position:
+        description: >
+          If click belongs in a section, the numberic position of the section
+        type: string
+      is_secton_followed:
+        description: >
+          If click belongs in a section, if that section is followed
+        type: boolean
     send_in_pings:
       - newtab
 
@@ -1386,6 +1571,7 @@ pocket:
       options in the context menu.
     bugs:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1902099
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1937200
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1902099
     data_sensitivity:
@@ -1406,6 +1592,7 @@ pocket:
           If the user clicked thumbs down.
         type: boolean
       scheduled_corpus_item_id: *scheduled_corpus_item_id
+      corpus_item_id: *corpus_item_id
       received_rank: *received_rank
       recommended_at: *recommended_at
       topic:
@@ -1414,6 +1601,18 @@ pocket:
       is_list_card:
         description: >
           Where the article card is in the list component
+        type: boolean
+      section:
+        description: >
+          If event belongs in a section, the name of the section
+        type: string
+      section_position:
+        description: >
+          If event belongs in a section, the numberic position of the section
+        type: string
+      is_secton_followed:
+        description: >
+          If event belongs in a section, if that section is followed
         type: boolean
     send_in_pings:
       - newtab
@@ -3011,3 +3210,75 @@ activity_stream:
     expires: never
     extra_keys: *activity_stream_event_extra
     telemetry_mirror: Activity_stream_Event_Unpin
+
+deletion.request:
+  impression_id:
+    type: string
+    description: >
+      An identifier used by user interaction pings in Pocket/newtab and
+      Messaging System.
+      This metric was generated to correspond to the Legacy Telemetry
+      scalar deletion.request.impression_id.
+    bugs:
+      - https://bugzil.la/1602064
+    data_reviews:
+      - https://bugzil.la/1602064
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings: ["deletion-request"]
+    telemetry_mirror: DELETION_REQUEST_IMPRESSION_ID
+
+  context_id:
+    type: string
+    description: >
+      An identifier to identify users for Contextual Services user
+      interaction pings.
+      This metric was generated to correspond to the Legacy Telemetry
+      scalar deletion.request.context_id.
+    bugs:
+      - https://bugzil.la/1729474
+    data_reviews:
+      - https://bugzil.la/1729474
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    send_in_pings: ["deletion-request"]
+    telemetry_mirror: DELETION_REQUEST_CONTEXT_ID
+
+contextual.services.topsites:
+  impression:
+    type: labeled_counter
+    description: >
+      A keyed uint recording how many times the user has viewed the
+      sponsored TopSites on the newtab page. The key is a combination of
+      the source and the placement of the TopSites tile (1-based). such as
+      'urlbar_1', 'newtab_2'.
+      This metric was generated to correspond to the Legacy Telemetry
+      scalar contextual.services.topsites.impression.
+    bugs:
+      - https://bugzil.la/1688698
+    data_reviews:
+      - https://bugzil.la/1688698
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    telemetry_mirror: CONTEXTUAL_SERVICES_TOPSITES_IMPRESSION
+
+  click:
+    type: labeled_counter
+    description: >
+      A keyed uint recording how many times the user has clicked on the
+      sponsored TopSites on the newtab page. The key is a combination of
+      the source and the placement of the TopSites tile (1-based). such as
+      'urlbar_1', 'newtab_2'.
+      This metric was generated to correspond to the Legacy Telemetry
+      scalar contextual.services.topsites.click.
+    bugs:
+      - https://bugzil.la/1688698
+    data_reviews:
+      - https://bugzil.la/1688698
+    notification_emails:
+      - najiang@mozilla.com
+    expires: never
+    telemetry_mirror: CONTEXTUAL_SERVICES_TOPSITES_CLICK

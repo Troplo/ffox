@@ -38,7 +38,7 @@
 
 #ifdef XP_WIN
 #  include "mozilla/layers/D3D11ShareHandleImage.h"
-#  include "mozilla/layers/D3D11TextureIMFSampleImage.h"
+#  include "mozilla/layers/D3D11ZeroCopyTextureImage.h"
 #  include "mozilla/layers/D3D11YCbCrImage.h"
 #endif
 
@@ -724,7 +724,7 @@ GLBlitHelper::GLBlitHelper(GLContext* const gl)
         }                                                                    \n\
     ";
   const char* const parts[] = {mDrawBlitProg_VersionLine.get(), kVertSource};
-  mGL->fShaderSource(mDrawBlitProg_VertShader, ArrayLength(parts), parts,
+  mGL->fShaderSource(mDrawBlitProg_VertShader, std::size(parts), parts,
                      nullptr);
   mGL->fCompileShader(mDrawBlitProg_VertShader);
 }
@@ -966,9 +966,9 @@ bool GLBlitHelper::BlitImageToFramebuffer(layers::Image* const srcImage,
     case ImageFormat::D3D11_SHARE_HANDLE_TEXTURE:
       return BlitImage(static_cast<layers::D3D11ShareHandleImage*>(srcImage),
                        destSize, destOrigin);
-    case ImageFormat::D3D11_TEXTURE_IMF_SAMPLE:
+    case ImageFormat::D3D11_TEXTURE_ZERO_COPY:
       return BlitImage(
-          static_cast<layers::D3D11TextureIMFSampleImage*>(srcImage), destSize,
+          static_cast<layers::D3D11ZeroCopyTextureImage*>(srcImage), destSize,
           destOrigin);
     case ImageFormat::D3D9_RGB32_TEXTURE:
       return false;  // todo
@@ -976,7 +976,7 @@ bool GLBlitHelper::BlitImageToFramebuffer(layers::Image* const srcImage,
       return false;
 #else
     case ImageFormat::D3D11_SHARE_HANDLE_TEXTURE:
-    case ImageFormat::D3D11_TEXTURE_IMF_SAMPLE:
+    case ImageFormat::D3D11_TEXTURE_ZERO_COPY:
     case ImageFormat::D3D9_RGB32_TEXTURE:
     case ImageFormat::DCOMP_SURFACE:
       MOZ_ASSERT(false);
@@ -1617,7 +1617,7 @@ template <size_t N>
 static void PushUnorm(uint32_t* const out, const float inVal) {
   const uint32_t mask = (1 << N) - 1;
   auto fval = inVal;
-  fval = std::max(0.0f, std::min(fval, 1.0f));
+  fval = std::clamp(fval, 0.0f, 1.0f);
   fval *= mask;
   fval = roundf(fval);
   auto ival = static_cast<uint32_t>(fval);

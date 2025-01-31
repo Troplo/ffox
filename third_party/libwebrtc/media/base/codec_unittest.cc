@@ -10,13 +10,18 @@
 
 #include "media/base/codec.h"
 
-#include <tuple>
+#include <optional>
+#include <string>
+#include <vector>
 
-#include "api/video_codecs/av1_profile.h"
+#include "api/media_types.h"
+#include "api/rtp_parameters.h"
 #include "api/video_codecs/h264_profile_level_id.h"
+#include "api/video_codecs/sdp_video_format.h"
 #include "api/video_codecs/vp9_profile.h"
+#include "media/base/media_constants.h"
 #include "modules/video_coding/codecs/h264/include/h264.h"
-#include "rtc_base/gunit.h"
+#include "test/gtest.h"
 
 using cricket::Codec;
 using cricket::FeedbackParam;
@@ -62,7 +67,7 @@ TEST(CodecTest, TestCodecOperators) {
   EXPECT_TRUE(c0 != c1);
 
   TestCodec c5;
-  TestCodec c6(0, "", 0);
+  TestCodec c6(Codec::kIdNotSet, "", 0);
   EXPECT_TRUE(c5 == c6);
 }
 
@@ -415,8 +420,8 @@ TEST(CodecTest, TestH265CodecMatches) {
     Codec c_level_id_4 = cricket::CreateVideoCodec(95, cricket::kH265CodecName);
     c_level_id_4.params[cricket::kH265FmtpLevelId] = kLevel4;
 
-    // Does not match since different level-ids are specified.
-    EXPECT_FALSE(c_ptl_blank.Matches(c_level_id_4));
+    // Matches since we ignore level-id when matching H.265 codecs.
+    EXPECT_TRUE(c_ptl_blank.Matches(c_level_id_4));
   }
 
   {
@@ -555,7 +560,7 @@ TEST(CodecTest, TestToCodecParameters) {
   EXPECT_EQ(cricket::MEDIA_TYPE_VIDEO, codec_params_1.kind);
   EXPECT_EQ("V", codec_params_1.name);
   EXPECT_EQ(cricket::kVideoCodecClockrate, codec_params_1.clock_rate);
-  EXPECT_EQ(absl::nullopt, codec_params_1.num_channels);
+  EXPECT_EQ(std::nullopt, codec_params_1.num_channels);
   ASSERT_EQ(1u, codec_params_1.parameters.size());
   EXPECT_EQ("p1", codec_params_1.parameters.begin()->first);
   EXPECT_EQ("v1", codec_params_1.parameters.begin()->second);
@@ -634,4 +639,11 @@ TEST(CodecTest, H264CostrainedBaselineNotAddedIfAlreadySpecified) {
   EXPECT_EQ(supported_formats[2], kExplicitlySupportedFormats[2]);
   EXPECT_EQ(supported_formats[3], kExplicitlySupportedFormats[3]);
   EXPECT_EQ(supported_formats.size(), kExplicitlySupportedFormats.size());
+}
+
+TEST(CodecTest, AbslStringify) {
+  Codec codec = cricket::CreateAudioCodec(47, "custom-audio", 48000, 2);
+  EXPECT_EQ(absl::StrCat(codec), "[47:audio/custom-audio/48000/2]");
+  codec.params["key"] = "value";
+  EXPECT_EQ(absl::StrCat(codec), "[47:audio/custom-audio/48000/2;key=value]");
 }

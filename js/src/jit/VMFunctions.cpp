@@ -10,7 +10,6 @@
 
 #include "builtin/MapObject.h"
 #include "builtin/String.h"
-#include "ds/OrderedHashTable.h"
 #include "gc/Cell.h"
 #include "gc/GC.h"
 #include "jit/arm/Simulator-arm.h"
@@ -42,6 +41,7 @@
 #include "vm/TypedArrayObject.h"
 #include "vm/TypeofEqOperand.h"  // TypeofEqOperand
 #include "vm/Watchtower.h"
+#include "vm/WrapperObject.h"
 #include "wasm/WasmGcObject.h"
 
 #include "debugger/DebugAPI-inl.h"
@@ -819,7 +819,7 @@ int32_t StringTrimEndIndex(const JSString* str, int32_t start) {
 }
 
 JSString* CharCodeToLowerCase(JSContext* cx, int32_t code) {
-  RootedString str(cx, StringFromCharCode(cx, code));
+  JSString* str = StringFromCharCode(cx, code);
   if (!str) {
     return nullptr;
   }
@@ -827,7 +827,7 @@ JSString* CharCodeToLowerCase(JSContext* cx, int32_t code) {
 }
 
 JSString* CharCodeToUpperCase(JSContext* cx, int32_t code) {
-  RootedString str(cx, StringFromCharCode(cx, code));
+  JSString* str = StringFromCharCode(cx, code);
   if (!str) {
     return nullptr;
   }
@@ -1824,16 +1824,10 @@ static MOZ_ALWAYS_INLINE bool ValueToAtomOrSymbolPure(JSContext* cx,
                                                       const Value& idVal,
                                                       jsid* id) {
   if (MOZ_LIKELY(idVal.isString())) {
-    JSString* s = idVal.toString();
-    JSAtom* atom;
-    if (s->isAtom()) {
-      atom = &s->asAtom();
-    } else {
-      atom = AtomizeString(cx, s);
-      if (!atom) {
-        cx->recoverFromOutOfMemory();
-        return false;
-      }
+    JSAtom* atom = AtomizeString(cx, idVal.toString());
+    if (!atom) {
+      cx->recoverFromOutOfMemory();
+      return false;
     }
 
     // Watch out for integer ids because they may be stored in dense elements.
@@ -2465,6 +2459,8 @@ bool DoConcatStringObject(JSContext* cx, HandleValue lhs, HandleValue rhs,
 }
 
 bool IsPossiblyWrappedTypedArray(JSContext* cx, JSObject* obj, bool* result) {
+  MOZ_ASSERT(obj->is<WrapperObject>(), "non-wrappers are handled in JIT code");
+
   JSObject* unwrapped = CheckedUnwrapDynamic(obj, cx);
   if (!unwrapped) {
     ReportAccessDenied(cx);
@@ -3111,30 +3107,69 @@ JSAtom* AtomizeStringNoGC(JSContext* cx, JSString* str) {
   return atom;
 }
 
-bool SetObjectHas(JSContext* cx, HandleObject obj, HandleValue key,
+bool SetObjectHas(JSContext* cx, Handle<SetObject*> obj, HandleValue key,
                   bool* rval) {
-  return SetObject::has(cx, obj, key, rval);
+  return obj->has(cx, key, rval);
 }
 
-bool MapObjectHas(JSContext* cx, HandleObject obj, HandleValue key,
-                  bool* rval) {
-  return MapObject::has(cx, obj, key, rval);
+bool SetObjectDelete(JSContext* cx, Handle<SetObject*> obj, HandleValue key,
+                     bool* rval) {
+  return obj->delete_(cx, key, rval);
 }
 
-bool MapObjectGet(JSContext* cx, HandleObject obj, HandleValue key,
+bool SetObjectAdd(JSContext* cx, Handle<SetObject*> obj, HandleValue key) {
+  return obj->add(cx, key);
+}
+
+bool SetObjectAddFromIC(JSContext* cx, Handle<SetObject*> obj, HandleValue key,
+                        MutableHandleValue rval) {
+  if (!SetObjectAdd(cx, obj, key)) {
+    return false;
+  }
+  rval.setObject(*obj);
+  return true;
+}
+
+bool MapObjectHas(JSContext* cx, Handle<MapObject*> obj, HandleValue key,
+                  bool* rval) {
+  return obj->has(cx, key, rval);
+}
+
+bool MapObjectGet(JSContext* cx, Handle<MapObject*> obj, HandleValue key,
                   MutableHandleValue rval) {
-  return MapObject::get(cx, obj, key, rval);
+  return obj->get(cx, key, rval);
+}
+
+bool MapObjectDelete(JSContext* cx, Handle<MapObject*> obj, HandleValue key,
+                     bool* rval) {
+  return obj->delete_(cx, key, rval);
+}
+
+bool MapObjectSet(JSContext* cx, Handle<MapObject*> obj, HandleValue key,
+                  HandleValue val) {
+  return obj->set(cx, key, val);
+}
+
+bool MapObjectSetFromIC(JSContext* cx, Handle<MapObject*> obj, HandleValue key,
+                        HandleValue val, MutableHandleValue rval) {
+  if (!MapObjectSet(cx, obj, key, val)) {
+    return false;
+  }
+  rval.setObject(*obj);
+  return true;
 }
 
 #ifdef DEBUG
-template <class OrderedHashTable>
-static mozilla::HashNumber HashValue(JSContext* cx, OrderedHashTable* hashTable,
+template <class T>
+static mozilla::HashNumber HashValue(JSContext* cx, T* obj,
                                      const Value* value) {
-  RootedValue rootedValue(cx, *value);
-  HashableValue hashable;
-  MOZ_ALWAYS_TRUE(hashable.setValue(cx, rootedValue));
+  MOZ_ASSERT(obj->size() > 0);
 
-  return hashTable->hash(hashable);
+  HashableValue hashable;
+  MOZ_ALWAYS_TRUE(hashable.setValue(cx, *value));
+
+  using Table = typename T::Table;
+  return *Table(obj).hash(hashable);
 }
 #endif
 
@@ -3142,14 +3177,14 @@ void AssertSetObjectHash(JSContext* cx, SetObject* obj, const Value* value,
                          mozilla::HashNumber actualHash) {
   AutoUnsafeCallWithABI unsafe;
 
-  MOZ_ASSERT(actualHash == HashValue(cx, obj->getData(), value));
+  MOZ_ASSERT(actualHash == HashValue(cx, obj, value));
 }
 
 void AssertMapObjectHash(JSContext* cx, MapObject* obj, const Value* value,
                          mozilla::HashNumber actualHash) {
   AutoUnsafeCallWithABI unsafe;
 
-  MOZ_ASSERT(actualHash == HashValue(cx, obj->getData(), value));
+  MOZ_ASSERT(actualHash == HashValue(cx, obj, value));
 }
 
 void AssertPropertyLookup(NativeObject* obj, PropertyKey id, uint32_t slot) {

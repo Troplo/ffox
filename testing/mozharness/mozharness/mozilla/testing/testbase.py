@@ -33,6 +33,7 @@ from mozharness.mozilla.tooltool import TooltoolMixin
 INSTALLER_SUFFIXES = (
     ".apk",  # Android
     ".tar.bz2",
+    ".tar.xz",
     ".tar.gz",  # Linux
     ".dmg",  # Mac
     ".installer-stub.exe",
@@ -296,7 +297,7 @@ class TestingMixin(
             )
 
         for key, value in self.config.items():
-            if type(value) == str and value.startswith("http"):
+            if type(value) is str and value.startswith("http"):
                 self.config[key] = _replace_url(value, c["replace_urls"])
 
         # Any changes to c means that we need credentials

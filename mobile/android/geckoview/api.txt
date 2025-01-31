@@ -53,7 +53,6 @@ import java.lang.Boolean;
 import java.lang.CharSequence;
 import java.lang.Class;
 import java.lang.Comparable;
-import java.lang.Deprecated;
 import java.lang.Double;
 import java.lang.Exception;
 import java.lang.Float;
@@ -88,7 +87,6 @@ import org.mozilla.geckoview.CompositorController;
 import org.mozilla.geckoview.ContentBlocking;
 import org.mozilla.geckoview.ContentBlockingController;
 import org.mozilla.geckoview.CrashHandler;
-import org.mozilla.geckoview.DeprecationSchedule;
 import org.mozilla.geckoview.ExperimentDelegate;
 import org.mozilla.geckoview.GeckoDisplay;
 import org.mozilla.geckoview.GeckoResult;
@@ -861,6 +859,7 @@ package org.mozilla.geckoview {
     method public int getAllowInsecureConnections();
     method @NonNull public String[] getArguments();
     method public boolean getAutomaticFontSizeAdjustment();
+    method @NonNull public int getCertificateTransparencyMode();
     method @Nullable public String getConfigFilePath();
     method public boolean getConsoleOutputEnabled();
     method @NonNull public ContentBlocking.Settings getContentBlocking();
@@ -896,6 +895,7 @@ package org.mozilla.geckoview {
     method @NonNull public int getLargeKeepaliveFactor();
     method @Nullable public String[] getLocales();
     method public boolean getLoginAutofillEnabled();
+    method public boolean getParallelMarkingEnabled();
     method public boolean getPauseForDebuggerEnabled();
     method public int getPreferredColorScheme();
     method public boolean getRemoteDebuggingEnabled();
@@ -912,6 +912,7 @@ package org.mozilla.geckoview {
     method @NonNull public GeckoRuntimeSettings setAboutConfigEnabled(boolean);
     method @NonNull public GeckoRuntimeSettings setAllowInsecureConnections(int);
     method @NonNull public GeckoRuntimeSettings setAutomaticFontSizeAdjustment(boolean);
+    method @NonNull public GeckoRuntimeSettings setCertificateTransparencyMode(int);
     method @NonNull public GeckoRuntimeSettings setConsoleOutputEnabled(boolean);
     method @NonNull public GeckoRuntimeSettings setCookieBehaviorOptInPartitioning(boolean);
     method @NonNull public GeckoRuntimeSettings setCookieBehaviorOptInPartitioningPBM(boolean);
@@ -937,6 +938,7 @@ package org.mozilla.geckoview {
     method @NonNull public GeckoRuntimeSettings setLargeKeepaliveFactor(int);
     method public void setLocales(@Nullable String[]);
     method @NonNull public GeckoRuntimeSettings setLoginAutofillEnabled(boolean);
+    method @NonNull public GeckoRuntimeSettings setParallelMarkingEnabled(boolean);
     method @NonNull public GeckoRuntimeSettings setPreferredColorScheme(int);
     method @NonNull public GeckoRuntimeSettings setRemoteDebuggingEnabled(boolean);
     method @NonNull public GeckoRuntimeSettings setTranslationsOfferPopup(boolean);
@@ -2707,9 +2709,6 @@ package org.mozilla.geckoview {
     field @NonNull public final String[] optionalOrigins;
     field @NonNull public final String[] optionalPermissions;
     field @Nullable public final String optionsPageUrl;
-    field @Deprecated @DeprecationSchedule(id="web-extension-required-origins",version=133) @NonNull public final String[] origins;
-    field @Deprecated @DeprecationSchedule(id="web-extension-required-permissions",version=133) @NonNull public final String[] permissions;
-    field @Deprecated @DeprecationSchedule(id="web-extension-required-permissions",version=133) @NonNull public final String[] promptPermissions;
     field @NonNull public final String[] requiredOrigins;
     field @NonNull public final String[] requiredPermissions;
     field public final int reviewCount;
@@ -2847,8 +2846,6 @@ package org.mozilla.geckoview {
   }
 
   @UiThread public static interface WebExtensionController.PromptDelegate {
-    method @Deprecated @DeprecationSchedule(id="web-extension-required-permissions",version=133) @Nullable default public GeckoResult<AllowOrDeny> onInstallPrompt(@NonNull WebExtension);
-    method @Deprecated @DeprecationSchedule(id="web-extension-on-install-prompt",version=134) @Nullable default public GeckoResult<AllowOrDeny> onInstallPrompt(@NonNull WebExtension, @NonNull String[], @NonNull String[]);
     method @Nullable default public GeckoResult<WebExtension.PermissionPromptResponse> onInstallPromptRequest(@NonNull WebExtension, @NonNull String[], @NonNull String[]);
     method @Nullable default public GeckoResult<AllowOrDeny> onOptionalPrompt(@NonNull WebExtension, @NonNull String[], @NonNull String[]);
     method @Nullable default public GeckoResult<AllowOrDeny> onUpdatePrompt(@NonNull WebExtension, @NonNull WebExtension, @NonNull String[], @NonNull String[]);

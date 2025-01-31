@@ -104,6 +104,56 @@ export class SearchEngineSelector {
   }
 
   /**
+   * Finds an engine configuration that has a matching host.
+   *
+   * @param {string} host
+   *   The host to match.
+   *
+   * @returns {object}
+   *   The configuration data for an engine.
+   */
+  async findContextualSearchEngineByHost(host) {
+    for (let config of this._configuration) {
+      if (config.recordType !== "engine") {
+        continue;
+      }
+      let searchHost = new URL(config.base.urls.search.base).hostname;
+      if (searchHost.startsWith("www.")) {
+        searchHost = searchHost.slice(4);
+      }
+      if (searchHost.startsWith(host)) {
+        let engine = structuredClone(config.base);
+        engine.identifier = config.identifier;
+        return engine;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Finds an engine configuration that has a matching identifier.
+   *
+   * @param {string} id
+   *   The identifier to match.
+   *
+   * @returns {object}
+   *   The configuration data for an engine.
+   */
+  async findContextualSearchEngineById(id) {
+    for (let config of this._configuration) {
+      if (config.recordType !== "engine") {
+        continue;
+      }
+      if (config.identifier == id) {
+        let engine = structuredClone(config.base);
+        engine.identifier = config.identifier;
+        return engine;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Used by tests to get the configuration overrides.
    *
    * @returns {object}
@@ -278,16 +328,16 @@ export class SearchEngineSelector {
         continue;
       }
 
-      let variant = config.variants?.findLast(variant =>
-        this.#matchesUserEnvironment(variant, userEnv)
+      let variant = config.variants?.findLast(v =>
+        this.#matchesUserEnvironment(v, userEnv)
       );
 
       if (!variant) {
         continue;
       }
 
-      let subVariant = variant.subVariants?.findLast(subVariant =>
-        this.#matchesUserEnvironment(subVariant, userEnv)
+      let subVariant = variant.subVariants?.findLast(sv =>
+        this.#matchesUserEnvironment(sv, userEnv)
       );
 
       let engine = structuredClone(config.base);

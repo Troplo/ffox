@@ -225,6 +225,7 @@ class DownloadRobot {
             Log.i(TAG, "clickOpen: Trying to click the \"OPEN\" download prompt button")
             openDownloadButton().click()
             Log.i(TAG, "clickOpen: Clicked the \"OPEN\" download prompt button")
+
             Log.i(TAG, "clickOpen: Trying to verify that the open intent is matched with associated data type")
             // verify open intent is matched with associated data type
             Intents.intended(

@@ -235,7 +235,7 @@ STATIC_ATOMS = [
     Atom("childList", "childList"),
     Atom("child_item_count", "child-item-count"),
     Atom("choose", "choose"),
-    Atom("chromemargin", "chromemargin"),
+    Atom("customtitlebar", "customtitlebar"),
     Atom("exposeToUntrustedContent", "exposeToUntrustedContent"),
     Atom("circ", "circ"),
     Atom("circle", "circle"),
@@ -2034,6 +2034,7 @@ STATIC_ATOMS = [
     Atom("privateBrowsingAllowedPermission", "internal:privateBrowsingAllowed"),
     Atom("svgContextPropertiesAllowedPermission", "internal:svgContextPropertiesAllowed"),
     Atom("theme", "theme"),
+    Atom("userScripts", "userScripts"),
     # CSS Counter Styles
     Atom("decimal_leading_zero", "decimal-leading-zero"),
     Atom("arabic_indic", "arabic-indic"),

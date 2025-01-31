@@ -84,6 +84,21 @@ interface FeatureSettingsHelper {
     var isNavigationToolbarEnabled: Boolean
 
     /**
+     * Enable or disable the new main menu.
+     */
+    var isMenuRedesignEnabled: Boolean
+
+    /**
+     * Enable or disable the new main menu CFR.
+     */
+    var isMenuRedesignCFREnabled: Boolean
+
+    /**
+     * Enable or disable the new bookmarks UI.
+     */
+    var isNewBookmarksEnabled: Boolean
+
+    /**
      * Enable or disable the new microsurvey feature.
      */
     var isMicrosurveyEnabled: Boolean
@@ -97,6 +112,17 @@ interface FeatureSettingsHelper {
      * Enable or disable bottom toolbar position.
      */
     var shouldUseBottomToolbar: Boolean
+
+    /**
+     * Enable or disable the translations prompt after a page that can be translated is loaded.
+     */
+    fun enableOrDisablePageLoadTranslationsPrompt(enableTranslationsPrompt: Boolean) {
+        if (enableTranslationsPrompt) {
+            FxNimbusHelper.enablePageLoadTranslationsPrompt()
+        } else {
+            FxNimbusHelper.disablePageLoadTranslationsPrompt()
+        }
+    }
 
     fun applyFlagUpdates()
 

@@ -36,8 +36,8 @@ enum class LayoutFrameType : uint8_t;
  * @return aValue clamped to [aMinValue, aMaxValue].
  *
  * @note This function needs to handle aMinValue > aMaxValue. In that case,
- *       aMinValue is returned. That's why we cannot use std::clamp() and
- *       mozilla::clamped() since they both assert max >= min.
+ *       aMinValue is returned. That's why we cannot use std::clamp()
+ *       since it asserts max >= min.
  * @note If aMinValue and aMaxValue are computed min block-size and max
  *       block-size, it is simpler to use ReflowInput::ApplyMinMaxBSize().
  *       Similarly, there is ReflowInput::ApplyMinMaxISize() for clamping an
@@ -169,7 +169,7 @@ struct SizeComputationInput {
                    const Maybe<LogicalMargin>& aPadding,
                    const nsStyleDisplay* aDisplay = nullptr);
 
-  /*
+  /**
    * Convert StyleSize or StyleMaxSize to nscoord when percentages depend on the
    * inline size of the containing block, and enumerated values are for inline
    * size, min-inline-size, or max-inline-size.  Does not handle auto inline
@@ -180,6 +180,20 @@ struct SizeComputationInput {
                                    StyleBoxSizing aBoxSizing,
                                    const SizeOrMaxSize&) const;
 
+  /**
+   * Wrapper for SizeComputationInput::ComputeBSizeValue (defined below, which
+   * itself is a wrapper for nsLayoutUtils::ComputeBSizeValue). This one just
+   * handles 'stretch' sizes first.
+   */
+  template <typename SizeOrMaxSize>
+  inline nscoord ComputeBSizeValueHandlingStretch(
+      nscoord aContainingBlockBSize, StyleBoxSizing aBoxSizing,
+      const SizeOrMaxSize& aSize) const;
+
+  /**
+   * Wrapper for nsLayoutUtils::ComputeBSizeValue, which automatically figures
+   * out the value to pass for its aContentEdgeToBoxSizingBoxEdge param.
+   */
   nscoord ComputeBSizeValue(nscoord aContainingBlockBSize,
                             StyleBoxSizing aBoxSizing,
                             const LengthPercentage& aCoord) const;
@@ -357,6 +371,10 @@ struct ReflowInput : public SizeComputationInput {
   // Return ReflowInput's computed size including border-padding, with
   // unconstrained dimensions replaced by zero.
   nsSize ComputedSizeAsContainerIfConstrained() const;
+
+  // Get the writing mode of the containing block, to resolve float/clear
+  // logical sides appropriately.
+  WritingMode GetCBWritingMode() const;
 
   // Our saved containing block dimensions.
   LogicalSize mContainingBlockSize{mWritingMode};

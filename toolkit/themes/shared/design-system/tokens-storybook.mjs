@@ -749,6 +749,12 @@ export const storybookTables = {
     },
     { value: "1px", name: "--link-focus-outline-offset" },
   ],
+  "page-main": [
+    {
+      value: { brand: { default: "664px" } },
+      name: "--page-main-content-width",
+    },
+  ],
   space: [
     { value: "calc(0.5 * var(--space-xsmall))", name: "--space-xxsmall" },
     { value: "0.267rem", name: "--space-xsmall" },
@@ -757,6 +763,28 @@ export const storybookTables = {
     { value: "calc(4 * var(--space-xsmall))", name: "--space-large" },
     { value: "calc(6 * var(--space-xsmall))", name: "--space-xlarge" },
     { value: "calc(8 * var(--space-xsmall))", name: "--space-xxlarge" },
+  ],
+  "table-row": [
+    {
+      value: { default: "var(--background-color-canvas)" },
+      name: "--table-row-background-color",
+    },
+    {
+      value: {
+        forcedColors: "var(--background-color-canvas)",
+        brand: {
+          light: "#f0f0f4",
+          dark: "var(--color-gray-80)",
+          default: "light-dark(#f0f0f4, var(--color-gray-80))",
+        },
+        platform: {
+          light: "rgba(0,0,0,5%)",
+          dark: "rgba(255,255,255,5%)",
+          default: "light-dark(rgba(0,0,0,5%), rgba(255,255,255,5%))",
+        },
+      },
+      name: "--table-row-background-color-alternate",
+    },
   ],
 };
 
@@ -1201,6 +1229,7 @@ export const variableLookupTable = {
     prefersContrast: "var(--border-color)",
     default: "light-dark(var(--color-red-50), var(--color-red-20))",
   },
+  "page-main-content-width": { brand: { default: "664px" } },
   "size-item-small": "16px",
   "size-item-medium": "28px",
   "size-item-large": "32px",
@@ -1211,6 +1240,20 @@ export const variableLookupTable = {
   "space-large": "calc(4 * var(--space-xsmall))",
   "space-xlarge": "calc(6 * var(--space-xsmall))",
   "space-xxlarge": "calc(8 * var(--space-xsmall))",
+  "table-row-background-color": { default: "var(--background-color-canvas)" },
+  "table-row-background-color-alternate": {
+    forcedColors: "var(--background-color-canvas)",
+    brand: {
+      light: "#f0f0f4",
+      dark: "var(--color-gray-80)",
+      default: "light-dark(#f0f0f4, var(--color-gray-80))",
+    },
+    platform: {
+      light: "rgba(0,0,0,5%)",
+      dark: "rgba(255,255,255,5%)",
+      default: "light-dark(rgba(0,0,0,5%), rgba(255,255,255,5%))",
+    },
+  },
   "text-color": {
     prefersContrast: "CanvasText",
     brand: {

@@ -308,18 +308,22 @@ function promiseAfterPaint() {
 // APZ handler on the main thread, the repaints themselves may not have
 // occurred by the the returned promise resolves. If you want to wait
 // for those repaints, consider using promiseApzFlushedRepaints instead.
-function promiseOnlyApzControllerFlushedWithoutSetTimeout(aWindow = window) {
+function promiseOnlyApzControllerFlushedWithoutSetTimeout(
+  aWindow = window,
+  aElement
+) {
   return new Promise(function (resolve) {
+    var fail = false;
     var repaintDone = function () {
       dump("PromiseApzRepaintsFlushed: APZ flush done\n");
       SpecialPowers.Services.obs.removeObserver(
         repaintDone,
         "apz-repaints-flushed"
       );
-      resolve();
+      resolve(!fail);
     };
     SpecialPowers.Services.obs.addObserver(repaintDone, "apz-repaints-flushed");
-    if (SpecialPowers.getDOMWindowUtils(aWindow).flushApzRepaints()) {
+    if (SpecialPowers.getDOMWindowUtils(aWindow).flushApzRepaints(aElement)) {
       dump(
         "PromiseApzRepaintsFlushed: Flushed APZ repaints, waiting for callback...\n"
       );
@@ -327,6 +331,7 @@ function promiseOnlyApzControllerFlushedWithoutSetTimeout(aWindow = window) {
       dump(
         "PromiseApzRepaintsFlushed: Flushing APZ repaints was a no-op, triggering callback directly...\n"
       );
+      fail = true;
       repaintDone();
     }
   });
@@ -334,11 +339,17 @@ function promiseOnlyApzControllerFlushedWithoutSetTimeout(aWindow = window) {
 
 // Another variant of the above promiseOnlyApzControllerFlushedWithoutSetTimeout
 // but with a setTimeout(0) callback.
-function promiseOnlyApzControllerFlushed(aWindow = window) {
+// |aElement| is an optional argument to do
+// promiseOnlyApzControllerFlushedWithoutSetTimeout for the given |aElement|
+// rather than |aWindow|. If you want to do "apz-repaints-flushed" in popup
+// windows, you need to specify the element inside the popup window.
+function promiseOnlyApzControllerFlushed(aWindow = window, aElement) {
   return new Promise(resolve => {
-    promiseOnlyApzControllerFlushedWithoutSetTimeout(aWindow).then(() => {
-      setTimeout(resolve, 0);
-    });
+    promiseOnlyApzControllerFlushedWithoutSetTimeout(aWindow, aElement).then(
+      result => {
+        setTimeout(() => resolve(result), 0);
+      }
+    );
   });
 }
 
@@ -351,9 +362,16 @@ function promiseOnlyApzControllerFlushed(aWindow = window) {
 // specific times, this method is the way to go. Even if in doubt, this is the
 // preferred method as the extra step is "safe" and shouldn't interfere with
 // most tests.
-async function promiseApzFlushedRepaints() {
+// If you want to do the flush in popup windows, you need to specify |aPopupElement|.
+async function promiseApzFlushedRepaints(aPopupElement = null) {
+  if (aPopupElement) {
+    SimpleTest.ok(XULPopupElement.isInstance(aPopupElement));
+  }
   await promiseAllPaintsDone();
-  await promiseOnlyApzControllerFlushed();
+  await promiseOnlyApzControllerFlushed(
+    aPopupElement ? aPopupElement.ownerGlobal : window,
+    aPopupElement
+  );
   await promiseAllPaintsDone();
 }
 
@@ -566,81 +584,6 @@ function pushPrefs(prefs) {
 }
 
 async function waitUntilApzStable() {
-  if (!SpecialPowers.isMainProcess()) {
-    // We use this waitUntilApzStable function during test initialization
-    // and for those scenarios we want to flush the parent-process layer
-    // tree to the compositor and wait for that as well. That way we know
-    // that not only is the content-process layer tree ready in the compositor,
-    // the parent-process layer tree in the compositor has the appropriate
-    // RefLayer pointing to the content-process layer tree.
-
-    // Sadly this helper function cannot reuse any code from other places because
-    // it must be totally self-contained to be shipped over to the parent process.
-    function parentProcessFlush() {
-      /* eslint-env mozilla/chrome-script */
-      function apzFlush() {
-        var topWin = Services.wm.getMostRecentWindow("navigator:browser");
-        if (!topWin) {
-          topWin = Services.wm.getMostRecentWindow("navigator:geckoview");
-        }
-        var topUtils = topWin.windowUtils;
-
-        var repaintDone = function () {
-          dump("WaitUntilApzStable: APZ flush done in parent proc\n");
-          Services.obs.removeObserver(repaintDone, "apz-repaints-flushed");
-          // send message back to content process
-          sendAsyncMessage("apz-flush-done", null);
-        };
-        var flushRepaint = function () {
-          if (topUtils.isMozAfterPaintPending) {
-            topWin.addEventListener("MozAfterPaint", flushRepaint, {
-              once: true,
-            });
-            return;
-          }
-
-          Services.obs.addObserver(repaintDone, "apz-repaints-flushed");
-          if (topUtils.flushApzRepaints()) {
-            dump(
-              "WaitUntilApzStable: flushed APZ repaints in parent proc, waiting for callback...\n"
-            );
-          } else {
-            dump(
-              "WaitUntilApzStable: flushing APZ repaints in parent proc was a no-op, triggering callback directly...\n"
-            );
-            repaintDone();
-          }
-        };
-
-        // Flush APZ repaints, but wait until all the pending paints have been
-        // sent.
-        flushRepaint();
-      }
-      function cleanup() {
-        removeMessageListener("apz-flush", apzFlush);
-        removeMessageListener("cleanup", cleanup);
-      }
-      addMessageListener("apz-flush", apzFlush);
-      addMessageListener("cleanup", cleanup);
-    }
-
-    // This is the first time waitUntilApzStable is being called, do initialization
-    if (typeof waitUntilApzStable.chromeHelper == "undefined") {
-      waitUntilApzStable.chromeHelper =
-        SpecialPowers.loadChromeScript(parentProcessFlush);
-      ApzCleanup.register(() => {
-        waitUntilApzStable.chromeHelper.sendAsyncMessage("cleanup", null);
-        waitUntilApzStable.chromeHelper.destroy();
-        delete waitUntilApzStable.chromeHelper;
-      });
-    }
-
-    // Actually trigger the parent-process flush and wait for it to finish
-    waitUntilApzStable.chromeHelper.sendAsyncMessage("apz-flush", null);
-    await waitUntilApzStable.chromeHelper.promiseOneMessage("apz-flush-done");
-    dump("WaitUntilApzStable: got apz-flush-done in child proc\n");
-  }
-
   await SimpleTest.promiseFocus(window);
   dump("WaitUntilApzStable: done promiseFocus\n");
   await promiseAllPaintsDone();

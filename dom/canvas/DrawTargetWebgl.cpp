@@ -638,8 +638,10 @@ bool DrawTargetWebgl::GenerateComplexClipMask() {
   }
   dt->SetTransform(Matrix::Translation(-mClipBounds.TopLeft()));
   dt->FillRect(Rect(mClipBounds), ColorPattern(DeviceColor(1, 1, 1, 1)));
-  // Bind the clip mask for uploading.
-  webgl->ActiveTexture(1);
+  // Bind the clip mask for uploading. This is done on texture unit 0 so that
+  // we can work around an Windows Intel driver bug. If done on texture unit 1,
+  // the driver doesn't notice that the texture contents was modified. Force a
+  // re-latch by binding the texture on texture unit 1 only after modification.
   webgl->BindTexture(LOCAL_GL_TEXTURE_2D, mClipMask);
   if (init) {
     mSharedContext->InitTexParameters(mClipMask, false);
@@ -658,10 +660,9 @@ bool DrawTargetWebgl::GenerateComplexClipMask() {
   mSharedContext->UploadSurface(data, SurfaceFormat::A8,
                                 IntRect(IntPoint(), mClipBounds.Size()),
                                 mClipBounds.TopLeft(), init);
-  webgl->ActiveTexture(0);
-  // We already bound the texture, so notify the shared context that the clip
-  // mask changed to it.
-  mSharedContext->mLastClipMask = mClipMask;
+  mSharedContext->ClearLastTexture();
+  // Bind the new clip mask to the clip sampler on texture unit 1.
+  mSharedContext->SetClipMask(mClipMask);
   mSharedContext->SetClipRect(mClipBounds);
   // We uploaded a surface, just as if we missed the texture cache, so account
   // for that here.
@@ -2814,20 +2815,18 @@ HashNumber PathCacheEntry::HashPath(const QuantizedPath& aPath,
 static inline bool HasMatchingScale(const Matrix& aTransform1,
                                     const Matrix& aTransform2) {
   return FuzzyEqual(aTransform1._11, aTransform2._11) &&
+         FuzzyEqual(aTransform1._22, aTransform2._22) &&
          FuzzyEqual(aTransform1._12, aTransform2._12) &&
-         FuzzyEqual(aTransform1._21, aTransform2._21) &&
-         FuzzyEqual(aTransform1._22, aTransform2._22);
+         FuzzyEqual(aTransform1._21, aTransform2._21);
 }
 
 // Determines if an existing path cache entry matches an incoming path and
 // pattern.
-inline bool PathCacheEntry::MatchesPath(const QuantizedPath& aPath,
-                                        const Pattern* aPattern,
-                                        const StrokeOptions* aStrokeOptions,
-                                        const Matrix& aTransform,
-                                        const IntRect& aBounds,
-                                        const Point& aOrigin, HashNumber aHash,
-                                        float aSigma) {
+inline bool PathCacheEntry::MatchesPath(
+    const QuantizedPath& aPath, const Pattern* aPattern,
+    const StrokeOptions* aStrokeOptions, AAStrokeMode aStrokeMode,
+    const Matrix& aTransform, const IntRect& aBounds, const Point& aOrigin,
+    HashNumber aHash, float aSigma) {
   return aHash == mHash && HasMatchingScale(aTransform, mTransform) &&
          // Ensure the clipped relative bounds fit inside those of the entry
          aBounds.x - aOrigin.x >= mBounds.x - mOrigin.x &&
@@ -2840,12 +2839,14 @@ inline bool PathCacheEntry::MatchesPath(const QuantizedPath& aPath,
          (!aPattern ? !mPattern : mPattern && *aPattern == *mPattern) &&
          (!aStrokeOptions
               ? !mStrokeOptions
-              : mStrokeOptions && *aStrokeOptions == *mStrokeOptions) &&
+              : mStrokeOptions && *aStrokeOptions == *mStrokeOptions &&
+                    mAAStrokeMode == aStrokeMode) &&
          aSigma == mSigma;
 }
 
 PathCacheEntry::PathCacheEntry(QuantizedPath&& aPath, Pattern* aPattern,
                                StoredStrokeOptions* aStrokeOptions,
+                               AAStrokeMode aStrokeMode,
                                const Matrix& aTransform, const IntRect& aBounds,
                                const Point& aOrigin, HashNumber aHash,
                                float aSigma)
@@ -2854,6 +2855,7 @@ PathCacheEntry::PathCacheEntry(QuantizedPath&& aPath, Pattern* aPattern,
       mOrigin(aOrigin),
       mPattern(aPattern),
       mStrokeOptions(aStrokeOptions),
+      mAAStrokeMode(aStrokeMode),
       mSigma(aSigma) {}
 
 // Attempt to find a matching entry in the path cache. If one isn't found,
@@ -2862,13 +2864,14 @@ PathCacheEntry::PathCacheEntry(QuantizedPath&& aPath, Pattern* aPattern,
 // or just reuse the cached texture.
 already_AddRefed<PathCacheEntry> PathCache::FindOrInsertEntry(
     QuantizedPath aPath, const Pattern* aPattern,
-    const StrokeOptions* aStrokeOptions, const Matrix& aTransform,
-    const IntRect& aBounds, const Point& aOrigin, float aSigma) {
+    const StrokeOptions* aStrokeOptions, AAStrokeMode aStrokeMode,
+    const Matrix& aTransform, const IntRect& aBounds, const Point& aOrigin,
+    float aSigma) {
   HashNumber hash =
       PathCacheEntry::HashPath(aPath, aPattern, aTransform, aBounds, aOrigin);
   for (const RefPtr<PathCacheEntry>& entry : GetChain(hash)) {
-    if (entry->MatchesPath(aPath, aPattern, aStrokeOptions, aTransform, aBounds,
-                           aOrigin, hash, aSigma)) {
+    if (entry->MatchesPath(aPath, aPattern, aStrokeOptions, aStrokeMode,
+                           aTransform, aBounds, aOrigin, hash, aSigma)) {
       return do_AddRef(entry);
     }
   }
@@ -2887,8 +2890,8 @@ already_AddRefed<PathCacheEntry> PathCache::FindOrInsertEntry(
     }
   }
   RefPtr<PathCacheEntry> entry =
-      new PathCacheEntry(std::move(aPath), pattern, strokeOptions, aTransform,
-                         aBounds, aOrigin, hash, aSigma);
+      new PathCacheEntry(std::move(aPath), pattern, strokeOptions, aStrokeMode,
+                         aTransform, aBounds, aOrigin, hash, aSigma);
   Insert(entry);
   return entry.forget();
 }
@@ -3223,12 +3226,6 @@ inline bool DrawTargetWebgl::ShouldAccelPath(
   return mWebglValid && SupportsDrawOptions(aOptions) && PrepareContext();
 }
 
-enum class AAStrokeMode {
-  Unsupported,
-  Geometry,
-  Mask,
-};
-
 // For now, we only directly support stroking solid color patterns to limit
 // artifacts from blending of overlapping geometry generated by AAStroke. Other
 // types of patterns may be partially supported by rendering to a temporary
@@ -3402,6 +3399,11 @@ bool SharedContextWebgl::DrawPathAccel(
           : (aPattern.GetType() == PatternType::COLOR
                  ? Some(static_cast<const ColorPattern&>(aPattern).mColor)
                  : Nothing());
+  AAStrokeMode aaStrokeMode =
+      aStrokeOptions && mPathAAStroke
+          ? SupportsAAStroke(aPattern, aOptions, *aStrokeOptions,
+                             aAllowStrokeAlpha)
+          : AAStrokeMode::Unsupported;
   // Look for an existing path cache entry, if possible, or otherwise create
   // one. If the draw request is not cacheable, then don't create an entry.
   RefPtr<PathCacheEntry> entry;
@@ -3419,7 +3421,7 @@ bool SharedContextWebgl::DrawPathAccel(
     }
     entry = mPathCache->FindOrInsertEntry(
         std::move(*qp), color ? nullptr : &aPattern, aStrokeOptions,
-        currentTransform, intBounds, quantizedOrigin,
+        aaStrokeMode, currentTransform, intBounds, quantizedOrigin,
         aShadow ? aShadow->mSigma : -1.0f);
     if (!entry) {
       return false;
@@ -3501,9 +3503,7 @@ bool SharedContextWebgl::DrawPathAccel(
             mRasterizationTruncates, outputBuffer, outputBufferCapacity);
       }
     } else {
-      if (mPathAAStroke &&
-          SupportsAAStroke(aPattern, aOptions, *aStrokeOptions,
-                           aAllowStrokeAlpha) != AAStrokeMode::Unsupported) {
+      if (aaStrokeMode != AAStrokeMode::Unsupported) {
         auto scaleFactors = currentTransform.ScaleFactors();
         if (scaleFactors.AreScalesSame()) {
           strokeVB = GenerateStrokeVertexBuffer(
@@ -3581,9 +3581,7 @@ bool SharedContextWebgl::DrawPathAccel(
         } else {
           AAStroke::aa_stroke_vertex_buffer_release(strokeVB.ref());
         }
-        if (strokeVB && aStrokeOptions &&
-            SupportsAAStroke(aPattern, aOptions, *aStrokeOptions,
-                             aAllowStrokeAlpha) == AAStrokeMode::Mask) {
+        if (strokeVB && aaStrokeMode == AAStrokeMode::Mask) {
           // Attempt to generate a stroke mask for path.
           if (RefPtr<TextureHandle> handle =
                   DrawStrokeMask(vertexRange, intBounds.Size())) {
@@ -3659,9 +3657,11 @@ bool SharedContextWebgl::DrawPathAccel(
     DrawTargetWebgl* oldTarget = mCurrentTarget;
     {
       RefPtr<const Path> path;
-      if (color || !aPathXform) {
+      if (!aPathXform || (color && !aStrokeOptions)) {
         // If the pattern is transform invariant or there is no pathXform, then
-        // it is safe to use the path directly.
+        // it is safe to use the path directly. Solid colors are transform
+        // invariant, except when there are stroke options such as line width or
+        // dashes that should not be scaled by pathXform.
         path = aPath;
         pathDT->SetTransform(pathXform * Matrix::Translation(offset));
       } else {
@@ -4296,6 +4296,25 @@ static void ReleaseGlyphCache(void* aPtr) {
   delete static_cast<GlyphCache*>(aPtr);
 }
 
+// Whether all glyphs in the buffer match the last whitespace glyph queried.
+bool GlyphCache::IsWhitespace(const GlyphBuffer& aBuffer) const {
+  if (!mLastWhitespace) {
+    return false;
+  }
+  uint32_t whitespace = *mLastWhitespace;
+  for (size_t i = 0; i < aBuffer.mNumGlyphs; ++i) {
+    if (aBuffer.mGlyphs[i].mIndex != whitespace) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Remember the last whitespace glyph seen.
+void GlyphCache::SetLastWhitespace(const GlyphBuffer& aBuffer) {
+  mLastWhitespace = Some(aBuffer.mGlyphs[0].mIndex);
+}
+
 void DrawTargetWebgl::SetPermitSubpixelAA(bool aPermitSubpixelAA) {
   DrawTarget::SetPermitSubpixelAA(aPermitSubpixelAA);
   mSkia->SetPermitSubpixelAA(aPermitSubpixelAA);
@@ -4341,27 +4360,17 @@ static DeviceColor QuantizePreblendColor(const DeviceColor& aColor,
   int32_t r = int32_t(aColor.r * 255.0f + 0.5f);
   int32_t g = int32_t(aColor.g * 255.0f + 0.5f);
   int32_t b = int32_t(aColor.b * 255.0f + 0.5f);
-  // Ensure that even if two values would normally quantize to the same bucket,
-  // that the reference value within the bucket still allows for accurate
-  // determination of whether light-on-dark or dark-on-light rasterization will
-  // be used (as on macOS).
-  bool lightOnDark = r >= 85 && g >= 85 && b >= 85 && r + g + b >= 2 * 255;
   // Skia only uses the high 3 bits of each color component to cache preblend
   // ramp tables.
   constexpr int32_t lumBits = 3;
-  constexpr int32_t ceilMask = (1 << (8 - lumBits)) - 1;
   constexpr int32_t floorMask = ((1 << lumBits) - 1) << (8 - lumBits);
   if (!aUseSubpixelAA) {
     // If not using subpixel AA, then quantize only the luminance, stored in the
     // G channel.
     g = (r * 54 + g * 183 + b * 19) >> 8;
-    g |= ceilMask;
-    // Still distinguish between light and dark in the key.
-    r = b = lightOnDark ? 255 : 0;
-  } else if (lightOnDark) {
-    r |= ceilMask;
-    g |= ceilMask;
-    b |= ceilMask;
+    g &= floorMask;
+    r = g;
+    b = g;
   } else {
     r &= floorMask;
     g &= floorMask;
@@ -4379,6 +4388,21 @@ bool SharedContextWebgl::DrawGlyphsAccel(ScaledFont* aFont,
                                          const DrawOptions& aOptions,
                                          const StrokeOptions* aStrokeOptions,
                                          bool aUseSubpixelAA) {
+  // Look for an existing glyph cache on the font. If not there, create it.
+  GlyphCache* cache =
+      static_cast<GlyphCache*>(aFont->GetUserData(&mGlyphCacheKey));
+  if (!cache) {
+    cache = new GlyphCache(aFont);
+    aFont->AddUserData(&mGlyphCacheKey, cache, ReleaseGlyphCache);
+    mGlyphCaches.insertFront(cache);
+  }
+
+  // Check if the buffer contains non-renderable whitespace characters before
+  // any other expensive checks.
+  if (cache->IsWhitespace(aBuffer)) {
+    return true;
+  }
+
   // Whether the font may use bitmaps. If so, we need to render the glyphs with
   // color as grayscale bitmaps will use the color while color emoji will not,
   // with no easy way to know ahead of time. We currently have to check the
@@ -4388,15 +4412,6 @@ bool SharedContextWebgl::DrawGlyphsAccel(ScaledFont* aFont,
   // as for color emoji.
   bool useBitmaps = !aStrokeOptions && aFont->MayUseBitmaps() &&
                     aOptions.mCompositionOp != CompositionOp::OP_CLEAR;
-
-  // Look for an existing glyph cache on the font. If not there, create it.
-  GlyphCache* cache =
-      static_cast<GlyphCache*>(aFont->GetUserData(&mGlyphCacheKey));
-  if (!cache) {
-    cache = new GlyphCache(aFont);
-    aFont->AddUserData(&mGlyphCacheKey, cache, ReleaseGlyphCache);
-    mGlyphCaches.insertFront(cache);
-  }
   // Hash the incoming text run and looking for a matching entry.
   DeviceColor color = aOptions.mCompositionOp == CompositionOp::OP_CLEAR
                           ? DeviceColor(1, 1, 1, 1)
@@ -4420,8 +4435,7 @@ bool SharedContextWebgl::DrawGlyphsAccel(ScaledFont* aFont,
 #endif
 
   // If the font has bitmaps, use the color directly. Otherwise, the texture
-  // will hold a grayscale mask, so encode the key's subpixel and light-or-dark
-  // state in the color.
+  // holds a grayscale mask, so encode the key's subpixel state in the color.
   const Matrix& currentTransform = mCurrentTarget->GetTransform();
   IntPoint quantizeScale = QuantizeScale(aFont, currentTransform);
   Matrix quantizeTransform = currentTransform;
@@ -4443,6 +4457,9 @@ bool SharedContextWebgl::DrawGlyphsAccel(ScaledFont* aFont,
     Maybe<Rect> bounds = mCurrentTarget->mSkia->GetGlyphLocalBounds(
         aFont, aBuffer, aPattern, aStrokeOptions, aOptions);
     if (!bounds) {
+      // Assume the buffer is full of whitespace characters that should be
+      // remembered for subsequent lookups.
+      cache->SetLastWhitespace(aBuffer);
       return true;
     }
     // Transform the local bounds into device space so that we know how big

@@ -245,6 +245,10 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
       override;
 
   void ConstrainPosition(DesktopIntPoint&) override {}
+  // Utility function for derived-class overrides of ConstrainPosition.
+  static DesktopIntPoint ConstrainPositionToBounds(
+      const DesktopIntPoint&, const mozilla::DesktopIntSize&,
+      const DesktopIntRect&);
   void MoveClient(const DesktopPoint& aOffset) override;
   void ResizeClient(const DesktopSize& aSize, bool aRepaint) override;
   void ResizeClient(const DesktopRect& aRect, bool aRepaint) override;
@@ -252,11 +256,9 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   LayoutDeviceIntRect GetClientBounds() override;
   LayoutDeviceIntRect GetScreenBounds() override;
   [[nodiscard]] nsresult GetRestoredBounds(LayoutDeviceIntRect& aRect) override;
-  nsresult SetNonClientMargins(const LayoutDeviceIntMargin&) override;
   LayoutDeviceIntPoint GetClientOffset() override;
   void EnableDragDrop(bool aEnable) override {};
   nsresult AsyncEnableDragDrop(bool aEnable) override;
-  void SetResizeMargin(mozilla::LayoutDeviceIntCoord aResizeMargin) override;
   [[nodiscard]] nsresult GetAttention(int32_t aCycleCount) override {
     return NS_OK;
   }
@@ -407,7 +409,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   void NotifyLiveResizeStopped();
 
 #if defined(MOZ_WIDGET_ANDROID)
-  void RecvToolbarAnimatorMessageFromCompositor(int32_t) override{};
+  void RecvToolbarAnimatorMessageFromCompositor(int32_t) override {};
   void UpdateRootFrameMetrics(const ScreenPoint& aScrollOffset,
                               const CSSToScreenScale& aZoom) override {};
   void RecvScreenPixels(mozilla::ipc::Shmem&& aMem, const ScreenIntSize& aSize,
@@ -570,9 +572,8 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
    */
   void ConstrainSize(int32_t* aWidth, int32_t* aHeight) override {
     SizeConstraints c = GetSizeConstraints();
-    *aWidth = std::max(c.mMinSize.width, std::min(c.mMaxSize.width, *aWidth));
-    *aHeight =
-        std::max(c.mMinSize.height, std::min(c.mMaxSize.height, *aHeight));
+    *aWidth = std::clamp(*aWidth, c.mMinSize.width, c.mMaxSize.width);
+    *aHeight = std::clamp(*aHeight, c.mMinSize.height, c.mMaxSize.height);
   }
 
   CompositorBridgeChild* GetRemoteRenderer() override;
@@ -596,7 +597,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   // Notify the compositor that a device reset has occurred.
   void OnRenderingDeviceReset();
 
-  bool UseAPZ();
+  bool UseAPZ() const;
 
   bool AllowWebRenderForThisWindow();
 
@@ -734,9 +735,6 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
 
 #ifdef DEBUG
  protected:
-  static nsAutoString debug_GuiEventToString(
-      mozilla::WidgetGUIEvent* aGuiEvent);
-
   static void debug_DumpInvalidate(FILE* aFileOut, nsIWidget* aWidget,
                                    const LayoutDeviceIntRect* aRect,
                                    const char* aWidgetName, int32_t aWindowID);

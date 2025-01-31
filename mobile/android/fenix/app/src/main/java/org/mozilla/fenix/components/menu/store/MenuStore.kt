@@ -39,10 +39,11 @@ private fun reducer(state: MenuState, action: MenuAction): MenuState {
         is MenuAction.ToggleReaderView,
         is MenuAction.CustomizeReaderView,
         is MenuAction.Navigate,
-        is MenuAction.ShowCFR,
-        is MenuAction.DismissCFR,
         is MenuAction.SaveMenuClicked,
         is MenuAction.ToolsMenuClicked,
+        is MenuAction.ShowCFR,
+        is MenuAction.OpenInRegularTab,
+        is MenuAction.DismissCFR,
         -> state
 
         is MenuAction.RequestDesktopSite -> state.copy(isDesktopMode = true)
@@ -57,10 +58,6 @@ private fun reducer(state: MenuState, action: MenuAction): MenuState {
 
         is MenuAction.UpdateWebExtensionBrowserMenuItems -> state.copyWithExtensionMenuState {
             it.copy(browserWebExtensionMenuItem = action.webExtensionBrowserMenuItem)
-        }
-
-        is MenuAction.UpdateWebExtensionPageMenuItems -> state.copyWithToolsMenuState {
-            it.copy(pageWebExtensionMenuItem = action.webExtensionPageMenuItem)
         }
 
         is MenuAction.UpdateBookmarkState -> state.copyWithBrowserMenuState {
@@ -82,6 +79,7 @@ private fun reducer(state: MenuState, action: MenuAction): MenuState {
         is MenuAction.InstallAddonSuccess -> state.copyWithExtensionMenuState { extensionState ->
             extensionState.copy(
                 recommendedAddons = state.extensionMenuState.recommendedAddons.filter { it != action.addon },
+                availableAddons = state.extensionMenuState.availableAddons.plus(action.addon),
                 addonInstallationInProgress = null,
             )
         }
@@ -96,6 +94,10 @@ private fun reducer(state: MenuState, action: MenuAction): MenuState {
 
         is MenuAction.UpdateManageExtensionsMenuItemVisibility -> state.copyWithExtensionMenuState {
             it.copy(shouldShowManageExtensionsMenuItem = action.isVisible)
+        }
+
+        is MenuAction.UpdateAvailableAddons -> state.copyWithExtensionMenuState {
+            it.copy(availableAddons = action.availableAddons)
         }
     }
 }
@@ -112,11 +114,4 @@ internal inline fun MenuState.copyWithExtensionMenuState(
     crossinline update: (ExtensionMenuState) -> ExtensionMenuState,
 ): MenuState {
     return this.copy(extensionMenuState = update(this.extensionMenuState))
-}
-
-@VisibleForTesting
-internal inline fun MenuState.copyWithToolsMenuState(
-    crossinline update: (ToolsMenuState) -> ToolsMenuState,
-): MenuState {
-    return this.copy(toolsMenuState = update(this.toolsMenuState))
 }

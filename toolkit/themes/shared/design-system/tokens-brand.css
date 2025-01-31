@@ -45,6 +45,12 @@
     --link-color-active: var(--color-accent-primary-active);
     --link-color-visited: var(--link-color);
 
+    /** Page **/
+    --page-main-content-width: 664px;
+
+    /** Table Row **/
+    --table-row-background-color-alternate: light-dark(#f0f0f4, var(--color-gray-80)); /* TODO Bug 1821203 - Gray use needs to be consolidated */
+
     /** Text **/
     --text-color: light-dark(var(--color-gray-100), var(--color-gray-05));
   }

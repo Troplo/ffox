@@ -28,13 +28,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import mozilla.components.compose.base.annotation.LightDarkPreview
 import mozilla.components.feature.tab.collections.TabCollection
 import org.mozilla.fenix.R
 import org.mozilla.fenix.R.drawable
 import org.mozilla.fenix.R.string
 import org.mozilla.fenix.compose.ContextualMenu
 import org.mozilla.fenix.compose.MenuItem
-import org.mozilla.fenix.compose.annotation.LightDarkPreview
 import org.mozilla.fenix.compose.list.ExpandableListHeader
 import org.mozilla.fenix.ext.getIconColor
 import org.mozilla.fenix.home.fake.FakeHomepagePreview
@@ -61,7 +61,7 @@ private val expandedCollectionShape = RoundedCornerShape(topStart = 8.dp, topEnd
  * @param onCollectionShareTabsClicked Invoked when the user clicks to share the collection.
  */
 @Composable
-@Suppress("LongMethod")
+@Suppress("LongMethod", "Deprecation") // https://bugzilla.mozilla.org/show_bug.cgi?id=1927713
 fun Collection(
     collection: TabCollection,
     expanded: Boolean,

@@ -87,18 +87,6 @@ ${helpers.predefined_type(
 )}
 
 ${helpers.predefined_type(
-    "-moz-window-transform-origin",
-    "TransformOrigin",
-    "computed::TransformOrigin::initial_value()",
-    engines="gecko",
-    gecko_ffi_name="mWindowTransformOrigin",
-    boxed=True,
-    spec="None (Nonstandard internal property)",
-    enabled_in="chrome",
-    affects="overflow",
-)}
-
-${helpers.predefined_type(
     "-moz-window-input-region-margin",
     "Length",
     "computed::Length::zero()",
@@ -195,12 +183,13 @@ ${helpers.predefined_type(
     "transition-behavior",
     "TransitionBehavior",
     "computed::TransitionBehavior::normal()",
-    engines="gecko",
+    engines="gecko servo",
     initial_specified_value="specified::TransitionBehavior::normal()",
     vector=True,
     need_index=True,
     animation_type="none",
     gecko_pref="layout.css.transition-behavior.enabled",
+    servo_pref="layout.css.transition-behavior.enabled",
     spec="https://drafts.csswg.org/css-transitions-2/#transition-behavior-property",
     affects="",
 )}

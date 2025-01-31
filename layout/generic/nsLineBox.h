@@ -229,20 +229,20 @@ class nsLineBox final : public nsLineLink {
   // mHasForcedLineBreakAfter bit & mFloatClearType value
   void ClearForcedLineBreak() {
     mFlags.mHasForcedLineBreakAfter = false;
-    mFlags.mFloatClearType = mozilla::StyleClear::None;
+    mFlags.mFloatClearType = mozilla::UsedClear::None;
   }
 
   bool HasFloatClearTypeBefore() const {
-    return FloatClearTypeBefore() != mozilla::StyleClear::None;
+    return FloatClearTypeBefore() != mozilla::UsedClear::None;
   }
-  void SetFloatClearTypeBefore(mozilla::StyleClear aClearType) {
+  void SetFloatClearTypeBefore(mozilla::UsedClear aClearType) {
     MOZ_ASSERT(IsBlock(), "Only block lines have break-before status!");
-    MOZ_ASSERT(aClearType != mozilla::StyleClear::None,
-               "Only StyleClear:Left/Right/Both are allowed before a line");
+    MOZ_ASSERT(aClearType != mozilla::UsedClear::None,
+               "Only UsedClear:Left/Right/Both are allowed before a line");
     mFlags.mFloatClearType = aClearType;
   }
-  mozilla::StyleClear FloatClearTypeBefore() const {
-    return IsBlock() ? mFlags.mFloatClearType : mozilla::StyleClear::None;
+  mozilla::UsedClear FloatClearTypeBefore() const {
+    return IsBlock() ? mFlags.mFloatClearType : mozilla::UsedClear::None;
   }
 
   bool HasForcedLineBreakAfter() const {
@@ -250,16 +250,16 @@ class nsLineBox final : public nsLineLink {
                "A block line shouldn't set mHasForcedLineBreakAfter bit!");
     return IsInline() && mFlags.mHasForcedLineBreakAfter;
   }
-  void SetForcedLineBreakAfter(mozilla::StyleClear aClearType) {
+  void SetForcedLineBreakAfter(mozilla::UsedClear aClearType) {
     MOZ_ASSERT(IsInline(), "Only inline lines have break-after status!");
     mFlags.mHasForcedLineBreakAfter = true;
     mFlags.mFloatClearType = aClearType;
   }
   bool HasFloatClearTypeAfter() const {
-    return FloatClearTypeAfter() != mozilla::StyleClear::None;
+    return FloatClearTypeAfter() != mozilla::UsedClear::None;
   }
-  mozilla::StyleClear FloatClearTypeAfter() const {
-    return IsInline() ? mFlags.mFloatClearType : mozilla::StyleClear::None;
+  mozilla::UsedClear FloatClearTypeAfter() const {
+    return IsInline() ? mFlags.mFloatClearType : mozilla::UsedClear::None;
   }
 
   // mCarriedOutBEndMargin value
@@ -306,6 +306,10 @@ class nsLineBox final : public nsLineLink {
     return GetOverflowArea(mozilla::OverflowType::Scrollable);
   }
 
+  // See comment on `mInFlowChildBounds`.
+  void SetInFlowChildBounds(const mozilla::Maybe<nsRect>& aInFlowChildBounds);
+  mozilla::Maybe<nsRect> GetInFlowChildBounds() const;
+
   void SlideBy(nscoord aDBCoord, const nsSize& aContainerSize) {
     NS_ASSERTION(
         aContainerSize == mContainerSize || mContainerSize == nsSize(-1, -1),
@@ -320,6 +324,9 @@ class nsLineBox final : public nsLineLink {
               .GetPhysicalPoint(mWritingMode, nullContainerSize);
       for (const auto otype : mozilla::AllOverflowTypes()) {
         mData->mOverflowAreas.Overflow(otype) += physicalDelta;
+      }
+      if (mData->mInFlowChildBounds) {
+        *mData->mInFlowChildBounds += physicalDelta;
       }
     }
   }
@@ -337,6 +344,9 @@ class nsLineBox final : public nsLineLink {
       nsPoint physicalDelta(-delta.width, 0);
       for (const auto otype : mozilla::AllOverflowTypes()) {
         mData->mOverflowAreas.Overflow(otype) += physicalDelta;
+      }
+      if (mData->mInFlowChildBounds) {
+        *mData->mInFlowChildBounds += physicalDelta;
       }
     }
     return delta;
@@ -399,7 +409,7 @@ class nsLineBox final : public nsLineLink {
                                   int32_t* aFrameIndexInLine);
 
 #ifdef DEBUG_FRAME_DUMP
-  static const char* StyleClearToString(mozilla::StyleClear aClearType);
+  static const char* UsedClearToString(mozilla::UsedClear aClearType);
 
   void List(FILE* out, int32_t aIndent,
             nsIFrame::ListFlags aFlags = nsIFrame::ListFlags()) const;
@@ -411,12 +421,14 @@ class nsLineBox final : public nsLineLink {
   void AddSizeOfExcludingThis(nsWindowSizes& aSizes) const;
 
   // Find the index of aFrame within the line, starting search at the start.
-  int32_t IndexOf(nsIFrame* aFrame) const;
+  int32_t IndexOf(const nsIFrame* aFrame) const;
 
-  // Find the index of aFrame within the line, starting search at the end.
+  // Find the index of aFrame within the line, starting search from both ends
+  // of the line and working inwards.
   // (Produces the same result as IndexOf, but with different performance
   // characteristics.)  The caller must provide the last frame in the line.
-  int32_t RIndexOf(nsIFrame* aFrame, nsIFrame* aLastFrameInLine) const;
+  int32_t RLIndexOf(const nsIFrame* aFrame,
+                    const nsIFrame* aLastFrameInLine) const;
 
   bool Contains(nsIFrame* aFrame) const {
     return MOZ_UNLIKELY(mFlags.mHasHashedFrames) ? mFrames->Contains(aFrame)
@@ -515,13 +527,19 @@ class nsLineBox final : public nsLineLink {
     bool mHasForcedLineBreakAfter : 1;
     // mFloatClearType indicates that there's a float clearance before a block
     // line, or after an inline line.
-    mozilla::StyleClear mFloatClearType;
+    mozilla::UsedClear mFloatClearType;
   };
 
   struct ExtraData {
     explicit ExtraData(const nsRect& aBounds)
         : mOverflowAreas(aBounds, aBounds) {}
     mozilla::OverflowAreas mOverflowAreas;
+    // Union of the margin-boxes of our in-flow children (only children,
+    // *not* their descendants). This is part of a special contribution to
+    // the scrollable overflow of a scrolled block; as such, this is only
+    // emplaced if our block is a scrolled frame (and we have in-flow children,
+    // and floats, which are considered in-flow for scrollable overflow).
+    mozilla::Maybe<nsRect> mInFlowChildBounds;
   };
 
   struct ExtraBlockData : public ExtraData {
@@ -985,7 +1003,9 @@ class nsLineList {
   void splice(iterator position, self_type& x, iterator first, iterator last) {
     NS_ASSERTION(!x.empty(), "Can't insert from empty list.");
 
-    if (first == last) return;
+    if (first == last) {
+      return;
+    }
 
     --last;  // so we now want to move [first, last]
     // remove from |x|

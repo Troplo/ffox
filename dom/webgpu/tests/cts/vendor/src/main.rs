@@ -186,7 +186,7 @@ fn run(args: CliArgs) -> miette::Result<()> {
                 git_status_porcelain_output,
             );
 
-            gecko_ckt.regen_dir(&cts_vendor_dir.join("checkout"), |vendored_ckt_dir| {
+            gecko_ckt.regen_dir(cts_vendor_dir.join("checkout"), |vendored_ckt_dir| {
                 log::info!("  …copying files tracked by Git to {vendored_ckt_dir}…");
                 let files_to_vendor = {
                     let mut git_ls_files_cmd = EasyCommand::new(&git_bin, |cmd| {
@@ -445,8 +445,7 @@ fn run(args: CliArgs) -> miette::Result<()> {
                             continue;
                         }
                     };
-                let slashed =
-                    path[..subtest_and_later_start_idx].replace(|c| matches!(c, ':' | ','), "/");
+                let slashed = path[..subtest_and_later_start_idx].replace([':', ','], "/");
                 cts_tests_dir.child(slashed)
             };
             if !cts_cases_by_spec_file_dir
@@ -506,7 +505,7 @@ fn run(args: CliArgs) -> miette::Result<()> {
 
         for (path, entry) in split_cases {
             let dir = path.parent().expect("no parent found for ");
-            match create_dir_all(&dir) {
+            match create_dir_all(dir) {
                 Ok(()) => log::trace!("made directory {}", dir.display()),
                 Err(e) => {
                     failed_writing = true;

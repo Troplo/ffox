@@ -25,7 +25,22 @@ rtc_source_set("neteq_api") {
     "../audio_codecs:audio_codecs_api",
     "../environment",
     "../units:timestamp",
-    "//third_party/abseil-cpp/absl/types:optional",
+  ]
+}
+
+rtc_source_set("default_neteq_factory") {
+  visibility = [ "*" ]
+  sources = [
+    "default_neteq_factory.cc",
+    "default_neteq_factory.h",
+  ]
+  deps = [
+    ":default_neteq_controller_factory",
+    ":neteq_api",
+    "..:scoped_refptr",
+    "../../modules/audio_coding:neteq",
+    "../audio_codecs:audio_codecs_api",
+    "../environment",
   ]
 }
 
@@ -57,7 +72,6 @@ rtc_source_set("neteq_controller_api") {
     ":neteq_api",
     ":tick_timer",
     "../environment",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 

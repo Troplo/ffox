@@ -75,9 +75,10 @@ Register IonIC::scratchRegisterForEntryJump() {
     case CacheKind::TypeOf:
     case CacheKind::TypeOfEq:
     case CacheKind::ToBool:
-    case CacheKind::GetIntrinsic:
+    case CacheKind::LazyConstant:
     case CacheKind::NewArray:
     case CacheKind::NewObject:
+    case CacheKind::Lambda:
       MOZ_CRASH("Unsupported IC");
   }
 

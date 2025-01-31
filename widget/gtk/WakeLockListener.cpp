@@ -664,12 +664,13 @@ bool WakeLockTopic::InhibitWaylandIdle() {
 
   UninhibitWaylandIdle();
 
-  MozContainerSurfaceLock lock(focusedWindow->GetMozContainer());
-  struct wl_surface* waylandSurface = lock.GetSurface();
-  if (waylandSurface) {
-    mWaylandInhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(
-        waylandDisplay->GetIdleInhibitManager(), waylandSurface);
-    mState = Inhibited;
+  if (GdkWindow* window = focusedWindow->GetGdkWindow()) {
+    wl_surface* waylandSurface = gdk_wayland_window_get_wl_surface(window);
+    if (waylandSurface) {
+      mWaylandInhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(
+          waylandDisplay->GetIdleInhibitManager(), waylandSurface);
+      mState = Inhibited;
+    }
   }
 
   WAKE_LOCK_LOG("InhibitWaylandIdle() %s",
@@ -810,7 +811,7 @@ nsresult WakeLockTopic::ProcessNextRequest() {
         mState = WaitingToUninhibit;
         return SendUninhibit() ? NS_OK : NS_ERROR_FAILURE;
       default:
-        MOZ_DIAGNOSTIC_ASSERT(false, "Wrong state!");
+        MOZ_DIAGNOSTIC_CRASH("Wrong state!");
         return NS_ERROR_FAILURE;
     }
   }

@@ -186,6 +186,10 @@ class TransactionBuilder final {
 
   void DeleteBlobImage(wr::BlobImageKey aKey);
 
+  void AddSnapshotImage(wr::SnapshotImageKey aKey);
+
+  void DeleteSnapshotImage(wr::SnapshotImageKey aKey);
+
   void AddRawFont(wr::FontKey aKey, wr::Vec<uint8_t>& aBytes, uint32_t aIndex);
 
   void AddFontDescriptor(wr::FontKey aKey, wr::Vec<uint8_t>& aBytes,
@@ -590,7 +594,7 @@ class DisplayListBuilder final {
 
   Maybe<wr::WrSpatialId> PushStackingContext(
       const StackingContextParams& aParams, const wr::LayoutRect& aBounds,
-      const wr::RasterSpace& aRasterSpace);
+      const wr::RasterSpace& aRasterSpace, const wr::SnapshotInfo* aSnapshot);
   void PopStackingContext(bool aIsReferenceFrame);
 
   wr::WrClipChainId DefineClipChain(const nsTArray<wr::WrClipId>& aClips,

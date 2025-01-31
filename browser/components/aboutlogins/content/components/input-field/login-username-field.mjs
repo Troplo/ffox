@@ -8,8 +8,19 @@ import { editableFieldTemplate, stylesTemplate } from "./input-field.mjs";
 class LoginUsernameField extends MozLitElement {
   static properties = {
     value: { type: String, reflect: true },
+    name: { type: String },
     readonly: { type: Boolean, reflect: true },
+    required: { type: Boolean, reflect: true },
   };
+
+  static queries = {
+    input: "input",
+  };
+
+  constructor() {
+    super();
+    this.value = "";
+  }
 
   render() {
     return html`
@@ -18,6 +29,7 @@ class LoginUsernameField extends MozLitElement {
         type: "text",
         value: this.value,
         disabled: this.readonly,
+        required: this.required,
         labelL10nId: "login-item-username-label",
         noteL10nId: "passwords-username-tooltip",
       })}

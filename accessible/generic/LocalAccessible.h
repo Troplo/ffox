@@ -73,12 +73,12 @@ void TreeSize(const char* aTitle, const char* aMsgText, LocalAccessible* aRoot);
 typedef nsRefPtrHashtable<nsPtrHashKey<const void>, LocalAccessible>
     AccessibleHashtable;
 
-#define NS_ACCESSIBLE_IMPL_IID                       \
-  { /* 133c8bf4-4913-4355-bd50-426bd1d6e1ad */       \
-    0x133c8bf4, 0x4913, 0x4355, {                    \
-      0xbd, 0x50, 0x42, 0x6b, 0xd1, 0xd6, 0xe1, 0xad \
-    }                                                \
-  }
+#define NS_ACCESSIBLE_IMPL_IID                \
+  {/* 133c8bf4-4913-4355-bd50-426bd1d6e1ad */ \
+   0x133c8bf4,                                \
+   0x4913,                                    \
+   0x4355,                                    \
+   {0xbd, 0x50, 0x42, 0x6b, 0xd1, 0xd6, 0xe1, 0xad}}
 
 /**
  * An accessibility tree node that originated in mDoc's content process.
@@ -723,8 +723,11 @@ class LocalAccessible : public nsISupports, public Accessible {
    * Push fields to cache.
    * aCacheDomain - describes which fields to bundle and ultimately send
    * aUpdate - describes whether this is an initial or subsequent update
+   * aAppendEventData - don't send the event now; append it to the mutation
+   *                    events list on the DocAccessibleChild
    */
-  void SendCache(uint64_t aCacheDomain, CacheUpdateType aUpdate);
+  void SendCache(uint64_t aCacheDomain, CacheUpdateType aUpdate,
+                 bool aAppendEventData = false);
 
   void MaybeQueueCacheUpdateForStyleChanges();
 
@@ -897,18 +900,15 @@ class LocalAccessible : public nsISupports, public Accessible {
    *  invoke action of mozilla accessibles direclty (see bug 277888 for
    * details).
    *
-   * @param  aContent      [in, optional] element to click
    * @param  aActionIndex  [in, optional] index of accessible action
    */
-  void DoCommand(nsIContent* aContent = nullptr,
-                 uint32_t aActionIndex = 0) const;
+  void DoCommand(uint32_t aActionIndex = 0) const;
 
   /**
    * Dispatch click event.
    */
   MOZ_CAN_RUN_SCRIPT
-  virtual void DispatchClickEvent(nsIContent* aContent,
-                                  uint32_t aActionIndex) const;
+  virtual void DispatchClickEvent(uint32_t aActionIndex) const;
 
   //////////////////////////////////////////////////////////////////////////////
   // Helpers

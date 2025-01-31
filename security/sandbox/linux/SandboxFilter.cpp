@@ -27,6 +27,7 @@
 #include <utility>
 #include <vector>
 
+#include "PlatformMacros.h"
 #include "Sandbox.h"  // for ContentProcessSandboxParams
 #include "SandboxBrokerClient.h"
 #include "SandboxFilterUtil.h"
@@ -42,6 +43,11 @@
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/system_headers/linux_seccomp.h"
 #include "sandbox/linux/system_headers/linux_syscalls.h"
+
+#if defined(GP_PLAT_amd64_linux) && defined(GP_ARCH_amd64) && \
+    defined(MOZ_USING_WASM_SANDBOXING)
+#  include <asm/prctl.h>  // For ARCH_SET_GS
+#endif
 
 using namespace sandbox::bpf_dsl;
 #define CASES SANDBOX_BPF_DSL_CASES
@@ -1122,6 +1128,22 @@ class SandboxPolicyCommon : public SandboxPolicyBase {
             .Else(PrctlPolicy());
       }
 
+#if defined(GP_PLAT_amd64_linux) && defined(GP_ARCH_amd64) && \
+    defined(MOZ_USING_WASM_SANDBOXING)
+        // arch_prctl
+      case __NR_arch_prctl: {
+        // Bug 1923701 - Needed for by RLBox-wasm2c: Buggy libraries are
+        // sandboxed with RLBox and wasm2c (Wasm). wasm2c offers an optimization
+        // for performance that uses the otherwise-unused GS register on x86.
+        // The GS register is only settable using the arch_prctl platforms on
+        // older x86 CPUs that don't have the wrgsbase instruction. This
+        // optimization is currently only supported on linux+clang+x86_64.
+        Arg<int> op(0);
+        return If(op == ARCH_SET_GS, Allow())
+            .Else(SandboxPolicyBase::EvaluateSyscall(sysno));
+      }
+#endif
+
         // NSPR can call this when creating a thread, but it will accept a
         // polite "no".
       case __NR_getpriority:
@@ -1599,6 +1621,10 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
         // usually do something reasonable on error.
       case __NR_clone:
         return ClonePolicy(Error(EPERM));
+#  ifdef __NR_fork
+      case __NR_fork:
+        return Error(ENOSYS);
+#  endif
 
 #  ifdef __NR_fadvise64
       case __NR_fadvise64:
@@ -1986,6 +2012,10 @@ class RDDSandboxPolicy final : public SandboxPolicyCommon {
         // nvidia drivers may attempt to spawn nvidia-modprobe
       case __NR_clone:
         return ClonePolicy(Error(EPERM));
+#ifdef __NR_fork
+      case __NR_fork:
+        return Error(ENOSYS);
+#endif
 
         // Pass through the common policy.
       default:

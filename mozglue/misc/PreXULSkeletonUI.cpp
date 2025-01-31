@@ -131,7 +131,7 @@ static int sVerticalResizeMargin = 0;
 
 // See nsWindow::NonClientSizeMargin()
 static Margin NonClientSizeMargin() {
-  return Margin{sCaptionHeight - sNonClientOffset.top,
+  return Margin{sCaptionHeight + sVerticalResizeMargin - sNonClientOffset.top,
                 sHorizontalResizeMargin - sNonClientOffset.right,
                 sVerticalResizeMargin - sNonClientOffset.bottom,
                 sHorizontalResizeMargin - sNonClientOffset.left};
@@ -1350,7 +1350,7 @@ ThemeColors GetTheme(ThemeMode themeId) {
       theme.tabOutlineColor = 0x1c1b22;
       // controlled by css variable --lwt-accent-color
       theme.titlebarColor = 0x1c1b22;
-      // controlled by --toolbar-non-lwt-textcolor in browser.css
+      // controlled by --toolbar-color in browser.css
       theme.chromeContentDividerColor = 0x0c0c0d;
       // controlled by css variable --toolbar-field-background-color
       theme.urlbarColor = 0x42414d;
@@ -1360,12 +1360,12 @@ ThemeColors GetTheme(ThemeMode themeId) {
     case ThemeMode::Light:
     case ThemeMode::Default:
     default:
-      // --toolbar-non-lwt-bgcolor in browser.css
+      // --toolbar-bgcolor in browser.css
       theme.backgroundColor = 0xf9f9fb;
       theme.tabColor = 0xf9f9fb;
       theme.toolbarForegroundColor = 0xdddde1;
       theme.tabOutlineColor = 0xdddde1;
-      // found in browser-aero.css ":root[tabsintitlebar]:not(:-moz-lwtheme)"
+      // found in browser-aero.css ":root[customtitlebar]:not(:-moz-lwtheme)"
       // (set to "hsl(235,33%,19%)")
       theme.titlebarColor = 0xf0f0f4;
       // --chrome-content-separator-color in browser.css
@@ -1923,7 +1923,7 @@ static Result<Ok, PreXULSkeletonUIError> CreateAndStorePreXULSkeletonUIImpl(
                                                          sThemeRegSuffix)));
   ThemeMode themeMode = static_cast<ThemeMode>(theme);
   if (themeMode == ThemeMode::Default) {
-    if (IsSystemDarkThemeEnabled() == true) {
+    if (IsSystemDarkThemeEnabled()) {
       themeMode = ThemeMode::Dark;
     }
   }
@@ -1952,7 +1952,7 @@ static Result<Ok, PreXULSkeletonUIError> CreateAndStorePreXULSkeletonUIImpl(
   // mostly #FFFFFF. To avoid a bright flash when the window is first created,
   // cloak the window while showing it, and fill it with the appropriate
   // background color before uncloaking it.
-  if (sDwmGetWindowAttribute != nullptr) {
+  {
     constexpr static auto const CloakWindow = [](HWND hwnd, BOOL state) {
       sDwmSetWindowAttribute(sPreXULSkeletonUIWindow, DWMWA_CLOAK, &state,
                              sizeof(state));
@@ -1992,25 +1992,15 @@ static Result<Ok, PreXULSkeletonUIError> CreateAndStorePreXULSkeletonUIImpl(
                             sGetSystemMetricsForDpi(SM_CXPADDEDBORDER, sDpi);
   sVerticalResizeMargin = sGetSystemMetricsForDpi(SM_CYFRAME, sDpi) +
                           sGetSystemMetricsForDpi(SM_CXPADDEDBORDER, sDpi);
-  sCaptionHeight =
-      sVerticalResizeMargin + sGetSystemMetricsForDpi(SM_CYCAPTION, sDpi);
+  sCaptionHeight = sGetSystemMetricsForDpi(SM_CYCAPTION, sDpi);
 
-  // These match the margins set in browser-tabsintitlebar.js with default prefs
-  // on Windows. We don't use the skeleton ui if tabsInTitlebar is disabled, see
-  // bug 1673092.
-  const Margin nonClientMargin{0, 2, 2, 2};
-
+  // These match the offsets that we get with default prefs. We don't use the
+  // skeleton ui if tabsInTitlebar is disabled, see bug 1673092.
   if (sMaximized) {
-    sNonClientOffset.top = sCaptionHeight - sVerticalResizeMargin;
+    sNonClientOffset = Margin{sCaptionHeight, 0, 0, 0};
   } else {
     // See nsWindow::NormalWindowNonClientOffset()
-    sNonClientOffset.top = sCaptionHeight;
-    sNonClientOffset.bottom =
-        std::min(sVerticalResizeMargin, nonClientMargin.bottom);
-    sNonClientOffset.left =
-        std::min(sHorizontalResizeMargin, nonClientMargin.left);
-    sNonClientOffset.right =
-        std::min(sHorizontalResizeMargin, nonClientMargin.right);
+    sNonClientOffset = Margin{sCaptionHeight + sVerticalResizeMargin, 0, 0, 0};
   }
 
   if (sMaximized) {

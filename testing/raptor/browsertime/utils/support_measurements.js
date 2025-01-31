@@ -7,15 +7,20 @@
 
 const os = require("os");
 const path = require("path");
+const fs = require("fs");
 
-const usbPowerProfiler = require(path.join(
-  process.env.BROWSERTIME_ROOT,
-  "node_modules",
-  "usb-power-profiling",
-  "usb-power-profiling.js"
-));
+const usbPowerProfiler = require(
+  path.join(
+    process.env.BROWSERTIME_ROOT,
+    "node_modules",
+    "usb-power-profiling",
+    "usb-power-profiling.js"
+  )
+);
+
 const {
   gatherWindowsPowerUsage,
+  getBrowsertimeResultsPath,
   startWindowsPowerProfiling,
   stopWindowsPowerProfiling,
 } = require("./profiling");
@@ -36,6 +41,8 @@ class SupportMeasurements {
     if (this.isAndroid) {
       if (this.application == "firefox") {
         this.androidPackage = this.context.options.firefox.android.package;
+      } else if (this.application == "chrome") {
+        this.androidPackage = "com.android.chrome";
       } else {
         this.androidPackage = this.context.options.chrome.android.package;
       }
@@ -44,18 +51,21 @@ class SupportMeasurements {
     this.measurementMap = {
       cpuTime: {
         run: measureCPU,
+        initialize: null,
         start: "_startMeasureCPU",
         stop: "_stopMeasureCPU",
         finalize: null,
       },
       powerUsageSupport: {
         run: measurePower,
+        initialize: "_initializeMeasurePower",
         start: "_startMeasurePower",
         stop: "_stopMeasurePower",
         finalize: "_finalizeMeasurePower",
       },
       "wallclock-for-tracking-only": {
         run: measureTime,
+        initialize: null,
         start: "_startMeasureTime",
         stop: "_stopMeasureTime",
         finalize: null,
@@ -137,13 +147,17 @@ class SupportMeasurements {
     });
   }
 
-  async _startMeasurePower() {
-    this.context.log.info("Starting power usage measurements");
+  async _initializeMeasurePower() {
+    this.context.log.info("Initializing power usage measurements");
     if (this.isAndroid) {
       await usbPowerProfiler.startSampling();
     } else if (this.isWindows11) {
       await startWindowsPowerProfiling(this.context.index);
     }
+  }
+
+  async _startMeasurePower() {
+    this.context.log.info("Starting power usage measurements");
     this.startPowerTime = Date.now();
   }
 
@@ -158,7 +172,22 @@ class SupportMeasurements {
         (currSum, currVal) => currSum + Number.parseInt(currVal[1]),
         0
       );
-      await usbPowerProfiler.stopSampling();
+
+      const powerProfile = await usbPowerProfiler.profileFromData();
+      const browsertimeResultsPath = await getBrowsertimeResultsPath(
+        this.context,
+        this.commands,
+        true
+      );
+
+      const data = JSON.stringify(powerProfile, undefined, 2);
+      await fs.promises.writeFile(
+        path.join(
+          browsertimeResultsPath,
+          `profile_power_${this.context.index}.json`
+        ),
+        data
+      );
 
       this.commands.measure.addObject({
         [measurementName]: [powerUsage],
@@ -170,7 +199,10 @@ class SupportMeasurements {
 
   async _finalizeMeasurePower() {
     this.context.log.info("Finalizing power usage measurements");
-    if (this.isWindows11) {
+    if (this.isAndroid) {
+      await usbPowerProfiler.stopSampling();
+      await usbPowerProfiler.resetPowerData();
+    } else if (this.isWindows11) {
       await stopWindowsPowerProfiling();
 
       let powerData = await gatherWindowsPowerUsage(this.testTimes);
@@ -205,6 +237,16 @@ class SupportMeasurements {
     this.commands = commands;
   }
 
+  async initialize() {
+    for (let measurementName in this.measurementMap) {
+      let measurementInfo = this.measurementMap[measurementName];
+      if (!(measurementInfo.run && measurementInfo.initialize)) {
+        continue;
+      }
+      await this[measurementInfo.initialize](measurementName);
+    }
+  }
+
   async start() {
     for (let measurementName in this.measurementMap) {
       let measurementInfo = this.measurementMap[measurementName];
@@ -237,7 +279,7 @@ class SupportMeasurements {
 }
 
 let supportMeasurementObj;
-async function startMeasurements(
+async function initializeMeasurements(
   context,
   commands,
   measureCPU,
@@ -254,13 +296,25 @@ async function startMeasurements(
     );
   }
 
+  await supportMeasurementObj.initialize();
+}
+
+async function startMeasurements(context, commands) {
+  if (!supportMeasurementObj) {
+    throw new Error(
+      "initializeMeasurements must be called before startMeasurements"
+    );
+  }
+
   await supportMeasurementObj.reset(context, commands);
   await supportMeasurementObj.start();
 }
 
 async function stopMeasurements() {
   if (!supportMeasurementObj) {
-    throw new Error("startMeasurements must be called before stopMeasurements");
+    throw new Error(
+      "initializeMeasurements must be called before stopMeasurements"
+    );
   }
   await supportMeasurementObj.stop();
 }
@@ -268,7 +322,7 @@ async function stopMeasurements() {
 async function finalizeMeasurements() {
   if (!supportMeasurementObj) {
     throw new Error(
-      "startMeasurements must be called before finalizeMeasurements"
+      "initializeMeasurements must be called before finalizeMeasurements"
     );
   }
   await supportMeasurementObj.finalize();
@@ -276,6 +330,7 @@ async function finalizeMeasurements() {
 
 module.exports = {
   SupportMeasurements,
+  initializeMeasurements,
   startMeasurements,
   stopMeasurements,
   finalizeMeasurements,

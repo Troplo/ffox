@@ -1,14 +1,4 @@
 {
-  "A11Y_INSTANTIATED_FLAG": {
-    "record_in_processes": ["main"],
-    "products": ["firefox", "fennec"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "releaseChannelCollection": "opt-out",
-    "bug_numbers": [1382820],
-    "description": "Flag indicating accessibility support has been instantiated.",
-    "alert_emails": ["accessibility@mozilla.com"]
-  },
   "A11Y_CONSUMERS": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec"],
@@ -19,22 +9,6 @@
     "bug_numbers": [1382820, 1462238],
     "description": "A list of known accessibility clients that inject into Firefox process space (see https://searchfox.org/mozilla-central/source/accessible/windows/msaa/Compatibility.h).",
     "alert_emails": ["accessibility@mozilla.com", "jteh@mozilla.com"]
-  },
-  "A11Y_ISIMPLEDOM_USAGE_FLAG": {
-    "record_in_processes": ["main"],
-    "products": ["firefox", "fennec"],
-    "expires_in_version": "default",
-    "kind": "flag",
-    "description": "Flag indicating the ISimpleDOM* accessibility interfaces has been used.",
-    "alert_emails": ["accessibility@mozilla.com"]
-  },
-  "A11Y_IATABLE_USAGE_FLAG": {
-    "record_in_processes": ["main"],
-    "products": ["firefox", "fennec"],
-    "expires_in_version": "default",
-    "kind": "flag",
-    "description": "Flag indicating the IAccessibleTable accessibility interface has been used.",
-    "alert_emails": ["accessibility@mozilla.com"]
   },
   "A11Y_TREE_UPDATE_TIMING_MS": {
     "record_in_processes": ["main", "content"],
@@ -558,22 +532,6 @@
     "high": 120,
     "n_buckets": 50,
     "description": "Time spent in between cycle collections (seconds)"
-  },
-  "CYCLE_COLLECTOR_OOM": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec"],
-    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Set if the cycle collector ran out of memory at some point"
-  },
-  "CYCLE_COLLECTOR_WORKER_OOM": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec"],
-    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Set if the cycle collector in a worker ran out of memory at some point"
   },
   "CYCLE_COLLECTOR_ASYNC_SNOW_WHITE_FREEING": {
     "record_in_processes": ["main", "content"],
@@ -1353,14 +1311,6 @@
     "description": "Geolocation results' accuracy radius in meters. Smaller radius is more accurate.",
     "alert_emails": ["shong@mozilla.com"]
   },
-  "GEOLOCATION_ERROR": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec"],
-    "expires_in_version": "145",
-    "kind": "flag",
-    "releaseChannelCollection": "opt-out",
-    "description": "Has seen location error"
-  },
   "GEOLOCATION_WIN8_SOURCE_IS_MLS": {
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec"],
@@ -1662,7 +1612,6 @@
     "high": 1024,
     "n_buckets": 21,
     "description": "Number of low-virtual-memory events fired since last ping",
-    "operating_systems": ["windows"],
     "bug_numbers": [711490, 1451005]
   },
   "LOW_MEMORY_EVENTS_PHYSICAL": {
@@ -1674,7 +1623,6 @@
     "high": 1024,
     "n_buckets": 21,
     "description": "Number of low-physical-memory events fired since last ping",
-    "operating_systems": ["windows"],
     "bug_numbers": [711490, 1451005]
   },
   "LOW_MEMORY_EVENTS_COMMIT_SPACE": {
@@ -1686,7 +1634,6 @@
     "high": 1024,
     "n_buckets": 21,
     "description": "Number of low-commit-space events fired since last ping",
-    "operating_systems": ["windows"],
     "bug_numbers": [1451005]
   },
   "PAGE_FAULTS_HARD": {
@@ -1697,8 +1644,7 @@
     "low": 8,
     "high": 65536,
     "n_buckets": 13,
-    "description": "Hard page faults (since last telemetry ping)",
-    "operating_systems": ["unix"]
+    "description": "Hard page faults (since last telemetry ping)"
   },
   "MEMORY_PHC_SLOP": {
     "record_in_processes": ["main", "content"],
@@ -1708,7 +1654,7 @@
       "pbone@mozilla.com"
     ],
     "bug_numbers": [1829127, 1892149],
-    "expires_in_version": "135",
+    "expires_in_version": "142",
     "kind": "exponential",
     "low": 4096,
     "high": 8388608,
@@ -1724,7 +1670,7 @@
       "pbone@mozilla.com"
     ],
     "bug_numbers": [1829127, 1892149],
-    "expires_in_version": "135",
+    "expires_in_version": "142",
     "kind": "exponential",
     "high": 16384,
     "n_buckets": 64,
@@ -1739,7 +1685,7 @@
       "pbone@mozilla.com"
     ],
     "bug_numbers": [1829127, 1892149],
-    "expires_in_version": "135",
+    "expires_in_version": "142",
     "kind": "exponential",
     "high": 16384,
     "n_buckets": 64,
@@ -1751,7 +1697,7 @@
     "products": ["firefox"],
     "alert_emails": ["pbone@mozilla.com"],
     "bug_numbers": [1897060],
-    "expires_in_version": "135",
+    "expires_in_version": "142",
     "kind": "exponential",
     "low": 15,
     "high": 86400,
@@ -1804,8 +1750,7 @@
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 10,
-    "description": "gfxDWriteFontList::DelayedInitFontList Total (ms)",
-    "operating_systems": ["windows"]
+    "description": "gfxDWriteFontList::DelayedInitFontList Total (ms)"
   },
   "DWRITEFONT_DELAYEDINITFONTLIST_COUNT": {
     "record_in_processes": ["main", "content"],
@@ -1814,8 +1759,7 @@
     "kind": "exponential",
     "high": 10000,
     "n_buckets": 10,
-    "description": "gfxDWriteFontList::DelayedInitFontList Font Family Count",
-    "operating_systems": ["windows"]
+    "description": "gfxDWriteFontList::DelayedInitFontList Font Family Count"
   },
   "DWRITEFONT_DELAYEDINITFONTLIST_COLLECT": {
     "record_in_processes": ["main", "content"],
@@ -1824,8 +1768,7 @@
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 10,
-    "description": "gfxDWriteFontList::DelayedInitFontList GetSystemFontCollection (ms)",
-    "operating_systems": ["windows"]
+    "description": "gfxDWriteFontList::DelayedInitFontList GetSystemFontCollection (ms)"
   },
   "DWRITEFONT_INIT_PROBLEM": {
     "record_in_processes": ["main", "content"],
@@ -1833,8 +1776,7 @@
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 8,
-    "description": "DirectWrite system fontlist initialization problem (1=GDI interop, 2=system font collection, 3=no fonts)",
-    "operating_systems": ["windows"]
+    "description": "DirectWrite system fontlist initialization problem (1=GDI interop, 2=system font collection, 3=no fonts)"
   },
   "GDI_INITFONTLIST_TOTAL": {
     "record_in_processes": ["main", "content"],
@@ -1843,8 +1785,7 @@
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 10,
-    "description": "gfxGDIFontList::InitFontList Total (ms)",
-    "operating_systems": ["windows"]
+    "description": "gfxGDIFontList::InitFontList Total (ms)"
   },
   "MAC_INITFONTLIST_TOTAL": {
     "record_in_processes": ["main", "content"],
@@ -1853,8 +1794,7 @@
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 10,
-    "description": "gfxMacPlatformFontList::InitFontList Total (ms)",
-    "operating_systems": ["mac"]
+    "description": "gfxMacPlatformFontList::InitFontList Total (ms)"
   },
   "SYSTEM_FONT_FALLBACK": {
     "record_in_processes": ["main", "content"],
@@ -4920,39 +4860,6 @@
     "n_buckets": 50,
     "description": "How many actual preconnects happen"
   },
-  "PREDICTOR_TOTAL_PRECONNECTS_CREATED": {
-    "record_in_processes": ["main", "socket"],
-    "products": ["firefox", "fennec"],
-    "alert_emails": ["necko@mozilla.com"],
-    "bug_numbers": [881804],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 1000000,
-    "n_buckets": 50,
-    "description": "How many preconnects actually created a speculative socket"
-  },
-  "PREDICTOR_TOTAL_PRECONNECTS_USED": {
-    "record_in_processes": ["main", "socket"],
-    "products": ["firefox", "fennec"],
-    "alert_emails": ["necko@mozilla.com"],
-    "bug_numbers": [881804],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 1000000,
-    "n_buckets": 50,
-    "description": "How many preconnects actually created a used speculative socket"
-  },
-  "PREDICTOR_TOTAL_PRECONNECTS_UNUSED": {
-    "record_in_processes": ["main", "socket"],
-    "products": ["firefox", "fennec"],
-    "alert_emails": ["necko@mozilla.com"],
-    "bug_numbers": [881804],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 1000000,
-    "n_buckets": 50,
-    "description": "How many preconnects needlessly created a speculative socket"
-  },
   "PREDICTOR_TOTAL_PRERESOLVES": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec"],
@@ -5060,33 +4967,6 @@
     "alert_emails": ["necko@mozilla.com"],
     "bug_numbers": [1409542, 1430322, 1312057],
     "description": "Why the predictor determined a particular resource that was marked eligible for prefetch should not be prefetched. See PrefetchIgnoreReason in Predictor.cpp for value meanings"
-  },
-  "HTTPCONNMGR_TOTAL_SPECULATIVE_CONN": {
-    "record_in_processes": ["main", "socket"],
-    "products": ["firefox", "fennec"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 1000000,
-    "n_buckets": 50,
-    "description": "How many speculative http connections are created"
-  },
-  "HTTPCONNMGR_USED_SPECULATIVE_CONN": {
-    "record_in_processes": ["main", "socket"],
-    "products": ["firefox", "fennec"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 1000000,
-    "n_buckets": 50,
-    "description": "How many speculative http connections are actually used"
-  },
-  "HTTPCONNMGR_UNUSED_SPECULATIVE_CONN": {
-    "record_in_processes": ["main", "socket"],
-    "products": ["firefox", "fennec"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 1000000,
-    "n_buckets": 50,
-    "description": "How many speculative connections are made needlessly"
   },
   "TAB_COUNT": {
     "record_in_processes": ["main"],
@@ -7068,8 +6948,7 @@
     "n_values": 99,
     "releaseChannelCollection": "opt-out",
     "bug_numbers": [1343669, 1540193, 1520321],
-    "description": "Update: Result code from downloading a complete update via BITS",
-    "operating_systems": ["windows"]
+    "description": "Update: Result code from downloading a complete update via BITS"
   },
   "UPDATE_BITS_RESULT_PARTIAL": {
     "record_in_processes": ["main"],
@@ -7083,8 +6962,7 @@
     "n_values": 99,
     "releaseChannelCollection": "opt-out",
     "bug_numbers": [1343669, 1540193, 1520321],
-    "description": "Update: Result code from downloading a partial update via BITS",
-    "operating_systems": ["windows"]
+    "description": "Update: Result code from downloading a partial update via BITS"
   },
   "UPDATE_LANGPACK_OVERTIME": {
     "record_in_processes": ["main"],
@@ -7824,18 +7702,6 @@
     "bug_numbers": [1804536],
     "description": "For weather suggestions, this histogram is updated in addition to FX_URLBAR_MERINO_RESPONSE. The categories are the same."
   },
-  "FX_URLBAR_QUICK_SUGGEST_REMOTE_SETTINGS_LATENCY_MS": {
-    "record_in_processes": ["main"],
-    "products": ["firefox"],
-    "alert_emails": ["fx-search-telemetry@mozilla.com", "adw@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 30000,
-    "n_buckets": 50,
-    "releaseChannelCollection": "opt-out",
-    "bug_numbers": [1737651],
-    "description": "Firefox: Latency of the remote settings source for quick suggest (ms)"
-  },
   "FX_URLBAR_ZERO_PREFIX_DWELL_TIME_MS": {
     "record_in_processes": ["main"],
     "products": ["firefox"],
@@ -8332,38 +8198,6 @@
     "kind": "count",
     "description": "Number of Telemetry ping files evicted due to server errors (4XX HTTP code received)"
   },
-  "TELEMETRY_SESSIONDATA_FAILED_LOAD": {
-    "record_in_processes": ["main"],
-    "products": ["firefox", "fennec", "thunderbird"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Set if Telemetry failed to load the session data from disk."
-  },
-  "TELEMETRY_SESSIONDATA_FAILED_PARSE": {
-    "record_in_processes": ["main"],
-    "products": ["firefox", "fennec", "thunderbird"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Set if Telemetry failed to parse the session data loaded from disk."
-  },
-  "TELEMETRY_SESSIONDATA_FAILED_VALIDATION": {
-    "record_in_processes": ["main"],
-    "products": ["firefox", "fennec", "thunderbird"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Set if Telemetry failed to validate the session data loaded from disk."
-  },
-  "TELEMETRY_SESSIONDATA_FAILED_SAVE": {
-    "record_in_processes": ["main"],
-    "products": ["firefox", "fennec", "thunderbird"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Set if Telemetry failed to save the session data to disk."
-  },
   "TELEMETRY_EVENT_PING_SENT": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "thunderbird"],
@@ -8458,18 +8292,6 @@
     "n_values": 70,
     "labels": ["CommonLabel", "Label7", "Label8"],
     "description": "a testing histogram; not meant to be touched"
-  },
-  "TELEMETRY_TEST_CATEGORICAL_WIN_ONLY": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "thunderbird"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "bug_numbers": [1539907],
-    "expires_in_version": "never",
-    "kind": "categorical",
-    "n_values": 70,
-    "labels": ["CommonLabel", "Label7", "Label8"],
-    "description": "a testing histogram used as a compile-time check; not meant to be touched",
-    "operating_systems": ["windows"]
   },
   "TELEMETRY_TEST_KEYED_COUNT_INIT_NO_RECORD": {
     "record_in_processes": ["main", "content"],
@@ -8793,58 +8615,6 @@
     "description": "a testing histogram; not meant to be touched",
     "products": ["fennec"]
   },
-  "TELEMETRY_TEST_OS_ANDROID_ONLY": {
-    "record_in_processes": ["all"],
-    "products": ["firefox", "fennec", "thunderbird"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "linear",
-    "low": 1,
-    "high": 10000,
-    "n_buckets": 10,
-    "bug_numbers": [1477213],
-    "description": "a testing histogram; not meant to be touched",
-    "operating_systems": ["android"]
-  },
-  "TELEMETRY_TEST_OS_WIN_ONLY": {
-    "record_in_processes": ["all"],
-    "products": ["firefox", "fennec", "thunderbird"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "linear",
-    "low": 1,
-    "high": 10000,
-    "n_buckets": 10,
-    "bug_numbers": [1477213],
-    "description": "a testing histogram; not meant to be touched",
-    "operating_systems": ["windows"]
-  },
-  "TELEMETRY_TEST_OS_LINUX_ONLY": {
-    "record_in_processes": ["all"],
-    "products": ["firefox", "fennec", "thunderbird"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "linear",
-    "low": 1,
-    "high": 10000,
-    "n_buckets": 10,
-    "bug_numbers": [1477213],
-    "description": "a testing histogram; not meant to be touched",
-    "operating_systems": ["linux"]
-  },
-  "TELEMETRY_TEST_OS_MAC_ONLY": {
-    "record_in_processes": ["all"],
-    "products": ["firefox", "fennec", "thunderbird"],
-    "alert_emails": ["telemetry-client-dev@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "linear",
-    "low": 1,
-    "high": 10000,
-    "n_buckets": 10,
-    "bug_numbers": [1477213],
-    "description": "a testing histogram; not meant to be touched",
-    "operating_systems": ["mac"]
-  },
   "TELEMETRY_TEST_MAIN_ONLY": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "thunderbird"],
@@ -8940,13 +8710,6 @@
     "bug_numbers": [1907945],
     "description": "a testing histogram; not meant to be touched"
   },
-  "STARTUP_CRASH_DETECTED": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "thunderbird"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether there was a crash during the last startup"
-  },
   "SAFE_MODE_USAGE": {
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec"],
@@ -9040,7 +8803,7 @@
   "STORAGE_ACCESS_API_UI": {
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec"],
-    "alert_emails": ["pbz@mozilla.com", "tihuang@mozilla.com"],
+    "alert_emails": ["emz@mozilla.com", "tihuang@mozilla.com"],
     "bug_numbers": [1513309, 1588844, 1643432, 1689262, 1730043, 1832670],
     "expires_in_version": "never",
     "kind": "categorical",
@@ -9176,15 +8939,7 @@
     "releaseChannelCollection": "opt-out",
     "bug_numbers": [795307, 1390269],
     "alert_emails": ["jimm@mozilla.com"],
-    "description": "Boolean indicating if a touch input device is detected.",
-    "operating_systems": ["windows"]
-  },
-  "COMPONENTS_SHIM_ACCESSED_BY_CONTENT": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec"],
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Whether content ever accesed the Components shim in this session"
+    "description": "Boolean indicating if a touch input device is detected."
   },
   "CRASH_STORE_COMPRESSED_BYTES": {
     "record_in_processes": ["main", "content"],
@@ -10584,7 +10339,6 @@
   "BROWSER_SET_DEFAULT_PDF_HANDLER_USER_CHOICE_RESULT": {
     "record_in_processes": ["main"],
     "products": ["firefox"],
-    "operating_systems": ["windows"],
     "expires_in_version": "never",
     "kind": "categorical",
     "labels": [
@@ -10608,7 +10362,6 @@
   "BROWSER_SET_DEFAULT_USER_CHOICE_RESULT": {
     "record_in_processes": ["main"],
     "products": ["firefox"],
-    "operating_systems": ["windows"],
     "expires_in_version": "never",
     "kind": "categorical",
     "labels": [
@@ -10645,8 +10398,7 @@
     "description": "Count for the number of errors encountered trying to determine attribution data: on Windows, from the installers (stub and full); on macOS, from an extended attributed on the .app bundle.",
     "releaseChannelCollection": "opt-out",
     "bug_numbers": [1621402, 1525076, 1874944],
-    "alert_emails": ["aoprea@mozilla.com"],
-    "operating_systems": ["mac", "windows"]
+    "alert_emails": ["aoprea@mozilla.com"]
   },
   "MIXED_CONTENT_PAGE_LOAD": {
     "record_in_processes": ["main", "content"],
@@ -10854,22 +10606,6 @@
     "kind": "enumerated",
     "n_values": 7,
     "description": "Final status of the CacheFileInputStream (0=ok, 1=other error, 2=out of memory, 3=disk full, 4=file corrupted, 5=file not found, 6=binding aborted)"
-  },
-  "NETWORK_CACHE_HIT_MISS_STAT_PER_CACHE_SIZE": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec"],
-    "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 40,
-    "description": "Hit/Miss count split by cache size in file count (0=Hit 0-5000, 1=Miss 0-5000, 2=Hit 5001-10000, ...)"
-  },
-  "NETWORK_CACHE_HIT_RATE_PER_CACHE_SIZE": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec"],
-    "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 400,
-    "description": "Hit rate for a specific cache size in file count. The hit rate is split into 20 buckets, the lower limit of the range in percents is 5*n/20. The cache size is divided into 20 ranges of length 5000, the lower limit of the range is 5000*(n%20)"
   },
   "NETWORK_CACHE_METADATA_FIRST_READ_TIME_MS": {
     "record_in_processes": ["main", "content"],
@@ -11401,14 +11137,6 @@
     "n_values": 30,
     "description": "Algorithms used with WebCrypto (see table in WebCryptoTask.cpp)"
   },
-  "MASTER_PASSWORD_ENABLED": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec"],
-    "expires_in_version": "never",
-    "releaseChannelCollection": "opt-out",
-    "kind": "flag",
-    "description": "If a primary-password is enabled for this profile"
-  },
   "DISPLAY_SCALING": {
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec"],
@@ -11601,7 +11329,7 @@
     "description": "A count of the query stripping. ('Navigation' = There was a top-level loading via navigation, 'Redirect' = There was a top-level loading via redirect, 'StripForNavigation' = There was a stripping happened for a top-level navigation, 'StripForRedirect' = There was a stripping happened for a top-level redirect.",
     "alert_emails": [
       "tihuang@mozilla.com",
-      "pbz@mozilla.com",
+      "emz@mozilla.com",
       "seceng-telemetry@mozilla.com"
     ],
     "bug_numbers": [1706616]
@@ -11618,7 +11346,7 @@
     "description": "If query params get stripped, how many per navigation/redirect.",
     "alert_emails": [
       "tihuang@mozilla.com",
-      "pbz@mozilla.com",
+      "emz@mozilla.com",
       "seceng-telemetry@mozilla.com"
     ],
     "bug_numbers": [1762374]
@@ -11656,7 +11384,7 @@
     "description": "Counts how often specific query parameters are stripped.",
     "alert_emails": [
       "tihuang@mozilla.com",
-      "pbz@mozilla.com",
+      "emz@mozilla.com",
       "seceng-telemetry@mozilla.com"
     ],
     "bug_numbers": [1762374, 1830058]
@@ -12735,7 +12463,6 @@
     "expires_in_version": "145",
     "releaseChannelCollection": "opt-out",
     "kind": "boolean",
-    "operating_systems": ["linux"],
     "description": "Whether our process succedeed in creating a user namespace"
   },
   "SANDBOX_REJECTED_SYSCALLS": {
@@ -12747,7 +12474,6 @@
     "releaseChannelCollection": "opt-out",
     "kind": "count",
     "keyed": true,
-    "operating_systems": ["linux"],
     "description": "System calls blocked by a seccomp-bpf sandbox policy; limited to syscalls where we would crash on Nightly.  The key is generally the architecture and syscall ID but in some cases we include non-personally-identifying information from the syscall arguments; see the function SubmitToTelemetry in security/sandbox/linux/reporter/SandboxReporter.cpp for details."
   },
   "SANDBOX_FAILED_LAUNCH_KEYED": {
@@ -12759,7 +12485,6 @@
     "keyed": true,
     "n_values": 50,
     "bug_numbers": [1368600],
-    "operating_systems": ["windows"],
     "description": "Error code when a Windows sandboxed process fails to launch, keyed by process type and Windows error code. See https://searchfox.org/mozilla-central/search?q=ResultCode++path%3Asandbox_types.h&redirect=true for definitions of the error codes."
   },
   "SYNC_WORKER_OPERATION": {
@@ -14594,7 +14319,7 @@
     "kind": "linear",
     "high": 100,
     "n_buckets": 50,
-    "alert_emails": ["amadan@mozilla.com", "pbz@mozilla.com"],
+    "alert_emails": ["amadan@mozilla.com", "emz@mozilla.com"],
     "bug_numbers": [1833105],
     "description": "The number of query parameters removed, if any, when strip on share is used"
   },
@@ -14606,7 +14331,7 @@
     "kind": "exponential",
     "high": 1000,
     "n_buckets": 100,
-    "alert_emails": ["amadan@mozilla.com", "pbz@mozilla.com"],
+    "alert_emails": ["amadan@mozilla.com", "emz@mozilla.com"],
     "bug_numbers": [1833105],
     "description": "The decrease in the length of the URL when strip on share is used, only if at least one parameter is stripped"
   },

@@ -17,9 +17,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
 const TELEMETRY_1ST_RESULT = "PLACES_AUTOCOMPLETE_1ST_RESULT_TIME_MS";
 const TELEMETRY_6_FIRST_RESULTS = "PLACES_AUTOCOMPLETE_6_FIRST_RESULTS_TIME_MS";
 
-const TELEMETRY_SCALAR_ENGAGEMENT = "urlbar.engagement";
-const TELEMETRY_SCALAR_ABANDONMENT = "urlbar.abandonment";
-
 const NOTIFICATIONS = {
   QUERY_STARTED: "onQueryStarted",
   QUERY_RESULTS: "onQueryResults",
@@ -322,21 +319,18 @@ export class UrlbarController {
         if (executeAction) {
           if (this.view.isOpen) {
             this.view.close();
-          } else if (lazy.UrlbarPrefs.get("focusContentDocumentOnEsc")) {
-            if (
-              this.browserWindow.gBrowser.userTypedValue ||
-              (this.input.getAttribute("pageproxystate") == "invalid" &&
-                this.input.value != "") ||
-              this.input.searchMode
-            ) {
-              this.input.handleRevert({ escapeSearchMode: true });
-            } else {
-              this.browserWindow.gBrowser.selectedBrowser.focus();
-            }
+          } else if (
+            lazy.UrlbarPrefs.get("focusContentDocumentOnEsc") &&
+            !this.input.searchMode &&
+            (this.input.getAttribute("pageproxystate") == "valid" ||
+              (this.input.value == "" &&
+                this.browserWindow.isBlankPageURL(
+                  this.browserWindow.gBrowser.currentURI.spec
+                )))
+          ) {
+            this.browserWindow.gBrowser.selectedBrowser.focus();
           } else {
-            this.input.handleRevert({
-              escapeSearchMode: true,
-            });
+            this.input.handleRevert();
           }
         }
         event.preventDefault();
@@ -354,6 +348,46 @@ export class UrlbarController {
         event.preventDefault();
         break;
       case KeyEvent.DOM_VK_TAB: {
+        if (!this.view.visibleRowCount) {
+          // Leave it to the default behaviour if there are not results.
+          break;
+        }
+
+        // Change the tab behavior when urlbar view is open.
+        if (
+          lazy.UrlbarPrefs.get("scotchBonnet.enableOverride") &&
+          this.view.isOpen
+        ) {
+          if (
+            (event.shiftKey &&
+              this.view.selectedElement ==
+                this.view.getFirstSelectableElement()) ||
+            (!event.shiftKey &&
+              this.view.selectedElement == this.view.getLastSelectableElement())
+          ) {
+            // If pressing tab + shift when the first or pressing tab when last
+            // element has been selected, move the focus to the Unified Search
+            // Button. Then make urlbar results selectable by tab + shift.
+            event.preventDefault();
+            this.view.selectedRowIndex = -1;
+            this.#focusOnUnifiedSearchButton();
+            break;
+          } else if (
+            !this.view.selectedElement &&
+            this.input.focusedViaMousedown
+          ) {
+            if (event.shiftKey) {
+              this.#focusOnUnifiedSearchButton();
+            } else {
+              this.view.selectBy(1, {
+                userPressedTab: true,
+              });
+            }
+            event.preventDefault();
+            break;
+          }
+        }
+
         // It's always possible to tab through results when the urlbar was
         // focused with the mouse or has a search string, or when the view
         // already has a selection.
@@ -431,6 +465,7 @@ export class UrlbarController {
       case KeyEvent.DOM_VK_END:
         this.input.maybeConfirmSearchModeFromResult({
           entry: "typed",
+          startQuery: true,
         });
       // Fall through.
       case KeyEvent.DOM_VK_LEFT:
@@ -485,10 +520,6 @@ export class UrlbarController {
     if (!this.input || context.isPrivate || !context.results.length) {
       return;
     }
-    let { url } = lazy.UrlbarUtils.getUrlFromResult(result);
-    if (!url) {
-      return;
-    }
 
     switch (reason) {
       case "resultsadded": {
@@ -512,6 +543,11 @@ export class UrlbarController {
               );
             }
           } else if (result.autofill) {
+            const { url } = lazy.UrlbarUtils.getUrlFromResult(result);
+            if (!url) {
+              return;
+            }
+
             lazy.UrlbarUtils.setupSpeculativeConnection(
               url,
               this.browserWindow
@@ -521,6 +557,11 @@ export class UrlbarController {
         return;
       }
       case "mousedown": {
+        const { url } = lazy.UrlbarUtils.getUrlFromResult(result);
+        if (!url) {
+          return;
+        }
+
         // On mousedown, connect only to http/https urls.
         if (url.startsWith("http")) {
           lazy.UrlbarUtils.setupSpeculativeConnection(url, this.browserWindow);
@@ -583,6 +624,7 @@ export class UrlbarController {
     //   probe name, it must be alphanumeric with optional underscores.
     // * Add a new keyed scalar probe into the urlbar.picked category for the
     //   newly added telemetryType.
+    // * Add a new matching Glean metric in browser/components/urlbar/metrics.yaml.
     // * Add a test named browser_UsageTelemetry_urlbar_newType.js to
     //   browser/modules/test/browser.
     //
@@ -593,18 +635,13 @@ export class UrlbarController {
     let telemetryType =
       result.providerName == "UrlbarProviderTopSites"
         ? "topsite"
-        : lazy.UrlbarUtils.telemetryTypeFromResult(result);
-    Services.telemetry.keyedScalarAdd(
-      `urlbar.picked.${telemetryType}`,
-      resultIndex,
-      1
-    );
+        : lazy.UrlbarUtils.telemetryTypeFromResult(result, true);
+    Glean.urlbarPicked[telemetryType]?.[resultIndex].add(1);
     if (this.input.searchMode && !this.input.searchMode.isPreview) {
-      Services.telemetry.keyedScalarAdd(
-        `urlbar.picked.searchmode.${this.input.searchMode.entry}`,
-        resultIndex,
-        1
+      let name = this.input.searchMode.entry.replace(/_([a-z])/g, (m, p) =>
+        p.toUpperCase()
       );
+      Glean.urlbarPickedSearchmode[name]?.[resultIndex].add(1);
     }
   }
 
@@ -710,6 +747,42 @@ export class UrlbarController {
         }
       }
     }
+  }
+
+  #focusOnUnifiedSearchButton() {
+    this.input.toggleAttribute("unifiedsearchbutton-available", true);
+
+    const switcher = this.input.document.getElementById(
+      "urlbar-searchmode-switcher"
+    );
+    // Set tabindex to be focusable.
+    switcher.setAttribute("tabindex", "-1");
+    // Remove blur listener to avoid closing urlbar view panel.
+    this.input.removeEventListener("blur", this.input);
+    // Move the focus.
+    switcher.focus();
+    // Restore all.
+    this.input.addEventListener("blur", this.input);
+    switcher.addEventListener(
+      "blur",
+      e => {
+        switcher.removeAttribute("tabindex");
+        if (
+          this.input.hasAttribute("focused") &&
+          !e.relatedTarget?.closest("#urlbar")
+        ) {
+          // If the focus is not back to urlbar, fire blur event explicitly to
+          // clear the urlbar. Because the input field has been losing an
+          // opportunity to lose the focus since we removed blur listener once.
+          this.input.inputField.dispatchEvent(
+            new FocusEvent("blur", {
+              relatedTarget: e.relatedTarget,
+            })
+          );
+        }
+      },
+      { once: true }
+    );
   }
 }
 
@@ -962,12 +1035,11 @@ class TelemetryEvent {
     }
 
     if (!skipLegacyTelemetry) {
-      Services.telemetry.scalarAdd(
-        method == "engagement"
-          ? TELEMETRY_SCALAR_ENGAGEMENT
-          : TELEMETRY_SCALAR_ABANDONMENT,
-        1
-      );
+      if (method == "engagement") {
+        Glean.urlbar.engagementCount.add(1);
+      } else {
+        Glean.urlbar.abandonmentCount.add(1);
+      }
 
       let firstVisibleResult = this._controller.view?.visibleResults?.[0];
       if (
@@ -976,9 +1048,11 @@ class TelemetryEvent {
         firstVisibleResult?.type == lazy.UrlbarUtils.RESULT_TYPE.URL
       ) {
         // Record autofill impressions upon engagement.
-        const type =
-          lazy.UrlbarUtils.telemetryTypeFromResult(firstVisibleResult);
-        Services.telemetry.scalarAdd(`urlbar.impression.${type}`, 1);
+        const type = lazy.UrlbarUtils.telemetryTypeFromResult(
+          firstVisibleResult,
+          true
+        );
+        Glean.urlbarImpression[type]?.add(1);
       }
     }
 
@@ -1121,9 +1195,7 @@ class TelemetryEvent {
       return;
     }
 
-    this._controller.logger.info(
-      `${method} event: ${JSON.stringify(eventInfo)}`
-    );
+    this._controller.logger.info(`${method} event:`, eventInfo);
 
     Glean.urlbar[method].record(eventInfo);
   }
@@ -1155,9 +1227,7 @@ class TelemetryEvent {
       // Record the `keyword_exposure` event if there's a keyword.
       if (keyword) {
         let data = { keyword, terminal, result: resultType };
-        this._controller.logger.debug(
-          `keyword_exposure event: ${JSON.stringify(data)}`
-        );
+        this._controller.logger.debug("Recording keyword_exposure event", data);
         Glean.urlbar.keywordExposure.record(data);
         keywordExposureRecorded = true;
       }
@@ -1169,9 +1239,7 @@ class TelemetryEvent {
       results: tuples.map(t => t[0]).join(","),
       terminal: tuples.map(t => t[1]).join(","),
     };
-    this._controller.logger.debug(
-      `exposure event: ${JSON.stringify(exposure)}`
-    );
+    this._controller.logger.debug("Recording exposure event", exposure);
     Glean.urlbar.exposure.record(exposure);
 
     // Submit the `urlbar-keyword-exposure` ping if any keyword exposure events

@@ -30,6 +30,7 @@ import org.mozilla.fenix.helpers.TestHelper.packageName
 import org.mozilla.fenix.helpers.TestHelper.waitForAppWindowToBeUpdated
 import org.mozilla.fenix.helpers.TestHelper.waitForObjects
 import org.mozilla.fenix.helpers.click
+import org.mozilla.fenix.helpers.isChecked
 
 /**
  *  Implementation of the robot pattern for Custom tabs
@@ -52,6 +53,12 @@ class CustomTabRobot {
         Log.i(TAG, "verifyDesktopSiteButtonExists: Trying to verify that the request desktop site button is displayed")
         desktopSiteButton().check(matches(isDisplayed()))
         Log.i(TAG, "verifyDesktopSiteButtonExists: Verified that the request desktop site button is displayed")
+    }
+
+    fun verifyRequestDesktopSiteToggleState(isEnabled: Boolean) {
+        Log.i(TAG, "verifyRequestDesktopSiteToggleState: Trying to verify that the request desktop site toggle is enabled : $isEnabled")
+        desktopSiteButton().check(matches(isChecked(isEnabled)))
+        Log.i(TAG, "verifyRequestDesktopSiteToggleState: Verified that the request desktop site toggle is enabled : $isEnabled")
     }
 
     fun verifyFindInPageButtonExists() {
@@ -155,6 +162,15 @@ class CustomTabRobot {
             itemWithResIdAndText("download", "Download"),
         )
 
+    fun verifyRedesignedCustomTabsMainMenuItems(customMenuItem: String) =
+        assertUIObjectExists(
+            itemWithDescription(getStringResource(R.string.browser_menu_switch_to_desktop_site)),
+            itemWithDescription(getStringResource(R.string.browser_menu_find_in_page_2)),
+            itemWithDescription("Open in $appName"),
+            itemWithDescription(getStringResource(R.string.browser_menu_share_2)),
+            itemContainingText(customMenuItem),
+        )
+
     class Transition {
         fun openMainMenu(interact: CustomTabRobot.() -> Unit): Transition {
             mainMenuButton().also {
@@ -170,6 +186,20 @@ class CustomTabRobot {
             return Transition()
         }
 
+        fun openMainMenuFromRedesignedToolbar(interact: CustomTabRobot.() -> Unit): Transition {
+            mainMenuButtonFromRedesignedToolbar().also {
+                Log.i(TAG, "openMainMenuFromRedesignedToolbar: Waiting for $waitingTime ms for the main menu button to exist")
+                it.waitForExists(waitingTime)
+                Log.i(TAG, "openMainMenuFromRedesignedToolbar: Waited for $waitingTime ms for the main menu button to exist")
+                Log.i(TAG, "openMainMenuFromRedesignedToolbar: Trying to click the main menu button")
+                it.click()
+                Log.i(TAG, "openMainMenuFromRedesignedToolbar: Clicked the main menu button")
+            }
+
+            CustomTabRobot().interact()
+            return Transition()
+        }
+
         fun clickOpenInBrowserButton(interact: BrowserRobot.() -> Unit): BrowserRobot.Transition {
             Log.i(TAG, "clickOpenInBrowserButton: Trying to click the \"Open in Firefox\" button")
             openInBrowserButton().perform(click())
@@ -179,10 +209,28 @@ class CustomTabRobot {
             return BrowserRobot.Transition()
         }
 
+        fun clickOpenInBrowserButtonFromRedesignedToolbar(interact: BrowserRobot.() -> Unit): BrowserRobot.Transition {
+            Log.i(TAG, "clickOpenInBrowserButtonFromRedesignedToolbar: Trying to click the \"Open in Firefox\" button")
+            openInBrowserButtonFromRedesignedToolbar().click()
+            Log.i(TAG, "clickOpenInBrowserButtonFromRedesignedToolbar: Clicked the \"Open in Firefox\" button")
+
+            BrowserRobot().interact()
+            return BrowserRobot.Transition()
+        }
+
         fun clickShareButton(interact: ShareOverlayRobot.() -> Unit): ShareOverlayRobot.Transition {
             Log.i(TAG, "clickShareButton: Trying to click the share button")
             itemWithDescription(getStringResource(R.string.mozac_feature_customtabs_share_link)).click()
             Log.i(TAG, "clickShareButton: Clicked the share button")
+
+            ShareOverlayRobot().interact()
+            return ShareOverlayRobot.Transition()
+        }
+
+        fun clickShareButtonFromRedesignedMenu(interact: ShareOverlayRobot.() -> Unit): ShareOverlayRobot.Transition {
+            Log.i(TAG, "clickShareButtonFromRedesignedMenu: Trying to click the main menu share button")
+            itemWithDescription(getStringResource(R.string.browser_menu_share_2)).click()
+            Log.i(TAG, "clickShareButtonFromRedesignedMenu: Clicked the main menu share button")
 
             ShareOverlayRobot().interact()
             return ShareOverlayRobot.Transition()
@@ -197,11 +245,16 @@ fun customTabScreen(interact: CustomTabRobot.() -> Unit): CustomTabRobot.Transit
 
 private fun mainMenuButton() = itemWithResId("$packageName:id/mozac_browser_toolbar_menu")
 
+private fun mainMenuButtonFromRedesignedToolbar() =
+    itemWithDescription(getStringResource(R.string.content_description_menu))
+
 private fun desktopSiteButton() = onView(withId(R.id.switch_widget))
 
 private fun findInPageButton() = onView(withText("Find in page"))
 
 private fun openInBrowserButton() = onView(withText("Open in $appName"))
+
+private fun openInBrowserButtonFromRedesignedToolbar() = itemWithDescription("Open in $appName")
 
 private fun closeButton() = onView(withContentDescription("Return to previous app"))
 

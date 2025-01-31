@@ -26,6 +26,7 @@ task-defaults:
                     - android/android-x86_64.py
                 linux.*:
                     - unittests/linux_unittest.py
+                    - unittests/linux_dbus-python.py
                     - remove_executables.py
                 macosx.*:
                     - unittests/mac_unittest.py
@@ -49,12 +50,14 @@ xpcshell:
         - no-fission
         - msix
         - geckoview-no-fission-ship
+        - os-integration
     instance-size:
         by-variant:
             conditioned_profile: large
             default: large-noscratch
     run-on-projects:
         by-variant:
+            os-integration: []  # this variant only runs as a cron task
             conditioned_profile:
                 by-test-platform:
                     .*asan.*: []
@@ -68,6 +71,7 @@ xpcshell:
             socketprocess_networking:
                 by-test-platform:
                     macosx1015.*: ['trunk']  # All Mac variants
+                    macosx1470.*: ['trunk']  # All Mac variants
                     ^(?!.*asan).*windows11.*: ['trunk']   # All Windows11 except ASAN
                     default: []
             no-fission:
@@ -93,12 +97,15 @@ xpcshell:
                     windows.*-asan-qr/opt: []  # No XPCShell on ASAN yet
                     default: built-projects
     chunks:
-        by-test-platform:
-            .*-asan-qr/opt: 4
-            .*-ccov.*/.*: 8
-            .*-tsan-qr/opt: 10
-            (android-em-7.*|macosx.*|linux1804-64.*/opt): 2
-            default: 4
+        by-variant:
+            os-integration: dynamic
+            default:
+                by-test-platform:
+                    .*-asan-qr/opt: 4
+                    .*-ccov.*/.*: 8
+                    .*-tsan-qr/opt: 10
+                    (android-em-7.*|macosx.*|linux1804-64.*/opt): 2
+                    default: 4
     max-run-time:
         by-variant:
             msix: 7200
@@ -133,10 +140,18 @@ xpcshell:
     fetches:
         toolchain:
             by-test-platform:
-                linux.*:
+                linux1804.*:
                     - linux64-node
                     - linux64-minidump-stackwalk
                     - linux64-fix-stacks
+                    - linux-python-dbusmock
+                    - linux64-1804-dbus-python
+                linux2204.*:
+                    - linux64-node
+                    - linux64-minidump-stackwalk
+                    - linux64-fix-stacks
+                    - linux-python-dbusmock
+                    - linux64-2204-dbus-python
                 macosx.*:
                     - macosx64-node
                     - macosx64-minidump-stackwalk

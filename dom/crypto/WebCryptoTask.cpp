@@ -26,7 +26,7 @@
 // Template taken from security/nss/lib/util/templates.c
 // This (or SGN_EncodeDigestInfo) would ideally be exported
 // by NSS and until that happens we have to keep our own copy.
-const SEC_ASN1Template SGN_DigestInfoTemplate[] = {
+MOZ_GLOBINIT const SEC_ASN1Template SGN_DigestInfoTemplate[] = {
     {SEC_ASN1_SEQUENCE, 0, NULL, sizeof(SGNDigestInfo)},
     {SEC_ASN1_INLINE, offsetof(SGNDigestInfo, digestAlgorithm),
      SEC_ASN1_GET(SECOID_AlgorithmIDTemplate)},
@@ -145,7 +145,7 @@ static nsresult GetAlgorithmName(JSContext* aCx, const OOS& aAlgorithm,
     Algorithm alg;
 
     if (!alg.Init(aCx, value)) {
-      return NS_ERROR_DOM_SYNTAX_ERR;
+      return NS_ERROR_DOM_TYPE_MISMATCH_ERR;
     }
 
     aName = alg.mName;
@@ -2059,15 +2059,15 @@ class ImportOKPKeyTask : public ImportKeyTask {
     }
 
     if (mFormat.EqualsLiteral(WEBCRYPTO_KEY_FORMAT_RAW)) {
-      RootedDictionary<Algorithm> params(aCx);
-      mEarlyRv = Coerce(aCx, params, aAlgorithm);
+      nsString paramsAlgName;
+      mEarlyRv = GetAlgorithmName(aCx, aAlgorithm, paramsAlgName);
       if (NS_FAILED(mEarlyRv)) {
         mEarlyRv = NS_ERROR_DOM_SYNTAX_ERR;
         return;
       }
 
       nsString algName;
-      if (!NormalizeToken(params.mName, algName)) {
+      if (!NormalizeToken(paramsAlgName, algName)) {
         mEarlyRv = NS_ERROR_DOM_NOT_SUPPORTED_ERR;
         return;
       }
@@ -2503,10 +2503,9 @@ class DeriveX25519BitsTask : public ReturnArrayBufferViewTask {
       return;
     }
 
-    // If specified, length must be a multiple of 8 bigger than zero
-    // (otherwise, the full output of the key derivation is used).
+    // If specified, length must be a multiple of 8.
     if (!mLength.IsNull()) {
-      if (mLength.Value() == 0 || mLength.Value() % 8) {
+      if (mLength.Value() % 8) {
         mEarlyRv = NS_ERROR_DOM_DATA_ERR;
         return;
       }
@@ -2821,8 +2820,8 @@ class DeriveHkdfBitsTask : public ReturnArrayBufferViewTask {
       return;
     }
 
-    // length must be non-null and greater than zero and multiple of eight.
-    if (aLength.IsNull() || aLength.Value() == 0 || aLength.Value() % 8 != 0) {
+    // length must be non-null and multiple of eight.
+    if (aLength.IsNull() || aLength.Value() % 8 != 0) {
       mEarlyRv = NS_ERROR_DOM_OPERATION_ERR;
       return;
     }
@@ -2887,6 +2886,12 @@ class DeriveHkdfBitsTask : public ReturnArrayBufferViewTask {
                                                &keyItem, nullptr));
     if (!baseKey) {
       return NS_ERROR_DOM_INVALID_ACCESS_ERR;
+    }
+
+    // We are going to return an empty string, so we can skip the rest.
+    if (mLengthInBits == 0) {
+      mResult.Clear();
+      return NS_OK;
     }
 
     SECItem salt = {siBuffer, nullptr, 0};
@@ -2968,8 +2973,8 @@ class DerivePbkdfBitsTask : public ReturnArrayBufferViewTask {
       return;
     }
 
-    // length must be non-null and greater than zero and multiple of eight.
-    if (aLength.IsNull() || aLength.Value() == 0 || aLength.Value() % 8) {
+    // length must be non-null and multiple of eight.
+    if (aLength.IsNull() || aLength.Value() % 8) {
       mEarlyRv = NS_ERROR_DOM_OPERATION_ERR;
       return;
     }
@@ -3044,6 +3049,12 @@ class DerivePbkdfBitsTask : public ReturnArrayBufferViewTask {
 
     if (!algID) {
       return NS_ERROR_DOM_OPERATION_ERR;
+    }
+
+    // We are going to return an empty string, so we can skip the rest.
+    if (mLength == 0) {
+      mResult.Clear();
+      return NS_OK;
     }
 
     UniquePK11SlotInfo slot(PK11_GetInternalSlot());
@@ -3134,15 +3145,6 @@ class DeriveEcdhBitsTask : public ReturnArrayBufferViewTask {
     if (!mPrivKey) {
       mEarlyRv = NS_ERROR_DOM_INVALID_ACCESS_ERR;
       return;
-    }
-
-    // If specified, length must be bigger than zero
-    // (otherwise, the full output of the key derivation is used).
-    if (!mLengthInBits.IsNull()) {
-      if (mLengthInBits.Value() == 0) {
-        mEarlyRv = NS_ERROR_DOM_DATA_ERR;
-        return;
-      }
     }
 
     // Retrieve the peer's public key.

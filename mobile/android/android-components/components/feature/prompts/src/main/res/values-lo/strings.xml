@@ -47,6 +47,8 @@
     <string name="mozac_feature_prompts_allow">ອະນຸຍາດ</string>
     <!-- Text of a negative button in dialog requesting to open a new window. -->
     <string name="mozac_feature_prompts_deny">ປະຕິເສດ</string>
+    <!-- Text of the title of a dialog when a page is requesting to open a new window. -->
+    <string name="mozac_feature_prompts_popup_dialog_title">ອະນຸຍາດໃຫ້ເວັບໄຊທ໌ນີ້ເປີດບໍ?</string>
     <!-- Title of the dialog shown when a user is leaving a website and there is still data not saved yet. -->
     <string name="mozac_feature_prompt_before_unload_dialog_title">ທ່ານແນ່ໃຈແລ້ວບໍ່?</string>
     <!-- Body text of the dialog shown when a user is leaving a website and there is still data not saved yet. -->
@@ -105,10 +107,20 @@
     <!-- Title for using the suggest strong password confirmation dialog -->
     <string name="mozac_feature_prompts_suggest_strong_password_title">ໃຊ້ລະຫັດຜ່ານທີ່ຄາດເດົາຍາກບໍ່?</string>
 
+    <!-- Content description for the suggest strong password confirmation dialog -->
+    <string name="mozac_feature_prompts_suggest_strong_password_description_3">ປົກປ້ອງບັນຊີຂອງທ່ານໂດຍໃຊ້ລະຫັດຜ່ານທີ່ເຂັ້ມແຂງ, ສ້າງຂຶ້ນແບບສຸ່ມ. ມັນຈະຖືກບັນທຶກໄວ້ໃນບັນຊີຂອງທ່ານເພື່ອໃຊ້ໃນອະນາຄົດ.</string>
+
     <!-- Pressing this will use the suggested strong password -->
     <string name="mozac_feature_prompts_suggest_strong_password_use_password">ໃຊ້ລະຫັດຜ່ານ</string>
     <!-- Pressing this will dismiss the suggested strong password dialog -->
     <string name="mozac_feature_prompts_suggest_strong_password_dismiss">ບໍ່ແມ່ນຕອນນີ້</string>
+
+    <!-- Title for showing the suggest strong password saved confirmation snackbar -->
+    <string name="mozac_feature_prompts_suggest_strong_password_saved_snackbar_title">ບັນທຶກລະຫັດຜ່ານແລ້ວ</string>
+    <!-- Title for showing the suggest strong password updated confirmation snackbar -->
+    <string name="mozac_feature_prompts_suggest_strong_password_updated_snackbar_title">ອັບເດດລະຫັດຜ່ານແລ້ວ</string>
+    <!-- Title for showing the username updated confirmation snackbar -->
+    <string name="mozac_feature_prompt_login_snackbar_username_updated">ອັບເດດຊື່ຜູ້ໃຊ້ແລ້ວ</string>
 
     <!-- Strings shown in a dialog that appear when users try to refresh a certain kind of webpages -->
     <string name="mozac_feature_prompt_repost_title">ສົ່ງຂໍ້ມູນຄືນສູ່ເວັບໄຊທນີ້ອີກບໍ?</string>
@@ -118,6 +130,13 @@
     <!-- Pressing this will dismiss the dialog and not refresh the webpage -->
     <string name="mozac_feature_prompt_repost_negative_button_text">ຍົກເລີກ</string>
 
+    <!-- Credit Card Autofill -->
+    <!-- Header for the select card prompt to allow users to fill a form with a saved card. -->
+    <string name="mozac_feature_prompts_select_credit_card_2">ໃຊ້ບັດທີ່ບັນທຶກໄວ້</string>
+    <!-- Content description for expanding the saved card options in the select card prompt. -->
+    <string name="mozac_feature_prompts_expand_credit_cards_content_description_2">ຂະຫຍາຍບັດທີ່ບັນທຶກໄວ້</string>
+    <!-- Content description for collapsing the saved card options in the select prompt. -->
+    <string name="mozac_feature_prompts_collapse_credit_cards_content_description_2">ຫຍໍ້ບັດທີ່ບັນທຶກໄວ້</string>
     <!-- Option in the expanded select card prompt that links to cards settings. -->
     <string name="mozac_feature_prompts_manage_credit_cards_2">ຈັດການບັດ</string>
     <!-- Text for the title of a save credit card dialog. -->
@@ -125,9 +144,16 @@
     <!-- Text for the title of an update credit card dialog. -->
     <string name="mozac_feature_prompts_update_credit_card_prompt_title">ຕ້ອງການອັບເດດວັນໝົດອາຍຸຂອງບັດບໍ?</string>
 
+    <!-- Subtitle text displayed under the title of the saved card dialog. Parameter will be replaced by app name-->
+    <string name="mozac_feature_prompts_save_credit_card_prompt_body_2">%s ເຂົ້າລະຫັດເລກບັດຂອງທ່ານ. ລະຫັດຄວາມປອດໄພຂອງທ່ານຈະບໍ່ຖືກບັນທຶກໄວ້.</string>
+
     <!-- Address Autofill -->
     <!-- Header for the select address prompt to allow users to fill a form with a saved address. -->
     <string name="mozac_feature_prompts_select_address_2">ເລືອກທີ່ຢູ່</string>
+    <!-- Content description for expanding the saved addresses options in the select address prompt. -->
+    <string name="mozac_feature_prompts_expand_address_content_description_2">ຂະຫຍາຍທີ່ຢູ່ທີ່ບັນທຶກໄວ້</string>
+    <!-- Content description for collapsing the saved address options in the select address prompt. -->
+    <string name="mozac_feature_prompts_collapse_address_content_description_2">ຫຍໍ້ທີ່ຢູ່ທີ່ບັນທຶກໄວ້</string>
     <!-- Text for the manage addresses button. -->
     <string name="mozac_feature_prompts_manage_address">ຈັດການທີ່ຢູ່</string>
 

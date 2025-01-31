@@ -153,7 +153,6 @@ include = [
   "UnicodeRange",
   "UserInput",
   "UserFocus",
-  "UserModify",
   "UserSelect",
   "PointerEvents",
   "Inert",
@@ -501,7 +500,9 @@ renaming_overrides_prefixing = true
   inline bool HasPercent() const;
   inline bool HasLengthAndPercentage() const;
   inline bool BehavesLikeStretchOnInlineAxis() const;
+  inline bool BehavesLikeStretchOnBlockAxis() const;
   inline bool BehavesLikeInitialValueOnBlockAxis() const;
+  inline bool BehavesLikeInitialValue(LogicalAxis) const;
 """
 
 "GenericFlexBasis" = """
@@ -516,7 +517,9 @@ renaming_overrides_prefixing = true
   inline bool HasPercent() const;
   inline bool HasLengthAndPercentage() const;
   inline bool BehavesLikeStretchOnInlineAxis() const;
+  inline bool BehavesLikeStretchOnBlockAxis() const;
   inline bool BehavesLikeInitialValueOnBlockAxis() const;
+  inline bool BehavesLikeInitialValue(LogicalAxis) const;
 """
 
 "GenericPosition" = """
@@ -854,7 +857,8 @@ renaming_overrides_prefixing = true
 "CssUrl" = """
   inline nsDependentCSubstring SpecifiedSerialization() const;
   inline const URLExtraData& ExtraData() const;
-  inline StyleLoadData& LoadData() const;
+  inline const StyleLoadData& LoadData() const;
+  inline StyleLoadData& MutLoadData() const;
   inline nsIURI* GetURI() const;
 """
 
@@ -863,7 +867,8 @@ renaming_overrides_prefixing = true
   inline nsDependentCSubstring SpecifiedSerialization() const;
   inline const URLExtraData& ExtraData() const;
   inline nsIURI* GetURI() const;
-  inline StyleLoadData& LoadData() const;
+  inline const StyleLoadData& LoadData() const;
+  inline StyleLoadData& MutLoadData() const;
 
   inline bool IsLocalRef() const;
   inline bool HasRef() const;

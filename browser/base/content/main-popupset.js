@@ -95,6 +95,9 @@ document.addEventListener(
         case "context_closeOtherTabs":
           gBrowser.removeAllTabsBut(TabContextMenu.contextTab);
           break;
+        case "context_unloadTab":
+          TabContextMenu.explicitUnloadTabs();
+          break;
         case "context_fullscreenAutohide":
           FullScreen.setAutohide();
           break;
@@ -181,6 +184,9 @@ document.addEventListener(
           break;
         case "toolbar-context-selectAllTabs":
           gBrowser.selectAllTabs();
+          break;
+        case "toolbar-context-customize":
+          gCustomizeMode.enter();
           break;
         case "toolbar-context-full-screen-autohide":
           FullScreen.setAutohide();
@@ -301,6 +307,11 @@ document.addEventListener(
             "panelitem-context"
           );
           break;
+
+        // == sharing-tabs-warning-panel ==
+        case "sharing-warning-proceed-to-tab":
+          gSharedTabWarning.allowSharedTabSwitch();
+          break;
       }
     });
 
@@ -342,6 +353,12 @@ document.addEventListener(
       .getElementById("unified-extensions-context-menu")
       .addEventListener("command", event => {
         gUnifiedExtensions.onContextMenuCommand(event.currentTarget, event);
+      });
+
+    document
+      .getElementById("webRTC-selectWindow-menulist")
+      .addEventListener("command", event => {
+        webrtcUI.updateWarningLabel(event.currentTarget);
       });
 
     mainPopupSet.addEventListener("popupshowing", event => {
@@ -391,6 +408,9 @@ document.addEventListener(
           gCustomizeMode.onPanelContextMenuShowing(event);
           ToolbarContextMenu.updateExtension(event.target);
           break;
+        case "bhTooltip":
+          BookmarksEventHandler.fillInBHTooltip(event.target, event);
+          break;
       }
     });
 
@@ -416,6 +436,7 @@ document.addEventListener(
     mainPopupSet.addEventListener("popuphiding", event => {
       switch (event.target.id) {
         case "tabbrowser-tab-tooltip":
+        case "bhTooltip":
           event.target.removeAttribute("position");
           break;
       }

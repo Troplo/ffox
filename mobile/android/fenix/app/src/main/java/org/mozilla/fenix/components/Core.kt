@@ -76,13 +76,19 @@ import mozilla.components.feature.webcompat.WebCompatFeature
 import mozilla.components.feature.webcompat.reporter.WebCompatReporterFeature
 import mozilla.components.feature.webnotifications.WebNotificationFeature
 import mozilla.components.lib.dataprotect.SecureAbove22Preferences
-import mozilla.components.service.contile.ContileTopSitesProvider
-import mozilla.components.service.contile.ContileTopSitesUpdater
 import mozilla.components.service.digitalassetlinks.RelationChecker
 import mozilla.components.service.digitalassetlinks.local.StatementApi
 import mozilla.components.service.digitalassetlinks.local.StatementRelationChecker
 import mozilla.components.service.location.LocationService
 import mozilla.components.service.location.MozillaLocationService
+import mozilla.components.service.mars.MarsTopSitesProvider
+import mozilla.components.service.mars.MarsTopSitesRequestConfig
+import mozilla.components.service.mars.NEW_TAB_TILE_1_PLACEMENT_KEY
+import mozilla.components.service.mars.NEW_TAB_TILE_2_PLACEMENT_KEY
+import mozilla.components.service.mars.Placement
+import mozilla.components.service.mars.contile.ContileTopSitesProvider
+import mozilla.components.service.mars.contile.ContileTopSitesUpdater
+import mozilla.components.service.pocket.ContentRecommendationsRequestConfig
 import mozilla.components.service.pocket.PocketStoriesConfig
 import mozilla.components.service.pocket.PocketStoriesRequestConfig
 import mozilla.components.service.pocket.PocketStoriesService
@@ -179,6 +185,8 @@ class Core(
             },
             webContentIsolationStrategy = WebContentIsolationStrategy.ISOLATE_HIGH_VALUE,
             fetchPriorityEnabled = FxNimbus.features.networking.value().fetchPriorityEnabled,
+            parallelMarkingEnabled = FxNimbus.features.javascript.value().parallelMarkingEnabled,
+            certificateTransparencyMode = FxNimbus.features.pki.value().certificateTransparencyMode,
         )
 
         // Apply fingerprinting protection overrides if the feature is enabled in Nimbus
@@ -472,7 +480,7 @@ class Core(
     /**
      * The storage component to sync and persist tabs in a Firefox Sync account.
      */
-    val lazyRemoteTabsStorage = lazyMonitored { RemoteTabsStorage(context) }
+    val lazyRemoteTabsStorage = lazyMonitored { RemoteTabsStorage(context, crashReporter) }
 
     val recentlyClosedTabsStorage =
         lazyMonitored { RecentlyClosedTabsStorage(context, engine, crashReporter) }
@@ -522,6 +530,9 @@ class Core(
             } else {
                 PocketStoriesRequestConfig()
             },
+            contentRecommendationsParams = ContentRecommendationsRequestConfig(
+                locale = LocaleManager.getSelectedLocale(context).toLanguageTag(),
+            ),
         )
     }
     val pocketStoriesService by lazyMonitored { PocketStoriesService(context, pocketStoriesConfig) }
@@ -534,11 +545,37 @@ class Core(
         )
     }
 
+    val marsTopSitesProvider by lazyMonitored {
+        MarsTopSitesProvider(
+            context = context,
+            client = client,
+            requestConfig = MarsTopSitesRequestConfig(
+                contextId = context.settings().contileContextId,
+                userAgent = engine.settings.userAgentString,
+                placements = listOf(
+                    Placement(
+                        placement = NEW_TAB_TILE_1_PLACEMENT_KEY,
+                        count = 1,
+                    ),
+                    Placement(
+                        placement = NEW_TAB_TILE_2_PLACEMENT_KEY,
+                        count = 1,
+                    ),
+                ),
+            ),
+            maxCacheAgeInSeconds = CONTILE_MAX_CACHE_AGE,
+        )
+    }
+
     @Suppress("MagicNumber")
     val contileTopSitesUpdater by lazyMonitored {
         ContileTopSitesUpdater(
             context = context,
-            provider = contileTopSitesProvider,
+            provider = if (context.settings().marsAPIEnabled) {
+                marsTopSitesProvider
+            } else {
+                contileTopSitesProvider
+            },
             frequency = Frequency(3, TimeUnit.HOURS),
         )
     }
@@ -615,7 +652,11 @@ class Core(
         DefaultTopSitesStorage(
             pinnedSitesStorage = pinnedSiteStorage,
             historyStorage = historyStorage,
-            topSitesProvider = contileTopSitesProvider,
+            topSitesProvider = if (context.settings().marsAPIEnabled) {
+                marsTopSitesProvider
+            } else {
+                contileTopSitesProvider
+            },
             defaultTopSites = defaultTopSites,
         )
     }

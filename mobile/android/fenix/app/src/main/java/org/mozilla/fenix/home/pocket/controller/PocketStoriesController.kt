@@ -5,6 +5,7 @@
 package org.mozilla.fenix.home.pocket.controller
 
 import mozilla.components.service.pocket.PocketStory
+import mozilla.components.service.pocket.PocketStory.ContentRecommendation
 import mozilla.components.service.pocket.PocketStory.PocketRecommendedStory
 import mozilla.components.service.pocket.PocketStory.PocketSponsoredStory
 import mozilla.components.service.pocket.ext.getCurrentFlightImpressions
@@ -14,7 +15,7 @@ import org.mozilla.fenix.GleanMetrics.Pings
 import org.mozilla.fenix.GleanMetrics.Pocket
 import org.mozilla.fenix.HomeActivity
 import org.mozilla.fenix.components.AppStore
-import org.mozilla.fenix.components.appstate.AppAction
+import org.mozilla.fenix.components.appstate.AppAction.ContentRecommendationsAction
 import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.home.pocket.PocketRecommendedStoriesCategory
 import org.mozilla.fenix.home.pocket.view.POCKET_CATEGORIES_SELECTED_AT_A_TIME_COUNT
@@ -85,7 +86,7 @@ internal class DefaultPocketStoriesController(
         storyShown: PocketStory,
         storyPosition: Pair<Int, Int>,
     ) {
-        appStore.dispatch(AppAction.PocketStoriesShown(listOf(storyShown)))
+        appStore.dispatch(ContentRecommendationsAction.PocketStoriesShown(listOf(storyShown)))
 
         when (storyShown) {
             is PocketSponsoredStory -> {
@@ -107,16 +108,24 @@ internal class DefaultPocketStoriesController(
     }
 
     override fun handleStoriesShown(storiesShown: List<PocketStory>) {
-        appStore.dispatch(AppAction.PocketStoriesShown(storiesShown))
+        // Only report here the impressions for recommended stories.
+        // Sponsored stories use a different API for more accurate tracking.
+        appStore.dispatch(
+            ContentRecommendationsAction.PocketStoriesShown(
+                storiesShown = storiesShown.filter { it is ContentRecommendation || it is PocketRecommendedStory },
+            ),
+        )
+
         Pocket.homeRecsShown.record(NoExtras())
     }
 
     override fun handleCategoryClick(categoryClicked: PocketRecommendedStoriesCategory) {
-        val initialCategoriesSelections = appStore.state.pocketStoriesCategoriesSelections
+        val initialCategoriesSelections =
+            appStore.state.recommendationState.pocketStoriesCategoriesSelections
 
         // First check whether the category is clicked to be deselected.
         if (initialCategoriesSelections.map { it.name }.contains(categoryClicked.name)) {
-            appStore.dispatch(AppAction.DeselectPocketStoriesCategory(categoryClicked.name))
+            appStore.dispatch(ContentRecommendationsAction.DeselectPocketStoriesCategory(categoryClicked.name))
             Pocket.homeRecsCategoryClicked.record(
                 Pocket.HomeRecsCategoryClickedExtra(
                     categoryName = categoryClicked.name,
@@ -136,11 +145,11 @@ internal class DefaultPocketStoriesController(
                 null
             }
         oldestCategoryToDeselect?.let {
-            appStore.dispatch(AppAction.DeselectPocketStoriesCategory(it.name))
+            appStore.dispatch(ContentRecommendationsAction.DeselectPocketStoriesCategory(it.name))
         }
 
         // Finally update the selection.
-        appStore.dispatch(AppAction.SelectPocketStoriesCategory(categoryClicked.name))
+        appStore.dispatch(ContentRecommendationsAction.SelectPocketStoriesCategory(categoryClicked.name))
 
         Pocket.homeRecsCategoryClicked.record(
             Pocket.HomeRecsCategoryClickedExtra(
@@ -181,6 +190,10 @@ internal class DefaultPocketStoriesController(
                 )
                 Pocket.spocShim.set(storyClicked.shim.click)
                 Pings.spoc.submit(Pings.spocReasonCodes.click)
+            }
+
+            is PocketStory.ContentRecommendation -> {
+                // no-op
             }
         }
     }

@@ -17,12 +17,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.LifecycleOwner
 import androidx.recyclerview.widget.RecyclerView
+import mozilla.components.compose.base.annotation.LightDarkPreview
 import mozilla.components.lib.state.ext.observeAsComposableState
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.components
 import org.mozilla.fenix.compose.ComposeViewHolder
 import org.mozilla.fenix.compose.SelectableChipColors
-import org.mozilla.fenix.compose.annotation.LightDarkPreview
 import org.mozilla.fenix.compose.home.HomeSectionHeader
 import org.mozilla.fenix.home.pocket.PocketRecommendedStoriesCategory
 import org.mozilla.fenix.home.pocket.PocketRecommendedStoriesSelectedCategory
@@ -57,9 +57,9 @@ class PocketCategoriesViewHolder(
             .observeAsComposableState { state -> state.firstFrameDrawn }.value ?: false
 
         val categories = components.appStore
-            .observeAsComposableState { state -> state.pocketStoriesCategories }.value
+            .observeAsComposableState { state -> state.recommendationState.pocketStoriesCategories }.value
         val categoriesSelections = components.appStore
-            .observeAsComposableState { state -> state.pocketStoriesCategoriesSelections }.value
+            .observeAsComposableState { state -> state.recommendationState.pocketStoriesCategoriesSelections }.value
 
         val wallpaperState = components.appStore
             .observeAsComposableState { state -> state.wallpaperState }.value ?: WallpaperState.default

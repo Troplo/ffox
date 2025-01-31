@@ -12,11 +12,11 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
 #include "absl/container/inlined_vector.h"
-#include "absl/types/optional.h"
 #include "api/array_view.h"
 #include "api/rtp_packet_infos.h"
 #include "api/scoped_refptr.h"
@@ -94,7 +94,7 @@ class RtpVideoFrameAssembler::Impl {
   std::unique_ptr<FrameDependencyStructure> video_structure_;
   SeqNumUnwrapper<uint16_t> rtp_sequence_number_unwrapper_;
   SeqNumUnwrapper<uint16_t> frame_id_unwrapper_;
-  absl::optional<int64_t> video_structure_frame_id_;
+  std::optional<int64_t> video_structure_frame_id_;
   std::unique_ptr<VideoRtpDepacketizer> depacketizer_;
   video_coding::PacketBuffer packet_buffer_;
   RtpFrameReferenceFinder reference_finder_;
@@ -112,10 +112,10 @@ RtpVideoFrameAssembler::FrameVector RtpVideoFrameAssembler::Impl::InsertPacket(
     return UpdateWithPadding(rtp_packet.SequenceNumber());
   }
 
-  absl::optional<VideoRtpDepacketizer::ParsedRtpPayload> parsed_payload =
+  std::optional<VideoRtpDepacketizer::ParsedRtpPayload> parsed_payload =
       depacketizer_->Parse(rtp_packet.PayloadBuffer());
 
-  if (parsed_payload == absl::nullopt) {
+  if (parsed_payload == std::nullopt) {
     return {};
   }
 
@@ -175,22 +175,23 @@ RtpVideoFrameAssembler::Impl::AssembleFrames(
 
       const video_coding::PacketBuffer::Packet& last_packet = *packet;
       result.push_back(std::make_unique<RtpFrameObject>(
-          first_packet->seq_num(),                //
-          last_packet.seq_num(),                  //
-          last_packet.marker_bit,                 //
-          /*times_nacked=*/0,                     //
-          /*first_packet_received_time=*/0,       //
-          /*last_packet_received_time=*/0,        //
-          first_packet->timestamp,                //
-          /*ntp_time_ms=*/0,                      //
-          /*timing=*/VideoSendTiming(),           //
-          first_packet->payload_type,             //
-          first_packet->codec(),                  //
-          last_packet.video_header.rotation,      //
-          last_packet.video_header.content_type,  //
-          first_packet->video_header,             //
-          last_packet.video_header.color_space,   //
-          /*packet_infos=*/RtpPacketInfos(),      //
+          first_packet->seq_num(),                              //
+          last_packet.seq_num(),                                //
+          last_packet.marker_bit,                               //
+          /*times_nacked=*/0,                                   //
+          /*first_packet_received_time=*/0,                     //
+          /*last_packet_received_time=*/0,                      //
+          first_packet->timestamp,                              //
+          /*ntp_time_ms=*/0,                                    //
+          /*timing=*/VideoSendTiming(),                         //
+          first_packet->payload_type,                           //
+          first_packet->codec(),                                //
+          last_packet.video_header.rotation,                    //
+          last_packet.video_header.content_type,                //
+          first_packet->video_header,                           //
+          last_packet.video_header.color_space,                 //
+          last_packet.video_header.frame_instrumentation_data,  //
+          /*packet_infos=*/RtpPacketInfos(),                    //
           std::move(bitstream)));
     }
   }

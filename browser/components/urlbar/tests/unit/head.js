@@ -361,6 +361,7 @@ function testEngine_setup() {
 
     registerCleanupFunction(async () => {
       Services.prefs.clearUserPref("browser.urlbar.suggest.searches");
+      Services.prefs.clearUserPref("browser.urlbar.contextualSearch.enabled");
       Services.prefs.clearUserPref(
         "browser.search.separatePrivateDefault.ui.enabled"
       );
@@ -379,6 +380,10 @@ function testEngine_setup() {
       false
     );
     Services.prefs.setBoolPref("browser.urlbar.suggest.searches", false);
+    Services.prefs.setBoolPref(
+      "browser.urlbar.scotchBonnet.enableOverride",
+      false
+    );
   });
 }
 
@@ -1001,6 +1006,8 @@ async function check_results({
     suggestedIndex: { optional: true },
     isSuggestedIndexRelativeToGroup: { optional: true, map: v => !!v },
     exposureTelemetry: { optional: true },
+    isRichSuggestion: { optional: true },
+    richSuggestionIconVariation: { optional: true },
   };
 
   let optionalPayloadProperties = new Set(["lastVisit"]);

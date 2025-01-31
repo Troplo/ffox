@@ -25,7 +25,7 @@ def test_gifft_codegen():
     byte-for-byte with expected output C++ files.
     To generate new expected output files, set `UPDATE_EXPECT=1` when running the test suite:
 
-    UPDATE_EXPECT=1 mach test toolkit/components/glean/pytest
+    UPDATE_EXPECT=1 mach test toolkit/components/glean/tests/pytest
     """
 
     options = {"allow_reserved": False}
@@ -40,9 +40,6 @@ def test_gifft_codegen():
         run_glean_parser.output_gifft_map(output_fd, probe_type, all_objs, cpp_fd)
 
         expect(here_path / f"gifft_output_{probe_type}", output_fd.getvalue())
-
-        if probe_type == "Event":
-            expect(here_path / "gifft_output_EventExtra", cpp_fd.getvalue())
 
 
 if __name__ == "__main__":

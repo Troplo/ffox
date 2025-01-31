@@ -620,11 +620,6 @@ nsMemoryInfoDumper::DumpMemoryReportsToNamedFile(
     return rv;
   }
 
-  reportsFile->InitWithPath(aFilename);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
   bool exists;
   rv = reportsFile->Exists(&exists);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -690,7 +685,7 @@ nsMemoryInfoDumper::DumpMemoryInfoToTempDir(const nsAString& aIdentifier,
 }
 
 #ifdef MOZ_DMD
-dmd::DMDFuncs::Singleton dmd::DMDFuncs::sSingleton;
+MOZ_RUNINIT dmd::DMDFuncs::Singleton dmd::DMDFuncs::sSingleton;
 
 nsresult nsMemoryInfoDumper::OpenDMDFile(const nsAString& aIdentifier, int aPid,
                                          FILE** aOutFile) {

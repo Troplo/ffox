@@ -1327,33 +1327,12 @@ void GatherCertificateCompressionTelemetry(SECStatus rv,
       break;
   }
 
-  mozilla::glean::cert_compression::used.Get(decoder).Add(1);
-
   if (rv != SECSuccess) {
     mozilla::glean::cert_compression::failures.Get(decoder).Add(1);
     return;
   }
   // Glam requires us to send 0 in case of success.
   mozilla::glean::cert_compression::failures.Get(decoder).Add(0);
-
-  PRUint64 diffActualEncodedLen = actualCertLen - encodedCertLen;
-  if (actualCertLen >= encodedCertLen) {
-    switch (alg) {
-      case zlib:
-        mozilla::glean::cert_compression::zlib_saved_bytes
-            .AccumulateSingleSample(diffActualEncodedLen);
-        break;
-
-      case brotli:
-        mozilla::glean::cert_compression::brotli_saved_bytes
-            .AccumulateSingleSample(diffActualEncodedLen);
-        break;
-      case zstd:
-        mozilla::glean::cert_compression::zstd_saved_bytes
-            .AccumulateSingleSample(diffActualEncodedLen);
-        break;
-    }
-  }
 }
 
 SECStatus zlibCertificateDecode(const SECItem* input, unsigned char* output,
@@ -1573,8 +1552,8 @@ static nsresult nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
         ssl_grp_kem_mlkem768x25519, ssl_grp_ec_curve25519, ssl_grp_ec_secp256r1,
         ssl_grp_ec_secp384r1,       ssl_grp_ec_secp521r1,  ssl_grp_ffdhe_2048,
         ssl_grp_ffdhe_3072};
-    if (SECSuccess != SSL_NamedGroupConfig(fd, namedGroups,
-                                           mozilla::ArrayLength(namedGroups))) {
+    if (SECSuccess !=
+        SSL_NamedGroupConfig(fd, namedGroups, std::size(namedGroups))) {
       return NS_ERROR_FAILURE;
     }
     additional_shares += 1;
@@ -1584,8 +1563,8 @@ static nsresult nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
         ssl_grp_ec_curve25519, ssl_grp_ec_secp256r1, ssl_grp_ec_secp384r1,
         ssl_grp_ec_secp521r1,  ssl_grp_ffdhe_2048,   ssl_grp_ffdhe_3072};
     // Skip the |ssl_grp_kem_mlkem768x25519| entry.
-    if (SECSuccess != SSL_NamedGroupConfig(fd, namedGroups,
-                                           mozilla::ArrayLength(namedGroups))) {
+    if (SECSuccess !=
+        SSL_NamedGroupConfig(fd, namedGroups, std::size(namedGroups))) {
       return NS_ERROR_FAILURE;
     }
   }
@@ -1632,9 +1611,9 @@ static nsresult nsSSLIOLayerSetOptions(PRFileDesc* fd, bool forSTARTTLS,
   // is properly rejected. NSS will not advertise PKCS1 or RSAE schemes (which
   // the |ssl_sig_rsa_pss_*| defines alias, meaning we will not currently accept
   // any RSA DC.
-  if (SECSuccess != SSL_SignatureSchemePrefSet(
-                        fd, sEnabledSignatureSchemes,
-                        mozilla::ArrayLength(sEnabledSignatureSchemes))) {
+  if (SECSuccess !=
+      SSL_SignatureSchemePrefSet(fd, sEnabledSignatureSchemes,
+                                 std::size(sEnabledSignatureSchemes))) {
     return NS_ERROR_FAILURE;
   }
 

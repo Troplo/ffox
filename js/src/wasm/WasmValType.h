@@ -472,10 +472,8 @@ class StorageTypeTraits {
 
   static bool isValidTypeCode(TypeCode tc) {
     switch (tc) {
-#ifdef ENABLE_WASM_GC
       case TypeCode::I8:
       case TypeCode::I16:
-#endif
       case TypeCode::I32:
       case TypeCode::I64:
       case TypeCode::F32:
@@ -487,7 +485,6 @@ class StorageTypeTraits {
       case TypeCode::ExternRef:
       case TypeCode::ExnRef:
       case TypeCode::NullExnRef:
-#ifdef ENABLE_WASM_GC
       case TypeCode::AnyRef:
       case TypeCode::EqRef:
       case TypeCode::I31Ref:
@@ -496,10 +493,7 @@ class StorageTypeTraits {
       case TypeCode::NullFuncRef:
       case TypeCode::NullExternRef:
       case TypeCode::NullAnyRef:
-#endif
-#ifdef ENABLE_WASM_GC
       case AbstractTypeRefCode:
-#endif
         return true;
       default:
         return false;
@@ -520,11 +514,9 @@ class StorageTypeTraits {
 
   static bool isPackedTypeCode(TypeCode tc) {
     switch (tc) {
-#ifdef ENABLE_WASM_GC
       case TypeCode::I8:
       case TypeCode::I16:
         return true;
-#endif
       default:
         return false;
     }
@@ -553,6 +545,24 @@ class ValTypeTraits {
     Ref = uint8_t(AbstractReferenceTypeCode),
   };
 
+  static const char* KindEnumName(Kind kind) {
+    switch (kind) {
+      case Kind::I32:
+        return "I32";
+      case Kind::I64:
+        return "I64";
+      case Kind::F32:
+        return "F32";
+      case Kind::F64:
+        return "F64";
+      case Kind::V128:
+        return "V128";
+      case Kind::Ref:
+        return "Ref";
+    }
+    MOZ_CRASH("Unknown kind");
+  }
+
   static constexpr bool isValidTypeCode(TypeCode tc) {
     switch (tc) {
       case TypeCode::I32:
@@ -566,7 +576,6 @@ class ValTypeTraits {
       case TypeCode::ExternRef:
       case TypeCode::ExnRef:
       case TypeCode::NullExnRef:
-#ifdef ENABLE_WASM_GC
       case TypeCode::AnyRef:
       case TypeCode::EqRef:
       case TypeCode::I31Ref:
@@ -575,10 +584,7 @@ class ValTypeTraits {
       case TypeCode::NullFuncRef:
       case TypeCode::NullExternRef:
       case TypeCode::NullAnyRef:
-#endif
-#ifdef ENABLE_WASM_GC
       case AbstractTypeRefCode:
-#endif
         return true;
       default:
         return false;

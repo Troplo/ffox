@@ -11,6 +11,7 @@ support-files = [
 prefs = [
   "app.update.BITS.enabled=false",
   "app.update.langpack.enabled=true",
+  "app.update.multiSessionInstallLockout.enabled=false",
 ]
 run-if = ["!msix"] # Updater is disabled in MSIX builds
 
@@ -62,7 +63,6 @@ tags = "os_integration"
 ["browser_aboutDialog_fc_check_noUpdate.js"]
 
 ["browser_aboutDialog_fc_check_otherInstance.js"]
-run-if = ["os == 'win' && !msix"] # "Windows only feature."
 tags = "os_integration"
 
 ["browser_aboutDialog_fc_check_unsupported.js"]
@@ -118,7 +118,6 @@ tags = "os_integration"
 ["browser_aboutPrefs_fc_check_noUpdate.js"]
 
 ["browser_aboutPrefs_fc_check_otherInstance.js"]
-run-if = ["os == 'win' && !msix"] # "test must be able to prevent file deletion."
 tags = "os_integration"
 
 ["browser_aboutPrefs_fc_check_unsupported.js"]

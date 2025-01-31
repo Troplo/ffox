@@ -176,6 +176,12 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "toolkit.profiles.storeID",
   null
 );
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "didHandleCampaignAction",
+  "trailhead.firstrun.didHandleCampaignAction",
+  false
+);
 
 XPCOMUtils.defineLazyServiceGetters(lazy, {
   AUS: ["@mozilla.org/updates/update-service;1", "nsIApplicationUpdateService"],
@@ -192,7 +198,6 @@ const FXA_USERNAME_PREF = "services.sync.username";
 
 const { activityStreamProvider: asProvider } = NewTabUtils;
 
-const FXA_ATTACHED_CLIENTS_UPDATE_INTERVAL = 4 * 60 * 60 * 1000; // Four hours
 const FRECENT_SITES_UPDATE_INTERVAL = 6 * 60 * 60 * 1000; // Six hours
 const FRECENT_SITES_IGNORE_BLOCKED = false;
 const FRECENT_SITES_NUM_ITEMS = 25;
@@ -232,7 +237,7 @@ export function CachedTargetingGetter(
   };
 }
 
-function CacheListAttachedOAuthClients() {
+function CacheUnhandledCampaignAction() {
   return {
     _lastUpdated: 0,
     _value: null,
@@ -242,15 +247,22 @@ function CacheListAttachedOAuthClients() {
     },
     get() {
       const now = Date.now();
-      if (now - this._lastUpdated >= FXA_ATTACHED_CLIENTS_UPDATE_INTERVAL) {
-        this._value = new Promise(resolve => {
-          lazy.fxAccounts
-            .listAttachedOAuthClients()
-            .then(clients => {
-              resolve(clients);
-            })
-            .catch(() => resolve([]));
-        });
+      // Don't get cached value until the action has been handled to ensure
+      // proper screen targeting in about:welcome
+      if (
+        now - this._lastUpdated >= FRECENT_SITES_UPDATE_INTERVAL ||
+        !lazy.didHandleCampaignAction
+      ) {
+        this._value = null;
+        if (!lazy.didHandleCampaignAction) {
+          const attributionData =
+            lazy.AttributionCode.getCachedAttributionData();
+          const ALLOWED_CAMPAIGN_ACTIONS = ["SET_DEFAULT_BROWSER"];
+          const campaign = attributionData?.campaign?.toUpperCase();
+          if (campaign && ALLOWED_CAMPAIGN_ACTIONS.includes(campaign)) {
+            this._value = campaign;
+          }
+        }
         this._lastUpdated = now;
       }
       return this._value;
@@ -324,8 +336,8 @@ export const QueryCache = {
     TotalBookmarksCount: new CachedTargetingGetter("getTotalBookmarksCount"),
     CheckBrowserNeedsUpdate: new CheckBrowserNeedsUpdate(),
     RecentBookmarks: new CachedTargetingGetter("getRecentBookmarks"),
-    ListAttachedOAuthClients: new CacheListAttachedOAuthClients(),
     UserMonthlyActivity: new CachedTargetingGetter("getUserMonthlyActivity"),
+    UnhandledCampaignAction: new CacheUnhandledCampaignAction(),
   },
   getters: {
     doesAppNeedPin: new CachedTargetingGetter(
@@ -588,9 +600,9 @@ const TargetingGetters = {
   },
   get canCreateSelectableProfiles() {
     if (!AppConstants.MOZ_SELECTABLE_PROFILES) {
-      return null;
+      return false;
     }
-    return !!lazy.SelectableProfileService?.groupToolkitProfile;
+    return lazy.SelectableProfileService?.isEnabled ?? false;
   },
   get hasSelectableProfiles() {
     return !!lazy.profileStoreID;
@@ -789,7 +801,12 @@ const TargetingGetters = {
   },
   get attachedFxAOAuthClients() {
     return this.usesFirefoxSync
-      ? QueryCache.queries.ListAttachedOAuthClients.get()
+      ? new Promise(resolve =>
+          lazy.fxAccounts
+            .listAttachedOAuthClients()
+            .then(clients => resolve(clients))
+            .catch(() => resolve([]))
+        )
       : [];
   },
   get platformName() {
@@ -1066,6 +1083,17 @@ const TargetingGetters = {
     return attributionData?.campaign === "migration";
   },
 
+  /**
+   * Whether the user opted into a special message action represented by an
+   * installer attribution campaign and this choice still needs to be honored.
+   * @return {string} A special message action to be executed on first-run. For
+   * example, `"SET_DEFAULT_BROWSER"` when the user selected to set as default
+   * via the install marketing page and set default has not yet been
+   * automatically triggered, 'null' otherwise.
+   */
+  get unhandledCampaignAction() {
+    return QueryCache.queries.UnhandledCampaignAction.get();
+  },
   /**
    * The values of the height and width available to the browser to display
    * web content. The available height and width are each calculated taking

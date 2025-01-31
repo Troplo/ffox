@@ -40,6 +40,7 @@ import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
 import org.mozilla.fenix.helpers.HomeActivityComposeTestRule
 import org.mozilla.fenix.helpers.MatcherHelper.assertItemTextEquals
 import org.mozilla.fenix.helpers.MatcherHelper.assertUIObjectExists
+import org.mozilla.fenix.helpers.MatcherHelper.itemWithDescription
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResId
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdAndText
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdContainingText
@@ -187,13 +188,23 @@ class NavigationToolbarRobot {
     // New unified search UI selector
     fun verifyDefaultSearchEngine(engineName: String) =
         assertUIObjectExists(
-            searchSelectorButton().getChild(UiSelector().description(engineName)),
+            searchSelectorButton().getChild(UiSelector().descriptionStartsWith(engineName)),
         )
 
     fun verifyTextSelectionOptions(vararg textSelectionOptions: String) {
         for (textSelectionOption in textSelectionOptions) {
             mDevice.waitNotNull(Until.findObject(textContains(textSelectionOption)), waitingTime)
         }
+    }
+
+    fun verifyRedesignedNavigationToolbarItems() {
+        assertUIObjectExists(
+            itemWithDescription(getStringResource(R.string.browser_menu_back)),
+            itemWithDescription(getStringResource(R.string.browser_menu_forward)),
+            itemWithDescription(getStringResource(R.string.search_hint)),
+            itemWithDescription("More options"),
+            itemWithResId("$packageName:id/counter_box"),
+        )
     }
 
     class Transition {
@@ -222,6 +233,24 @@ class NavigationToolbarRobot {
                 )
                 Log.i(TAG, "enterURLAndEnterToBrowser: Asserted that home screen layout or download button or the total cookie protection contextual hint exist")
             }
+
+            BrowserRobot().interact()
+            return BrowserRobot.Transition()
+        }
+
+        fun enterURL(
+            url: Uri,
+            interact: BrowserRobot.() -> Unit,
+        ): BrowserRobot.Transition {
+            sessionLoadedIdlingResource = SessionLoadedIdlingResource()
+
+            openEditURLView()
+            Log.i(TAG, "enterURLAndEnterToBrowser: Trying to set toolbar text to: $url")
+            awesomeBar().setText(url.toString())
+            Log.i(TAG, "enterURLAndEnterToBrowser: Toolbar text was set to: $url")
+            Log.i(TAG, "enterURLAndEnterToBrowser: Trying to press device enter button")
+            mDevice.pressEnter()
+            Log.i(TAG, "enterURLAndEnterToBrowser: Pressed device enter button")
 
             BrowserRobot().interact()
             return BrowserRobot.Transition()

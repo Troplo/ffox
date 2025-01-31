@@ -13,9 +13,10 @@
 edition = "2021"
 rust-version = "1.76"
 name = "wgpu-core"
-version = "22.0.0"
+version = "23.0.1"
 authors = ["gfx-rs developers"]
 build = "build.rs"
+autolib = false
 autobins = false
 autoexamples = false
 autotests = false
@@ -57,14 +58,14 @@ version = "0.8"
 version = "2.6"
 
 [dependencies.bytemuck]
-version = "1.18"
+version = "1.20"
 optional = true
 
 [dependencies.document-features]
 version = "0.2.10"
 
 [dependencies.hal]
-version = "22.0.0"
+version = "23.0.0"
 path = "../wgpu-hal"
 default-features = false
 package = "wgpu-hal"
@@ -76,7 +77,7 @@ version = "2"
 version = "0.4"
 
 [dependencies.naga]
-version = "22.0.0"
+version = "23.0.0"
 path = "../naga"
 
 [dependencies.once_cell]
@@ -109,10 +110,10 @@ optional = true
 version = "1"
 
 [dependencies.thiserror]
-version = "1.0.64"
+version = "1.0.69"
 
 [dependencies.wgt]
-version = "22.0.0"
+version = "23.0.0"
 path = "../wgpu-types"
 package = "wgpu-types"
 
@@ -129,6 +130,7 @@ fragile-send-sync-non-atomic-wasm = [
 ]
 gles = ["hal/gles"]
 glsl = ["naga/glsl-in"]
+indirect-validation = ["naga/wgsl-in"]
 metal = ["hal/metal"]
 observe_locks = [
     "dep:ron",

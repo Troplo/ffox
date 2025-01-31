@@ -448,12 +448,6 @@ class AsyncPanZoomController {
   void ClearPhysicalOverscroll();
 
   /**
-   * Returns whether this APZC is for an element marked with the 'scrollgrab'
-   * attribute.
-   */
-  bool HasScrollgrab() const { return mScrollMetadata.GetHasScrollgrab(); }
-
-  /**
    * Returns whether this APZC has scroll snap points.
    */
   bool HasScrollSnapping() const {
@@ -851,7 +845,8 @@ class AsyncPanZoomController {
   /**
    * Gets the relevant point in the event, in external screen coordinates.
    */
-  ExternalPoint GetFirstExternalTouchPoint(const MultiTouchInput& aEvent);
+  static ExternalPoint GetFirstExternalTouchPoint(
+      const MultiTouchInput& aEvent);
 
   /**
    * Gets the amount by which this APZC is overscrolled along both axes.
@@ -977,7 +972,7 @@ class AsyncPanZoomController {
    */
   Maybe<LayoutDevicePoint> ConvertToGecko(const ScreenIntPoint& aPoint);
 
-  enum AxisLockMode {
+  enum class AxisLockMode {
     FREE,     /* No locking at all */
     STANDARD, /* Default axis locking mode that remains locked until pan ends */
     STICKY,   /* Allow lock to be broken, with hysteresis */
@@ -1110,6 +1105,12 @@ class AsyncPanZoomController {
   // RecentEventsBuffer is not threadsafe. Should only be accessed on the
   // controller thread.
   RecentEventsBuffer<PinchGestureInput> mPinchEventBuffer;
+
+  // Stores the touch events that occured within a given timeframe. Ussed to
+  // determine the direction of a touch scroll, which determines which axis
+  // should be locked if STICKY axis locking is used. Should only by accessed
+  // on the controller thread.
+  RecentEventsBuffer<MultiTouchInput> mTouchScrollEventBuffer;
 
   // Most up-to-date constraints on zooming. These should always be reasonable
   // values; for example, allowing a min zoom of 0.0 can cause very bad things
@@ -1381,6 +1382,7 @@ class AsyncPanZoomController {
 
  private:
   friend class AutoApplyAsyncTestAttributes;
+  friend class AutoDynamicToolbarHider;
 
   bool SuppressAsyncScrollOffset() const;
 
@@ -1477,6 +1479,7 @@ class AsyncPanZoomController {
 
  private:
   friend class StateChangeNotificationBlocker;
+  friend class ThreadSafeStateChangeNotificationBlocker;
   /**
    * A counter of how many StateChangeNotificationBlockers are active.
    * A non-zero count will prevent state change notifications from

@@ -515,7 +515,7 @@ MOZ_NEVER_INLINE MOZ_ASAN_IGNORE static pid_t DoClone(int aFlags,
 #ifdef __hppa__
   void* stackPtr = miniStack;
 #else
-  void* stackPtr = ArrayEnd(miniStack);
+  void* stackPtr = std::end(miniStack);
 #endif
   return clone(CloneCallee, stackPtr, aFlags, aCtx);
 }
@@ -688,7 +688,7 @@ void SandboxLaunch::StartChrootServer() {
   caps.Effective(CAP_SYS_CHROOT) = true;
   if (!caps.SetCurrent()) {
     SANDBOX_LOG_ERRNO("capset (chroot helper)");
-    MOZ_DIAGNOSTIC_ASSERT(false);
+    MOZ_DIAGNOSTIC_CRASH("caps.SetCurrent() failed");
   }
 
   base::CloseSuperfluousFds(this, [](void* aCtx, int aFd) {

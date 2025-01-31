@@ -442,14 +442,15 @@ void nsPresContext::GetUserPreferences() {
   // * image animation
   nsAutoCString animatePref;
   Preferences::GetCString("image.animation_mode", animatePref);
-  if (animatePref.EqualsLiteral("normal"))
+  if (animatePref.EqualsLiteral("normal")) {
     mImageAnimationModePref = imgIContainer::kNormalAnimMode;
-  else if (animatePref.EqualsLiteral("none"))
+  } else if (animatePref.EqualsLiteral("none")) {
     mImageAnimationModePref = imgIContainer::kDontAnimMode;
-  else if (animatePref.EqualsLiteral("once"))
+  } else if (animatePref.EqualsLiteral("once")) {
     mImageAnimationModePref = imgIContainer::kLoopOnceAnimMode;
-  else  // dynamic change to invalid value should act like it does initially
+  } else {  // dynamic change to invalid value should act like it does initially
     mImageAnimationModePref = imgIContainer::kNormalAnimMode;
+  }
 
   uint32_t bidiOptions = GetBidi();
 
@@ -846,8 +847,8 @@ bool nsPresContext::UpdateFontVisibility() {
   }
 
   // Clamp result to the valid range of levels.
-  level = std::max(std::min(level, int32_t(FontVisibility::User)),
-                   int32_t(FontVisibility::Base));
+  level = std::clamp(level, int32_t(FontVisibility::Base),
+                     int32_t(FontVisibility::User));
 
   mFontVisibility = FontVisibility(level);
   return mFontVisibility != oldValue;
@@ -938,10 +939,11 @@ void nsPresContext::AttachPresShell(mozilla::PresShell* aPresShell) {
   nsIURI* docURI = doc->GetDocumentURI();
 
   if (IsDynamic() && docURI) {
-    if (!docURI->SchemeIs("chrome") && !docURI->SchemeIs("resource"))
+    if (!docURI->SchemeIs("chrome") && !docURI->SchemeIs("resource")) {
       mImageAnimationMode = mImageAnimationModePref;
-    else
+    } else {
       mImageAnimationMode = imgIContainer::kNormalAnimMode;
+    }
   }
 
   UpdateCharSet(doc->GetDocumentCharacterSet());
@@ -1240,11 +1242,15 @@ nsPresContext* nsPresContext::GetParentPresContext() const {
 }
 
 nsPresContext* nsPresContext::GetInProcessRootContentDocumentPresContext() {
-  if (IsChrome()) return nullptr;
+  if (IsChrome()) {
+    return nullptr;
+  }
   nsPresContext* pc = this;
   for (;;) {
     nsPresContext* parent = pc->GetParentPresContext();
-    if (!parent || parent->IsChrome()) return pc;
+    if (!parent || parent->IsChrome()) {
+      return pc;
+    }
     pc = parent;
   }
 }
@@ -1273,7 +1279,9 @@ nsRootPresContext* nsPresContext::GetRootPresContext() const {
   nsPresContext* pc = const_cast<nsPresContext*>(this);
   for (;;) {
     nsPresContext* parent = pc->GetParentPresContext();
-    if (!parent) break;
+    if (!parent) {
+      break;
+    }
     pc = parent;
   }
   return pc->IsRoot() ? static_cast<nsRootPresContext*>(pc) : nullptr;
@@ -1394,13 +1402,15 @@ void nsPresContext::SetSMILAnimations(dom::Document* aDoc, uint16_t aNewMode,
     switch (aNewMode) {
       case imgIContainer::kNormalAnimMode:
       case imgIContainer::kLoopOnceAnimMode:
-        if (aOldMode == imgIContainer::kDontAnimMode)
+        if (aOldMode == imgIContainer::kDontAnimMode) {
           controller->Resume(SMILTimeContainer::PAUSE_USERPREF);
+        }
         break;
 
       case imgIContainer::kDontAnimMode:
-        if (aOldMode != imgIContainer::kDontAnimMode)
+        if (aOldMode != imgIContainer::kDontAnimMode) {
           controller->Pause(SMILTimeContainer::PAUSE_USERPREF);
+        }
         break;
     }
   }
@@ -1413,7 +1423,9 @@ void nsPresContext::SetImageAnimationMode(uint16_t aMode) {
                "Wrong Animation Mode is being set!");
 
   // Image animation mode cannot be changed when rendering to a printer.
-  if (!IsDynamic()) return;
+  if (!IsDynamic()) {
+    return;
+  }
 
   // Now walk the content tree and set the animation mode
   // on all the images.
@@ -1543,9 +1555,8 @@ gfxSize nsPresContext::ScreenSizeInchesForFontInflation(bool* aChanged) {
   }
 
   nsDeviceContext* dx = DeviceContext();
-  nsRect clientRect;
-  dx->GetClientRect(clientRect);  // FIXME: GetClientRect looks expensive
   float unitsPerInch = dx->AppUnitsPerPhysicalInch();
+  nsRect clientRect = dx->GetClientRect();
   gfxSize deviceSizeInches(float(clientRect.width) / unitsPerInch,
                            float(clientRect.height) / unitsPerInch);
 
@@ -1595,11 +1606,12 @@ static bool CheckOverflow(const ComputedStyle* aComputedStyle,
 // properly when we insert a body element and there is a previous one, for
 // example).
 static Element* GetPropagatedScrollStylesForViewport(
-    nsPresContext* aPresContext, ScrollStyles* aStyles) {
+    nsPresContext* aPresContext, const Element* aRemovedChild,
+    ScrollStyles* aStyles) {
   Document* document = aPresContext->Document();
   Element* docElement = document->GetRootElement();
   // docElement might be null if we're doing this after removing it.
-  if (!docElement) {
+  if (!docElement || docElement == aRemovedChild) {
     return nullptr;
   }
 
@@ -1619,17 +1631,15 @@ static Element* GetPropagatedScrollStylesForViewport(
   // XXX this should be earlier; we shouldn't even look at the document root
   // for non-HTML documents. Fix this once we support explicit CSS styling
   // of the viewport
-  if (!document->IsHTMLOrXHTML() || !docElement->IsHTMLElement()) {
+  if (!document->IsHTMLOrXHTML() ||
+      !docElement->IsHTMLElement(nsGkAtoms::html)) {
     return nullptr;
   }
 
-  Element* bodyElement = document->AsHTMLDocument()->GetBodyElement();
+  Element* bodyElement = document->GetBodyElement(aRemovedChild);
   if (!bodyElement) {
     return nullptr;
   }
-
-  MOZ_ASSERT(bodyElement->IsHTMLElement(nsGkAtoms::body),
-             "GetBodyElement returned something bogus");
 
   const auto* bodyStyle = Servo_Element_GetMaybeOutOfDateStyle(bodyElement);
   if (bodyStyle && bodyStyle->StyleDisplay()->IsContainAny()) {
@@ -1644,7 +1654,8 @@ static Element* GetPropagatedScrollStylesForViewport(
   return nullptr;
 }
 
-Element* nsPresContext::UpdateViewportScrollStylesOverride() {
+Element* nsPresContext::UpdateViewportScrollStylesOverride(
+    const Element* aRemovedChild) {
   ScrollStyles oldViewportScrollStyles = mViewportScrollStyles;
 
   // Start off with our default styles, and then update them as needed.
@@ -1653,8 +1664,8 @@ Element* nsPresContext::UpdateViewportScrollStylesOverride() {
   mViewportScrollOverrideElement = nullptr;
   // Don't propagate the scrollbar state in printing or print preview.
   if (!IsPaginated()) {
-    mViewportScrollOverrideElement =
-        GetPropagatedScrollStylesForViewport(this, &mViewportScrollStyles);
+    mViewportScrollOverrideElement = GetPropagatedScrollStylesForViewport(
+        this, aRemovedChild, &mViewportScrollStyles);
   }
 
   dom::Document* document = Document();
@@ -1694,7 +1705,8 @@ bool nsPresContext::ElementWouldPropagateScrollStyles(const Element& aElement) {
   // in practice we will make this call quite rarely, because we checked for all
   // the common cases above.
   ScrollStyles dummy(StyleOverflow::Auto, StyleOverflow::Auto);
-  return GetPropagatedScrollStylesForViewport(this, &dummy) == &aElement;
+  return GetPropagatedScrollStylesForViewport(this, nullptr, &dummy) ==
+         &aElement;
 }
 
 nsISupports* nsPresContext::GetContainerWeak() const {
@@ -2324,7 +2336,9 @@ void nsPresContext::FireDOMPaintEvent(
     nsTArray<nsRect>* aList, TransactionId aTransactionId,
     mozilla::TimeStamp aTimeStamp /* = mozilla::TimeStamp() */) {
   nsPIDOMWindowInner* ourWindow = mDocument->GetInnerWindow();
-  if (!ourWindow) return;
+  if (!ourWindow) {
+    return;
+  }
 
   nsCOMPtr<EventTarget> dispatchTarget = do_QueryInterface(ourWindow);
   nsCOMPtr<EventTarget> eventTarget = dispatchTarget;
@@ -2370,11 +2384,17 @@ void nsPresContext::FireDOMPaintEvent(
 }
 
 static bool MayHavePaintEventListener(nsPIDOMWindowInner* aInnerWindow) {
-  if (!aInnerWindow) return false;
-  if (aInnerWindow->HasPaintEventListeners()) return true;
+  if (!aInnerWindow) {
+    return false;
+  }
+  if (aInnerWindow->HasPaintEventListeners()) {
+    return true;
+  }
 
   EventTarget* parentTarget = aInnerWindow->GetParentTarget();
-  if (!parentTarget) return false;
+  if (!parentTarget) {
+    return false;
+  }
 
   EventListenerManager* manager = nullptr;
   if ((manager = parentTarget->GetExistingListenerManager()) &&
@@ -3155,6 +3175,11 @@ void nsPresContext::UpdateKeyboardHeight(ScreenIntCoord aHeight) {
   }
 }
 
+bool nsPresContext::IsKeyboardHiddenOrResizesContentMode() const {
+  return mKeyboardHeight == 0 ||
+         mDocument->InteractiveWidget() == InteractiveWidget::ResizesContent;
+}
+
 DynamicToolbarState nsPresContext::GetDynamicToolbarState() const {
   if (!HasDynamicToolbar()) {
     return DynamicToolbarState::None;
@@ -3199,7 +3224,8 @@ nscoord nsPresContext::GetBimodalDynamicToolbarHeightInAppUnits() const {
              : 0;
 }
 
-void nsPresContext::SetSafeAreaInsets(const ScreenIntMargin& aSafeAreaInsets) {
+void nsPresContext::SetSafeAreaInsets(
+    const LayoutDeviceIntMargin& aSafeAreaInsets) {
   if (mSafeAreaInsets == aSafeAreaInsets) {
     return;
   }

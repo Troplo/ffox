@@ -30,6 +30,7 @@
 #include "mozilla/dom/MIDIManagerParent.h"
 #include "mozilla/dom/MIDIPlatformService.h"
 #include "mozilla/dom/MIDIPortParent.h"
+#include "mozilla/dom/MLSTransactionParent.h"
 #include "mozilla/dom/MessagePortParent.h"
 #include "mozilla/dom/PGamepadEventChannelParent.h"
 #include "mozilla/dom/PGamepadTestChannelParent.h"
@@ -54,6 +55,7 @@
 #include "mozilla/dom/locks/LockManagerParent.h"
 #include "mozilla/dom/localstorage/ActorsParent.h"
 #include "mozilla/dom/network/UDPSocketParent.h"
+#include "mozilla/dom/notification/NotificationParent.h"
 #include "mozilla/dom/quota/ActorsParent.h"
 #include "mozilla/dom/quota/QuotaParent.h"
 #include "mozilla/dom/simpledb/ActorsParent.h"
@@ -81,6 +83,7 @@ using mozilla::dom::MIDIPortParent;
 using mozilla::dom::PMessagePortParent;
 using mozilla::dom::PMIDIManagerParent;
 using mozilla::dom::PMIDIPortParent;
+using mozilla::dom::PMLSTransactionParent;
 using mozilla::dom::PServiceWorkerContainerParent;
 using mozilla::dom::PServiceWorkerParent;
 using mozilla::dom::PServiceWorkerRegistrationParent;
@@ -404,8 +407,8 @@ bool BackgroundParentImpl::DeallocPBackgroundLocalStorageCacheParent(
 }
 
 auto BackgroundParentImpl::AllocPBackgroundStorageParent(
-    const nsAString& aProfilePath,
-    const uint32_t& aPrivateBrowsingId) -> PBackgroundStorageParent* {
+    const nsAString& aProfilePath, const uint32_t& aPrivateBrowsingId)
+    -> PBackgroundStorageParent* {
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
 
@@ -458,7 +461,7 @@ mozilla::ipc::IPCResult BackgroundParentImpl::RecvCreateFileSystemManagerParent(
   AssertIsOnBackgroundThread();
 
   return mozilla::dom::CreateFileSystemManagerParent(
-      aPrincipalInfo, std::move(aParentEndpoint), std::move(aResolver));
+      this, aPrincipalInfo, std::move(aParentEndpoint), std::move(aResolver));
 }
 
 mozilla::ipc::IPCResult BackgroundParentImpl::RecvCreateWebTransportParent(
@@ -476,6 +479,23 @@ mozilla::ipc::IPCResult BackgroundParentImpl::RecvCreateWebTransportParent(
   webt->Create(aURL, aPrincipal, aClientInfo, aDedicated, aRequireUnreliable,
                aCongestionControl, std::move(aServerCertHashes),
                std::move(aParentEndpoint), std::move(aResolver));
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult BackgroundParentImpl::RecvCreateNotificationParent(
+    Endpoint<dom::notification::PNotificationParent>&& aParentEndpoint,
+    NotNull<nsIPrincipal*> aPrincipal,
+    NotNull<nsIPrincipal*> aEffectiveStoragePrincipal,
+    const bool& aIsSecureContext, const nsAString& aId, const nsAString& aScope,
+    const IPCNotificationOptions& aOptions,
+    CreateNotificationParentResolver&& aResolver) {
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+
+  auto actor = MakeRefPtr<dom::notification::NotificationParent>(
+      aPrincipal, aEffectiveStoragePrincipal, aIsSecureContext, aId, aScope,
+      aOptions);
+  actor->BindToMainThread(std::move(aParentEndpoint), std::move(aResolver));
   return IPC_OK();
 }
 
@@ -642,8 +662,8 @@ bool BackgroundParentImpl::DeallocPCamerasParent(
 }
 
 auto BackgroundParentImpl::AllocPUDPSocketParent(
-    const Maybe<PrincipalInfo>& /* unused */,
-    const nsACString& /* unused */) -> PUDPSocketParent* {
+    const Maybe<PrincipalInfo>& /* unused */, const nsACString& /* unused */)
+    -> PUDPSocketParent* {
   RefPtr<UDPSocketParent> p = new UDPSocketParent(this);
 
   return p.forget().take();
@@ -1145,6 +1165,82 @@ mozilla::ipc::IPCResult BackgroundParentImpl::RecvHasMIDIDevice(
   return IPC_OK();
 }
 
+// NOTE: Only accessed on the background thread.
+static StaticRefPtr<nsISerialEventTarget> sMLSTaskQueue;
+
+class MLSTaskQueueShutdownTask final : public nsITargetShutdownTask {
+ public:
+  NS_DECL_THREADSAFE_ISUPPORTS
+
+  void TargetShutdown() override { sMLSTaskQueue = nullptr; }
+
+ private:
+  ~MLSTaskQueueShutdownTask() = default;
+};
+
+NS_IMPL_ISUPPORTS(MLSTaskQueueShutdownTask, nsITargetShutdownTask)
+
+mozilla::ipc::IPCResult BackgroundParentImpl::RecvCreateMLSTransaction(
+    Endpoint<PMLSTransactionParent>&& aEndpoint,
+    NotNull<nsIPrincipal*> aPrincipal) {
+  AssertIsInMainProcess();
+  AssertIsOnBackgroundThread();
+
+  if (!aEndpoint.IsValid()) {
+    return IPC_FAIL(this, "invalid endpoint for MLSTransaction");
+  }
+
+  if (!sMLSTaskQueue) {
+    nsCOMPtr<nsISerialEventTarget> taskQueue;
+    MOZ_ALWAYS_SUCCEEDS(NS_CreateBackgroundTaskQueue(
+        "MLSTaskQueue", getter_AddRefs(taskQueue)));
+    sMLSTaskQueue = taskQueue.forget();
+
+    // Clean up the sMLSTaskQueue static when the PBackground thread shuts down.
+    nsCOMPtr<nsITargetShutdownTask> shutdownTask =
+        new MLSTaskQueueShutdownTask();
+    MOZ_ALWAYS_SUCCEEDS(
+        GetCurrentSerialEventTarget()->RegisterShutdownTask(shutdownTask));
+  }
+
+  // Construct the database's prefix path
+  nsCOMPtr<nsIFile> file;
+  nsresult rv =
+      mozilla::dom::MLSTransactionParent::ConstructDatabasePrefixPath(file);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    // The enpoint's destructor will close the actor
+    return IPC_OK();
+  }
+
+  // Dispatch the task to the MLS task queue
+  sMLSTaskQueue->Dispatch(NS_NewRunnableFunction(
+      "CreateMLSTransactionRunnable",
+      [endpoint = std::move(aEndpoint), file,
+       principal = RefPtr{aPrincipal.get()}]() mutable {
+        // Create the mls directory if it doesn't exist
+        nsresult rv =
+            mozilla::dom::MLSTransactionParent::CreateDirectoryIfNotExists(
+                file);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return;
+        }
+
+        // Construct the database's full path
+        nsAutoCString databasePath;
+        rv = mozilla::dom::MLSTransactionParent::ConstructDatabaseFullPath(
+            file, principal, databasePath);
+        if (NS_WARN_IF(NS_FAILED(rv))) {
+          return;
+        }
+
+        // Create the MLS transaction parent and bind it to the endpoint
+        RefPtr<PMLSTransactionParent> result =
+            new mozilla::dom::MLSTransactionParent(databasePath);
+        endpoint.Bind(result);
+      }));
+  return IPC_OK();
+}
+
 already_AddRefed<mozilla::dom::PClientManagerParent>
 BackgroundParentImpl::AllocPClientManagerParent() {
   return mozilla::dom::AllocClientManagerParent();
@@ -1381,8 +1477,7 @@ mozilla::ipc::IPCResult BackgroundParentImpl::RecvPLockManagerConstructor(
 already_AddRefed<dom::locks::PLockManagerParent>
 BackgroundParentImpl::AllocPLockManagerParent(NotNull<nsIPrincipal*> aPrincipal,
                                               const Maybe<nsID>& aClientId) {
-  return MakeAndAddRef<mozilla::dom::locks::LockManagerParent>(aPrincipal,
-                                                               aClientId);
+  return MakeAndAddRef<dom::locks::LockManagerParent>(aPrincipal, aClientId);
 }
 
 already_AddRefed<dom::PFetchParent> BackgroundParentImpl::AllocPFetchParent() {

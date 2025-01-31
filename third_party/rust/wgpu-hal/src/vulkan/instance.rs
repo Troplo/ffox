@@ -344,11 +344,11 @@ impl super::Instance {
                     callback_data: debug_utils_create_info.callback_data,
                 })
             } else {
-                log::info!("Debug utils not enabled: extension not listed");
+                log::debug!("Debug utils not enabled: extension not listed");
                 None
             }
         } else {
-            log::info!(
+            log::debug!(
                 "Debug utils not enabled: \
                         debug_utils_user_data not passed to Instance::from_raw"
             );
@@ -1095,6 +1095,7 @@ impl crate::Surface for super::Surface {
                 raw: swapchain.images[index as usize],
                 drop_guard: None,
                 block: None,
+                external_memory: None,
                 usage: swapchain.config.usage,
                 format: swapchain.config.format,
                 raw_flags,

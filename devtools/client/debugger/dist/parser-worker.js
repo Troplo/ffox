@@ -23,7 +23,7 @@
 
     var lib$4 = {};
 
-    var isReactComponent$1 = {};
+    var isReactComponent = {};
 
     var buildMatchMemberExpression = {};
 
@@ -2935,20 +2935,20 @@
     var hasRequiredIsReactComponent;
 
     function requireIsReactComponent () {
-    	if (hasRequiredIsReactComponent) return isReactComponent$1;
+    	if (hasRequiredIsReactComponent) return isReactComponent;
     	hasRequiredIsReactComponent = 1;
 
-    	Object.defineProperty(isReactComponent$1, "__esModule", {
+    	Object.defineProperty(isReactComponent, "__esModule", {
     	  value: true
     	});
-    	isReactComponent$1.default = void 0;
+    	isReactComponent.default = void 0;
     	var _buildMatchMemberExpression = requireBuildMatchMemberExpression();
-    	const isReactComponent = (0, _buildMatchMemberExpression.default)("React.Component");
-    	var _default = isReactComponent;
-    	isReactComponent$1.default = _default;
+    	const isReactComponent$1 = (0, _buildMatchMemberExpression.default)("React.Component");
+    	var _default = isReactComponent$1;
+    	isReactComponent.default = _default;
 
     	
-    	return isReactComponent$1;
+    	return isReactComponent;
     }
 
     var isCompatTag = {};
@@ -29872,6 +29872,7 @@
           "classPrivateProperties",
           "classPrivateMethods",
           "classProperties",
+          "explicitResourceManagement",
           "objectRestSpread",
           "optionalChaining",
           "privateIn",
@@ -29894,6 +29895,7 @@
           "classPrivateProperties",
           "classPrivateMethods",
           "classProperties",
+          "explicitResourceManagement",
           "exportDefaultFrom",
           "exportNamespaceFrom",
           "asyncGenerators",
@@ -29964,6 +29966,7 @@
             "classStaticBlock",
             "classPrivateProperties",
             "classPrivateMethods",
+            "explicitResourceManagement",
             "objectRestSpread",
             "dynamicImport",
             "nullishCoalescingOperator",
@@ -39058,61 +39061,6 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
       return "anonymous";
     }
 
-    function getFramework(symbols) {
-      if (isReactComponent(symbols)) {
-        return "React";
-      }
-      if (isAngularComponent(symbols)) {
-        return "Angular";
-      }
-      if (isVueComponent(symbols)) {
-        return "Vue";
-      }
-
-      return null;
-    }
-
-    function isReactComponent({ importsReact, classes, identifiers }) {
-      return (
-        importsReact ||
-        extendsReactComponent(classes) ||
-        isReact(identifiers) ||
-        isRedux(identifiers)
-      );
-    }
-
-    function extendsReactComponent(classes) {
-      return classes.some(
-        classObj =>
-          libExports$2.isIdentifier(classObj.parent, { name: "Component" }) ||
-          libExports$2.isIdentifier(classObj.parent, { name: "PureComponent" }) ||
-          (libExports$2.isMemberExpression(classObj.parent, { computed: false }) &&
-            libExports$2.isIdentifier(classObj.parent, { name: "Component" }))
-      );
-    }
-
-    function isAngularComponent({ memberExpressions }) {
-      return memberExpressions.some(
-        item =>
-          item.expression == "angular.controller" ||
-          item.expression == "angular.module"
-      );
-    }
-
-    function isVueComponent({ identifiers }) {
-      return identifiers.some(identifier => identifier.name == "Vue");
-    }
-
-    /* This identifies the react lib file */
-    function isReact(identifiers) {
-      return identifiers.some(identifier => identifier.name == "isReactComponent");
-    }
-
-    /* This identifies the redux lib file */
-    function isRedux(identifiers) {
-      return identifiers.some(identifier => identifier.name == "Redux");
-    }
-
     const symbolDeclarations = new Map();
 
     function extractFunctionSymbol(path, state, symbols) {
@@ -39138,14 +39086,6 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
     function extractSymbol(path, symbols, state) {
       if (isFunction(path)) {
         extractFunctionSymbol(path, state, symbols);
-      }
-
-      if (libExports$2.isJSXElement(path)) {
-        symbols.hasJsx = true;
-      }
-
-      if (libExports$2.isGenericTypeAnnotation(path)) {
-        symbols.hasTypes = true;
       }
 
       if (libExports$2.isClassDeclaration(path)) {
@@ -39184,6 +39124,27 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
     }
 
     function extractSymbols(sourceId) {
+      // This is used in the main thread by:
+      // * The `getFunctionSymbols` function which is used by the Outline, QuickOpen panels.
+      // * The `getClosestFunctionName` function used in the mapping of frame function names.
+      // * The `findOutOfScopeLocations` function use to determine in scope lines.
+      // functions: symbols.functions,
+      // The three following attributes are only used by `findBestMatchExpression` within the worker thread
+      // `memberExpressions`, `literals`, `identifiers`
+      //
+      // These three memberExpressions, literals and identifiers attributes are arrays containing objects whose attributes are:
+      // * name: string
+      // * location: object {start: number, end: number}
+      // * expression: string
+      // * computed: boolean (only for memberExpressions)
+      //
+      // `findBestMatchExpression` uses `location`, `computed` and `expression` (not name).
+      //    `expression` isn't used from the worker thread implementation of `findBestMatchExpression`.
+      //    The main thread only uses `expression` and `location`.
+      // This is used by the `getClassSymbols` function in the Outline panel
+      // `classes`
+      // This is only used by `findOutOfScopeLocations`:
+      // `comments`
       const symbols = {
         functions: [],
         memberExpressions: [],
@@ -39194,9 +39155,6 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
         identifiersKeys: new Set(),
         classes: [],
         literals: [],
-        hasJsx: false,
-        hasTypes: false,
-        framework: undefined,
         importsReact: false,
       };
 
@@ -39219,7 +39177,6 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
 
       // comments are extracted separately from the AST
       symbols.comments = getComments(ast);
-      symbols.framework = getFramework(symbols);
 
       return symbols;
     }
@@ -39485,47 +39442,10 @@ Please specify the "importAttributesKeyword" generator option, whose value can b
     }
 
     // This is only called from the main thread and we return a subset of attributes
+    // Note: This is now used just to trigger the parser
     function getSymbols(sourceId) {
-      const symbols = getInternalSymbols(sourceId);
-      return {
-        // This is used in the main thread by:
-        // * The `getFunctionSymbols` function which is used by the Outline, QuickOpen panels.
-        // * The `getClosestFunctionName` function used in the mapping of frame function names.
-        // * The `findOutOfScopeLocations` function use to determine in scope lines.
-        // functions: symbols.functions,
-
-        // The three following attributes are only used by `findBestMatchExpression` within the worker thread
-        // `memberExpressions`, `literals`
-        // This one is also used within the worker for framework computation
-        // `identifiers`
-        //
-        // These three memberExpressions, literals and identifiers attributes are arrays containing objects whose attributes are:
-        // * name: string
-        // * location: object {start: number, end: number}
-        // * expression: string
-        // * computed: boolean (only for memberExpressions)
-        //
-        // `findBestMatchExpression` uses `location`, `computed` and `expression` (not name).
-        //    `expression` isn't used from the worker thread implementation of `findBestMatchExpression`.
-        //    The main thread only uses `expression` and `location`.
-        // framework computation uses only:
-        // * `name` for identifiers
-        // * `expression` for memberExpression
-
-        // This is used within the worker for framework computation,
-        // and in the `getClassSymbols` function
-        // `classes`
-
-        // The two following are only used by the main thread for computing CodeMirror "mode"
-        hasJsx: symbols.hasJsx,
-        hasTypes: symbols.hasTypes,
-
-        // This is used in the main thread only to compute the source icon
-        framework: symbols.framework,
-
-        // This is only used by `findOutOfScopeLocations`:
-        // `comments`
-      };
+      getInternalSymbols(sourceId);
+      return {};
     }
 
     function getMemberExpressionSymbol(path) {

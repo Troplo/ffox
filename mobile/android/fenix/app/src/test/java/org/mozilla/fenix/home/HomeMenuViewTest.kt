@@ -13,7 +13,7 @@ import io.mockk.verify
 import mozilla.appservices.places.BookmarkRoot
 import mozilla.components.browser.menu.view.MenuButton
 import mozilla.components.support.test.robolectric.testContext
-import mozilla.telemetry.glean.testing.GleanTestRule
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Before
@@ -28,6 +28,7 @@ import org.mozilla.fenix.R
 import org.mozilla.fenix.components.accounts.AccountState
 import org.mozilla.fenix.components.accounts.FenixFxAEntryPoint
 import org.mozilla.fenix.ext.nav
+import org.mozilla.fenix.helpers.FenixGleanTestRule
 import org.mozilla.fenix.helpers.FenixRobolectricTestRunner
 import org.mozilla.fenix.settings.SupportUtils
 import org.mozilla.fenix.whatsnew.WhatsNew
@@ -38,7 +39,7 @@ import org.mozilla.fenix.GleanMetrics.HomeMenu as HomeMenuMetrics
 class HomeMenuViewTest {
 
     @get:Rule
-    val gleanTestRule = GleanTestRule(testContext)
+    val gleanTestRule = FenixGleanTestRule(testContext)
 
     private lateinit var view: View
     private lateinit var lifecycleOwner: LifecycleOwner
@@ -204,6 +205,11 @@ class HomeMenuViewTest {
         homeMenuView.onItemTapped(HomeMenu.Item.WhatsNew)
 
         assertNotNull(Events.whatsNewTapped.testGetValue())
+
+        val snapshot = Events.whatsNewTapped.testGetValue()!!
+
+        assertEquals(1, snapshot.size)
+        assertEquals("HOME", snapshot.single().extra?.getValue("source"))
 
         verify {
             WhatsNew.userViewedWhatsNew(testContext)

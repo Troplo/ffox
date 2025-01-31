@@ -645,7 +645,7 @@ nsresult nsNSSComponent::BlockUntilLoadableCertsLoaded() {
 
 #ifndef MOZ_NO_SMART_CARDS
 static StaticMutex sCheckForSmartCardChangesMutex MOZ_UNANNOTATED;
-static TimeStamp sLastCheckedForSmartCardChanges = TimeStamp::Now();
+MOZ_RUNINIT static TimeStamp sLastCheckedForSmartCardChanges = TimeStamp::Now();
 #endif
 
 nsresult nsNSSComponent::CheckForSmartCardChanges() {
@@ -707,13 +707,9 @@ static nsresult GetNSS3Directory(nsCString& result) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nss not loaded?"));
     return NS_ERROR_FAILURE;
   }
-  nsCOMPtr<nsIFile> nss3File(do_CreateInstance(NS_LOCAL_FILE_CONTRACTID));
-  if (!nss3File) {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("couldn't create a file?"));
-    return NS_ERROR_FAILURE;
-  }
-  nsAutoCString nss3PathAsString(nss3Path.get());
-  nsresult rv = nss3File->InitWithNativePath(nss3PathAsString);
+  nsCOMPtr<nsIFile> nss3File;
+  nsresult rv = NS_NewNativeLocalFile(nsDependentCString(nss3Path.get()),
+                                      getter_AddRefs(nss3File));
   if (NS_FAILED(rv)) {
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
             ("couldn't initialize file with path '%s'", nss3Path.get()));
@@ -1111,6 +1107,25 @@ void nsNSSComponent::setValidationOptions(
 
   CertVerifier::CertificateTransparencyMode ctMode =
       GetCertificateTransparencyMode();
+  nsCString skipCTForHosts;
+  Preferences::GetCString(
+      "security.pki.certificate_transparency.disable_for_hosts",
+      skipCTForHosts);
+  nsAutoCString skipCTForSPKIHashesBase64;
+  Preferences::GetCString(
+      "security.pki.certificate_transparency.disable_for_spki_hashes",
+      skipCTForSPKIHashesBase64);
+  nsTArray<CopyableTArray<uint8_t>> skipCTForSPKIHashes;
+  for (const auto& spkiHashBase64 : skipCTForSPKIHashesBase64.Split(',')) {
+    nsAutoCString spkiHashString;
+    if (NS_SUCCEEDED(Base64Decode(spkiHashBase64, spkiHashString))) {
+      nsTArray<uint8_t> spkiHash(spkiHashString.Data(),
+                                 spkiHashString.Length());
+      skipCTForSPKIHashes.AppendElement(std::move(spkiHash));
+    }
+  }
+  CertVerifier::CertificateTransparencyConfig ctConfig(
+      ctMode, std::move(skipCTForHosts), std::move(skipCTForSPKIHashes));
 
   // This preference controls whether we do OCSP fetching and does not affect
   // OCSP stapling.
@@ -1164,7 +1179,7 @@ void nsNSSComponent::setValidationOptions(
 
   mDefaultCertVerifier = new SharedCertVerifier(
       odc, osc, softTimeout, hardTimeout, certShortLifetimeInDays,
-      netscapeStepUpPolicy, ctMode, crliteMode, mEnterpriseCerts);
+      netscapeStepUpPolicy, std::move(ctConfig), crliteMode, mEnterpriseCerts);
 }
 
 void nsNSSComponent::UpdateCertVerifierWithEnterpriseRoots() {
@@ -1174,13 +1189,17 @@ void nsNSSComponent::UpdateCertVerifierWithEnterpriseRoots() {
   }
 
   RefPtr<SharedCertVerifier> oldCertVerifier = mDefaultCertVerifier;
+  nsCString skipCTForHosts(oldCertVerifier->mCTConfig.mSkipForHosts);
+  CertVerifier::CertificateTransparencyConfig ctConfig(
+      oldCertVerifier->mCTConfig.mMode, std::move(skipCTForHosts),
+      oldCertVerifier->mCTConfig.mSkipForSPKIHashes.Clone());
   mDefaultCertVerifier = new SharedCertVerifier(
       oldCertVerifier->mOCSPDownloadConfig,
       oldCertVerifier->mOCSPStrict ? CertVerifier::ocspStrict
                                    : CertVerifier::ocspRelaxed,
       oldCertVerifier->mOCSPTimeoutSoft, oldCertVerifier->mOCSPTimeoutHard,
       oldCertVerifier->mCertShortLifetimeInDays,
-      oldCertVerifier->mNetscapeStepUpPolicy, oldCertVerifier->mCTMode,
+      oldCertVerifier->mNetscapeStepUpPolicy, std::move(ctConfig),
       oldCertVerifier->mCRLiteMode, mEnterpriseCerts);
 }
 
@@ -1308,14 +1327,9 @@ static nsresult GetNSSProfilePath(nsAutoCString& aProfilePath) {
 // |profilePath| is encoded in UTF-8.
 static nsresult AttemptToRenamePKCS11ModuleDB(const nsACString& profilePath) {
   nsCOMPtr<nsIFile> profileDir;
-#ifdef XP_WIN
   // |profilePath| is encoded in UTF-8 because SQLite always takes UTF-8 file
   // paths regardless of the current system code page.
-  MOZ_TRY(NS_NewLocalFile(u""_ns, getter_AddRefs(profileDir)));
-  MOZ_TRY(profileDir->InitWithPath(NS_ConvertUTF8toUTF16(profilePath)));
-#else
-  MOZ_TRY(NS_NewNativeLocalFile(profilePath, getter_AddRefs(profileDir)));
-#endif
+  MOZ_TRY(NS_NewUTF8LocalFile(profilePath, getter_AddRefs(profileDir)));
   const char* moduleDBFilename = "pkcs11.txt";
   nsAutoCString destModuleDBFilename(moduleDBFilename);
   destModuleDBFilename.Append(".fips");
@@ -1739,20 +1753,21 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
 
     if (HandleTLSPrefChange(prefName)) {
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("HandleTLSPrefChange done"));
-    } else if (prefName.EqualsLiteral("security.OCSP.enabled") ||
-               prefName.EqualsLiteral("security.OCSP.require") ||
-               prefName.EqualsLiteral(
-                   "security.pki.cert_short_lifetime_in_days") ||
-               prefName.EqualsLiteral("security.ssl.enable_ocsp_stapling") ||
-               prefName.EqualsLiteral("security.ssl.enable_ocsp_must_staple") ||
-               prefName.EqualsLiteral(
-                   "security.pki.certificate_transparency.mode") ||
-               prefName.EqualsLiteral("security.pki.netscape_step_up_policy") ||
-               prefName.EqualsLiteral(
-                   "security.OCSP.timeoutMilliseconds.soft") ||
-               prefName.EqualsLiteral(
-                   "security.OCSP.timeoutMilliseconds.hard") ||
-               prefName.EqualsLiteral("security.pki.crlite_mode")) {
+    } else if (
+        prefName.EqualsLiteral("security.OCSP.enabled") ||
+        prefName.EqualsLiteral("security.OCSP.require") ||
+        prefName.EqualsLiteral("security.pki.cert_short_lifetime_in_days") ||
+        prefName.EqualsLiteral("security.ssl.enable_ocsp_stapling") ||
+        prefName.EqualsLiteral("security.ssl.enable_ocsp_must_staple") ||
+        prefName.EqualsLiteral("security.pki.certificate_transparency.mode") ||
+        prefName.EqualsLiteral(
+            "security.pki.certificate_transparency.disable_for_hosts") ||
+        prefName.EqualsLiteral(
+            "security.pki.certificate_transparency.disable_for_spki_hashes") ||
+        prefName.EqualsLiteral("security.pki.netscape_step_up_policy") ||
+        prefName.EqualsLiteral("security.OCSP.timeoutMilliseconds.soft") ||
+        prefName.EqualsLiteral("security.OCSP.timeoutMilliseconds.hard") ||
+        prefName.EqualsLiteral("security.pki.crlite_mode")) {
       MutexAutoLock lock(mMutex);
       setValidationOptions(false, lock);
 #ifdef DEBUG
@@ -1814,13 +1829,6 @@ nsresult nsNSSComponent::GetNewPrompter(nsIPrompt** result) {
 }
 
 nsresult nsNSSComponent::LogoutAuthenticatedPK11() {
-  nsCOMPtr<nsICertOverrideService> icos =
-      do_GetService("@mozilla.org/security/certoverride;1");
-  if (icos) {
-    icos->ClearValidityOverride("all:temporary-certificates"_ns, 0,
-                                OriginAttributes());
-  }
-
   ClearSSLExternalAndInternalSessionCache();
 
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();

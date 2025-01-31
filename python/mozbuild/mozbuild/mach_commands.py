@@ -159,7 +159,7 @@ def _cargo_config_yaml_schema():
 @CommandArgument(
     "cargo_command",
     default=None,
-    help="Target to cargo, must be one of the commands in config/cargo/",
+    help="Target to cargo, must be one of the commands in build/cargo/",
 )
 @CommandArgument(
     "--all-crates",
@@ -330,10 +330,10 @@ def cargo(
         if cargo_build_flags:
             append_env["CARGO_NO_AUTO_ARG"] = "1"
         else:
-            append_env[
-                "ADD_RUST_LTOABLE"
-            ] = "force-cargo-library-{s:s} force-cargo-program-{s:s}".format(
-                s=cargo_command
+            append_env["ADD_RUST_LTOABLE"] = (
+                "force-cargo-library-{s:s} force-cargo-program-{s:s}".format(
+                    s=cargo_command
+                )
             )
 
         ret = command_context._run_make(
@@ -2450,14 +2450,20 @@ def repackage_deb_l10n(
 @CommandArgument(
     "--attribution_sentinel", type=str, required=False, help="DMGs with attribution."
 )
-def repackage_dmg(command_context, input, output, attribution_sentinel):
+@CommandArgument(
+    "--compression",
+    type=str,
+    required=False,
+    help="Use alternative compression algorithm",
+)
+def repackage_dmg(command_context, input, output, attribution_sentinel, compression):
     if not os.path.exists(input):
         print("Input file does not exist: %s" % input)
         return 1
 
     from mozbuild.repackaging.dmg import repackage_dmg
 
-    repackage_dmg(input, output, attribution_sentinel)
+    repackage_dmg(input, output, attribution_sentinel, compression)
 
 
 @SubCommand("repackage", "pkg", description="Repackage a tar file into a .pkg for OSX")

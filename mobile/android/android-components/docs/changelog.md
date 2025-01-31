@@ -4,7 +4,33 @@ title: Changelog
 permalink: /changelog/
 ---
 
-# 133.0 (In Development)
+# 135.0 (In Development)
+* **feature-downloads**
+  * `AbstractFetchDownloadService.createOpenFileIntent` will no longer create an intent to open PDF files from the caller application if it can open PDFs. The user will be prompted to choose an application. See [Bug 1941609](https://bugzilla.mozilla.org/show_bug.cgi?id=1941609).
+
+* **feature-prompts**
+    * 🆕 New `ToggleablePrompt` interface implemented by `AddressSelectBar`, `CreditCard` `LoginSelectBar` and `SuggestStrongPasswordBar` to inform when these are shown or hidden. [Bug 1909746](https://bugzilla.mozilla.org/show_bug.cgi?id=1909746).
+    * 🆕 New `ExpandablePrompt` interface implemented by `LoginSelectBar` to inform when it is expanded or collapsed. [Bug 1909746](https://bugzilla.mozilla.org/show_bug.cgi?id=1909746).
+
+# 134.0
+* **browser-state**
+  * 🌟 Added `DownloadState.isPdf` property to indicate whether the file associated with the download is a PDF. See [Bug 1920092](https://bugzilla.mozilla.org/show_bug.cgi?id=1920092).
+
+* **concept-storage**
+  * 🆕 Exposed `lastModified` property for `BookmarkNode`s that includes timestamp data for the last time the node was modified. [Bug 1928444](https://bugzilla.mozilla.org/show_bug.cgi?id=1928444)
+
+* **feature-downloads**
+  * `AbstractFetchDownloadService.createOpenFileIntent` will create an intent to open PDF files from the caller application if it can open PDFs. See [Bug 1920092](https://bugzilla.mozilla.org/show_bug.cgi?id=1920092).
+  * `AbstractFetchDownloadService.openFile` will open PDF files from the caller application if it can open PDFs. See [Bug 1920092](https://bugzilla.mozilla.org/show_bug.cgi?id=1920092).
+
+* **browser-toolbar**
+    * Added internal data class `DisplayMargins` in `DisplayToolbar` class that can be used to specify margins for `DisplayToolbar`'s views
+    * Added `setUrlBackgroundMargins` method in `DisplayToolbar` class that client apps can use to specify custom `DisplayMargins` for the `background` view. [Bug 1927778](https://bugzilla.mozilla.org/show_bug.cgi?id=1927778)
+
+* **lib-crash**
+  * ⚠️ **Breaking change**: Crash database functions dealing with unsent crashes have been renamed and now require a timestamp parameter as the start of the range to search for unsent crashes.
+
+# 133.0
 * **browser-store**
     * Adds `desktopMode` property to the `BrowserStore` to know whether or not browsing is in desktop mode. The pre-existing Action to update a tab's desktop mode has been renamed to disambiguate its intended use case. [Bug 1910768](https://bugzilla.mozilla.org/show_bug.cgi?id=1910768)
 
@@ -21,10 +47,6 @@ permalink: /changelog/
 
 * **ui-widgets**
   * 🆕 New `mozac_material_ripple_minimum_interaction_size` drawable for a 48dp ripple to be used when `selectableItemBackgroundBorderless` is too big and `selectableItemBackground` is too small. [Bug 1920554](https://bugzilla.mozilla.org/show_bug.cgi?id=1920554).
-
-* **browser-toolbar**
-  * Added internal data class `DisplayMargins` in `DisplayToolbar` class that can be used to specify margins for `DisplayToolbar`'s views
-  * Added `setUrlBackgroundMargins` method in `DisplayToolbar` class that client apps can use to specify custom `DisplayMargins` for the `background` view. [Bug 1927778](https://bugzilla.mozilla.org/show_bug.cgi?id=1927778)
 
 # 132.0
 * **feature-awesomebar**

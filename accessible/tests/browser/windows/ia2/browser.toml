@@ -6,8 +6,12 @@ skip-if = [
 ]
 support-files = ["head.js"]
 
+["browser_groupPosition.js"]
+
 ["browser_osPicker.js"]
 
 ["browser_role.js"]
+
+["browser_scrolling.js"]
 
 ["browser_text.js"]

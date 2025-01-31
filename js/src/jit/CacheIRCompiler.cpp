@@ -4667,6 +4667,68 @@ bool CacheIRCompiler::emitLoadStringCodePointResult(StringOperandId strId,
   return true;
 }
 
+bool CacheIRCompiler::emitNewMapObjectResult(uint32_t templateObjectOffset) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoCallVM callvm(masm, this, allocator);
+
+  callvm.prepare();
+  masm.Push(ImmPtr(nullptr));  // proto
+
+  using Fn = MapObject* (*)(JSContext*, HandleObject);
+  callvm.call<Fn, MapObject::create>();
+  return true;
+}
+
+bool CacheIRCompiler::emitNewSetObjectResult(uint32_t templateObjectOffset) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoCallVM callvm(masm, this, allocator);
+
+  callvm.prepare();
+  masm.Push(ImmPtr(nullptr));  // proto
+
+  using Fn = SetObject* (*)(JSContext*, HandleObject);
+  callvm.call<Fn, SetObject::create>();
+  return true;
+}
+
+bool CacheIRCompiler::emitNewMapObjectFromIterableResult(
+    uint32_t templateObjectOffset, ValOperandId iterableId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoCallVM callvm(masm, this, allocator);
+  ValueOperand iterable = allocator.useValueRegister(masm, iterableId);
+
+  callvm.prepare();
+  masm.Push(ImmPtr(nullptr));  // allocatedFromJit
+  masm.Push(iterable);
+  masm.Push(ImmPtr(nullptr));  // proto
+
+  using Fn = MapObject* (*)(JSContext*, Handle<JSObject*>, Handle<Value>,
+                            Handle<MapObject*>);
+  callvm.call<Fn, MapObject::createFromIterable>();
+  return true;
+}
+
+bool CacheIRCompiler::emitNewSetObjectFromIterableResult(
+    uint32_t templateObjectOffset, ValOperandId iterableId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoCallVM callvm(masm, this, allocator);
+  ValueOperand iterable = allocator.useValueRegister(masm, iterableId);
+
+  callvm.prepare();
+  masm.Push(ImmPtr(nullptr));  // allocatedFromJit
+  masm.Push(iterable);
+  masm.Push(ImmPtr(nullptr));  // proto
+
+  using Fn = SetObject* (*)(JSContext*, Handle<JSObject*>, Handle<Value>,
+                            Handle<SetObject*>);
+  callvm.call<Fn, SetObject::createFromIterable>();
+  return true;
+}
+
 bool CacheIRCompiler::emitNewStringObjectResult(uint32_t templateObjectOffset,
                                                 StringOperandId strId) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
@@ -4783,7 +4845,7 @@ bool CacheIRCompiler::emitStringToLowerCaseResult(StringOperandId strId) {
   callvm.prepare();
   masm.Push(str);
 
-  using Fn = JSString* (*)(JSContext*, HandleString);
+  using Fn = JSLinearString* (*)(JSContext*, JSString*);
   callvm.call<Fn, js::StringToLowerCase>();
   return true;
 }
@@ -4798,7 +4860,7 @@ bool CacheIRCompiler::emitStringToUpperCaseResult(StringOperandId strId) {
   callvm.prepare();
   masm.Push(str);
 
-  using Fn = JSString* (*)(JSContext*, HandleString);
+  using Fn = JSLinearString* (*)(JSContext*, JSString*);
   callvm.call<Fn, js::StringToUpperCase>();
   return true;
 }
@@ -9529,8 +9591,8 @@ bool CacheIRCompiler::emitInt32ToStringWithBaseResult(Int32OperandId inputId,
   masm.Push(base);
   masm.Push(input);
 
-  using Fn = JSString* (*)(JSContext*, int32_t, int32_t, bool);
-  callvm.call<Fn, js::Int32ToStringWithBase>();
+  using Fn = JSLinearString* (*)(JSContext*, int32_t, int32_t, bool);
+  callvm.call<Fn, js::Int32ToStringWithBase<CanGC>>();
   return true;
 }
 
@@ -9589,24 +9651,76 @@ bool CacheIRCompiler::emitObjectToStringResult(ObjOperandId objId) {
   return true;
 }
 
-bool CacheIRCompiler::emitCallStringConcatResult(StringOperandId lhsId,
-                                                 StringOperandId rhsId) {
+bool CacheIRCompiler::emitConcatStringsResult(StringOperandId lhsId,
+                                              StringOperandId rhsId,
+                                              uint32_t stubOffset) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
   AutoCallVM callvm(masm, this, allocator);
+  const AutoOutputRegister& output = callvm.output();
 
   Register lhs = allocator.useRegister(masm, lhsId);
   Register rhs = allocator.useRegister(masm, rhsId);
 
-  callvm.prepare();
+  // Discard the stack to ensure it's balanced when we skip the vm-call.
+  allocator.discardStack(masm);
 
-  masm.Push(static_cast<js::jit::Imm32>(int32_t(js::gc::Heap::Default)));
-  masm.Push(rhs);
-  masm.Push(lhs);
+  Label done;
+  {
+    // The StringConcat stub uses CallTemp registers 0 to 5.
+    LiveGeneralRegisterSet liveRegs;
+    liveRegs.add(CallTempReg0);
+    liveRegs.add(CallTempReg1);
+    liveRegs.add(CallTempReg2);
+    liveRegs.add(CallTempReg3);
+    liveRegs.add(CallTempReg4);
+    liveRegs.add(CallTempReg5);
+#ifdef JS_USE_LINK_REGISTER
+    liveRegs.add(ICTailCallReg);
+#endif
+    liveRegs.takeUnchecked(output.valueReg());
+    masm.PushRegsInMask(liveRegs);
 
-  using Fn =
-      JSString* (*)(JSContext*, HandleString, HandleString, js::gc::Heap);
-  callvm.call<Fn, ConcatStrings<CanGC>>();
+    // The stub expects lhs in CallTempReg0 and rhs in CallTempReg1.
+    masm.moveRegPair(lhs, rhs, CallTempReg0, CallTempReg1);
 
+    uint32_t framePushed = masm.framePushed();
+
+    // Call cx->zone()->jitZone()->stringConcatStub. See also the comment and
+    // code in CallRegExpStub.
+    Label vmCall;
+    Register temp = CallTempReg2;
+    masm.loadJSContext(temp);
+    masm.loadPtr(Address(temp, JSContext::offsetOfZone()), temp);
+    masm.loadPtr(Address(temp, Zone::offsetOfJitZone()), temp);
+    masm.loadPtr(Address(temp, JitZone::offsetOfStringConcatStub()), temp);
+    masm.branchTestPtr(Assembler::Zero, temp, temp, &vmCall);
+    masm.call(Address(temp, JitCode::offsetOfCode()));
+
+    // The result is returned in CallTempReg5 (nullptr on failure).
+    masm.branchTestPtr(Assembler::Zero, CallTempReg5, CallTempReg5, &vmCall);
+    masm.tagValue(JSVAL_TYPE_STRING, CallTempReg5, output.valueReg());
+    masm.PopRegsInMask(liveRegs);
+    masm.jump(&done);
+
+    masm.bind(&vmCall);
+    masm.setFramePushed(framePushed);
+    masm.PopRegsInMask(liveRegs);
+  }
+
+  {
+    callvm.prepare();
+
+    masm.Push(static_cast<js::jit::Imm32>(int32_t(js::gc::Heap::Default)));
+    masm.Push(rhs);
+    masm.Push(lhs);
+
+    using Fn =
+        JSString* (*)(JSContext*, HandleString, HandleString, js::gc::Heap);
+    callvm.call<Fn, ConcatStrings<CanGC>>();
+  }
+
+  masm.bind(&done);
   return true;
 }
 
@@ -10390,6 +10504,17 @@ bool CacheIRCompiler::emitAtomicsIsLockFreeResult(Int32OperandId valueId) {
   return true;
 }
 
+bool CacheIRCompiler::emitAtomicsPauseResult() {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoOutputRegister output(*this);
+
+  masm.atomicPause();
+  masm.moveValue(UndefinedValue(), output.valueReg());
+
+  return true;
+}
+
 bool CacheIRCompiler::emitBigIntAsIntNResult(Int32OperandId bitsId,
                                              BigIntOperandId bigIntId) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
@@ -10438,7 +10563,7 @@ bool CacheIRCompiler::emitSetHasResult(ObjOperandId setId, ValOperandId valId) {
   masm.Push(val);
   masm.Push(set);
 
-  using Fn = bool (*)(JSContext*, HandleObject, HandleValue, bool*);
+  using Fn = bool (*)(JSContext*, Handle<SetObject*>, HandleValue, bool*);
   callvm.call<Fn, jit::SetObjectHas>();
   return true;
 }
@@ -10547,6 +10672,42 @@ bool CacheIRCompiler::emitSetHasObjectResult(ObjOperandId setId,
   return true;
 }
 
+bool CacheIRCompiler::emitSetDeleteResult(ObjOperandId setId,
+                                          ValOperandId valId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoCallVM callvm(masm, this, allocator);
+
+  Register set = allocator.useRegister(masm, setId);
+  ValueOperand val = allocator.useValueRegister(masm, valId);
+
+  callvm.prepare();
+  masm.Push(val);
+  masm.Push(set);
+
+  using Fn = bool (*)(JSContext*, Handle<SetObject*>, HandleValue, bool*);
+  callvm.call<Fn, jit::SetObjectDelete>();
+  return true;
+}
+
+bool CacheIRCompiler::emitSetAddResult(ObjOperandId setId, ValOperandId keyId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoCallVM callvm(masm, this, allocator);
+
+  Register set = allocator.useRegister(masm, setId);
+  ValueOperand key = allocator.useValueRegister(masm, keyId);
+
+  callvm.prepare();
+  masm.Push(key);
+  masm.Push(set);
+
+  using Fn =
+      bool (*)(JSContext*, Handle<SetObject*>, HandleValue, MutableHandleValue);
+  callvm.call<Fn, jit::SetObjectAddFromIC>();
+  return true;
+}
+
 bool CacheIRCompiler::emitSetSizeResult(ObjOperandId setId) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
 
@@ -10571,7 +10732,7 @@ bool CacheIRCompiler::emitMapHasResult(ObjOperandId mapId, ValOperandId valId) {
   masm.Push(val);
   masm.Push(map);
 
-  using Fn = bool (*)(JSContext*, HandleObject, HandleValue, bool*);
+  using Fn = bool (*)(JSContext*, Handle<MapObject*>, HandleValue, bool*);
   callvm.call<Fn, jit::MapObjectHas>();
   return true;
 }
@@ -10693,8 +10854,47 @@ bool CacheIRCompiler::emitMapGetResult(ObjOperandId mapId, ValOperandId valId) {
   masm.Push(map);
 
   using Fn =
-      bool (*)(JSContext*, HandleObject, HandleValue, MutableHandleValue);
+      bool (*)(JSContext*, Handle<MapObject*>, HandleValue, MutableHandleValue);
   callvm.call<Fn, jit::MapObjectGet>();
+  return true;
+}
+
+bool CacheIRCompiler::emitMapDeleteResult(ObjOperandId mapId,
+                                          ValOperandId valId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoCallVM callvm(masm, this, allocator);
+
+  Register map = allocator.useRegister(masm, mapId);
+  ValueOperand val = allocator.useValueRegister(masm, valId);
+
+  callvm.prepare();
+  masm.Push(val);
+  masm.Push(map);
+
+  using Fn = bool (*)(JSContext*, Handle<MapObject*>, HandleValue, bool*);
+  callvm.call<Fn, jit::MapObjectDelete>();
+  return true;
+}
+
+bool CacheIRCompiler::emitMapSetResult(ObjOperandId mapId, ValOperandId keyId,
+                                       ValOperandId valId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoCallVM callvm(masm, this, allocator);
+
+  Register map = allocator.useRegister(masm, mapId);
+  ValueOperand key = allocator.useValueRegister(masm, keyId);
+  ValueOperand val = allocator.useValueRegister(masm, valId);
+
+  callvm.prepare();
+  masm.Push(val);
+  masm.Push(key);
+  masm.Push(map);
+
+  using Fn = bool (*)(JSContext*, Handle<MapObject*>, HandleValue, HandleValue,
+                      MutableHandleValue);
+  callvm.call<Fn, jit::MapObjectSetFromIC>();
   return true;
 }
 
@@ -11246,6 +11446,10 @@ struct ReturnTypeToJSValueType<JSString*> {
   static constexpr JSValueType result = JSVAL_TYPE_STRING;
 };
 template <>
+struct ReturnTypeToJSValueType<JSLinearString*> {
+  static constexpr JSValueType result = JSVAL_TYPE_STRING;
+};
+template <>
 struct ReturnTypeToJSValueType<JSAtom*> {
   static constexpr JSValueType result = JSVAL_TYPE_STRING;
 };
@@ -11283,6 +11487,14 @@ struct ReturnTypeToJSValueType<ArrayObject*> {
 };
 template <>
 struct ReturnTypeToJSValueType<TypedArrayObject*> {
+  static constexpr JSValueType result = JSVAL_TYPE_OBJECT;
+};
+template <>
+struct ReturnTypeToJSValueType<MapObject*> {
+  static constexpr JSValueType result = JSVAL_TYPE_OBJECT;
+};
+template <>
+struct ReturnTypeToJSValueType<SetObject*> {
   static constexpr JSValueType result = JSVAL_TYPE_OBJECT;
 };
 

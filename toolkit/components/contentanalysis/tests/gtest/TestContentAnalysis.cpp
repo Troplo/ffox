@@ -77,7 +77,6 @@ class ContentAnalysisTest : public testing::Test {
     mContentAnalysis->mParsedUrlLists = false;
     mContentAnalysis->mAllowUrlList = {};
     mContentAnalysis->mDenyUrlList = {};
-    mContentAnalysis->ResetCachedDataTimeoutForTesting();
 
     MOZ_ALWAYS_SUCCEEDS(mContentAnalysis->TestOnlySetCACmdLineArg(false));
 
@@ -94,6 +93,7 @@ class ContentAnalysisTest : public testing::Test {
     // (behavior differs for download vs other types).
     return RefPtr(new ContentAnalysisRequest(
                       nsIContentAnalysisRequest::AnalysisType::eFileTransfer,
+                      nsIContentAnalysisRequest::Reason::eFilePickerDialog,
                       EmptyString(), false, EmptyCString(), uri,
                       nsIContentAnalysisRequest::OperationType::eDroppedText,
                       nullptr))
@@ -112,8 +112,8 @@ class ContentAnalysisTest : public testing::Test {
     return mContentAnalysis->FilterByUrlLists(aReq);
   }
 };
-nsString ContentAnalysisTest::mPipeName;
-MozAgentInfo ContentAnalysisTest::mAgentInfo;
+MOZ_RUNINIT nsString ContentAnalysisTest::mPipeName;
+MOZ_RUNINIT MozAgentInfo ContentAnalysisTest::mAgentInfo;
 
 TEST_F(ContentAnalysisTest, AllowUrlList) {
   MOZ_ALWAYS_SUCCEEDS(
@@ -283,7 +283,8 @@ TEST_F(ContentAnalysisTest, SendAllowedTextToAgent_GetAllowedResponse) {
   nsCOMPtr<nsIURI> uri = GetExampleDotComURI();
   nsString allow(L"allow");
   nsCOMPtr<nsIContentAnalysisRequest> request = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, std::move(allow),
+      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry,
+      nsIContentAnalysisRequest::Reason::eClipboardPaste, std::move(allow),
       false, EmptyCString(), uri,
       nsIContentAnalysisRequest::OperationType::eClipboard, nullptr);
 
@@ -296,7 +297,8 @@ TEST_F(ContentAnalysisTest, SendBlockedTextToAgent_GetBlockResponse) {
   nsCOMPtr<nsIURI> uri = GetExampleDotComURI();
   nsString block(L"block");
   nsCOMPtr<nsIContentAnalysisRequest> request = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, std::move(block),
+      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry,
+      nsIContentAnalysisRequest::Reason::eClipboardPaste, std::move(block),
       false, EmptyCString(), uri,
       nsIContentAnalysisRequest::OperationType::eClipboard, nullptr);
 
@@ -344,7 +346,8 @@ TEST_F(ContentAnalysisTest, CheckRawRequestWithText) {
   nsCOMPtr<nsIURI> uri = GetExampleDotComURI();
   nsString allow(L"allow");
   nsCOMPtr<nsIContentAnalysisRequest> request = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, std::move(allow),
+      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry,
+      nsIContentAnalysisRequest::Reason::eClipboardPaste, std::move(allow),
       false, EmptyCString(), uri,
       nsIContentAnalysisRequest::OperationType::eClipboard, nullptr);
   nsCOMPtr<nsIObserverService> obsServ =
@@ -365,12 +368,6 @@ TEST_F(ContentAnalysisTest, CheckRawRequestWithText) {
   const auto& request_url = requests[0].request_data().url();
   EXPECT_EQ(uri->GetSpecOrDefault(),
             nsCString(request_url.data(), request_url.size()));
-  nsCString request_user_action_id(requests[0].user_action_id().data(),
-                                   requests[0].user_action_id().size());
-  // The user_action_id has a GUID appended to the end, just make sure the
-  // beginning is right.
-  request_user_action_id.Truncate(8);
-  EXPECT_EQ(nsCString("Firefox "), request_user_action_id);
   const auto& request_text = requests[0].text_content();
   EXPECT_EQ(nsCString("allow"),
             nsCString(request_text.data(), request_text.size()));
@@ -391,7 +388,8 @@ TEST_F(ContentAnalysisTest, CheckRawRequestWithFile) {
   MOZ_ALWAYS_SUCCEEDS(file->GetPath(allowPath));
 
   nsCOMPtr<nsIContentAnalysisRequest> request = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, allowPath, true,
+      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry,
+      nsIContentAnalysisRequest::Reason::eClipboardPaste, allowPath, true,
       EmptyCString(), uri, nsIContentAnalysisRequest::OperationType::eClipboard,
       nullptr);
   nsCOMPtr<nsIObserverService> obsServ =
@@ -407,12 +405,6 @@ TEST_F(ContentAnalysisTest, CheckRawRequestWithFile) {
   const auto& request_url = requests[0].request_data().url();
   EXPECT_EQ(uri->GetSpecOrDefault(),
             nsCString(request_url.data(), request_url.size()));
-  nsCString request_user_action_id(requests[0].user_action_id().data(),
-                                   requests[0].user_action_id().size());
-  // The user_action_id has a GUID appended to the end, just make sure the
-  // beginning is right.
-  request_user_action_id.Truncate(8);
-  EXPECT_EQ(nsCString("Firefox "), request_user_action_id);
   const auto& request_file_path = requests[0].file_path();
   EXPECT_EQ(NS_ConvertUTF16toUTF8(allowPath),
             nsCString(request_file_path.data(), request_file_path.size()));
@@ -421,19 +413,21 @@ TEST_F(ContentAnalysisTest, CheckRawRequestWithFile) {
       obsServ->RemoveObserver(rawRequestObserver, "dlp-request-sent-raw"));
 }
 
-TEST_F(ContentAnalysisTest, CheckTwoRequestsHaveSameUserActionId) {
+TEST_F(ContentAnalysisTest, CheckTwoRequestsHaveDifferentUserActionId) {
   nsCOMPtr<nsIURI> uri = GetExampleDotComURI();
   nsString allow1(L"allowMe");
   nsCOMPtr<nsIContentAnalysisRequest> request1 = new ContentAnalysisRequest(
       nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry,
-      std::move(allow1), false, EmptyCString(), uri,
+      nsIContentAnalysisRequest::Reason::eClipboardPaste, std::move(allow1),
+      false, EmptyCString(), uri,
       nsIContentAnalysisRequest::OperationType::eClipboard, nullptr);
 
   // Use different text so the request doesn't match the cache
   nsString allow2(L"allowMeAgain");
   nsCOMPtr<nsIContentAnalysisRequest> request2 = new ContentAnalysisRequest(
       nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry,
-      std::move(allow2), false, EmptyCString(), uri,
+      nsIContentAnalysisRequest::Reason::eClipboardPaste, std::move(allow2),
+      false, EmptyCString(), uri,
       nsIContentAnalysisRequest::OperationType::eClipboard, nullptr);
   nsCOMPtr<nsIObserverService> obsServ =
       mozilla::services::GetObserverService();
@@ -447,211 +441,7 @@ TEST_F(ContentAnalysisTest, CheckTwoRequestsHaveSameUserActionId) {
                                Some(false));
   auto requests = rawRequestObserver->GetRequests();
   EXPECT_EQ(static_cast<size_t>(2), requests.size());
-  EXPECT_EQ(requests[0].user_action_id(), requests[1].user_action_id());
-
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->RemoveObserver(rawRequestObserver, "dlp-request-sent-raw"));
-}
-
-TEST_F(ContentAnalysisTest, CheckNoCachedResultWhenDifferentText) {
-  nsCOMPtr<nsIURI> uri = GetExampleDotComURI();
-  nsString allow1(L"allowMe");
-  nsCOMPtr<nsIContentAnalysisRequest> request1 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry,
-      std::move(allow1), false, EmptyCString(), uri,
-      nsIContentAnalysisRequest::OperationType::eClipboard, nullptr);
-
-  // Use different text so the request doesn't match the cache
-  nsString allow2(L"allowMeAgain");
-  nsCOMPtr<nsIContentAnalysisRequest> request2 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry,
-      std::move(allow2), false, EmptyCString(), uri,
-      nsIContentAnalysisRequest::OperationType::eClipboard, nullptr);
-  nsCOMPtr<nsIObserverService> obsServ =
-      mozilla::services::GetObserverService();
-  auto rawRequestObserver = MakeRefPtr<RawRequestObserver>();
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->AddObserver(rawRequestObserver, "dlp-request-sent-raw", false));
-
-  SendRequestAndExpectResponse(mContentAnalysis, request1, Nothing(), Nothing(),
-                               Some(false));
-  SendRequestAndExpectResponse(mContentAnalysis, request2, Nothing(), Nothing(),
-                               Some(false));
-  auto requests = rawRequestObserver->GetRequests();
-  EXPECT_EQ(static_cast<size_t>(2), requests.size());
-
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->RemoveObserver(rawRequestObserver, "dlp-request-sent-raw"));
-}
-
-TEST_F(ContentAnalysisTest, CheckNoCachedResultWhenDifferentUrl) {
-  nsCOMPtr<nsIURI> uri1 = GetExampleDotComURI();
-  nsCOMPtr<nsIURI> uri2 = GetExampleDotComWithPathURI();
-  nsString allow(L"allowMe");
-  nsCOMPtr<nsIContentAnalysisRequest> request1 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, allow, false,
-      EmptyCString(), uri1,
-      nsIContentAnalysisRequest::OperationType::eClipboard, nullptr);
-  nsCOMPtr<nsIContentAnalysisRequest> request2 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, allow, false,
-      EmptyCString(), uri2,
-      nsIContentAnalysisRequest::OperationType::eClipboard, nullptr);
-  nsCOMPtr<nsIObserverService> obsServ =
-      mozilla::services::GetObserverService();
-  auto rawRequestObserver = MakeRefPtr<RawRequestObserver>();
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->AddObserver(rawRequestObserver, "dlp-request-sent-raw", false));
-
-  SendRequestAndExpectResponse(mContentAnalysis, request1, Nothing(), Nothing(),
-                               Some(false));
-  SendRequestAndExpectResponse(mContentAnalysis, request2, Nothing(), Nothing(),
-                               Some(false));
-  auto requests = rawRequestObserver->GetRequests();
-  EXPECT_EQ(static_cast<size_t>(2), requests.size());
-
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->RemoveObserver(rawRequestObserver, "dlp-request-sent-raw"));
-}
-
-TEST_F(ContentAnalysisTest, CheckNoCachedResultWhenFilePath) {
-  nsCOMPtr<nsIURI> uri = GetExampleDotComURI();
-  nsCOMPtr<nsIFile> file;
-  MOZ_ALWAYS_SUCCEEDS(GetSpecialSystemDirectory(OS_CurrentWorkingDirectory,
-                                                getter_AddRefs(file)));
-  nsString allowRelativePath(L"allowedFile.txt");
-  MOZ_ALWAYS_SUCCEEDS(file->AppendRelativePath(allowRelativePath));
-  nsString allowPath;
-  MOZ_ALWAYS_SUCCEEDS(file->GetPath(allowPath));
-
-  nsCOMPtr<nsIContentAnalysisRequest> request1 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, allowPath, true,
-      EmptyCString(), uri, nsIContentAnalysisRequest::OperationType::eClipboard,
-      nullptr);
-  nsCOMPtr<nsIContentAnalysisRequest> request2 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, allowPath, true,
-      EmptyCString(), uri, nsIContentAnalysisRequest::OperationType::eClipboard,
-      nullptr);
-  nsCOMPtr<nsIObserverService> obsServ =
-      mozilla::services::GetObserverService();
-  auto rawRequestObserver = MakeRefPtr<RawRequestObserver>();
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->AddObserver(rawRequestObserver, "dlp-request-sent-raw", false));
-
-  SendRequestAndExpectResponse(mContentAnalysis, request1, Nothing(), Nothing(),
-                               Some(false));
-  SendRequestAndExpectResponse(mContentAnalysis, request2, Nothing(), Nothing(),
-                               Some(false));
-  auto requests = rawRequestObserver->GetRequests();
-  EXPECT_EQ(static_cast<size_t>(2), requests.size());
-
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->RemoveObserver(rawRequestObserver, "dlp-request-sent-raw"));
-}
-
-TEST_F(ContentAnalysisTest, CheckCachedResultForAllow) {
-  nsCOMPtr<nsIURI> uri = GetExampleDotComURI();
-  nsString allow(L"allowMeText");
-  nsCOMPtr<nsIContentAnalysisRequest> request1 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, allow, false,
-      EmptyCString(), uri, nsIContentAnalysisRequest::OperationType::eClipboard,
-      nullptr);
-  nsCOMPtr<nsIContentAnalysisRequest> request2 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, allow, false,
-      EmptyCString(), uri, nsIContentAnalysisRequest::OperationType::eClipboard,
-      nullptr);
-  nsCOMPtr<nsIObserverService> obsServ =
-      mozilla::services::GetObserverService();
-  auto rawRequestObserver = MakeRefPtr<RawRequestObserver>();
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->AddObserver(rawRequestObserver, "dlp-request-sent-raw", false));
-
-  SendRequestAndExpectResponse(mContentAnalysis, request1, Some(true),
-                               Some(nsIContentAnalysisResponse::eAllow),
-                               Some(false));
-  // The timer gets cleared on the main thread, so yield for a short time
-  // to make sure it doesn't get cleared
-  YieldMainThread(50);
-  SendRequestAndExpectResponse(mContentAnalysis, request2, Some(true),
-                               Some(nsIContentAnalysisResponse::eAllow),
-                               Some(true));
-  auto requests = rawRequestObserver->GetRequests();
-  // Only the first request should be analyzed since the second would match the
-  // cache.
-  EXPECT_EQ(static_cast<size_t>(1), requests.size());
-
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->RemoveObserver(rawRequestObserver, "dlp-request-sent-raw"));
-}
-
-TEST_F(ContentAnalysisTest, CheckCachedResultForBlock) {
-  nsCOMPtr<nsIURI> uri = GetExampleDotComURI();
-  nsString block(L"blockMeText");
-  nsCOMPtr<nsIContentAnalysisRequest> request1 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, block, false,
-      EmptyCString(), uri, nsIContentAnalysisRequest::OperationType::eClipboard,
-      nullptr);
-  nsCOMPtr<nsIContentAnalysisRequest> request2 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, block, false,
-      EmptyCString(), uri, nsIContentAnalysisRequest::OperationType::eClipboard,
-      nullptr);
-  nsCOMPtr<nsIObserverService> obsServ =
-      mozilla::services::GetObserverService();
-  auto rawRequestObserver = MakeRefPtr<RawRequestObserver>();
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->AddObserver(rawRequestObserver, "dlp-request-sent-raw", false));
-
-  SendRequestAndExpectResponse(mContentAnalysis, request1, Some(false),
-                               Some(nsIContentAnalysisResponse::eBlock),
-                               Some(false));
-  // The timer gets cleared on the main thread, so yield for a short time
-  // to make sure it doesn't get cleared
-  YieldMainThread(50);
-  SendRequestAndExpectResponse(mContentAnalysis, request2, Some(false),
-                               Some(nsIContentAnalysisResponse::eBlock),
-                               Some(true));
-  auto requests = rawRequestObserver->GetRequests();
-  // Only the first request should be analyzed since the second would match the
-  // cache.
-  EXPECT_EQ(static_cast<size_t>(1), requests.size());
-
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->RemoveObserver(rawRequestObserver, "dlp-request-sent-raw"));
-}
-
-TEST_F(ContentAnalysisTest, CheckCachedExpiration) {
-  nsCOMPtr<nsIURI> uri = GetExampleDotComURI();
-  nsString allow(L"allowMeTextWithExpiration");
-  constexpr uint32_t kShortCacheTimeout =
-      ContentAnalysis::kDefaultCachedDataTimeoutInMs / 50;
-  mContentAnalysis->SetCachedDataTimeoutForTesting(kShortCacheTimeout);
-  nsCOMPtr<nsIContentAnalysisRequest> request1 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, allow, false,
-      EmptyCString(), uri, nsIContentAnalysisRequest::OperationType::eClipboard,
-      nullptr);
-  nsCOMPtr<nsIContentAnalysisRequest> request2 = new ContentAnalysisRequest(
-      nsIContentAnalysisRequest::AnalysisType::eBulkDataEntry, allow, false,
-      EmptyCString(), uri, nsIContentAnalysisRequest::OperationType::eClipboard,
-      nullptr);
-  nsCOMPtr<nsIObserverService> obsServ =
-      mozilla::services::GetObserverService();
-  auto rawRequestObserver = MakeRefPtr<RawRequestObserver>();
-  MOZ_ALWAYS_SUCCEEDS(
-      obsServ->AddObserver(rawRequestObserver, "dlp-request-sent-raw", false));
-
-  SendRequestAndExpectResponse(mContentAnalysis, request1, Some(true),
-                               Some(nsIContentAnalysisResponse::eAllow),
-                               Some(false));
-  // The timer gets cleared on the main thread, so we need to yield the main
-  // thread for this to work
-  YieldMainThread(kShortCacheTimeout * 2);
-  SendRequestAndExpectResponse(mContentAnalysis, request2, Some(true),
-                               Some(nsIContentAnalysisResponse::eAllow),
-                               Some(false));
-  mContentAnalysis->ResetCachedDataTimeoutForTesting();
-  auto requests = rawRequestObserver->GetRequests();
-  // Both requests should be analyzed since the second arrived after the
-  // timeout.
-  EXPECT_EQ(static_cast<size_t>(2), requests.size());
+  EXPECT_NE(requests[0].user_action_id(), requests[1].user_action_id());
 
   MOZ_ALWAYS_SUCCEEDS(
       obsServ->RemoveObserver(rawRequestObserver, "dlp-request-sent-raw"));

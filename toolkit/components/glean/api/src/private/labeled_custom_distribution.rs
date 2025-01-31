@@ -10,6 +10,12 @@ use crate::ipc::with_ipc_payload;
 use crate::private::{CustomDistributionMetric, DistributionData, MetricId};
 use std::collections::HashMap;
 
+#[cfg(feature = "with_gecko")]
+use super::profiler_utils::{
+    truncate_vector_for_marker, DistributionMetricMarker, DistributionValues,
+    TelemetryProfilerCategory,
+};
+
 /// A custom_distribution metric that knows it's a labeled custom distribution's submetric.
 ///
 /// It has special work to do when in a non-parent process.
@@ -36,6 +42,17 @@ impl CustomDistribution for LabeledCustomDistributionMetric {
         match self {
             LabeledCustomDistributionMetric::Parent(p) => p.accumulate_samples_signed(samples),
             LabeledCustomDistributionMetric::Child { id, label } => {
+                #[cfg(feature = "with_gecko")]
+                gecko_profiler::lazy_add_marker!(
+                    "CustomDistribution::accumulate",
+                    TelemetryProfilerCategory,
+                    DistributionMetricMarker::new(
+                        *id,
+                        Some(label.clone()),
+                        DistributionValues::Samples(truncate_vector_for_marker(&samples)),
+                    )
+                );
+
                 with_ipc_payload(move |payload| {
                     if let Some(map) = payload.labeled_custom_samples.get_mut(id) {
                         if let Some(v) = map.get_mut(label) {
@@ -57,6 +74,17 @@ impl CustomDistribution for LabeledCustomDistributionMetric {
         match self {
             LabeledCustomDistributionMetric::Parent(p) => p.accumulate_single_sample_signed(sample),
             LabeledCustomDistributionMetric::Child { id, label } => {
+                #[cfg(feature = "with_gecko")]
+                gecko_profiler::lazy_add_marker!(
+                    "CustomDistribution::accumulate",
+                    TelemetryProfilerCategory,
+                    DistributionMetricMarker::new(
+                        *id,
+                        Some(label.clone()),
+                        DistributionValues::Sample(sample),
+                    )
+                );
+
                 with_ipc_payload(move |payload| {
                     if let Some(map) = payload.labeled_custom_samples.get_mut(id) {
                         if let Some(v) = map.get_mut(label) {
@@ -123,6 +151,17 @@ mod test {
         {
             // scope for need_ipc RAII
             let _raii = ipc::test_set_need_ipc(true);
+
+            // clear the per-process submetric cache,
+            // or else we'll be given the parent-process child metric.
+            {
+                let mut map =
+                    crate::metrics::__glean_metric_maps::submetric_maps::CUSTOM_DISTRIBUTION_MAP
+                        .write()
+                        .expect("Write lock for CUSTOM_DISTRIBUTION_MAP was poisoned");
+                map.clear();
+            }
+
             let child_metric = parent_metric.get(label);
 
             let metric_id = child_metric.metric_id();
@@ -141,6 +180,16 @@ mod test {
                     "Stored the correct value in the ipc payload"
                 );
             });
+
+            // clear the per-process submetric cache again,
+            // or else we'll be given the child-process child metric below.
+            {
+                let mut map =
+                    crate::metrics::__glean_metric_maps::submetric_maps::CUSTOM_DISTRIBUTION_MAP
+                        .write()
+                        .expect("Write lock for CUSTOM_DISTRIBUTION_MAP was poisoned");
+                map.clear();
+            }
         }
 
         assert!(

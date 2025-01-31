@@ -13,10 +13,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
+#include <optional>
 #include <vector>
 
 #include "absl/algorithm/container.h"
-#include "absl/types/optional.h"
 #include "absl/types/variant.h"
 #include "api/scoped_refptr.h"
 #include "api/video/encoded_image.h"
@@ -25,8 +25,10 @@
 #include "api/video/video_frame_buffer.h"
 #include "api/video/video_frame_type.h"
 #include "api/video_codecs/video_codec.h"
+#include "common_video/frame_instrumentation_data.h"
 #include "modules/include/module_common_types_public.h"
 #include "modules/video_coding/utility/qp_parser.h"
+#include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "video/corruption_detection/generic_mapping_functions.h"
 #include "video/corruption_detection/halton_frame_sampler.h"
@@ -34,11 +36,12 @@
 namespace webrtc {
 namespace {
 
-absl::optional<FilterSettings> GetCorruptionFilterSettings(
+std::optional<FilterSettings> GetCorruptionFilterSettings(
     const EncodedImage& encoded_image,
     VideoCodecType video_codec_type,
     int layer_id) {
-  /* TODO: b/358039777 - Uncomment when parameters are available in EncodedImage
+  /* TODO: bugs.webrtc.org/358039777 - Uncomment when parameters are available
+     in EncodedImage.
   if (encoded_image.CorruptionDetectionParameters()) {
     return FilterSettings{
         .std_dev = encoded_image.CorruptionDetectionParameters()->std_dev,
@@ -51,13 +54,13 @@ absl::optional<FilterSettings> GetCorruptionFilterSettings(
 
   int qp = encoded_image.qp_;
   if (qp == -1) {
-    absl::optional<uint32_t> parsed_qp = QpParser().Parse(
+    std::optional<uint32_t> parsed_qp = QpParser().Parse(
         video_codec_type, layer_id, encoded_image.data(), encoded_image.size());
     if (!parsed_qp.has_value()) {
       RTC_LOG(LS_VERBOSE) << "Missing QP for "
                           << CodecTypeToPayloadString(video_codec_type)
                           << " layer " << layer_id << ".";
-      return absl::nullopt;
+      return std::nullopt;
     }
     qp = *parsed_qp;
   }
@@ -75,7 +78,7 @@ void FrameInstrumentationGenerator::OnCapturedFrame(VideoFrame frame) {
   captured_frames_.push(frame);
 }
 
-absl::optional<
+std::optional<
     absl::variant<FrameInstrumentationSyncData, FrameInstrumentationData>>
 FrameInstrumentationGenerator::OnEncodedImage(
     const EncodedImage& encoded_image) {
@@ -89,17 +92,15 @@ FrameInstrumentationGenerator::OnEncodedImage(
       captured_frames_.front().rtp_timestamp() != rtp_timestamp_encoded_image) {
     RTC_LOG(LS_VERBOSE) << "No captured frames for RTC timestamp "
                         << rtp_timestamp_encoded_image << ".";
-    return absl::nullopt;
+    return std::nullopt;
   }
   VideoFrame captured_frame = captured_frames_.front();
 
-  int layer_id = std::max(encoded_image.SpatialIndex().value_or(0),
-                          encoded_image.SimulcastIndex().value_or(0));
+  int layer_id = GetLayerId(encoded_image);
+
   bool is_key_frame =
       encoded_image.FrameType() == VideoFrameType::kVideoFrameKey;
-  if (is_key_frame) {
-    contexts_.erase(layer_id);
-  } else {
+  if (!is_key_frame) {
     for (const auto& [unused, context] : contexts_) {
       if (context.rtp_timestamp_of_last_key_frame ==
           rtp_timestamp_encoded_image) {
@@ -109,35 +110,51 @@ FrameInstrumentationGenerator::OnEncodedImage(
       }
     }
   }
-
   if (is_key_frame) {
     contexts_[layer_id].rtp_timestamp_of_last_key_frame =
         encoded_image.RtpTimestamp();
   } else if (contexts_.find(layer_id) == contexts_.end()) {
     RTC_LOG(LS_INFO) << "The first frame of a spatial or simulcast layer is "
                         "not a key frame.";
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   int sequence_index = contexts_[layer_id].frame_sampler.GetCurrentIndex();
-  // TODO: b/358039777 - Maybe allow other sample sizes as well
+  bool communicate_upper_bits = false;
+  if (is_key_frame) {
+    communicate_upper_bits = true;
+    // Increase until all the last 7 bits are zeroes.
+
+    // If this would overflow to 15 bits, reset to 0.
+    if (sequence_index > 0b0011'1111'1000'0000) {
+      sequence_index = 0;
+    } else if ((sequence_index & 0b0111'1111) != 0) {
+      // Last 7 bits are not all zeroes.
+      sequence_index >>= 7;
+      sequence_index += 1;
+      sequence_index <<= 7;
+    }
+    contexts_[layer_id].frame_sampler.SetCurrentIndex(sequence_index);
+  }
+
+  // TODO: bugs.webrtc.org/358039777 - Maybe allow other sample sizes as well
   std::vector<HaltonFrameSampler::Coordinates> sample_coordinates =
       contexts_[layer_id]
           .frame_sampler.GetSampleCoordinatesForFrameIfFrameShouldBeSampled(
               is_key_frame, captured_frame.rtp_timestamp(),
-              /*sample_size=*/13);
+              /*num_samples=*/13);
   if (sample_coordinates.empty()) {
     if (!is_key_frame) {
-      return absl::nullopt;
+      return std::nullopt;
     }
     return FrameInstrumentationSyncData{.sequence_index = sequence_index,
-                                        .is_key_frame = true};
+                                        .communicate_upper_bits = true};
   }
 
-  absl::optional<FilterSettings> filter_settings =
+  std::optional<FilterSettings> filter_settings =
       GetCorruptionFilterSettings(encoded_image, video_codec_type_, layer_id);
   if (!filter_settings.has_value()) {
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   scoped_refptr<I420BufferInterface> captured_frame_buffer_as_i420 =
@@ -147,12 +164,12 @@ FrameInstrumentationGenerator::OnEncodedImage(
                       << VideoFrameBufferTypeToString(
                              captured_frame.video_frame_buffer()->type())
                       << " image to I420.";
-    return absl::nullopt;
+    return std::nullopt;
   }
 
   FrameInstrumentationData data = {
       .sequence_index = sequence_index,
-      .is_key_frame = is_key_frame,
+      .communicate_upper_bits = communicate_upper_bits,
       .std_dev = filter_settings->std_dev,
       .luma_error_threshold = filter_settings->luma_error_threshold,
       .chroma_error_threshold = filter_settings->chroma_error_threshold};
@@ -166,4 +183,26 @@ FrameInstrumentationGenerator::OnEncodedImage(
   return data;
 }
 
+std::optional<int> FrameInstrumentationGenerator::GetHaltonSequenceIndex(
+    int layer_id) const {
+  auto it = contexts_.find(layer_id);
+  if (it == contexts_.end()) {
+    return std::nullopt;
+  }
+  return it->second.frame_sampler.GetCurrentIndex();
+}
+
+void FrameInstrumentationGenerator::SetHaltonSequenceIndex(int index,
+                                                           int layer_id) {
+  if (index <= 0x3FFF) {
+    contexts_[layer_id].frame_sampler.SetCurrentIndex(index);
+  }
+  RTC_DCHECK_LE(index, 0x3FFF) << "Index must not be larger than 0x3FFF";
+}
+
+int FrameInstrumentationGenerator::GetLayerId(
+    const EncodedImage& encoded_image) const {
+  return std::max(encoded_image.SpatialIndex().value_or(0),
+                  encoded_image.SimulcastIndex().value_or(0));
+}
 }  // namespace webrtc

@@ -15,8 +15,8 @@
 #include "api/audio_codecs/audio_decoder.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/environment/environment_factory.h"
+#include "api/neteq/default_neteq_factory.h"
 #include "api/neteq/neteq.h"
-#include "modules/audio_coding/neteq/default_neteq_factory.h"
 #include "modules/audio_coding/neteq/tools/rtp_generator.h"
 #include "test/audio_decoder_proxy_factory.h"
 #include "test/gmock.h"
@@ -58,7 +58,7 @@ class MockAudioDecoder final : public AudioDecoder {
 
     size_t Duration() const override { return kPacketDuration; }
 
-    absl::optional<DecodeResult> Decode(
+    std::optional<DecodeResult> Decode(
         rtc::ArrayView<int16_t> decoded) const override {
       const size_t output_size =
           sizeof(int16_t) * kPacketDuration * num_channels_;
@@ -69,7 +69,7 @@ class MockAudioDecoder final : public AudioDecoder {
       } else {
         ADD_FAILURE() << "Expected decoded.size() to be >= output_size ("
                       << decoded.size() << " vs. " << output_size << ")";
-        return absl::nullopt;
+        return std::nullopt;
       }
     }
 

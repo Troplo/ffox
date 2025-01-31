@@ -257,7 +257,7 @@ test_description_schema = Schema(
         ): optionally_keyed_by("release-type", "test-platform", bool),
         # The target name, specifying the build artifact to be tested.
         # If None or not specified, a transform sets the target based on OS:
-        # target.dmg (Mac), target.apk (Android), target.tar.bz2 (Linux),
+        # target.dmg (Mac), target.apk (Android), target.tar.xz (Linux),
         # or target.zip (Windows).
         Optional("target"): optionally_keyed_by(
             "app",
@@ -411,11 +411,6 @@ def run_remaining_transforms(config, tasks):
         # Although the os-integration transforms setup an index route that
         # depends on the chunk number.
         ("chunk", None),
-        (
-            "os_integration",
-            lambda t: t.get("attributes", {}).get("unittest_variant")
-            == "os-integration",
-        ),
     )
 
     for task in tasks:

@@ -206,7 +206,7 @@ static ColorStop GetStopInformation(const nsIFrame* aStopFrame,
   static_cast<SVGStopElement*>(stopContent)
       ->GetAnimatedNumberValues(&position, nullptr);
 
-  position = clamped(position, 0.0f, 1.0f);
+  position = std::clamp(position, 0.0f, 1.0f);
 
   if (position < aLastPosition) {
     position = aLastPosition;
@@ -230,9 +230,8 @@ class MOZ_STACK_CLASS SVGColorStopInterpolator
   SVGColorStopInterpolator(
       gfxPattern* aGradient, const nsTArray<ColorStop>& aStops,
       const StyleColorInterpolationMethod& aStyleColorInterpolationMethod,
-      bool aExtendLastStop)
-      : ColorStopInterpolator(aStops, aStyleColorInterpolationMethod,
-                              aExtendLastStop),
+      bool aExtend)
+      : ColorStopInterpolator(aStops, aStyleColorInterpolationMethod, aExtend),
         mGradient(aGradient) {}
 
   void CreateStop(float aPosition, DeviceColor aColor) {
@@ -245,7 +244,7 @@ class MOZ_STACK_CLASS SVGColorStopInterpolator
 
 already_AddRefed<gfxPattern> SVGGradientFrame::GetPaintServerPattern(
     nsIFrame* aSource, const DrawTarget* aDrawTarget,
-    const gfxMatrix& aContextMatrix, StyleSVGPaint nsStyleSVG::*aFillOrStroke,
+    const gfxMatrix& aContextMatrix, StyleSVGPaint nsStyleSVG::* aFillOrStroke,
     float aGraphicOpacity, imgDrawingParams& aImgParams,
     const gfxRect* aOverrideBounds) {
   uint16_t gradientUnits = GetGradientUnits();
@@ -301,12 +300,13 @@ already_AddRefed<gfxPattern> SVGGradientFrame::GetPaintServerPattern(
   }
 
   uint16_t aSpread = GetSpreadMethod();
-  if (aSpread == SVG_SPREADMETHOD_PAD)
+  if (aSpread == SVG_SPREADMETHOD_PAD) {
     gradient->SetExtend(ExtendMode::CLAMP);
-  else if (aSpread == SVG_SPREADMETHOD_REFLECT)
+  } else if (aSpread == SVG_SPREADMETHOD_REFLECT) {
     gradient->SetExtend(ExtendMode::REFLECT);
-  else if (aSpread == SVG_SPREADMETHOD_REPEAT)
+  } else if (aSpread == SVG_SPREADMETHOD_REPEAT) {
     gradient->SetExtend(ExtendMode::REPEAT);
+  }
 
   gradient->SetMatrix(patternMatrix);
 

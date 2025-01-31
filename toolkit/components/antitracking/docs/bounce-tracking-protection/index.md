@@ -42,6 +42,98 @@ Work for the Gecko implementation in tracked under following meta-bug:
 [Bug 1839915 - \[meta\] Bounce Tracking Protection](https://bugzilla.mozilla.org/show_bug.cgi?id=1839915).
 
 
+A simplified UML diagram of the BTP implementation in Gecko. Note that some
+classes and attributes have been omitted for readability. You can use the
+diagram feature in Searchfox to view the full diagram
+([example](https://searchfox.org/mozilla-central/query/default?q=class-diagram%3A%27mozilla%3A%3ABounceTrackingState%27+depth%3A2)).
+
+```{mermaid}
+classDiagram
+    class BounceTrackingProtection {
+        - mBounceTrackingPurgeTimer: nsITimer
+        - mStorage: BounceTrackingProtectionStorage
+        - mStorageObserver: BounceTrackingStorageObserver
+    }
+
+    note for BounceTrackingProtection "Singleton class to manage the feature."
+
+    class BounceTrackingProtectionStorage {
+        - mStateGlobal : nsTHashMap&lt;OriginAttributesHashKey, RefPtr&lt;BounceTrackingStateGlobal&gt;&gt;
+        - mDatabaseFile : nsCOMPtr&lt;nsIFile&gt;
+    }
+
+    class BounceTrackingStateGlobal {
+        - mUserActivation: nsTHashMap&lt;nsCStringHashKey, PRTime&gt;
+        - mBounceTrackers: nsTHashMap&lt;nsCStringHashKey, PRTime&gt;
+        - mOriginAttributes: OriginAttributes
+    }
+
+    note for BounceTrackingStateGlobal "Manages the global maps for bounce tracker candidates
+                                        and user activation for a specific OriginAttributes dict."
+
+    class BounceTrackingStorageObserver {
+        <!-- [...] -->
+    }
+
+    note for BounceTrackingStorageObserver "Listens to cookie/storage access
+                                            and notifies BounceTrackingState"
+
+    class BounceTrackingRecord {
+        - mInitialHost: nsAutoCString
+        - mBounceHosts: nsTHashSet&lt;nsCStringHashKey&gt;
+        - mFinalHost: nsAutoCString
+        - mStorageAccessHosts: nsTHashSet&lt;nsCStringHashKey&gt;
+    }
+
+    note for BounceTrackingRecord "Encapsulates the per-tab navigation state
+                                   during an extended navigation."
+
+    class BounceTrackingState {
+        - mBounceTrackingProtection: BounceTrackingProtection
+        - mBounceTrackingRecord: BounceTrackingRecord
+        - mClientBounceDetectionTimeout: nsReadOnlyTimer
+        - mOriginAttributes: OriginAttributes
+    }
+
+
+    class BrowsingContextWebProgress {
+        - mBounceTrackingState: BounceTrackingState
+    }
+
+    class nsIBTPExceptionList {
+        <!-- Bug 1930704: Empty classes lead to build errors. Adding a comment inside the class fixes the issue -->
+        <!-- [...] -->
+    }
+
+    class BounceTrackingAllowList {
+        <!-- [...] -->
+    }
+
+    class DocumentLoadListener{
+        <!-- [...] -->
+    }
+
+    note for BrowsingContextWebProgress "Every tab has a web progress
+                                         and therefore a BounceTrackingState"
+
+    BounceTrackingProtection *-- BounceTrackingProtectionStorage
+    BounceTrackingProtection *-- BounceTrackingStorageObserver
+    BounceTrackingState --o BounceTrackingProtection
+    BounceTrackingState --> BounceTrackingProtection : RecordStatefulBounces() on extended nav end
+    BounceTrackingState *-- BounceTrackingRecord
+    BounceTrackingStorageObserver --> BounceTrackingState : Storage access signals
+    BrowsingContextWebProgress *-- BounceTrackingState
+    BounceTrackingStateGlobal --* BounceTrackingProtectionStorage
+    BounceTrackingStateGlobal --> BounceTrackingProtectionStorage : Persists state changes in storage.
+    BounceTrackingProtection --> BounceTrackingStateGlobal : Manages global state
+    nsIBTPExceptionList --* BounceTrackingProtection
+    nsIBTPExceptionList --> BounceTrackingProtection : Site host purge exceptions from RemoteSettings.
+    BounceTrackingAllowList --* BounceTrackingProtection
+    BounceTrackingAllowList --> BounceTrackingProtection :  Site host purge exceptions from PermissionManager.
+    BrowsingContextWebProgress --> BounceTrackingState : Navigation signals
+    DocumentLoadListener --> BounceTrackingState : Navigation signals
+```
+
 ## Preferences
 
 The feature can be enabled and it's behavior can be adjusted using the
@@ -54,24 +146,41 @@ fully disabled and `1` is fully enabled. See
 [nsIBounceTrackingProtection.idl](https://searchfox.org/mozilla-central/rev/ec342a3d481d9ac3324d1041e05eefa6b61392d2/toolkit/components/antitracking/bouncetrackingprotection/nsIBounceTrackingProtection.idl#10-42)
 for a full list of options.
 
+When classifying sites, BTP also looks at whether the site accessed cookies or
+storage in the redirect. Whether cookies or storage access is considered is
+controlled by the `privacy.bounceTrackingProtection.requireStatefulBounces`
+pref.
+
+# Nimbus Integration
+A subset of the BTP prefs can be controlled via Nimbus. See definition here:
+[FeatureManifest.yaml](https://searchfox.org/mozilla-central/source/toolkit/components/nimbus/FeatureManifest.yaml#:~:text=bounceTrackingProtection).
+
 ## Logging
+
 BTP has a logger which can be enabled by starting Firefox with the `MOZ_LOG`
 environment variable. Use `MOZ_LOG=BounceTrackingProtection:5` for verbose
 logging for every navigation and `MOZ_LOG=BounceTrackingProtection:3` for more
 concise logging focused on classification and purging.
+
+### Console Messages
+
+You can check the developer tools console for warning messages which will
+be logged when a site gets classified. Example:
+
+> “bounce-tracking-demo-tracker-server.glitch.me” has been classified as a
+> bounce tracker. If it does not receive user activation within the next 3,600
+> seconds it will have its state purged.
+
+
+When a site has recently been purged (since last restart), upon next visit,
+Firefox will also log a warning to the website console:
+> The state of “bounce-tracking-demo-tracker-server.glitch.me” was recently purged because it was detected as a bounce tracker.
 
 ## Testing
 When testing sites to ensure they don't get purged for bounce tracking behavior
 you can use both logging (as described above) to observe classification and
 direct calls to the feature via the Browser Toolbox to trigger the purging
 early.
-
-You can also check the developer tools console for warning messages which will
-be logged when a site gets classified. Example:
-
-> “bounce-tracking-demo-tracker-server.glitch.me” has been classified as a
-> bounce tracker. If it does not receive user activation within the next 3,600
-> seconds it will have its state purged.
 
 The snippets in the following section need to be executed in the [Browser
 Toolbox]. Note that while the toolbox looks like the regular devtools it's a
@@ -116,6 +225,21 @@ await Cc[
 ```
 The return value will be an array of sites that have been purged. Note that
 purging applies for the entire domain (eTLD+1).
+
+### List recently purged sites
+You can obtain a list of recently purged sites (since the last restart) by
+calling:
+```javascript
+await Cc[
+  "@mozilla.org/bounce-tracking-protection;1"
+].getService(Ci.nsIBounceTrackingProtection).testGetRecentlyPurgedTrackers({});
+```
+This only shows sites which have been purged in normal browsing. If you want
+data from private browsing or containers you need to pass in a non-default
+`OriginAttributes` object, e.g. `{ privateBrowsingId: 1 }`.
+
+There is also `hasRecentlyPurgedSite` which can be used to check if a specific
+site has been recently purged (across all OriginAttributes contexts).
 
 ## Test Page
 https://bounce-tracking-demo.glitch.me/ is a demo page with two links that

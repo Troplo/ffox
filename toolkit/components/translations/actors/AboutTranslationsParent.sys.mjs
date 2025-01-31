@@ -14,8 +14,40 @@ ChromeUtils.defineESModuleGetters(lazy, {
 export class AboutTranslationsParent extends JSWindowActorParent {
   #isDestroyed = false;
 
+  /**
+   * A dedicated handle to this.#observe.bind(this), which we need to register non-static
+   * per-instance observers when the actor is created as well as remove when it is destroyed.
+   *
+   * @type {Function | null}
+   *
+   * @see {AboutTranslationsParent.actorCreated}
+   * @see {AboutTranslationsParent.didDestroy}
+   */
+  #boundObserve = null;
+
+  actorCreated() {
+    this.#boundObserve = this.#observe.bind(this);
+    Services.obs.addObserver(this.#boundObserve, "translations:pref-changed");
+  }
+
   didDestroy() {
+    if (this.#boundObserve) {
+      Services.obs.removeObserver(this.#boundObserve);
+      this.#boundObserve = null;
+    }
     this.#isDestroyed = true;
+  }
+
+  #observe(subject, topic, data) {
+    switch (topic) {
+      case "translations:pref-changed": {
+        switch (data) {
+          case "browser.translations.useLexicalShortlist": {
+            this.sendAsyncMessage("AboutTranslations:RebuildTranslator");
+          }
+        }
+      }
+    }
   }
 
   async receiveMessage({ name, data }) {
@@ -56,6 +88,23 @@ export class AboutTranslationsParent extends JSWindowActorParent {
       }
       case "AboutTranslations:IsTranslationsEngineSupported": {
         return lazy.TranslationsParent.getIsTranslationsEngineSupported();
+      }
+      case "AboutTranslations:Telemetry": {
+        const { telemetryFunctionName, telemetryData } = data;
+        const aboutTranslationsTelemetry =
+          lazy.TranslationsParent.telemetry().aboutTranslationsPage();
+        const telemetryFunction =
+          aboutTranslationsTelemetry[telemetryFunctionName];
+
+        if (typeof telemetryFunction !== "function") {
+          throw new Error(
+            `Unknown AboutTranslationsTelemetry function name '${telemetryFunctionName}'`
+          );
+        }
+
+        aboutTranslationsTelemetry[telemetryFunctionName](telemetryData);
+
+        return undefined;
       }
       default:
         throw new Error("Unknown AboutTranslations message: " + name);

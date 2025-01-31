@@ -500,7 +500,7 @@ const ImpressionsItem = ({
 /******/ 	
 /************************************************************************/
 var __webpack_exports__ = {};
-// This entry need to be wrapped in an IIFE because it need to be isolated against other modules in the chunk.
+// This entry needs to be wrapped in an IIFE because it needs to be isolated against other modules in the chunk.
 (() => {
 __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
@@ -923,7 +923,7 @@ class ASRouterAdminInner extends (react__WEBPACK_IMPORTED_MODULE_1___default().P
     const impressions = this.state.messageImpressions[msg.id] ? this.state.messageImpressions[msg.id].length : 0;
     const isCollapsed = this.state.collapsedMessages.includes(msg.id);
     const isModified = this.state.modifiedMessages.includes(msg.id);
-    const aboutMessagePreviewSupported = ["infobar", "spotlight", "cfr_doorhanger", "feature_callout"].includes(msg.template);
+    const aboutMessagePreviewSupported = ["infobar", "spotlight", "cfr_doorhanger", "feature_callout", "pb_newtab"].includes(msg.template);
     let itemClassName = "message-item";
     if (isBlocked) {
       itemClassName += " blocked";
@@ -1387,7 +1387,7 @@ class ASRouterAdminInner extends (react__WEBPACK_IMPORTED_MODULE_1___default().P
   }
   onChangeAttributionParameters(event) {
     const {
-      eventName,
+      name: eventName,
       value
     } = event.target;
     this.setState(({
@@ -1512,7 +1512,7 @@ class ASRouterAdminInner extends (react__WEBPACK_IMPORTED_MODULE_1___default().P
 }
 const ASRouterAdmin = props => /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_1___default().createElement(_SimpleHashRouter__WEBPACK_IMPORTED_MODULE_3__.SimpleHashRouter, null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_1___default().createElement(ASRouterAdminInner, props));
 function renderASRouterAdmin() {
-  react_dom__WEBPACK_IMPORTED_MODULE_2___default().render( /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_1___default().createElement(ASRouterAdmin, null), document.getElementById("root"));
+  react_dom__WEBPACK_IMPORTED_MODULE_2___default().render(/*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_1___default().createElement(ASRouterAdmin, null), document.getElementById("root"));
 }
 })();
 

@@ -178,7 +178,8 @@ bool HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs) {
           a.handleFetchEventStart(), a.handleFetchEventEnd(),
           a.forceMainDocumentChannel(), a.navigationStartTimeStamp(),
           a.earlyHintPreloaderId(), a.classicScriptHintCharset(),
-          a.documentCharacterSet(), a.isUserAgentHeaderModified());
+          a.documentCharacterSet(), a.isUserAgentHeaderModified(),
+          a.initiatorType());
     }
     case HttpChannelCreationArgs::THttpChannelConnectArgs: {
       const HttpChannelConnectArgs& cArgs = aArgs.get_HttpChannelConnectArgs();
@@ -446,7 +447,7 @@ bool HttpChannelParent::DoAsyncOpen(
     const uint64_t& aEarlyHintPreloaderId,
     const nsAString& aClassicScriptHintCharset,
     const nsAString& aDocumentCharacterSet,
-    const bool& aIsUserAgentHeaderModified) {
+    const bool& aIsUserAgentHeaderModified, const nsString& aInitiatorType) {
   MOZ_ASSERT(aURI, "aURI should not be NULL");
 
   if (aEarlyHintPreloaderId) {
@@ -529,7 +530,6 @@ bool HttpChannelParent::DoAsyncOpen(
   if (httpChannelImpl) {
     httpChannelImpl->SetWarningReporter(this);
   }
-  httpChannel->SetTimingEnabled(true);
   if (mPBOverride != kPBOverride_Unset) {
     httpChannel->SetPrivate(mPBOverride == kPBOverride_Private);
   }
@@ -581,6 +581,8 @@ bool HttpChannelParent::DoAsyncOpen(
   }
 
   httpChannel->SetIsUserAgentHeaderModified(aIsUserAgentHeaderModified);
+
+  httpChannel->SetInitiatorType(aInitiatorType);
 
   RefPtr<ParentChannelListener> parentListener = new ParentChannelListener(
       this, mBrowserParent ? mBrowserParent->GetBrowsingContext() : nullptr);
@@ -1295,9 +1297,7 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
   if (mOverrideReferrerInfo) {
     args.overrideReferrerInfo() = ToRefPtr(std::move(mOverrideReferrerInfo));
   }
-  if (!mCookie.IsEmpty()) {
-    args.cookie() = std::move(mCookie);
-  }
+  args.cookieHeaders().SwapElements(mCookieHeaders);
 
   nsHttpRequestHead* requestHead = chan->GetRequestHead();
   // !!! We need to lock headers and please don't forget to unlock them !!!
@@ -1336,13 +1336,18 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
   mChannel->GetTrrSkipReason(&reason);
   args.trrSkipReason() = reason;
 
-  if (mIPCClosed ||
-      !mBgParent->OnStartRequest(
-          *responseHead, useResponseHead,
-          cleanedUpRequest ? cleanedUpRequestHeaders : requestHead->Headers(),
-          args, altDataSource, chan->GetOnStartRequestStartTime())) {
+  if (mIPCClosed) {
     rv = NS_ERROR_UNEXPECTED;
+  } else {
+    nsHttpResponseHead newResponseHead = *responseHead;
+    if (!mBgParent->OnStartRequest(
+            std::move(newResponseHead), useResponseHead,
+            cleanedUpRequest ? cleanedUpRequestHeaders : requestHead->Headers(),
+            args, altDataSource, chan->GetOnStartRequestStartTime())) {
+      rv = NS_ERROR_UNEXPECTED;
+    }
   }
+
   requestHead->Exit();
 
   // Need to wait for the cookies/permissions to content process, which is sent
@@ -1909,9 +1914,11 @@ HttpChannelParent::StartRedirect(nsIChannel* newChannel, uint32_t redirectFlags,
   }
 
   if (!mIPCClosed) {
+    cleanedUpResponseHead = *responseHead;
     if (!SendRedirect1Begin(mRedirectChannelId, newOriginalURI, newLoadFlags,
-                            redirectFlags, loadInfoForwarderArg, *responseHead,
-                            securityInfo, channelId, mChannel->GetPeerAddr(),
+                            redirectFlags, loadInfoForwarderArg,
+                            std::move(cleanedUpResponseHead), securityInfo,
+                            channelId, mChannel->GetPeerAddr(),
                             GetTimingAttributes(mChannel))) {
       return NS_BINDING_ABORTED;
     }
@@ -2184,10 +2191,11 @@ void HttpChannelParent::SetHttpChannelFromEarlyHintPreloader(
   mChannel = aChannel;
 }
 
-void HttpChannelParent::SetCookie(nsCString&& aCookie) {
+void HttpChannelParent::SetCookieHeaders(
+    const nsTArray<nsCString>& aCookieHeaders) {
   LOG(("HttpChannelParent::SetCookie [this=%p]", this));
   MOZ_ASSERT(!mAfterOnStartRequestBegun);
-  MOZ_ASSERT(mCookie.IsEmpty());
+  MOZ_ASSERT(mCookieHeaders.IsEmpty());
 
   // The loadGroup of the channel in the parent process could be null in the
   // XPCShell content process test, see test_cookiejars_wrap.js. In this case,
@@ -2199,7 +2207,7 @@ void HttpChannelParent::SetCookie(nsCString&& aCookie) {
       mChannel->IsBrowsingContextDiscarded()) {
     return;
   }
-  mCookie = std::move(aCookie);
+  mCookieHeaders.AppendElements(aCookieHeaders);
 }
 
 }  // namespace mozilla::net

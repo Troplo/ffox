@@ -194,6 +194,9 @@ class CancelableBlockState : public InputBlockState {
 
   bool ShouldDropEvents() const override;
 
+  bool HasStateBeenReset() const { return mHasStateBeenReset; };
+  void ResetState() { mHasStateBeenReset = true; }
+
   void ResetContentResponseTimerExpired() {
     mContentResponseTimerExpired = false;
     mContentResponded = false;
@@ -203,6 +206,7 @@ class CancelableBlockState : public InputBlockState {
   bool mPreventDefault;
   bool mContentResponded;
   bool mContentResponseTimerExpired;
+  bool mHasStateBeenReset;
 };
 
 /**
@@ -370,6 +374,14 @@ class PanGestureBlockState : public CancelableBlockState {
     return mWaitingForContentResponse;
   }
   Maybe<LayersId> WheelTransactionLayersId() const override;
+
+  void ConfirmForHoldGesture() {
+    // Hold gestures get their own input block, but do not generate
+    // any events that get to web content (because the PANGESTURE_MAYSTART
+    // event has a zero delta). As a result, do not wait for a content
+    // response for them because it will never arrive.
+    mTargetConfirmed = InputBlockState::TargetConfirmationState::eConfirmed;
+  }
 
  private:
   bool mInterrupted;

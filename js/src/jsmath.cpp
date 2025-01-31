@@ -909,7 +909,7 @@ double js::math_sign_impl(double x) {
   return x == 0 ? x : x < 0 ? -1 : 1;
 }
 
-static bool math_sign(JSContext* cx, unsigned argc, Value* vp) {
+bool js::math_sign(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
   if (args.length() == 0) {
     args.rval().setNaN();
@@ -1010,20 +1010,20 @@ UnaryMathFunctionType js::GetUnaryMathFunctionPtr(UnaryMathFunction fun) {
   MOZ_CRASH("Unknown function");
 }
 
-const char* js::GetUnaryMathFunctionName(UnaryMathFunction fun) {
+const char* js::GetUnaryMathFunctionName(UnaryMathFunction fun, bool enumName) {
   switch (fun) {
     case UnaryMathFunction::SinNative:
-      return "Sin (native)";
+      return enumName ? "SinNative" : "Sin (native)";
     case UnaryMathFunction::SinFdlibm:
-      return "Sin (fdlibm)";
+      return enumName ? "SinFdlibm" : "Sin (fdlibm)";
     case UnaryMathFunction::CosNative:
-      return "Cos (native)";
+      return enumName ? "CosNative" : "Cos (native)";
     case UnaryMathFunction::CosFdlibm:
-      return "Cos (fdlibm)";
+      return enumName ? "CosFdlibm" : "Cos (fdlibm)";
     case UnaryMathFunction::TanNative:
-      return "Tan (native)";
+      return enumName ? "TanNative" : "Tan (native)";
     case UnaryMathFunction::TanFdlibm:
-      return "Tan (fdlibm)";
+      return enumName ? "TanFdlibm" : "Tan (fdlibm)";
     case UnaryMathFunction::Log:
       return "Log";
     case UnaryMathFunction::Exp:

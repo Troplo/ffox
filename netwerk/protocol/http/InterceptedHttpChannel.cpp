@@ -110,7 +110,8 @@ void InterceptedHttpChannel::AsyncOpenInternal() {
         mURI, requestMethod, mPriority, mChannelId, NetworkLoadType::LOAD_START,
         mChannelCreationTimestamp, mLastStatusReported, 0, kCacheUnknown,
         mLoadInfo->GetInnerWindowID(),
-        mLoadInfo->GetOriginAttributes().IsPrivateBrowsing());
+        mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(),
+        mRequestHead.Version(), mClassOfService.Flags());
   }
 
   // If an error occurs in this file we must ensure mListener callbacks are
@@ -124,9 +125,7 @@ void InterceptedHttpChannel::AsyncOpenInternal() {
 
   // We should have pre-set the AsyncOpen time based on the original channel if
   // timings are enabled.
-  if (LoadTimingEnabled()) {
-    MOZ_DIAGNOSTIC_ASSERT(!mAsyncOpenTime.IsNull());
-  }
+  MOZ_DIAGNOSTIC_ASSERT(!mAsyncOpenTime.IsNull());
 
   StoreIsPending(true);
   StoreResponseCouldBeSynthesized(true);
@@ -551,7 +550,8 @@ InterceptedHttpChannel::Cancel(nsresult aStatus) {
         mLastStatusReported, TimeStamp::Now(), size, kCacheUnknown,
         mLoadInfo->GetInnerWindowID(),
         mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(),
-        &mTransactionTimings, std::move(mSource));
+        mRequestHead.Version(), mClassOfService.Flags(), &mTransactionTimings,
+        std::move(mSource));
   }
 
   MOZ_DIAGNOSTIC_ASSERT(NS_FAILED(aStatus));
@@ -640,7 +640,7 @@ InterceptedHttpChannel::GetIsAuthChannel(bool* aIsAuthChannel) {
 
 NS_IMETHODIMP
 InterceptedHttpChannel::SetPriority(int32_t aPriority) {
-  mPriority = clamped<int32_t>(aPriority, INT16_MIN, INT16_MAX);
+  mPriority = std::clamp<int32_t>(aPriority, INT16_MIN, INT16_MAX);
   return NS_OK;
 }
 
@@ -780,9 +780,9 @@ InterceptedHttpChannel::ResetInterception(bool aBypass) {
         NetworkLoadType::LOAD_REDIRECT, mLastStatusReported, TimeStamp::Now(),
         size, kCacheUnknown, mLoadInfo->GetInnerWindowID(),
         mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(),
-        &mTransactionTimings, std::move(mSource),
-        Some(nsDependentCString(contentType.get())), mURI, flags,
-        newBaseChannel->ChannelId());
+        mRequestHead.Version(), mClassOfService.Flags(), &mTransactionTimings,
+        std::move(mSource), Some(nsDependentCString(contentType.get())), mURI,
+        flags, newBaseChannel->ChannelId());
   }
 
   rv = SetupReplacementChannel(mURI, newChannel, true, flags);
@@ -1225,8 +1225,8 @@ InterceptedHttpChannel::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
         mLastStatusReported, TimeStamp::Now(), size, kCacheUnknown,
         mLoadInfo->GetInnerWindowID(),
         mLoadInfo->GetOriginAttributes().IsPrivateBrowsing(),
-        &mTransactionTimings, std::move(mSource),
-        Some(nsDependentCString(contentType.get())));
+        mRequestHead.Version(), mClassOfService.Flags(), &mTransactionTimings,
+        std::move(mSource), Some(nsDependentCString(contentType.get())));
   }
 
   nsresult rv = NS_OK;

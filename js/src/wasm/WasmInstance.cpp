@@ -946,7 +946,7 @@ bool Instance::initSegments(JSContext* cx,
       }
 
       const wasm::Table* table = tables()[seg.tableIndex];
-      uint64_t offset = table->indexType() == IndexType::I32
+      uint64_t offset = table->addressType() == AddressType::I32
                             ? offsetVal.get().i32()
                             : offsetVal.get().i64();
 
@@ -977,7 +977,7 @@ bool Instance::initSegments(JSContext* cx,
     if (!seg->offset().evaluate(cx, instanceObj, &offsetVal)) {
       return false;  // OOM
     }
-    uint64_t offset = memoryObj->indexType() == IndexType::I32
+    uint64_t offset = memoryObj->addressType() == AddressType::I32
                           ? offsetVal.get().i32()
                           : offsetVal.get().i64();
     uint32_t count = seg->bytes.length();
@@ -1287,24 +1287,24 @@ static int32_t MemDiscardShared(Instance* instance, I byteOffset, I byteLen,
   return MemDiscardShared(instance, byteOffset, byteLen, memBase);
 }
 
-/* static */ void* Instance::tableGet(Instance* instance, uint32_t index,
+/* static */ void* Instance::tableGet(Instance* instance, uint32_t address,
                                       uint32_t tableIndex) {
   MOZ_ASSERT(SASigTableGet.failureMode == FailureMode::FailOnInvalidRef);
 
   JSContext* cx = instance->cx();
   const Table& table = *instance->tables()[tableIndex];
-  if (index >= table.length()) {
+  if (address >= table.length()) {
     ReportTrapError(cx, JSMSG_WASM_TABLE_OUT_OF_BOUNDS);
     return AnyRef::invalid().forCompiledCode();
   }
 
   switch (table.repr()) {
     case TableRepr::Ref:
-      return table.getAnyRef(index).forCompiledCode();
+      return table.getAnyRef(address).forCompiledCode();
     case TableRepr::Func: {
       MOZ_RELEASE_ASSERT(!table.isAsmJS());
       RootedFunction fun(cx);
-      if (!table.getFuncRef(cx, index, &fun)) {
+      if (!table.getFuncRef(cx, address, &fun)) {
         return AnyRef::invalid().forCompiledCode();
       }
       return FuncRef::fromJSFunction(fun).forCompiledCode();
@@ -1335,25 +1335,25 @@ static int32_t MemDiscardShared(Instance* instance, I byteOffset, I byteLen,
   return oldSize;
 }
 
-/* static */ int32_t Instance::tableSet(Instance* instance, uint32_t index,
+/* static */ int32_t Instance::tableSet(Instance* instance, uint32_t address,
                                         void* value, uint32_t tableIndex) {
   MOZ_ASSERT(SASigTableSet.failureMode == FailureMode::FailOnNegI32);
 
   JSContext* cx = instance->cx();
   Table& table = *instance->tables()[tableIndex];
 
-  if (index >= table.length()) {
+  if (address >= table.length()) {
     ReportTrapError(cx, JSMSG_WASM_TABLE_OUT_OF_BOUNDS);
     return -1;
   }
 
   switch (table.repr()) {
     case TableRepr::Ref:
-      table.setAnyRef(index, AnyRef::fromCompiledCode(value));
+      table.setAnyRef(address, AnyRef::fromCompiledCode(value));
       break;
     case TableRepr::Func:
       MOZ_RELEASE_ASSERT(!table.isAsmJS());
-      table.fillFuncRef(index, 1, FuncRef::fromCompiledCode(value), cx);
+      table.fillFuncRef(address, 1, FuncRef::fromCompiledCode(value), cx);
       break;
   }
 
@@ -1504,15 +1504,16 @@ template void* Instance::arrayNew<false>(Instance* instance,
 
 // Copies from a data segment into a wasm GC array. Performs the necessary
 // bounds checks, accounting for the array's element size. If this function
-// returns false, it has already reported a trap error.
+// returns false, it has already reported a trap error. Null arrays should
+// be handled in the caller.
 static bool ArrayCopyFromData(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
-                              const TypeDef* typeDef, uint32_t arrayIndex,
-                              const DataSegment* seg, uint32_t segByteOffset,
-                              uint32_t numElements) {
+                              uint32_t arrayIndex, const DataSegment* seg,
+                              uint32_t segByteOffset, uint32_t numElements) {
+  uint32_t elemSize = arrayObj->typeDef().arrayType().elementType().size();
+
   // Compute the number of bytes to copy, ensuring it's below 2^32.
   CheckedUint32 numBytesToCopy =
-      CheckedUint32(numElements) *
-      CheckedUint32(typeDef->arrayType().elementType().size());
+      CheckedUint32(numElements) * CheckedUint32(elemSize);
   if (!numBytesToCopy.isValid()) {
     // Because the request implies that 2^32 or more bytes are to be copied.
     ReportTrapError(cx, JSMSG_WASM_OUT_OF_BOUNDS);
@@ -1541,10 +1542,15 @@ static bool ArrayCopyFromData(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
     return false;
   }
 
+  // This value is safe due to the previous range check on number of elements.
+  // (We know the full result fits in the array, and we can't overflow uint64_t
+  // since elemSize caps out at 16.)
+  uint64_t dstByteOffset = uint64_t(arrayIndex) * uint64_t(elemSize);
+
   // Because `numBytesToCopy` is an in-range `CheckedUint32`, the cast to
   // `size_t` is safe even on a 32-bit target.
   if (numElements != 0) {
-    memcpy(arrayObj->data_, &seg->bytes[segByteOffset],
+    memcpy(&arrayObj->data_[dstByteOffset], &seg->bytes[segByteOffset],
            size_t(numBytesToCopy.value()));
   }
 
@@ -1579,7 +1585,7 @@ static bool ArrayCopyFromElem(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
 
   GCPtr<AnyRef>* dst = reinterpret_cast<GCPtr<AnyRef>*>(arrayObj->data_);
   for (uint32_t i = 0; i < numElements; i++) {
-    dst[i] = seg[segOffset + i];
+    dst[arrayIndex + i] = seg[segOffset + i];
   }
 
   return true;
@@ -1614,7 +1620,6 @@ static bool ArrayCopyFromElem(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
   // At this point, if `seg` is null then `numElements` and `segByteOffset`
   // are both zero.
 
-  const TypeDef* typeDef = typeDefData->typeDef;
   Rooted<WasmArrayObject*> arrayObj(
       cx,
       WasmArrayObject::createArray<true>(
@@ -1630,8 +1635,7 @@ static bool ArrayCopyFromElem(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
     return arrayObj;
   }
 
-  if (!ArrayCopyFromData(cx, arrayObj, typeDef, 0, seg, segByteOffset,
-                         numElements)) {
+  if (!ArrayCopyFromData(cx, arrayObj, 0, seg, segByteOffset, numElements)) {
     // Trap errors will be reported by ArrayCopyFromData.
     return nullptr;
   }
@@ -1692,9 +1696,11 @@ static bool ArrayCopyFromElem(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
 //
 // Traps if accesses are out of bounds for either the data segment or the array,
 // or if the array object is null.
-/* static */ int32_t Instance::arrayInitData(
-    Instance* instance, void* array, uint32_t index, uint32_t segByteOffset,
-    uint32_t numElements, TypeDefInstanceData* typeDefData, uint32_t segIndex) {
+/* static */ int32_t Instance::arrayInitData(Instance* instance, void* array,
+                                             uint32_t index,
+                                             uint32_t segByteOffset,
+                                             uint32_t numElements,
+                                             uint32_t segIndex) {
   MOZ_ASSERT(SASigArrayInitData.failureMode == FailureMode::FailOnNegI32);
   JSContext* cx = instance->cx();
 
@@ -1721,16 +1727,16 @@ static bool ArrayCopyFromElem(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
   }
 
   if (!seg) {
-    // A zero-length init was requested, so we're done.
+    // The segment was dropped, therefore a zero-length init was requested, so
+    // we're done.
     return 0;
   }
 
   // Get hold of the array.
-  const TypeDef* typeDef = typeDefData->typeDef;
   Rooted<WasmArrayObject*> arrayObj(cx, static_cast<WasmArrayObject*>(array));
   MOZ_RELEASE_ASSERT(arrayObj->is<WasmArrayObject>());
 
-  if (!ArrayCopyFromData(cx, arrayObj, typeDef, index, seg, segByteOffset,
+  if (!ArrayCopyFromData(cx, arrayObj, index, seg, segByteOffset,
                          numElements)) {
     // Trap errors will be reported by ArrayCopyFromData.
     return -1;
@@ -1784,13 +1790,19 @@ static bool ArrayCopyFromElem(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
   return 0;
 }
 
+// Copies range of elements between two arrays.
+//
+// Traps if accesses are out of bounds for the arrays, or either array
+// object is null.
+//
+// This function is only used by baseline, Ion emits inline code using
+// WasmArrayMemMove and WasmArrayRefsMove builtins instead.
 /* static */ int32_t Instance::arrayCopy(Instance* instance, void* dstArray,
                                          uint32_t dstIndex, void* srcArray,
                                          uint32_t srcIndex,
                                          uint32_t numElements,
                                          uint32_t elementSize) {
   MOZ_ASSERT(SASigArrayCopy.failureMode == FailureMode::FailOnNegI32);
-  JSContext* cx = instance->cx();
 
   // At the entry point, `elementSize` may be negative to indicate
   // reftyped-ness of array elements.  That is done in order to avoid having
@@ -1798,7 +1810,7 @@ static bool ArrayCopyFromElem(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
 
   // "traps if either array is null"
   if (!srcArray || !dstArray) {
-    ReportTrapError(cx, JSMSG_WASM_DEREF_NULL);
+    ReportTrapError(instance->cx(), JSMSG_WASM_DEREF_NULL);
     return -1;
   }
 
@@ -1810,13 +1822,10 @@ static bool ArrayCopyFromElem(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
   MOZ_ASSERT(elementSize >= 1 && elementSize <= 16);
 
   // Get hold of the two arrays.
-  Rooted<WasmArrayObject*> dstArrayObj(cx,
-                                       static_cast<WasmArrayObject*>(dstArray));
-  MOZ_RELEASE_ASSERT(dstArrayObj->is<WasmArrayObject>());
-
-  Rooted<WasmArrayObject*> srcArrayObj(cx,
-                                       static_cast<WasmArrayObject*>(srcArray));
-  MOZ_RELEASE_ASSERT(srcArrayObj->is<WasmArrayObject>());
+  WasmArrayObject* dstArrayObj = static_cast<WasmArrayObject*>(dstArray);
+  WasmArrayObject* srcArrayObj = static_cast<WasmArrayObject*>(srcArray);
+  MOZ_ASSERT(dstArrayObj->is<WasmArrayObject>() &&
+             srcArrayObj->is<WasmArrayObject>());
 
   // If WasmArrayObject::numElements() is changed to return 64 bits, the
   // following checking logic will be incorrect.
@@ -1825,27 +1834,25 @@ static bool ArrayCopyFromElem(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
   // "traps if destination + length > len(array1)"
   uint64_t dstNumElements = uint64_t(dstArrayObj->numElements_);
   if (uint64_t(dstIndex) + uint64_t(numElements) > dstNumElements) {
-    ReportTrapError(cx, JSMSG_WASM_OUT_OF_BOUNDS);
+    // Potential GC hazard: srcArrayObj and dstArrayObj are invalidated by
+    // reporting an error, do no use them after this point.
+    ReportTrapError(instance->cx(), JSMSG_WASM_OUT_OF_BOUNDS);
     return -1;
   }
 
   // "traps if source + length > len(array2)"
   uint64_t srcNumElements = uint64_t(srcArrayObj->numElements_);
   if (uint64_t(srcIndex) + uint64_t(numElements) > srcNumElements) {
-    ReportTrapError(cx, JSMSG_WASM_OUT_OF_BOUNDS);
+    // Potential GC hazard: srcArrayObj and dstArrayObj are invalidated by
+    // reporting an error, do no use them after this point.
+    ReportTrapError(instance->cx(), JSMSG_WASM_OUT_OF_BOUNDS);
     return -1;
   }
 
-  // trap if we're asked to copy 2^32 or more bytes on a 32-bit target.
-  uint64_t numBytesToCopy = uint64_t(numElements) * uint64_t(elementSize);
-#ifndef JS_64BIT
-  if (numBytesToCopy > uint64_t(UINT32_MAX)) {
-    ReportTrapError(cx, JSMSG_WASM_OUT_OF_BOUNDS);
-    return -1;
+  if (numElements == 0) {
+    // Early exit if there's no work to do.
+    return 0;
   }
-#endif
-  // We're now assured that `numBytesToCopy` can be cast to `size_t` without
-  // overflow.
 
   // Actually do the copy, taking care to handle cases where the src and dst
   // areas overlap.
@@ -1853,47 +1860,25 @@ static bool ArrayCopyFromElem(JSContext* cx, Handle<WasmArrayObject*> arrayObj,
   uint8_t* dstBase = dstArrayObj->data_;
   srcBase += size_t(srcIndex) * size_t(elementSize);
   dstBase += size_t(dstIndex) * size_t(elementSize);
-
-  if (numBytesToCopy == 0 || srcBase == dstBase) {
+  if (srcBase == dstBase) {
     // Early exit if there's no work to do.
     return 0;
   }
 
   if (!elemsAreRefTyped) {
     // Hand off to memmove, which is presumably highly optimized.
-    memmove(dstBase, srcBase, size_t(numBytesToCopy));
+    memmove(dstBase, srcBase, size_t(numElements) * size_t(elementSize));
     return 0;
   }
 
-  // We're copying refs; doing that needs suitable GC barrier-ing.
-  uint8_t* nextSrc;
-  uint8_t* nextDst;
-  intptr_t step;
-  if (dstBase < srcBase) {
-    // Moving data backwards in the address space; so iterate forwards through
-    // the array.
-    step = intptr_t(elementSize);
-    nextSrc = srcBase;
-    nextDst = dstBase;
+  GCPtr<AnyRef>* dst = (GCPtr<AnyRef>*)dstBase;
+  AnyRef* src = (AnyRef*)srcBase;
+  // The std::copy performs GCPtr::set() operation under the hood.
+  if (uintptr_t(dstBase) < uintptr_t(srcBase)) {
+    std::copy(src, src + numElements, dst);
   } else {
-    // Moving data forwards; so iterate backwards.
-    step = -intptr_t(elementSize);
-    nextSrc = srcBase + size_t(numBytesToCopy) - size_t(elementSize);
-    nextDst = dstBase + size_t(numBytesToCopy) - size_t(elementSize);
+    std::copy_backward(src, src + numElements, dst + numElements);
   }
-  // We don't know the type of the elems, only that they are refs.  No matter,
-  // we can simply make up a type.
-  RefType aRefType = RefType::eq();
-  // Do the iteration
-  for (size_t i = 0; i < size_t(numElements); i++) {
-    // Copy `elementSize` bytes from `nextSrc` to `nextDst`.
-    RootedVal value(cx, aRefType);
-    value.get().readFromHeapLocation(nextSrc);
-    value.get().writeToHeapLocation(nextDst);
-    nextSrc += step;
-    nextDst += step;
-  }
-
   return 0;
 }
 
@@ -2168,7 +2153,7 @@ void* Instance::stringConcat(Instance* instance, void* firstStringArg,
   Rooted<JSString*> secondString(cx, secondStringRef.toJSString());
   JSString* result = ConcatStrings<CanGC>(cx, firstString, secondString);
   if (!result) {
-    MOZ_ASSERT(cx->isThrowingOutOfMemory());
+    MOZ_ASSERT(cx->isExceptionPending());
     return nullptr;
   }
   return AnyRef::fromJSString(result).forCompiledCode();
@@ -2744,10 +2729,7 @@ void Instance::resetTemporaryStackLimit(JSContext* cx) {
 
 int32_t Instance::computeInitialHotnessCounter(uint32_t funcIndex) {
   MOZ_ASSERT(code().mode() == CompileMode::LazyTiering);
-  uint32_t bodyLength =
-      codeMeta()
-          .funcDefRanges[funcIndex - codeMeta().numFuncImports]
-          .bodyLength;
+  uint32_t bodyLength = codeMeta().funcDefRange(funcIndex).size;
   return LazyTieringHeuristics::estimateIonCompilationCost(bodyLength);
 }
 
@@ -2777,46 +2759,160 @@ void Instance::submitCallRefHints(uint32_t funcIndex) {
        callRefIndex < range.begin + range.length; callRefIndex++) {
     MOZ_RELEASE_ASSERT(callRefIndex < codeMeta().numCallRefMetrics);
 
+    // In this loop, for each CallRefMetrics, we create a corresponding
+    // CallRefHint.  The CallRefHint is a recommendation of which function(s)
+    // to inline into the associated call site.  It is based on call target
+    // counts at the call site and incorporates other heuristics as implemented
+    // by the code below.
+    //
+    // Later, when compiling the call site with Ion, the CallRefHint created
+    // here is consulted.  That may or may not result in inlining actually
+    // taking place, since it depends also on context known only at
+    // Ion-compilation time -- inlining depth, inlining budgets, etc.  In
+    // particular, if the call site is itself within a function that got
+    // inlined multiple times, the call site may be compiled multiple times,
+    // with inlining happening in some cases and not in others.
+    //
+    // The logic below tries to find reasons not to inline into this call site,
+    // and if none are found, creates and stores a CallRefHint specifying the
+    // recommended targets.
+    //
+    // The core criterion is that the set of targets that eventually get chosen
+    // must together make up at least `requiredHotnessFraction` of all calls
+    // made by this call site.
+
     CallRefMetrics& metrics = callRefMetrics_[callRefIndex];
     MOZ_RELEASE_ASSERT(metrics.checkInvariants());
 
-    uint64_t totalCount = metrics.totalCount();
-    uint32_t targetFuncIndex = UINT32_MAX;
-    uint32_t targetBodySize = 0;
+    // For convenience, work with a copy of the candidates, not directly with
+    // `metrics`.
+    struct Candidate {
+      uint32_t funcIndex = 0;
+      uint32_t count = 0;
+      Candidate() = default;
+      Candidate(const Candidate&) = default;
+      Candidate(uint32_t funcIndex, uint32_t count)
+          : funcIndex(funcIndex), count(count) {}
+    };
+    Candidate candidates[CallRefMetrics::NUM_SLOTS];
+    size_t numCandidates = 0;
+
+    // If we're going to recommend no inlining here, specify a reason.
     const char* skipReason = nullptr;
 
+    // The total count for targets that are individually tracked.
+    uint64_t totalTrackedCount = 0;
+    bool allCandidatesAreImports = true;
+
+    // Make a first pass over the candidates, skipping imports.
+    for (size_t i = 0; i < CallRefMetrics::NUM_SLOTS; i++) {
+      if (!metrics.targets[i]) {
+        break;
+      }
+      uint32_t targetCount = metrics.counts[i];
+      if (targetCount == 0) {
+        continue;
+      }
+      totalTrackedCount += uint64_t(targetCount);
+
+      // We can't inline a call to a function which is in this module but has a
+      // different Instance, since the potential callees of any function depend
+      // on the instance it is associated with.  Cross-instance calls should
+      // have already been excluded from consideration by the code generated by
+      // BaseCompiler::updateCallRefMetrics, but given that this is critical,
+      // assert it here.
+      const DebugOnly<Instance*> targetFuncInstance =
+          static_cast<wasm::Instance*>(
+              metrics.targets[i]
+                  ->getExtendedSlot(FunctionExtended::WASM_INSTANCE_SLOT)
+                  .toPrivate());
+      MOZ_ASSERT(targetFuncInstance == this);
+
+      uint32_t targetFuncIndex =
+          wasm::ExportedFunctionToFuncIndex(metrics.targets[i]);
+      if (codeMeta().funcIsImport(targetFuncIndex)) {
+        continue;
+      }
+      allCandidatesAreImports = false;
+      candidates[numCandidates] = Candidate(targetFuncIndex, targetCount);
+      numCandidates++;
+    }
+    MOZ_RELEASE_ASSERT(numCandidates <= CallRefMetrics::NUM_SLOTS);
+
+    // The total count of all calls made by this call site.
+    uint64_t totalCount = totalTrackedCount + uint64_t(metrics.countOther);
+
+    // Throw out some obvious cases.
     if (totalCount == 0) {
       // See comments on definition of CallRefMetrics regarding overflow.
       skipReason = "(callsite unused)";
     } else if (metrics.targets[0] == nullptr) {
-      skipReason = "(all calls are cross-instance)";
-    } else {
-      targetFuncIndex = wasm::ExportedFunctionToFuncIndex(metrics.targets[0]);
-      if (codeMeta().funcIsImport(targetFuncIndex)) {
-        skipReason = "(target is an import)";
-      }
+      // None of the calls made by this call site could be attributed to
+      // specific callees; they all got lumped into CallRefMetrics::countOther.
+      // See GenerateUpdateCallRefMetricsStub for possible reasons why.
+      skipReason = "(no individually tracked targets)";
+    } else if (numCandidates > 0 && allCandidatesAreImports) {
+      // Imported functions can't be inlined.
+      skipReason = "(all targets are imports)";
     }
 
-    MOZ_ASSERT_IF(!skipReason,
-                  targetFuncIndex != UINT32_MAX && targetFuncIndex < MaxFuncs);
+    // We want to avoid inlining large functions into cold(ish) call sites.
     if (!skipReason) {
-      // We assume slot 0 is the hottest of all the slots.  See comments on
-      // definition of CallRefMetrics for rationale.
-      targetBodySize = codeMeta().funcDefRange(targetFuncIndex).bodyLength;
-      if (2 * totalCount < targetBodySize) {
+      uint32_t totalTargetBodySize = 0;
+      for (size_t i = 0; i < numCandidates; i++) {
+        totalTargetBodySize +=
+            codeMeta().funcDefRange(candidates[i].funcIndex).size;
+      }
+      if (totalCount < 2 * totalTargetBodySize) {
         skipReason = "(callsite too cold)";
-      } else if ((float(metrics.counts[0]) / float(totalCount)) <
-                 requiredHotnessFraction) {
-        skipReason = "(no clear hottest)";
       }
     }
 
-    codeMeta().setCallRefHint(
-        callRefIndex, skipReason ? CallRefHint::unknown()
-                                 : CallRefHint::inlineFunc(targetFuncIndex));
+    // The final check is the most important.  We need to choose some subset of
+    // the candidates which together make up at least `requiredHotnessFraction`
+    // of the calls made by this call site.  However, to avoid generated code
+    // wasting time on checking guards for relatively unlikely targets, we
+    // ignore any candidate that does not achieve at least 10% of
+    // `requiredHotnessFraction`.  Also make up a CallRefHints in anticipation
+    // of finding a usable set of candidates.
+    CallRefHint hints;
+    if (!skipReason) {
+      MOZ_RELEASE_ASSERT(totalCount > 0);  // Be sure to avoid NaN/Inf problems
+      float usableFraction = 0.0;
+      uint32_t numUsableCandidates = 0;
+      for (size_t i = 0; i < numCandidates; i++) {
+        float candidateFraction =
+            float(candidates[i].count) / float(totalCount);
+        if (candidateFraction >= 0.1 * requiredHotnessFraction) {
+          usableFraction += candidateFraction;
+          numUsableCandidates++;
+          if (!hints.full()) {
+            // Add this candidate to `hints`.  This assumes that we
+            // (more-or-less) encounter candidates in declining order of
+            // hotness.  See block comment on `struct CallRefMetrics`.
+            hints.append(candidates[i].funcIndex);
+          }
+        }
+      }
+      if (numUsableCandidates == 0) {
+        skipReason = "(no target is hot enough)";
+      } else if (usableFraction < requiredHotnessFraction) {
+        skipReason = "(collectively not hot enough)";
+      }
+    }
+
+    if (!skipReason) {
+      // Success!
+      MOZ_ASSERT(hints.length() > 0);
+      codeMeta().setCallRefHint(callRefIndex, hints);
+    } else {
+      CallRefHint empty;
+      codeMeta().setCallRefHint(callRefIndex, empty);
+    }
+
 #ifdef JS_JITSPEW
     if (!headerShown) {
-      JS_LOG(wasmCodeMetaStats, mozilla::LogLevel::Info,
+      JS_LOG(wasmPerf, mozilla::LogLevel::Info,
              "CM=..%06lx  CallRefMetrics for I=..%06lx fI=%-4u",
              (unsigned long)(uintptr_t(&codeMeta()) & 0xFFFFFFL),
              (unsigned long)(uintptr_t(this) & 0xFFFFFFL), funcIndex);
@@ -2828,12 +2924,18 @@ void Instance::submitCallRefHints(uint32_t funcIndex) {
       countsStr =
           JS_sprintf_append(std::move(countsStr), "%u ", metrics.counts[i]);
     }
-    JS::UniqueChars targetStr = skipReason
-                                    ? JS_smprintf("%s", skipReason)
-                                    : JS_smprintf("fI %u", targetFuncIndex);
-
-    JS_LOG(wasmCodeMetaStats, mozilla::LogLevel::Info,
-           "CM=..%06lx    %sother:%u --> %s",
+    JS::UniqueChars targetStr;
+    if (skipReason) {
+      targetStr = JS_smprintf("%s", skipReason);
+    } else {
+      targetStr = JS_smprintf("%s", "fI ");
+      for (size_t i = 0; i < hints.length(); i++) {
+        targetStr =
+            JS_sprintf_append(std::move(targetStr), "%u%s", hints.get(i),
+                              i + 1 < hints.length() ? ", " : "");
+      }
+    }
+    JS_LOG(wasmPerf, mozilla::LogLevel::Info, "CM=..%06lx    %sother:%u --> %s",
            (unsigned long)(uintptr_t(&codeMeta()) & 0xFFFFFFL), countsStr.get(),
            metrics.countOther, targetStr.get());
 #endif
@@ -3110,6 +3212,7 @@ static bool GetInterpEntryAndEnsureStubs(JSContext* cx, Instance& instance,
   const FuncExport* funcExport;
   if (!instance.code().getOrCreateInterpEntry(funcIndex, &funcExport,
                                               interpEntry)) {
+    ReportOutOfMemory(cx);
     return false;
   }
 
@@ -3122,6 +3225,7 @@ static bool GetInterpEntryAndEnsureStubs(JSContext* cx, Instance& instance,
   // WasmInstanceObject::getExportedFunction().
   if (!funcExport->hasEagerStubs() && (*funcType)->canHaveJitEntry()) {
     if (!EnsureBuiltinThunksInitialized()) {
+      ReportOutOfMemory(cx);
       return false;
     }
     JSFunction& callee = args.callee().as<JSFunction>();

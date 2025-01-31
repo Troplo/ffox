@@ -130,7 +130,7 @@ class ProcessCrashMonitor final {
   }
 
   static inline StaticMutex sMutex;
-  static inline UniquePtr<ProcessCrashMonitor> sCrashMonitor;
+  static inline MOZ_RUNINIT UniquePtr<ProcessCrashMonitor> sCrashMonitor;
   static inline Atomic<bool> sIsShutdown{false};
 
   uint32_t mCrashNums;
@@ -950,7 +950,7 @@ void ExternalEngineStateMachine::OnRequestVideo() {
     return;
   }
 
-  if (IsRequestingVideoData() || mVideoWaitRequest.Exists() || IsSeeking()) {
+  if (IsTrackingVideoData() || IsSeeking()) {
     LOGV(
         "No need to request video, isRequesting=%d, waitingVideo=%d, "
         "isSeeking=%d",

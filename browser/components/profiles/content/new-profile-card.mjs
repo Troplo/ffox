@@ -9,6 +9,8 @@ import { EditProfileCard } from "chrome://browser/content/profiles/edit-profile-
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://global/content/elements/moz-support-link.mjs";
 
+const DEFAULT_THEME_ID = "default-theme@mozilla.org";
+
 /**
  * Element used for updating a profile's name, theme, and avatar.
  */
@@ -18,16 +20,39 @@ export class NewProfileCard extends EditProfileCard {
       return;
     }
 
-    let { currentProfile, profiles, themes } = await RPMSendQuery(
-      "Profiles:GetNewProfileContent"
-    );
+    let { currentProfile, profiles, themes, isInAutomation } =
+      await RPMSendQuery("Profiles:GetNewProfileContent");
+
+    if (isInAutomation) {
+      this.updateNameDebouncer.timeout = 50;
+    }
+
     this.profile = currentProfile;
     this.profiles = profiles;
     this.themes = themes;
 
+    this.setRandomTheme(isInAutomation);
+
     this.setInitialInput();
 
+    super.setFavicon();
+
     this.initialized = true;
+  }
+
+  async setRandomTheme(isInAutomation) {
+    if (this.profile.themeId !== DEFAULT_THEME_ID) {
+      return;
+    }
+
+    let isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    let possibleThemes = this.themes.filter(t => t.isDark === isDark);
+    if (isInAutomation) {
+      possibleThemes = possibleThemes.filter(t => t.useInAutomation);
+    }
+    let newTheme =
+      possibleThemes[Math.floor(Math.random() * possibleThemes.length)];
+    super.updateTheme(newTheme.id);
   }
 
   async setInitialInput() {
@@ -44,21 +69,9 @@ export class NewProfileCard extends EditProfileCard {
     RPMSendAsyncMessage("Profiles:DeleteNewProfile");
   }
 
-  onDoneClick() {
-    let newName = this.nameInput.value.trim();
-    if (newName === "") {
-      this.showErrorMessage("edit-profile-page-no-name");
-    } else if (this.isDuplicateName(newName)) {
-      this.showErrorMessage("edit-profile-page-duplicate-name");
-    } else {
-      this.updateName();
-      RPMSendAsyncMessage("Profiles:CloseNewProfileTab");
-    }
-  }
-
   headerTemplate() {
     return html`<div>
-      <h1 data-l10n-id="new-profile-page-header"></h1>
+      <h2 data-l10n-id="new-profile-page-header"></h2>
       <p>
         <span data-l10n-id="new-profile-page-header-description"></span>
         <a
@@ -80,18 +93,6 @@ export class NewProfileCard extends EditProfileCard {
       value=${this.profile.name}
       @input=${super.handleInputEvent}
     />`;
-  }
-
-  buttonsTemplate() {
-    return html`<moz-button
-        data-l10n-id="edit-profile-page-delete-button"
-        @click=${this.onDeleteClick}
-      ></moz-button>
-      <moz-button
-        data-l10n-id="new-profile-page-done-button"
-        @click=${this.onDoneClick}
-        type="primary"
-      ></moz-button>`;
   }
 }
 

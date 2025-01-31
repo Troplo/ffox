@@ -91,6 +91,8 @@ class SearchRobot {
         searchTerm: String,
         shouldEditKeyword: Boolean = false,
         numberOfDeletionSteps: Int = 0,
+        shouldUseSearchShort: Boolean = false,
+        searchEngineName: String = "",
     ) {
         rule.waitForIdle()
         for (i in 1..RETRY_COUNT) {
@@ -114,6 +116,10 @@ class SearchRobot {
                     mDevice.pressBack()
                     homeScreen {
                     }.openSearch {
+                        if (shouldUseSearchShort) {
+                            clickSearchSelectorButton()
+                            selectTemporarySearchMethod(searchEngineName)
+                        }
                         typeSearch(searchTerm)
                         if (shouldEditKeyword) {
                             deleteSearchKeywordCharacters(numberOfDeletionSteps = numberOfDeletionSteps)
@@ -304,13 +310,6 @@ class SearchRobot {
     }
 
     fun longClickToolbar() {
-        Log.i(TAG, "longClickToolbar: Waiting for $waitingTime ms for $packageName window to be updated")
-        mDevice.waitForWindowUpdate(packageName, waitingTime)
-        Log.i(TAG, "longClickToolbar: Waited for $waitingTime ms for $packageName window to be updated")
-        Log.i(TAG, "longClickToolbar: Waiting for $waitingTime ms for the awesome bar to exist")
-        mDevice.findObject(UiSelector().resourceId("$packageName:id/awesomeBar"))
-            .waitForExists(waitingTime)
-        Log.i(TAG, "longClickToolbar: Waited for $waitingTime ms for the awesome bar to exist")
         Log.i(TAG, "longClickToolbar: Waiting for $waitingTime ms for the toolbar to exist")
         mDevice.findObject(UiSelector().resourceId("$packageName:id/toolbar"))
             .waitForExists(waitingTime)
@@ -321,9 +320,9 @@ class SearchRobot {
     }
 
     fun clickPasteText() {
-        Log.i(TAG, "clickPasteText: Waiting for $waitingTime ms for the \"Paste\" option to exist")
-        mDevice.findObject(UiSelector().textContains("Paste")).waitForExists(waitingTime)
-        Log.i(TAG, "clickPasteText: Waited for $waitingTime ms for the \"Paste\" option to exist")
+        Log.i(TAG, "clickPasteText: Waiting for $waitingTimeShort ms for the \"Paste\" option to exist")
+        mDevice.findObject(UiSelector().textContains("Paste")).waitForExists(waitingTimeShort)
+        Log.i(TAG, "clickPasteText: Waited for $waitingTimeShort ms for the \"Paste\" option to exist")
         Log.i(TAG, "clickPasteText: Trying to click the \"Paste\" button")
         mDevice.findObject(By.textContains("Paste")).click()
         Log.i(TAG, "clickPasteText: Clicked the \"Paste\" button")
@@ -336,6 +335,7 @@ class SearchRobot {
         assertUIObjectExists(
             itemWithResIdAndText("$packageName:id/mozac_browser_toolbar_edit_url_view", expectedText),
             exists = exists,
+            waitingTime = waitingTimeShort,
         )
 
     fun verifySearchBarPosition(bottomPosition: Boolean) {
@@ -366,20 +366,19 @@ class SearchRobot {
         private lateinit var sessionLoadedIdlingResource: SessionLoadedIdlingResource
 
         fun dismissSearchBar(interact: HomeScreenRobot.() -> Unit): HomeScreenRobot.Transition {
-            try {
-                Log.i(TAG, "dismissSearchBar: Waiting for $waitingTime ms for the search wrapper to exist")
-                searchWrapper().waitForExists(waitingTime)
-                Log.i(TAG, "dismissSearchBar: Waited for $waitingTime ms for the search wrapper to exist")
-                Log.i(TAG, "dismissSearchBar: Trying to click device back button")
-                mDevice.pressBack()
-                Log.i(TAG, "dismissSearchBar: Clicked device back button")
-                assertUIObjectIsGone(searchWrapper())
-            } catch (e: AssertionError) {
-                Log.i(TAG, "dismissSearchBar: AssertionError caught, executing fallback methods")
-                Log.i(TAG, "dismissSearchBar: Trying to click device back button")
-                mDevice.pressBack()
-                Log.i(TAG, "dismissSearchBar: Clicked device back button")
-                assertUIObjectIsGone(searchWrapper())
+            for (i in 0..1) {
+                try {
+                    Log.i(TAG, "dismissSearchBar: Trying to click device back button")
+                    mDevice.pressBack()
+                    Log.i(TAG, "dismissSearchBar: Clicked device back button")
+                    assertUIObjectIsGone(searchWrapper())
+
+                    break
+                } catch (e: AssertionError) {
+                    if (i == 1) {
+                        throw e
+                    }
+                }
             }
 
             HomeScreenRobot().interact()

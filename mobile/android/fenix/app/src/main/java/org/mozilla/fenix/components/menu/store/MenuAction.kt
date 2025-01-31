@@ -83,14 +83,9 @@ sealed class MenuAction : Action {
     data object FindInPage : MenuAction()
 
     /**
-     * [MenuAction] dispatched to show the menu CFR.
+     * [MenuAction] dispatched when a private tab is open in normal tab.
      */
-    data object ShowCFR : MenuAction()
-
-    /**
-     * [MenuAction] dispatched when the menu CFR is dismissed.
-     */
-    data object DismissCFR : MenuAction()
+    data object OpenInRegularTab : MenuAction()
 
     /**
      * [MenuAction] dispatched when the extension state is updated.
@@ -104,21 +99,21 @@ sealed class MenuAction : Action {
     /**
      * [MenuAction] dispatched when browser web extension items list is updated.
      *
-     * @property webExtensionBrowserMenuItem browserMenuItem The list of [WebExtensionMenuItem.WebExtensionBrowserMenuItem]
+     * @property webExtensionBrowserMenuItem browserMenuItem The list of [WebExtensionMenuItem]
      * to be shown in the menu.
      */
     data class UpdateWebExtensionBrowserMenuItems(
-        val webExtensionBrowserMenuItem: List<WebExtensionMenuItem.WebExtensionBrowserMenuItem>,
+        val webExtensionBrowserMenuItem: List<WebExtensionMenuItem>,
     ) : MenuAction()
 
     /**
-     * [MenuAction] dispatched when page web extension items list is updated.
+     * [MenuAction] dispatched when installed addons list is updated.
      *
-     * @property webExtensionPageMenuItem The list of [WebExtensionMenuItem.WebExtensionPageMenuItem]
+     * @property availableAddons The list of installed and enabled [Addon]s
      * to be shown in the menu.
      */
-    data class UpdateWebExtensionPageMenuItems(
-        val webExtensionPageMenuItem: List<WebExtensionMenuItem.WebExtensionPageMenuItem>,
+    data class UpdateAvailableAddons(
+        val availableAddons: List<Addon>,
     ) : MenuAction()
 
     /**
@@ -211,9 +206,19 @@ sealed class MenuAction : Action {
     data object SaveMenuClicked : MenuAction()
 
     /**
-     * [MenuAction] dispatched when the save menu item is clicked.
+     * [MenuAction] dispatched when the tools menu item is clicked.
      */
     data object ToolsMenuClicked : MenuAction()
+
+    /**
+     * [MenuAction] dispatched to show the menu CFR.
+     */
+    data object ShowCFR : MenuAction()
+
+    /**
+     * [MenuAction] dispatched when the menu CFR is dismissed.
+     */
+    data object DismissCFR : MenuAction()
 
     /**
      * [MenuAction] dispatched when a navigation event occurs for a specific destination.
@@ -333,5 +338,10 @@ sealed class MenuAction : Action {
         data class AddonDetails(
             val addon: Addon,
         ) : Navigate()
+
+        /**
+         * [Navigate] action dispatched when the user clicks to report a broken site.
+         */
+        data object WebCompatReporter : Navigate()
     }
 }

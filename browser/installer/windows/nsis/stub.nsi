@@ -25,7 +25,6 @@ ManifestDPIAware true
 !addplugindir ./
 
 Var CheckboxShortcuts
-Var CheckboxSendPing
 Var CheckboxInstallMaintSvc
 Var CheckboxCleanupProfile
 
@@ -67,6 +66,8 @@ Var EndFinishPhaseTickCount
 
 Var DistributionID
 Var DistributionVersion
+Var WindowsUBR
+Var StubBuildID
 
 Var InitialInstallRequirementsCode
 Var ExistingProfile
@@ -74,13 +75,24 @@ Var ExistingVersion
 Var ExistingBuildID
 Var DownloadedBytes
 Var DownloadRetryCount
+
+; After a failure, did the user choose to open the download page as a fallback?
 Var OpenedDownloadPage
+
 Var DownloadServerIP
 Var PostSigningData
 Var PreviousInstallDir
 Var ProfileCleanupPromptType
 Var AppLaunchWaitTickCount
 Var TimerHandle
+
+; Set AbortInstallation to "true" to prevent the installation "Pages" from starting, while still allowing
+; SendPing and its OnPing callback to complete.
+Var AbortInstallation
+
+; The SendPing function will set this to "true" once it has sent a ping, to ensure that we don't
+; send multiple pings for the same installation.
+Var PingAlreadySent
 
 !define ARCH_X86 1
 !define ARCH_AMD64 2
@@ -91,10 +103,14 @@ Var ArchToInstall
 ; the stub installer
 ;!define STUB_DEBUG
 
-!define StubURLVersion "v9"
+!define StubURLVersion "v10"
 
 ; Successful install exit code
 !define ERR_SUCCESS 0
+
+; Default failure exit code. Seeing this in telemetry indicates that the stub
+; installer has exited unsuccessfully, but no reason has been specified
+!define ERR_UNKNOWN 1
 
 /**
  * The following errors prefixed with ERR_DOWNLOAD apply to the download phase.
@@ -125,6 +141,18 @@ Var ArchToInstall
 
 ; Timed out while waiting for the certificate checks to run.
 !define ERR_PREINSTALL_CERT_TIMEOUT 24
+
+; System does not meet the minimum hardware requirements
+!define ERR_PREINSTALL_SYS_HW_REQ 25
+
+; System does not meet the minimum OS version requirements
+!define ERR_PREINSTALL_SYS_OS_REQ 26
+
+; Insufficient storage space is available in the target location
+!define ERR_PREINSTALL_SPACE 27
+
+; Target location is not writable
+!define ERR_PREINSTALL_NOT_WRITABLE 28
 
 /**
  * The following errors prefixed with ERR_INSTALL apply to the install phase.
@@ -173,7 +201,7 @@ Var ArchToInstall
 
 ; Maximum value of the download/install/launch progress bar, and the end values
 ; for each individual stage.
-!define PROGRESS_BAR_TOTAL_STEPS 500 
+!define PROGRESS_BAR_TOTAL_STEPS 500
 !define PROGRESS_BAR_DOWNLOAD_END_STEP 300
 !define PROGRESS_BAR_INSTALL_END_STEP 475
 !define PROGRESS_BAR_APP_LAUNCH_END_STEP 500
@@ -284,7 +312,8 @@ Function .onInit
   ; Remove the current exe directory from the search order.
   ; This only effects LoadLibrary calls and not implicitly loaded DLLs.
   System::Call 'kernel32::SetDllDirectoryW(w "")'
-
+  StrCpy $PingAlreadySent "false"
+  StrCpy $AbortInstallation "false"
   StrCpy $LANGUAGE 0
   ; This macro is used to set the brand name variables but the ini file method
   ; isn't supported for the stub installer.
@@ -297,21 +326,25 @@ Function .onInit
 
   ; Windows 8.1/Server 2012 R2 and lower are not supported.
   ${Unless} ${AtLeastWin10}
+    StrCpy $ExitCode "${ERR_PREINSTALL_SYS_OS_REQ}"
     ${If} "$R7" == "0"
       strCpy $R7 "$(WARN_MIN_SUPPORTED_OSVER_CPU_MSG)"
     ${Else}
       strCpy $R7 "$(WARN_MIN_SUPPORTED_OSVER_MSG)"
     ${EndIf}
     MessageBox MB_OKCANCEL|MB_ICONSTOP "$R7" IDCANCEL +2
-    ExecShell "open" "${URLSystemRequirements}"
-    Quit
+    ExecShell "open" "${URLWinPre10NeedsEsr115}"
+    StrCpy $AbortInstallation "true"
+    Return
   ${EndUnless}
 
   ; SSE2 CPU support
   ${If} "$R7" == "0"
+    StrCpy $ExitCode "${ERR_PREINSTALL_SYS_HW_REQ}"
     MessageBox MB_OKCANCEL|MB_ICONSTOP "$(WARN_MIN_SUPPORTED_CPU_MSG)" IDCANCEL +2
     ExecShell "open" "${URLSystemRequirements}"
-    Quit
+    StrCpy $AbortInstallation "true"
+    Return
   ${EndIf}
 
   Call GetArchToInstall
@@ -355,7 +388,7 @@ Function .onInit
 
   ; Initialize the majority of variables except those that need to be reset
   ; when a page is displayed.
-  StrCpy $ExitCode "${ERR_DOWNLOAD_CANCEL}"
+  StrCpy $ExitCode "${ERR_UNKNOWN}"
   StrCpy $IntroPhaseSeconds "0"
   StrCpy $OptionsPhaseSeconds "0"
   StrCpy $EndPreInstallPhaseTickCount "0"
@@ -366,7 +399,6 @@ Function .onInit
   StrCpy $IsDownloadFinished ""
   StrCpy $FirefoxLaunchCode "0"
   StrCpy $CheckboxShortcuts "1"
-  StrCpy $CheckboxSendPing "1"
   StrCpy $CheckboxCleanupProfile "0"
   StrCpy $ProgressCompleted "0"
 !ifdef MOZ_MAINTENANCE_SERVICE
@@ -448,14 +480,18 @@ Function .onInit
 
   Call CanWrite
   ${If} "$CanWriteToInstallDir" == "false"
+    StrCpy $ExitCode "${ERR_PREINSTALL_NOT_WRITABLE}"
     MessageBox MB_OK|MB_ICONEXCLAMATION "$(WARN_WRITE_ACCESS_QUIT)$\n$\n$INSTDIR"
-    Quit
+    StrCpy $AbortInstallation "true"
+    Return
   ${EndIf}
 
   Call CheckSpace
   ${If} "$HasRequiredSpaceAvailable" == "false"
+      StrCpy $ExitCode "${ERR_PREINSTALL_SPACE}"
     MessageBox MB_OK|MB_ICONEXCLAMATION "$(WARN_DISK_SPACE_QUIT)"
-    Quit
+    StrCpy $AbortInstallation "true"
+    Return
   ${EndIf}
 
   ${InitHashAppModelId} "$INSTDIR" "Software\Mozilla\${AppName}\TaskBarIDs"
@@ -494,6 +530,7 @@ Function .onUserAbort
     Pop $0
     ${If} $0 == 1002
       ; The cancel button was clicked
+      StrCpy $ExitCode "${ERR_DOWNLOAD_CANCEL}"
       Call LaunchHelpPage
       Call SendPing
     ${Else}
@@ -617,6 +654,10 @@ Function getUIString
 FunctionEnd
 
 Function createProfileCleanup
+  ${If} $AbortInstallation != "false"
+    ; Abort in this context skips the "page"
+    Abort
+  ${EndIf}
   Call ShouldPromptForProfileCleanup
 
   ${If} $ProfileCleanupPromptType == 0
@@ -633,6 +674,12 @@ Function createProfileCleanup
 FunctionEnd
 
 Function createInstall
+  ${If} $AbortInstallation != "false"
+    ; Skip the installation, but first send the telemetry
+    Call SendPing
+    ; Abort in this context skips the "page"
+    Abort
+  ${EndIf}
   GetDlgItem $0 $HWNDPARENT 1 ; Install button
   EnableWindow $0 0
   ShowWindow $0 ${SW_HIDE}
@@ -945,7 +992,8 @@ FunctionEnd
 Function SendPing
   HideWindow
 
-  ${If} $CheckboxSendPing == 1
+  ${If} $PingAlreadySent == "false"
+    StrCpy $PingAlreadySent "true"
     ; Get the tick count for the completion of all phases.
     System::Call "kernel32::GetTickCount()l .s"
     Pop $EndFinishPhaseTickCount
@@ -1054,6 +1102,15 @@ Function SendPing
       StrCpy $DistributionVersion "0"
     ${EndIf}
 
+    ; Capture the Windows UBR
+    ReadRegDWORD $WindowsUBR HKLM "SOFTWARE\Microsoft\Windows NT\CurrentVersion" "UBR"
+    ${If} ${Errors}
+      StrCpy $WindowsUBR "-1" ; Assign -1 if an error occured during registry read
+    ${EndIf}
+    
+    ; Capture the stub installer build ID
+    StrCpy $StubBuildID ${MOZ_BUILDID}
+
     ; Whether installed into the default installation directory
     ${GetLongPath} "$INSTDIR" $R7
     ${GetLongPath} "$InitialInstallDir" $R8
@@ -1122,6 +1179,10 @@ Function SendPing
 
     StrCpy $R3 "1"
 
+; Note: ExitCode gets parsed here to determine values for "succeeded",
+; "user_cancelled", etc.
+; https://github.com/mozilla/gcp-ingestion/blob/1d9dc42384ebe3b0c7b0b2c193416d1534b7e444/ingestion-beam/src/main/java/com/mozilla/telemetry/decoder/ParseUri.java#L266
+
 !ifdef STUB_DEBUG
     MessageBox MB_OK "${BaseURLStubPing} \
                       $\nStub URL Version = ${StubURLVersion}${StubURLVersionAppend} \
@@ -1164,14 +1225,16 @@ Function SendPing
                       $\nProfile cleanup prompt shown = $ProfileCleanupPromptType \
                       $\nDid profile cleanup = $CheckboxCleanupProfile \
                       $\nDistribution ID = $DistributionID \
-                      $\nDistribution Version = $DistributionVersion"
+                      $\nDistribution Version = $DistributionVersion \
+                      $\nWindows UBR = $WindowsUBR \
+                      $\nStub Installer Build ID = $StubBuildID"
     ; The following will exit the installer
     SetAutoClose true
     StrCpy $R9 "2"
     Call RelativeGotoPage
 !else
     ${StartTimer} ${DownloadIntervalMS} OnPing
-    InetBgDL::Get "${BaseURLStubPing}/${StubURLVersion}${StubURLVersionAppend}/${Channel}/${UpdateChannel}/${AB_CD}/$R0/$R1/$5/$6/$7/$8/$9/$ExitCode/$FirefoxLaunchCode/$DownloadRetryCount/$DownloadedBytes/$DownloadSizeBytes/$IntroPhaseSeconds/$OptionsPhaseSeconds/$0/$1/$DownloadFirstTransferSeconds/$2/$3/$4/$InitialInstallRequirementsCode/$OpenedDownloadPage/$ExistingProfile/$ExistingVersion/$ExistingBuildID/$R5/$R6/$R7/$R8/$R2/$R3/$DownloadServerIP/$PostSigningData/$ProfileCleanupPromptType/$CheckboxCleanupProfile/$DistributionID/$DistributionVersion" \
+    InetBgDL::Get "${BaseURLStubPing}/${StubURLVersion}${StubURLVersionAppend}/${Channel}/${UpdateChannel}/${AB_CD}/$R0/$R1/$5/$6/$7/$8/$9/$ExitCode/$FirefoxLaunchCode/$DownloadRetryCount/$DownloadedBytes/$DownloadSizeBytes/$IntroPhaseSeconds/$OptionsPhaseSeconds/$0/$1/$DownloadFirstTransferSeconds/$2/$3/$4/$InitialInstallRequirementsCode/$OpenedDownloadPage/$ExistingProfile/$ExistingVersion/$ExistingBuildID/$R5/$R6/$R7/$R8/$R2/$R3/$DownloadServerIP/$PostSigningData/$ProfileCleanupPromptType/$CheckboxCleanupProfile/$DistributionID/$DistributionVersion/$WindowsUBR/$StubBuildID" \
                   "$PLUGINSDIR\_temp" /END
 !endif
   ${Else}

@@ -4,8 +4,8 @@
 
 use crate::{
     cow_label, error::HasErrorBufferType, wgpu_string, AdapterInformation, ByteBuf,
-    CommandEncoderAction, DeviceAction, DropAction, ImageDataLayout, ImplicitLayout,
-    QueueWriteAction, RawString, TextureAction,
+    CommandEncoderAction, DeviceAction, DropAction, ImplicitLayout, QueueWriteAction, RawString,
+    TexelCopyBufferLayout, TextureAction,
 };
 
 use crate::SwapChainId;
@@ -302,6 +302,7 @@ struct IdentityHub {
     textures: IdentityManager<markers::Texture>,
     texture_views: IdentityManager<markers::TextureView>,
     samplers: IdentityManager<markers::Sampler>,
+    query_sets: IdentityManager<markers::QuerySet>,
 }
 
 impl Default for IdentityHub {
@@ -322,6 +323,7 @@ impl Default for IdentityHub {
             textures: IdentityManager::new(),
             texture_views: IdentityManager::new(),
             samplers: IdentityManager::new(),
+            query_sets: IdentityManager::new(),
         }
     }
 }
@@ -713,6 +715,49 @@ pub unsafe extern "C" fn wgpu_client_create_render_bundle_error(
 #[no_mangle]
 pub extern "C" fn wgpu_client_free_render_bundle_id(client: &Client, id: id::RenderBundleId) {
     client.identities.lock().render_bundles.free(id)
+}
+
+#[repr(C)]
+pub struct RawQuerySetDescriptor<'a> {
+    label: Option<&'a nsACString>,
+    ty: RawQueryType,
+    count: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub enum RawQueryType {
+    Occlusion,
+    Timestamp,
+}
+
+#[no_mangle]
+pub extern "C" fn wgpu_client_create_query_set(
+    client: &Client,
+    desc: &RawQuerySetDescriptor,
+    bb: &mut ByteBuf,
+) -> wgc::id::QuerySetId {
+    let &RawQuerySetDescriptor { label, ty, count } = desc;
+
+    let label = wgpu_string(label);
+    let ty = match ty {
+        RawQueryType::Occlusion => wgt::QueryType::Occlusion,
+        RawQueryType::Timestamp => wgt::QueryType::Timestamp,
+    };
+
+    let desc = wgc::resource::QuerySetDescriptor { label, ty, count };
+
+    let id = client.identities.lock().query_sets.process();
+
+    let action = DeviceAction::CreateQuerySet(id, desc);
+    *bb = make_byte_buf(&action);
+
+    id
+}
+
+#[no_mangle]
+pub extern "C" fn wgpu_client_free_query_set_id(client: &Client, id: id::QuerySetId) {
+    client.identities.lock().query_sets.free(id)
 }
 
 #[repr(C)]
@@ -1163,15 +1208,15 @@ pub unsafe extern "C" fn wgpu_command_encoder_copy_buffer_to_buffer(
 
 #[no_mangle]
 pub unsafe extern "C" fn wgpu_command_encoder_copy_texture_to_buffer(
-    src: wgc::command::ImageCopyTexture,
+    src: wgc::command::TexelCopyTextureInfo,
     dst_buffer: wgc::id::BufferId,
-    dst_layout: &ImageDataLayout,
+    dst_layout: &TexelCopyBufferLayout,
     size: wgt::Extent3d,
     bb: &mut ByteBuf,
 ) {
     let action = CommandEncoderAction::CopyTextureToBuffer {
         src,
-        dst: wgc::command::ImageCopyBuffer {
+        dst: wgc::command::TexelCopyBufferInfo {
             buffer: dst_buffer,
             layout: dst_layout.into_wgt(),
         },
@@ -1183,13 +1228,13 @@ pub unsafe extern "C" fn wgpu_command_encoder_copy_texture_to_buffer(
 #[no_mangle]
 pub unsafe extern "C" fn wgpu_command_encoder_copy_buffer_to_texture(
     src_buffer: wgc::id::BufferId,
-    src_layout: &ImageDataLayout,
-    dst: wgc::command::ImageCopyTexture,
+    src_layout: &TexelCopyBufferLayout,
+    dst: wgc::command::TexelCopyTextureInfo,
     size: wgt::Extent3d,
     bb: &mut ByteBuf,
 ) {
     let action = CommandEncoderAction::CopyBufferToTexture {
-        src: wgc::command::ImageCopyBuffer {
+        src: wgc::command::TexelCopyBufferInfo {
             buffer: src_buffer,
             layout: src_layout.into_wgt(),
         },
@@ -1201,8 +1246,8 @@ pub unsafe extern "C" fn wgpu_command_encoder_copy_buffer_to_texture(
 
 #[no_mangle]
 pub unsafe extern "C" fn wgpu_command_encoder_copy_texture_to_texture(
-    src: wgc::command::ImageCopyTexture,
-    dst: wgc::command::ImageCopyTexture,
+    src: wgc::command::TexelCopyTextureInfo,
+    dst: wgc::command::TexelCopyTextureInfo,
     size: wgt::Extent3d,
     bb: &mut ByteBuf,
 ) {
@@ -1249,6 +1294,25 @@ pub unsafe extern "C" fn wgpu_command_encoder_insert_debug_marker(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn wgpu_command_encoder_resolve_query_set(
+    query_set_id: id::QuerySetId,
+    start_query: u32,
+    query_count: u32,
+    destination: id::BufferId,
+    destination_offset: wgt::BufferAddress,
+    bb: &mut ByteBuf,
+) {
+    let action = CommandEncoderAction::ResolveQuerySet {
+        query_set_id,
+        start_query,
+        query_count,
+        destination,
+        destination_offset,
+    };
+    *bb = make_byte_buf(&action);
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn wgpu_queue_write_buffer(
     dst: id::BufferId,
     offset: wgt::BufferAddress,
@@ -1260,8 +1324,8 @@ pub unsafe extern "C" fn wgpu_queue_write_buffer(
 
 #[no_mangle]
 pub unsafe extern "C" fn wgpu_queue_write_texture(
-    dst: wgt::ImageCopyTexture<id::TextureId>,
-    layout: ImageDataLayout,
+    dst: wgt::TexelCopyTextureInfo<id::TextureId>,
+    layout: TexelCopyBufferLayout,
     size: wgt::Extent3d,
     bb: &mut ByteBuf,
 ) {

@@ -638,8 +638,7 @@ class HistoryMenu extends PlacesMenu {
     // populate menu
     let tabsFragment = RecentlyClosedTabsAndWindowsMenuUtils.getTabsFragment(
       window,
-      "menuitem",
-      /* aPrefixRestoreAll = */ false
+      "menuitem"
     );
     undoPopup.appendChild(tabsFragment);
   }
@@ -830,10 +829,7 @@ var BookmarksEventHandler = {
       PlacesUIUtils.openNodeWithEvent(target._placesNode, aEvent);
       // Only record interactions through the Bookmarks Toolbar
       if (target.closest("#PersonalToolbar")) {
-        Services.telemetry.scalarAdd(
-          "browser.engagement.bookmarks_toolbar_bookmark_opened",
-          1
-        );
+        Glean.browserEngagement.bookmarksToolbarBookmarkOpened.add(1);
       }
     }
   },
@@ -847,7 +843,8 @@ var BookmarksEventHandler = {
       var tree = aTooltip.triggerNode.parentNode;
       var cell = tree.getCellAt(aEvent.clientX, aEvent.clientY);
       if (cell.row == -1) {
-        return false;
+        aEvent.preventDefault();
+        return;
       }
       node = tree.view.nodeForTreeIndex(cell.row);
       cropped = tree.isCellCropped(cell.row, cell.col);
@@ -864,7 +861,8 @@ var BookmarksEventHandler = {
     }
 
     if (!node && !targetURI) {
-      return false;
+      aEvent.preventDefault();
+      return;
     }
 
     // Show node.label as tooltip's title for non-Places nodes.
@@ -878,7 +876,8 @@ var BookmarksEventHandler = {
 
     // Show tooltip for containers only if their title is cropped.
     if (!cropped && !url) {
-      return false;
+      aEvent.preventDefault();
+      return;
     }
 
     let tooltipTitle = aEvent.target.querySelector(".places-tooltip-title");
@@ -895,7 +894,6 @@ var BookmarksEventHandler = {
     }
 
     // Show tooltip.
-    return true;
   },
 };
 
@@ -2055,10 +2053,7 @@ var BookmarkingUI = {
           }
 
           if (ev.parentGuid === PlacesUtils.bookmarks.toolbarGuid) {
-            Services.telemetry.scalarAdd(
-              "browser.engagement.bookmarks_toolbar_bookmark_added",
-              1
-            );
+            Glean.browserEngagement.bookmarksToolbarBookmarkAdded.add(1);
           }
           if (ev.parentGuid == PlacesUtils.bookmarks.tagsGuid) {
             StarUI.userHasTags = true;
@@ -2103,10 +2098,7 @@ var BookmarkingUI = {
           ) {
             affectsBookmarksToolbarFolder = true;
             if (ev.oldParentGuid != PlacesUtils.bookmarks.toolbarGuid) {
-              Services.telemetry.scalarAdd(
-                "browser.engagement.bookmarks_toolbar_bookmark_added",
-                1
-              );
+              Glean.browserEngagement.bookmarksToolbarBookmarkAdded.add(1);
             }
           }
           break;
@@ -2245,13 +2237,14 @@ var BookmarkingUI = {
     let otherBookmarksButton = document.createXULElement("toolbarbutton");
     otherBookmarksButton.setAttribute("type", "menu");
     otherBookmarksButton.setAttribute("container", "true");
-    otherBookmarksButton.setAttribute(
-      "onpopupshowing",
-      "document.getElementById('PlacesToolbar')._placesView._onOtherBookmarksPopupShowing(event);"
-    );
     otherBookmarksButton.id = "OtherBookmarks";
     otherBookmarksButton.className = "bookmark-item";
     otherBookmarksButton.hidden = "true";
+    otherBookmarksButton.addEventListener("popupshowing", event =>
+      document
+        .getElementById("PlacesToolbar")
+        ._placesView._onOtherBookmarksPopupShowing(event)
+    );
 
     MozXULElement.insertFTLIfNeeded("browser/places.ftl");
     document.l10n.setAttributes(otherBookmarksButton, "other-bookmarks-folder");

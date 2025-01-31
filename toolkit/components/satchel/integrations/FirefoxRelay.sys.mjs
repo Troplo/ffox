@@ -37,8 +37,45 @@ const gConfig = (function () {
     privacyPolicyUrl: Services.urlFormatter.formatURLPref(
       "signon.firefoxRelay.privacy_policy_url"
     ),
+    allowListForFirstOfferPref: "signon.firefoxRelay.allowListForFirstOffer",
+    allowListRemoteSettingsCollectionPref:
+      "signon.firefoxRelay.allowListRemoteSettingsCollection",
   };
 })();
+
+export const autocompleteUXTreatments = {
+  control: {
+    image: "chrome://browser/content/logos/relay.svg",
+    messageIds: [
+      "firefox-relay-opt-in-title-1",
+      "firefox-relay-opt-in-subtitle-1",
+    ],
+  },
+  "basic-info": {
+    image:
+      "chrome://activity-stream/content/data/content/assets/glyph-mail-16.svg",
+    messageIds: [
+      "firefox-relay-opt-in-title-a",
+      "firefox-relay-opt-in-subtitle-a",
+    ],
+  },
+  "with-domain": {
+    image:
+      "chrome://activity-stream/content/data/content/assets/glyph-mail-16.svg",
+    messageIds: [
+      "firefox-relay-opt-in-title-b",
+      "firefox-relay-opt-in-subtitle-b",
+    ],
+  },
+  "with-domain-and-value-prop": {
+    image:
+      "chrome://activity-stream/content/data/content/assets/glyph-mail-16.svg",
+    messageIds: [
+      "firefox-relay-opt-in-title-b",
+      "firefox-relay-opt-in-subtitle-b",
+    ],
+  },
+};
 
 ChromeUtils.defineLazyGetter(lazy, "log", () =>
   LoginHelper.createLogger("FirefoxRelay")
@@ -55,9 +92,14 @@ ChromeUtils.defineLazyGetter(lazy, "strings", function () {
   return new Localization([
     "branding/brand.ftl",
     "browser/firefoxRelay.ftl",
-    "preview/firefoxRelayToAllBrowsers.ftl",
     "toolkit/branding/brandings.ftl",
   ]);
+});
+ChromeUtils.defineESModuleGetters(lazy, {
+  NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+  RemoteSettings: "resource://services-settings/remote-settings.sys.mjs",
+  RemoteSettingsClient:
+    "resource://services-settings/RemoteSettingsClient.sys.mjs",
 });
 
 if (Services.appinfo.processType !== Services.appinfo.PROCESS_TYPE_DEFAULT) {
@@ -68,6 +110,7 @@ if (Services.appinfo.processType !== Services.appinfo.PROCESS_TYPE_DEFAULT) {
 const AUTH_TOKEN_ERROR_CODE = 418;
 
 let gFlowId;
+let gAllowListCollection;
 
 async function getRelayTokenAsync() {
   try {
@@ -167,13 +210,14 @@ async function showErrorAsync(browser, messageId, messageArgs) {
     {
       autofocus: true,
       removeOnDismissal: true,
+      hideClose: true,
       popupIconURL: "chrome://browser/content/logos/relay.svg",
       learnMoreURL: gConfig.learnMoreURL,
     }
   );
 }
 
-function customizeNotificationHeader(notification) {
+function customizeNotificationHeader(notification, treatment = "control") {
   if (!notification) {
     return;
   }
@@ -181,7 +225,11 @@ function customizeNotificationHeader(notification) {
   const description = document.querySelector(
     `description[popupid=${notification.id}]`
   );
-  const headerTemplate = document.getElementById("firefox-relay-header");
+  const notificationHeaderId =
+    treatment === "control"
+      ? `firefox-relay-header`
+      : `firefox-relay-header-${treatment}`;
+  const headerTemplate = document.getElementById(notificationHeaderId);
   description.replaceChildren(headerTemplate.firstChild.cloneNode(true));
 }
 
@@ -349,6 +397,7 @@ async function showReusableMasksAsync(browser, origin, error) {
     {
       autofocus: true,
       removeOnDismissal: true,
+      hideClose: true,
       eventCallback: onNotificationEvent,
     }
   );
@@ -420,21 +469,71 @@ function isSignup(scenarioName) {
   return scenarioName == "SignUpFormScenario";
 }
 
+async function onAllowList(origin) {
+  const allowListForFirstOffer = Services.prefs.getBoolPref(
+    gConfig.allowListForFirstOfferPref,
+    true
+  );
+  if (!allowListForFirstOffer) {
+    return true;
+  }
+  if (!origin) {
+    return false;
+  }
+  if (!gAllowListCollection) {
+    const allowListRemoteSettingsCollection = Services.prefs.getStringPref(
+      gConfig.allowListRemoteSettingsCollectionPref,
+      "fxrelay-allowlist"
+    );
+    try {
+      gAllowListCollection = await lazy
+        .RemoteSettings(allowListRemoteSettingsCollection)
+        .get();
+      lazy.RemoteSettings(allowListRemoteSettingsCollection).on("sync", () => {
+        gAllowListCollection = null;
+      });
+    } catch (ex) {
+      if (ex instanceof lazy.RemoteSettingsClient.UnknownCollectionError) {
+        lazy.log.warn(
+          "Could not get Remote Settings collection.",
+          gConfig.allowListRemoteSettingsCollection,
+          ex
+        );
+      }
+      throw ex;
+    }
+  }
+  const originHost = new URL(origin).host;
+  return gAllowListCollection.some(
+    allowListRecord => allowListRecord.domain == originHost
+  );
+}
+
 class RelayOffered {
-  async *autocompleteItemsAsync(_origin, scenarioName, hasInput) {
+  async *autocompleteItemsAsync(origin, scenarioName, hasInput) {
+    const hasFxA = await hasFirefoxAccountAsync();
+    const showRelayOnAllowlistSiteToAllUsers =
+      Services.prefs.getBoolPref(gConfig.showToAllBrowsersPref, false) &&
+      (await onAllowList(origin));
     if (
       !hasInput &&
       isSignup(scenarioName) &&
       !Services.prefs.prefIsLocked(gConfig.relayFeaturePref) &&
-      ((await hasFirefoxAccountAsync()) ||
-        Services.prefs.getBoolPref(gConfig.showToAllBrowsersPref, false))
+      (hasFxA || showRelayOnAllowlistSiteToAllUsers)
     ) {
+      const nimbusRelayAutocompleteFeature =
+        lazy.NimbusFeatures["email-autocomplete-relay"];
+      const treatment =
+        nimbusRelayAutocompleteFeature.getVariable("firstOfferVersion");
+      if (!hasFxA && treatment == "disabled") {
+        return;
+      }
+      nimbusRelayAutocompleteFeature.recordExposureEvent({ once: true });
       const [title, subtitle] = await formatMessages(
-        "firefox-relay-opt-in-title-1",
-        "firefox-relay-opt-in-subtitle-1"
+        ...autocompleteUXTreatments[treatment].messageIds
       );
       yield new ParentAutocompleteOption(
-        "chrome://browser/content/logos/relay.svg",
+        autocompleteUXTreatments[treatment].image,
         title,
         subtitle,
         "PasswordManager:offerRelayIntegration",
@@ -503,9 +602,17 @@ class RelayOffered {
     const fillUsernamePromise = new Promise(
       resolve => (fillUsername = resolve)
     );
+    const nimbusRelayAutocompleteFeature =
+      lazy.NimbusFeatures["email-autocomplete-relay"];
+    const treatment =
+      nimbusRelayAutocompleteFeature.getVariable("firstOfferVersion");
+    const enableButtonId =
+      treatment === "control"
+        ? "firefox-relay-and-fxa-opt-in-confirmation-enable-button-sign-up"
+        : `firefox-relay-and-fxa-opt-in-confirmation-enable-button-${treatment}`;
     const [enableStrings, disableStrings, postponeStrings] =
       await formatMessages(
-        "firefox-relay-and-fxa-opt-in-confirmation-enable-button",
+        enableButtonId,
         "firefox-relay-and-fxa-opt-in-confirmation-disable",
         "firefox-relay-and-fxa-opt-in-confirmation-postpone"
       );
@@ -592,6 +699,12 @@ class RelayOffered {
             "relay_integration",
             {
               service: "relay",
+              entrypoint_experiment: "first_offer_version",
+              entrypoint_variation: treatment,
+              utm_source: "relay-integration",
+              utm_medium: "firefox-desktop",
+              utm_campaign: "first_offer_version",
+              utm_content: treatment,
             }
           );
         browser.ownerGlobal.openWebLinkIn(fxaUrl, "tab");
@@ -601,9 +714,17 @@ class RelayOffered {
     const disableIntegration = getDisableIntegration(disableStrings, feature);
     let notification;
     feature.markAsOffered();
+    const popupNotificationId =
+      treatment === "control"
+        ? "fxa-and-relay-integration-offer"
+        : `fxa-and-relay-integration-offer-${treatment}`;
+
+    const learnMoreURL =
+      treatment === "control" ? gConfig.learnMoreURL : undefined;
+
     notification = PopupNotifications.show(
       browser,
-      "fxa-and-relay-integration-offer",
+      popupNotificationId,
       "", // content is provided after popup shown
       "password-notification-icon",
       enableIntegration,
@@ -611,16 +732,34 @@ class RelayOffered {
       {
         autofocus: true,
         removeOnDismissal: true,
-        learnMoreURL: gConfig.learnMoreURL,
+        hideClose: true,
+        learnMoreURL,
         eventCallback: event => {
           switch (event) {
             case "shown": {
               const document = notification.owner.panel.ownerDocument;
-              customizeNotificationHeader(notification);
-              document.getElementById("firefox-relay-offer-tos-url").href =
-                gConfig.termsOfServiceUrl;
-              document.getElementById("firefox-relay-offer-privacy-url").href =
-                gConfig.privacyPolicyUrl;
+              customizeNotificationHeader(notification, treatment);
+              document.querySelector(
+                '[data-l10n-name="firefox-relay-learn-more-url"]'
+              ).href = gConfig.learnMoreURL;
+              const baseDomain = Services.eTLD.getBaseDomain(
+                Services.io.newURI(origin)
+              );
+              document.querySelector(
+                '[data-l10n-name="firefox-fxa-and-relay-offer-domain"]'
+              ).textContent = baseDomain;
+              const tosLink = document.querySelector(
+                ".firefox-fxa-and-relay-offer-tos-url"
+              );
+              if (tosLink) {
+                tosLink.href = gConfig.termsOfServiceUrl;
+              }
+              const privacyPolicyLink = document.querySelector(
+                ".firefox-fxa-and-relay-offer-privacy-url"
+              );
+              if (privacyPolicyLink) {
+                privacyPolicyLink.href = gConfig.privacyPolicyUrl;
+              }
               Glean.relayIntegration.shownOptInPanel.record({ value: gFlowId });
               break;
             }
@@ -673,6 +812,7 @@ class RelayOffered {
       {
         autofocus: true,
         removeOnDismissal: true,
+        hideClose: true,
         learnMoreURL: gConfig.learnMoreURL,
         eventCallback: event => {
           switch (event) {

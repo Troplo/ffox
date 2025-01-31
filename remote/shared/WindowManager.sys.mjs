@@ -39,8 +39,23 @@ class WindowManager {
     return chromeWindowHandles;
   }
 
+  /**
+   * Retrieve all the open windows.
+   *
+   * @returns {Array<Window>}
+   *     All the open windows. Will return an empty list if no window is open.
+   */
   get windows() {
-    return Services.wm.getEnumerator(null);
+    const windows = [];
+
+    for (const win of Services.wm.getEnumerator(null)) {
+      if (win.closed) {
+        continue;
+      }
+      windows.push(win);
+    }
+
+    return windows;
   }
 
   /**
@@ -286,3 +301,46 @@ class WindowManager {
 
 // Expose a shared singleton.
 export const windowManager = new WindowManager();
+
+/**
+ * Representation of the {@link ChromeWindow} window state.
+ *
+ * @enum {string}
+ */
+export const WindowState = {
+  Maximized: "maximized",
+  Minimized: "minimized",
+  Normal: "normal",
+  Fullscreen: "fullscreen",
+
+  /**
+   * Converts {@link Window.windowState} to WindowState.
+   *
+   * @param {number} windowState
+   *     Attribute from {@link Window.windowState}.
+   *
+   * @returns {WindowState}
+   *     JSON representation.
+   *
+   * @throws {TypeError}
+   *     If <var>windowState</var> was unknown.
+   */
+  from(windowState) {
+    switch (windowState) {
+      case 1:
+        return WindowState.Maximized;
+
+      case 2:
+        return WindowState.Minimized;
+
+      case 3:
+        return WindowState.Normal;
+
+      case 4:
+        return WindowState.Fullscreen;
+
+      default:
+        throw new TypeError(`Unknown window state: ${windowState}`);
+    }
+  },
+};

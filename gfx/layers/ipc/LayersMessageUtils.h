@@ -18,7 +18,8 @@
 #include "ipc/IPCMessageUtils.h"
 #include "mozilla/ScrollSnapInfo.h"
 #include "mozilla/ServoBindings.h"
-#include "mozilla/dom/WebGLIpdl.h"
+#include "mozilla/ParamTraits_IsEnumCase.h"
+#include "mozilla/ParamTraits_TiedFields.h"
 #include "mozilla/ipc/ByteBuf.h"
 #include "mozilla/ipc/ProtocolMessageUtils.h"
 #include "mozilla/ipc/RustMessageUtils.h"
@@ -28,6 +29,7 @@
 #include "mozilla/layers/CompositorTypes.h"
 #include "mozilla/layers/FocusTarget.h"
 #include "mozilla/layers/GeckoContentControllerTypes.h"
+#include "mozilla/layers/GpuFence.h"
 #include "mozilla/layers/KeyboardMap.h"
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/layers/MatrixMessage.h"
@@ -579,6 +581,13 @@ struct ParamTraits<mozilla::ScrollPositionUpdate> {
 };
 
 template <>
+struct ParamTraits<mozilla::dom::InteractiveWidget>
+    : public ContiguousEnumSerializerInclusive<
+          mozilla::dom::InteractiveWidget,
+          mozilla::dom::InteractiveWidget::OverlaysContent,
+          mozilla::dom::InteractiveWidget::ResizesVisual> {};
+
+template <>
 struct ParamTraits<mozilla::layers::ScrollMetadata>
     : BitfieldHelper<mozilla::layers::ScrollMetadata> {
   typedef mozilla::layers::ScrollMetadata paramType;
@@ -590,7 +599,7 @@ struct ParamTraits<mozilla::layers::ScrollMetadata>
     WriteParam(aWriter, aParam.GetContentDescription());
     WriteParam(aWriter, aParam.mLineScrollAmount);
     WriteParam(aWriter, aParam.mPageScrollAmount);
-    WriteParam(aWriter, aParam.mHasScrollgrab);
+    WriteParam(aWriter, aParam.mInteractiveWidget);
     WriteParam(aWriter, aParam.mIsLayersIdRoot);
     WriteParam(aWriter, aParam.mIsAutoDirRootContentRTL);
     WriteParam(aWriter, aParam.mForceDisableApz);
@@ -600,6 +609,7 @@ struct ParamTraits<mozilla::layers::ScrollMetadata>
     WriteParam(aWriter, aParam.mForceMousewheelAutodir);
     WriteParam(aWriter, aParam.mForceMousewheelAutodirHonourRoot);
     WriteParam(aWriter, aParam.mIsPaginatedPresentation);
+    WriteParam(aWriter, aParam.mIsSoftwareKeyboardVisible);
     WriteParam(aWriter, aParam.mDisregardedDirection);
     WriteParam(aWriter, aParam.mOverscrollBehavior);
     WriteParam(aWriter, aParam.mOverflow);
@@ -623,8 +633,7 @@ struct ParamTraits<mozilla::layers::ScrollMetadata>
             ReadContentDescription(aReader, aResult) &&
             ReadParam(aReader, &aResult->mLineScrollAmount) &&
             ReadParam(aReader, &aResult->mPageScrollAmount) &&
-            ReadBoolForBitfield(aReader, aResult,
-                                &paramType::SetHasScrollgrab) &&
+            ReadParam(aReader, &aResult->mInteractiveWidget) &&
             ReadBoolForBitfield(aReader, aResult,
                                 &paramType::SetIsLayersIdRoot) &&
             ReadBoolForBitfield(aReader, aResult,
@@ -644,6 +653,8 @@ struct ParamTraits<mozilla::layers::ScrollMetadata>
                &paramType::SetForceMousewheelAutodirHonourRoot) &&
            ReadBoolForBitfield(aReader, aResult,
                                &paramType::SetIsPaginatedPresentation) &&
+           ReadBoolForBitfield(aReader, aResult,
+                               &paramType::SetIsSoftwareKeyboardVisible) &&
            ReadParam(aReader, &aResult->mDisregardedDirection) &&
            ReadParam(aReader, &aResult->mOverscrollBehavior) &&
            ReadParam(aReader, &aResult->mOverflow) &&
@@ -1161,6 +1172,39 @@ struct ParamTraits<mozilla::layers::DoubleTapToZoomMetrics> {
 };
 
 } /* namespace IPC */
+
+namespace mozilla {
+namespace ipc {
+
+template <>
+struct IPDLParamTraits<layers::GpuFence*> {
+  static void Write(IPC::MessageWriter* aWriter, IProtocol* aActor,
+                    layers::GpuFence* aParam) {
+    if (aParam) {
+      MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+    }
+    WriteIPDLParam(aWriter, aActor, false);
+  }
+
+  static bool Read(IPC::MessageReader* aReader, IProtocol* aActor,
+                   RefPtr<layers::GpuFence>* aResult) {
+    *aResult = nullptr;
+    bool notnull = false;
+    if (!ReadIPDLParam(aReader, aActor, &notnull)) {
+      return false;
+    }
+
+    if (!notnull) {
+      return true;
+    }
+
+    MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+    return true;
+  }
+};
+
+}  // namespace ipc
+}  // namespace mozilla
 
 #define DEFINE_SERVO_PARAMTRAITS(ty_)                                \
   MOZ_DEFINE_RUST_PARAMTRAITS(mozilla::ty_, Servo_##ty_##_Serialize, \

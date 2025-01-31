@@ -298,6 +298,7 @@ APZEventResult InputQueue::ReceiveMouseInput(
 
     INPQ_LOG(
         "started new drag block %p id %" PRIu64
+        " "
         "for %sconfirmed target %p; on scrollbar: %d; on scrollthumb: %d\n",
         block.get(), block->GetBlockId(), aFlags.mTargetConfirmed ? "" : "un",
         aTarget.get(), aFlags.mHitScrollbar, aFlags.mHitScrollThumb);
@@ -442,15 +443,6 @@ APZEventResult InputQueue::ReceivePanGestureInput(
     TargetConfirmationFlags aFlags, const PanGestureInput& aEvent) {
   APZEventResult result(aTarget, aFlags);
 
-#ifndef MOZ_WIDGET_GTK
-  if (aEvent.mType == PanGestureInput::PANGESTURE_MAYSTART ||
-      aEvent.mType == PanGestureInput::PANGESTURE_CANCELLED) {
-    // Ignore these events for now.
-    result.SetStatusAsConsumeDoDefault(aTarget);
-    return result;
-  }
-#endif
-
   if (aEvent.mType == PanGestureInput::PANGESTURE_INTERRUPTED) {
     if (RefPtr<PanGestureBlockState> block = mActivePanGestureBlock.get()) {
       mQueuedInputs.AppendElement(MakeUnique<QueuedInput>(aEvent, *block));
@@ -500,6 +492,10 @@ APZEventResult InputQueue::ReceivePanGestureInput(
     block = new PanGestureBlockState(aTarget, aFlags, event);
     INPQ_LOG("started new pan gesture block %p id %" PRIu64 " for target %p\n",
              block.get(), block->GetBlockId(), aTarget.get());
+
+    if (event.mType == PanGestureInput::PANGESTURE_MAYSTART) {
+      block->ConfirmForHoldGesture();
+    }
 
     mActivePanGestureBlock = block;
 

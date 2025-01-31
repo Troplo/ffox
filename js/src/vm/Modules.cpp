@@ -46,9 +46,9 @@ using mozilla::Utf8Unit;
 
 static bool ModuleLink(JSContext* cx, Handle<ModuleObject*> module);
 static bool ModuleEvaluate(JSContext* cx, Handle<ModuleObject*> module,
-                           MutableHandle<Value> result);
+                           MutableHandle<Value> rval);
 static bool SyntheticModuleEvaluate(JSContext* cx, Handle<ModuleObject*> module,
-                                    MutableHandle<Value> result);
+                                    MutableHandle<Value> rval);
 
 ////////////////////////////////////////////////////////////////////////////////
 // Public API
@@ -174,10 +174,10 @@ JS_PUBLIC_API JSObject* JS::CompileJsonModule(
   }
 
   Rooted<ExportNameVector> exportNames(cx);
-  if (!exportNames.reserve(1)) {
+  if (!exportNames.append(cx->names().default_)) {
+    ReportOutOfMemory(cx);
     return nullptr;
   }
-  exportNames.infallibleAppend(cx->names().default_);
 
   Rooted<ModuleObject*> moduleObject(
       cx, ModuleObject::createSynthetic(cx, &exportNames));
@@ -185,11 +185,11 @@ JS_PUBLIC_API JSObject* JS::CompileJsonModule(
     return nullptr;
   }
 
-  Rooted<GCVector<Value>> exportValues(cx, GCVector<Value>(cx));
-  if (!exportValues.reserve(1)) {
+  RootedVector<Value> exportValues(cx);
+  if (!exportValues.append(jsonValue)) {
+    ReportOutOfMemory(cx);
     return nullptr;
   }
-  exportValues.infallibleAppend(jsonValue);
 
   if (!ModuleObject::createSyntheticEnvironment(cx, moduleObject,
                                                 exportValues)) {
@@ -1493,8 +1493,8 @@ static bool InnerModuleLinking(JSContext* cx, Handle<ModuleObject*> module,
 
 static bool SyntheticModuleEvaluate(JSContext* cx,
                                     Handle<ModuleObject*> moduleArg,
-                                    MutableHandle<Value> result) {
-  // Steps 1-12 happens elsewhere in the engine.
+                                    MutableHandle<Value> rval) {
+  // Steps 1-12 happen elsewhere in the engine.
 
   // Step 13. Let pc be ! NewPromiseCapability(%Promise%).
   Rooted<PromiseObject*> resultPromise(cx, CreatePromiseObjectForAsync(cx));
@@ -1502,15 +1502,18 @@ static bool SyntheticModuleEvaluate(JSContext* cx,
     return false;
   }
 
+  // Since the only synthetic modules we support are JSON modules, result is
+  // always |undefined|.
+
   // Step 14. IfAbruptRejectPromise(result, pc) (Skipped)
 
   // 15. Perform ! pc.[[Resolve]](result).
-  if (!AsyncFunctionReturned(cx, resultPromise, result)) {
+  if (!AsyncFunctionReturned(cx, resultPromise, JS::UndefinedHandleValue)) {
     return false;
   }
 
   // 16. Return pc.[[Promise]].
-  result.set(ObjectValue(*resultPromise));
+  rval.set(ObjectValue(*resultPromise));
   return true;
 }
 

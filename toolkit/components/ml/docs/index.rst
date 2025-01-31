@@ -31,3 +31,6 @@ Learn more about the platform:
    api
    notifications
    models
+   perf
+   extensions
+   extensions-api-example/README

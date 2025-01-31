@@ -85,19 +85,25 @@ void RestyleManager::ContentInserted(nsIContent* aChild) {
 }
 
 void RestyleManager::ContentAppended(nsIContent* aFirstNewContent) {
-  auto* container = aFirstNewContent->GetParentNode();
-  MOZ_ASSERT(container);
+  MOZ_ASSERT(aFirstNewContent->GetParentNode());
 
 #ifdef DEBUG
-  {
-    for (nsIContent* cur = aFirstNewContent; cur; cur = cur->GetNextSibling()) {
-      NS_ASSERTION(!cur->IsRootOfNativeAnonymousSubtree(),
-                   "anonymous nodes should not be in child lists");
-    }
+  for (nsIContent* cur = aFirstNewContent; cur; cur = cur->GetNextSibling()) {
+    NS_ASSERTION(cur->IsRootOfNativeAnonymousSubtree() ==
+                     aFirstNewContent->IsRootOfNativeAnonymousSubtree(),
+                 "anonymous nodes should not be in child lists");
   }
 #endif
+
+  // We get called explicitly with NAC by editor and view transitions code, but
+  // in those cases we don't need to do any invalidation.
+  if (MOZ_UNLIKELY(aFirstNewContent->IsRootOfNativeAnonymousSubtree())) {
+    return;
+  }
+
   StyleSet()->MaybeInvalidateForElementAppend(*aFirstNewContent);
 
+  auto* container = aFirstNewContent->GetParentNode();
   const auto selectorFlags = container->GetSelectorFlags() &
                              NodeSelectorFlags::AllSimpleRestyleFlagsForAppend;
   if (!selectorFlags) {
@@ -154,7 +160,7 @@ void RestyleManager::ContentAppended(nsIContent* aFirstNewContent) {
         PostRestyleEvent(element, RestyleHint::RestyleSubtree(),
                          nsChangeHint(0));
         StyleSet()->MaybeInvalidateRelativeSelectorForNthEdgeDependency(
-            *element);
+            *element, StyleRelativeSelectorNthEdgeInvalidateFor::Last);
         break;
       }
     }
@@ -212,7 +218,7 @@ void RestyleManager::MaybeRestyleForEdgeChildChange(nsINode* aContainer,
         PostRestyleEvent(element, RestyleHint::RestyleSubtree(),
                          nsChangeHint(0));
         StyleSet()->MaybeInvalidateRelativeSelectorForNthEdgeDependency(
-            *element);
+            *element, StyleRelativeSelectorNthEdgeInvalidateFor::First);
       }
       break;
     }
@@ -231,7 +237,7 @@ void RestyleManager::MaybeRestyleForEdgeChildChange(nsINode* aContainer,
         PostRestyleEvent(element, RestyleHint::RestyleSubtree(),
                          nsChangeHint(0));
         StyleSet()->MaybeInvalidateRelativeSelectorForNthEdgeDependency(
-            *element);
+            *element, StyleRelativeSelectorNthEdgeInvalidateFor::Last);
       }
       break;
     }
@@ -425,8 +431,7 @@ void RestyleManager::RestyleForInsertOrChange(nsIContent* aChild) {
   }
 }
 
-void RestyleManager::ContentRemoved(nsIContent* aOldChild,
-                                    nsIContent* aFollowingSibling) {
+void RestyleManager::ContentWillBeRemoved(nsIContent* aOldChild) {
   auto* container = aOldChild->GetParentNode();
   MOZ_ASSERT(container);
 
@@ -441,23 +446,25 @@ void RestyleManager::ContentRemoved(nsIContent* aOldChild,
     // invalidated.
     IncrementUndisplayedRestyleGeneration();
   }
+
+  // This is called with anonymous nodes explicitly by editor and view
+  // transitions code, which manage anon content manually.
+  // See similar code in ContentAppended.
+  if (MOZ_UNLIKELY(aOldChild->IsRootOfNativeAnonymousSubtree())) {
+    MOZ_ASSERT(!aOldChild->GetNextSibling(), "NAC doesn't have siblings");
+    MOZ_ASSERT(aOldChild->GetProperty(nsGkAtoms::restylableAnonymousNode),
+               "anonymous nodes should not be in child lists (bug 439258)");
+    return;
+  }
+
   if (aOldChild->IsElement()) {
-    StyleSet()->MaybeInvalidateForElementRemove(*aOldChild->AsElement(),
-                                                aFollowingSibling);
+    StyleSet()->MaybeInvalidateForElementRemove(*aOldChild->AsElement());
   }
 
   const auto selectorFlags =
       container->GetSelectorFlags() & NodeSelectorFlags::AllSimpleRestyleFlags;
   if (!selectorFlags) {
     return;
-  }
-
-  if (aOldChild->IsRootOfNativeAnonymousSubtree()) {
-    // This should be an assert, but this is called incorrectly in
-    // HTMLEditor::DeleteRefToAnonymousNode and the assertions were clogging
-    // up the logs.  Make it an assert again when that's fixed.
-    MOZ_ASSERT(aOldChild->GetProperty(nsGkAtoms::restylableAnonymousNode),
-               "anonymous nodes should not be in child lists (bug 439258)");
   }
 
   // The container cannot be a document.
@@ -473,7 +480,7 @@ void RestyleManager::ContentRemoved(nsIContent* aOldChild,
       // so be conservative and assume :-moz-only-whitespace (i.e., make
       // IsSignificantChild less likely to be true, and thus make us more
       // likely to restyle).
-      if (nsStyleUtil::IsSignificantChild(child, false)) {
+      if (child != aOldChild && nsStyleUtil::IsSignificantChild(child, false)) {
         isEmpty = false;
         break;
       }
@@ -505,24 +512,26 @@ void RestyleManager::ContentRemoved(nsIContent* aOldChild,
   if (selectorFlags & NodeSelectorFlags::HasSlowSelectorLaterSiblings) {
     // Restyle all later siblings.
     if (selectorFlags & NodeSelectorFlags::HasSlowSelectorNthAll) {
-      Element* nextSibling =
-          aFollowingSibling ? aFollowingSibling->IsElement()
-                                  ? aFollowingSibling->AsElement()
-                                  : aFollowingSibling->GetNextElementSibling()
-                            : nullptr;
+      Element* nextSibling = aOldChild->GetNextElementSibling();
       StyleSet()->MaybeInvalidateRelativeSelectorForNthDependencyFromSibling(
           nextSibling, /* aForceRestyleSiblings = */ true);
     } else {
-      RestyleSiblingsStartingWith(aFollowingSibling);
+      RestyleSiblingsStartingWith(aOldChild->GetNextSibling());
     }
   }
 
   if (selectorFlags & NodeSelectorFlags::HasEdgeChildSelector) {
+    const nsIContent* nextSibling = aOldChild->GetNextSibling();
     // restyle the now-first element child if it was after aOldChild
     bool reachedFollowingSibling = false;
     for (nsIContent* content = container->GetFirstChild(); content;
          content = content->GetNextSibling()) {
-      if (content == aFollowingSibling) {
+      if (content == aOldChild) {
+        // aOldChild is getting removed, so we don't want to account for it for
+        // the purposes of computing whether we're now the first / last child.
+        continue;
+      }
+      if (content == nextSibling) {
         reachedFollowingSibling = true;
         // do NOT continue here; we might want to restyle this node
       }
@@ -532,26 +541,30 @@ void RestyleManager::ContentRemoved(nsIContent* aOldChild,
           PostRestyleEvent(element, RestyleHint::RestyleSubtree(),
                            nsChangeHint(0));
           StyleSet()->MaybeInvalidateRelativeSelectorForNthEdgeDependency(
-              *element);
+              *element, StyleRelativeSelectorNthEdgeInvalidateFor::First);
         }
         break;
       }
     }
     // restyle the now-last element child if it was before aOldChild
-    reachedFollowingSibling = (aFollowingSibling == nullptr);
+    reachedFollowingSibling = !nextSibling;
     for (nsIContent* content = container->GetLastChild(); content;
          content = content->GetPreviousSibling()) {
+      if (content == aOldChild) {
+        // See above.
+        continue;
+      }
       if (content->IsElement()) {
         if (reachedFollowingSibling) {
           auto* element = content->AsElement();
           PostRestyleEvent(element, RestyleHint::RestyleSubtree(),
                            nsChangeHint(0));
           StyleSet()->MaybeInvalidateRelativeSelectorForNthEdgeDependency(
-              *element);
+              *element, StyleRelativeSelectorNthEdgeInvalidateFor::Last);
         }
         break;
       }
-      if (content == aFollowingSibling) {
+      if (content == nextSibling) {
         reachedFollowingSibling = true;
       }
     }
@@ -694,12 +707,11 @@ nsCString RestyleManager::ChangeHintToString(nsChangeHint aHint) {
                          "UpdateTableCellSpans",
                          "VisibilityChange"};
   static_assert(nsChangeHint_AllHints ==
-                    static_cast<uint32_t>((1ull << ArrayLength(names)) - 1),
+                    static_cast<uint32_t>((1ull << std::size(names)) - 1),
                 "Name list doesn't match change hints.");
-  uint32_t hint =
-      aHint & static_cast<uint32_t>((1ull << ArrayLength(names)) - 1);
+  uint32_t hint = aHint & static_cast<uint32_t>((1ull << std::size(names)) - 1);
   uint32_t rest =
-      aHint & ~static_cast<uint32_t>((1ull << ArrayLength(names)) - 1);
+      aHint & ~static_cast<uint32_t>((1ull << std::size(names)) - 1);
   if ((hint & NS_STYLE_HINT_REFLOW) == NS_STYLE_HINT_REFLOW) {
     result.AppendLiteral("NS_STYLE_HINT_REFLOW");
     hint = hint & ~NS_STYLE_HINT_REFLOW;
@@ -714,7 +726,7 @@ nsCString RestyleManager::ChangeHintToString(nsChangeHint aHint) {
     hint = hint & ~NS_STYLE_HINT_VISUAL;
     any = true;
   }
-  for (uint32_t i = 0; i < ArrayLength(names); i++) {
+  for (uint32_t i = 0; i < std::size(names); i++) {
     if (hint & (1u << i)) {
       if (any) {
         result.AppendLiteral(" | ");
@@ -1370,7 +1382,9 @@ static void StyleChangeReflow(nsIFrame* aFrame, nsChangeHint aHint) {
 
   // If we're not going to clear any intrinsic sizes on the frames, and
   // there are no dirty bits to set, then there's nothing to do.
-  if (dirtyType == IntrinsicDirty::None && !dirtyBits) return;
+  if (dirtyType == IntrinsicDirty::None && !dirtyBits) {
+    return;
+  }
 
   ReflowRootHandling rootHandling;
   if (aHint & nsChangeHint_ReflowChangesSizeOrPosition) {
@@ -2046,44 +2060,62 @@ RestyleManager::AnimationsWithDestroyedFrame::AnimationsWithDestroyedFrame(
 
 void RestyleManager::AnimationsWithDestroyedFrame ::
     StopAnimationsForElementsWithoutFrames() {
-  StopAnimationsWithoutFrame(mContents, PseudoStyleType::NotPseudo);
-  StopAnimationsWithoutFrame(mBeforeContents, PseudoStyleType::before);
-  StopAnimationsWithoutFrame(mAfterContents, PseudoStyleType::after);
-  StopAnimationsWithoutFrame(mMarkerContents, PseudoStyleType::marker);
+  StopAnimationsWithoutFrame(mContents, PseudoStyleRequest::NotPseudo());
+  StopAnimationsWithoutFrame(mBeforeContents, PseudoStyleRequest::Before());
+  StopAnimationsWithoutFrame(mAfterContents, PseudoStyleRequest::After());
+  StopAnimationsWithoutFrame(mMarkerContents, PseudoStyleRequest::Marker());
 }
 
 void RestyleManager::AnimationsWithDestroyedFrame ::StopAnimationsWithoutFrame(
-    nsTArray<RefPtr<nsIContent>>& aArray, PseudoStyleType aPseudoType) {
+    nsTArray<RefPtr<nsIContent>>& aArray,
+    const PseudoStyleRequest& aPseudoRequest) {
   nsAnimationManager* animationManager =
       mRestyleManager->PresContext()->AnimationManager();
   nsTransitionManager* transitionManager =
       mRestyleManager->PresContext()->TransitionManager();
   for (nsIContent* content : aArray) {
-    if (aPseudoType == PseudoStyleType::NotPseudo) {
-      if (content->GetPrimaryFrame()) {
-        continue;
-      }
-    } else if (aPseudoType == PseudoStyleType::before) {
-      if (nsLayoutUtils::GetBeforeFrame(content)) {
-        continue;
-      }
-    } else if (aPseudoType == PseudoStyleType::after) {
-      if (nsLayoutUtils::GetAfterFrame(content)) {
-        continue;
-      }
-    } else if (aPseudoType == PseudoStyleType::marker) {
-      if (nsLayoutUtils::GetMarkerFrame(content)) {
-        continue;
-      }
+    switch (aPseudoRequest.mType) {
+      case PseudoStyleType::NotPseudo:
+        if (content->GetPrimaryFrame()) {
+          continue;
+        }
+        break;
+      case PseudoStyleType::before:
+        if (nsLayoutUtils::GetBeforeFrame(content)) {
+          continue;
+        }
+        break;
+      case PseudoStyleType::after:
+        if (nsLayoutUtils::GetAfterFrame(content)) {
+          continue;
+        }
+        break;
+      case PseudoStyleType::marker:
+        if (nsLayoutUtils::GetMarkerFrame(content)) {
+          continue;
+        }
+        break;
+      case PseudoStyleType::viewTransition:
+      case PseudoStyleType::viewTransitionGroup:
+      case PseudoStyleType::viewTransitionImagePair:
+      case PseudoStyleType::viewTransitionOld:
+      case PseudoStyleType::viewTransitionNew:
+        // FIXME: Bug 1922095. Revisit here to make sure we destroy the view
+        // transitions if the associated frames are destroyed.
+      default:
+        // Do nothing
+        break;
     }
     dom::Element* element = content->AsElement();
 
-    animationManager->StopAnimationsForElement(element, aPseudoType);
-    transitionManager->StopAnimationsForElement(element, aPseudoType);
+    // FIXME: Bug 1922095. Revisit here to make sure we destroy the view
+    // transitions if the associated frames are destroyed.
+    animationManager->StopAnimationsForElement(element, aPseudoRequest);
+    transitionManager->StopAnimationsForElement(element, aPseudoRequest);
 
     // All other animations should keep running but not running on the
     // *compositor* at this point.
-    if (EffectSet* effectSet = EffectSet::Get(element, aPseudoType)) {
+    if (EffectSet* effectSet = EffectSet::Get(element, aPseudoRequest)) {
       for (KeyframeEffect* effect : *effectSet) {
         effect->ResetIsRunningOnCompositor();
       }
@@ -2434,12 +2466,10 @@ void RestyleManager::PostRestyleEvent(Element* aElement,
   }
 }
 
-void RestyleManager::PostRestyleEventForAnimations(Element* aElement,
-                                                   PseudoStyleType aPseudoType,
-                                                   RestyleHint aRestyleHint) {
-  Element* elementToRestyle =
-      AnimationUtils::GetElementForRestyle(aElement, aPseudoType);
-
+void RestyleManager::PostRestyleEventForAnimations(
+    Element* aElement, const PseudoStyleRequest& aPseudoRequest,
+    RestyleHint aRestyleHint) {
+  Element* elementToRestyle = aElement->GetPseudoElement(aPseudoRequest);
   if (!elementToRestyle) {
     // FIXME: Bug 1371107: When reframing happens,
     // EffectCompositor::mElementsToRestyle still has unbound old pseudo
@@ -2602,7 +2632,7 @@ struct RestyleManager::TextPostTraversalState {
 static void UpdateBackdropIfNeeded(nsIFrame* aFrame, ServoStyleSet& aStyleSet,
                                    nsStyleChangeList& aChangeList) {
   const nsStyleDisplay* display = aFrame->Style()->StyleDisplay();
-  if (display->mTopLayer != StyleTopLayer::Top) {
+  if (display->mTopLayer != StyleTopLayer::Auto) {
     return;
   }
 
@@ -3827,8 +3857,6 @@ void RestyleManager::DoReparentComputedStyleForFirstLine(
     }
   }
 
-  // FIXME(emilio): This is the only caller of GetParentComputedStyle, let's try
-  // to remove it?
   nsIFrame* providerFrame;
   ComputedStyle* newParentStyle =
       aFrame->GetParentComputedStyle(&providerFrame);

@@ -100,7 +100,7 @@ add_task(async function test_record_exposure_event() {
   );
 
   // Check that there aren't any Glean exposure events yet
-  var exposureEvents = Glean.nimbusEvents.exposure.testGetValue();
+  var exposureEvents = Glean.nimbusEvents.exposure.testGetValue("events");
   Assert.equal(
     undefined,
     exposureEvents,
@@ -111,6 +111,7 @@ add_task(async function test_record_exposure_event() {
     ExperimentFakes.experiment("blah", {
       branch: {
         slug: "treatment",
+        ratio: 1,
         features: [
           {
             featureId: "foo",
@@ -130,7 +131,7 @@ add_task(async function test_record_exposure_event() {
   Assert.equal(getExperimentSpy.callCount, 2, "Should be called every time");
 
   // Check that the Glean exposure event was recorded.
-  exposureEvents = Glean.nimbusEvents.exposure.testGetValue();
+  exposureEvents = Glean.nimbusEvents.exposure.testGetValue("events");
   // We expect only one event
   Assert.equal(1, exposureEvents.length);
   // And that one event matches the expected
@@ -167,6 +168,7 @@ add_task(async function test_record_exposure_event_once() {
     ExperimentFakes.experiment("blah", {
       branch: {
         slug: "treatment",
+        ratio: 1,
         features: [
           {
             featureId: "foo",
@@ -187,7 +189,7 @@ add_task(async function test_record_exposure_event_once() {
   );
 
   // Check that the Glean exposure event was recorded.
-  let exposureEvents = Glean.nimbusEvents.exposure.testGetValue();
+  let exposureEvents = Glean.nimbusEvents.exposure.testGetValue("events");
   // We expect only one event
   Assert.equal(1, exposureEvents.length);
 
@@ -223,7 +225,7 @@ add_task(async function test_allow_multiple_exposure_events() {
   );
 
   // Check that the Glean exposure event was recorded.
-  let exposureEvents = Glean.nimbusEvents.exposure.testGetValue();
+  let exposureEvents = Glean.nimbusEvents.exposure.testGetValue("events");
   // We expect 3 events
   Assert.equal(3, exposureEvents.length);
 

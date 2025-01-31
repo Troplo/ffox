@@ -30,9 +30,10 @@ import io.mockk.unmockkStatic
 import io.mockk.verify
 import kotlinx.coroutines.CoroutineScope
 import mozilla.components.browser.menu.BrowserMenu
+import mozilla.components.browser.state.state.ContentState
+import mozilla.components.browser.state.state.TabSessionState
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.support.test.robolectric.testContext
-import mozilla.telemetry.glean.testing.GleanTestRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -50,6 +51,7 @@ import org.mozilla.fenix.databinding.ComponentTabstrayFabBinding
 import org.mozilla.fenix.databinding.FragmentTabTrayDialogBinding
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.settings
+import org.mozilla.fenix.helpers.FenixGleanTestRule
 import org.mozilla.fenix.helpers.FenixRobolectricTestRunner
 import org.mozilla.fenix.helpers.MockkRetryTestRule
 import org.mozilla.fenix.home.HomeScreenViewModel
@@ -69,7 +71,7 @@ class TabsTrayFragmentTest {
     val mockkRule = MockkRetryTestRule()
 
     @get:Rule
-    val gleanTestRule = GleanTestRule(testContext)
+    val gleanTestRule = FenixGleanTestRule(testContext)
 
     @Before
     fun setup() {
@@ -484,5 +486,40 @@ class TabsTrayFragmentTest {
         fragment.onConfigurationChanged(newConfiguration)
 
         verify(exactly = 0) { adapter.notifyDataSetChanged() }
+    }
+
+    @Test
+    fun `GIVEN a list of tabs WHEN a tab is present with an ID THEN the index is returned`() {
+        val tab1 = TabSessionState(
+            id = "tab1",
+            content = ContentState(
+                url = "https://mozilla.org",
+                private = false,
+                isProductUrl = false,
+            ),
+        )
+        val tab2 = TabSessionState(
+            id = "tab2",
+            content = ContentState(
+                url = "https://mozilla.org",
+                private = false,
+                isProductUrl = false,
+            ),
+        )
+        val tab3 = TabSessionState(
+            id = "tab3",
+            content = ContentState(
+                url = "https://mozilla.org",
+                private = false,
+                isProductUrl = false,
+            ),
+        )
+        val tabsList = listOf(
+            tab1,
+            tab2,
+            tab3,
+        )
+        val position = fragment.getTabPositionFromId(tabsList, "tab2")
+        assertEquals(1, position)
     }
 }

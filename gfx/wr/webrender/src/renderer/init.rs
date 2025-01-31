@@ -317,6 +317,15 @@ pub fn create_webrender_instance(
 
     HAS_BEEN_INITIALIZED.store(true, Ordering::SeqCst);
 
+    // For now, we assume that native OS compositors are top-left origin. If that doesn't
+    // turn out to be the case, we can add a query method on `LayerCompositor`.
+    match options.compositor_config {
+        CompositorConfig::Draw { .. } | CompositorConfig::Native { .. } => {}
+        CompositorConfig::Layer { .. } => {
+            options.surface_origin_is_top_left = true;
+        }
+    }
+
     let (api_tx, api_rx) = unbounded_channel();
     let (result_tx, result_rx) = unbounded_channel();
     let gl_type = gl.get_type();
@@ -525,6 +534,10 @@ pub fn create_webrender_instance(
 
             CompositorKind::Native {
                 capabilities,
+            }
+        }
+        CompositorConfig::Layer { .. } => {
+            CompositorKind::Layer {
             }
         }
     };

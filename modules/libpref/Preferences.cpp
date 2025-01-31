@@ -2045,7 +2045,7 @@ static void TestParseErrorHandlePref(const char* aPrefName, PrefType aType,
                                      PrefValueKind aKind, PrefValue aValue,
                                      bool aIsSticky, bool aIsLocked) {}
 
-static nsCString gTestParseErrorMsgs;
+MOZ_CONSTINIT static nsCString gTestParseErrorMsgs;
 
 static void TestParseErrorHandleError(const char* aMsg) {
   gTestParseErrorMsgs.Append(aMsg);
@@ -2522,17 +2522,9 @@ nsPrefBranch::GetComplexValue(const char* aPrefName, const nsIID& aType,
 
   if (aType.Equals(NS_GET_IID(nsIFile))) {
     ENSURE_PARENT_PROCESS("GetComplexValue(nsIFile)", aPrefName);
-
-    nsCOMPtr<nsIFile> file(do_CreateInstance(NS_LOCAL_FILE_CONTRACTID, &rv));
-
-    if (NS_SUCCEEDED(rv)) {
-      rv = file->SetPersistentDescriptor(utf8String);
-      if (NS_SUCCEEDED(rv)) {
-        file.forget(reinterpret_cast<nsIFile**>(aRetVal));
-        return NS_OK;
-      }
-    }
-    return rv;
+    MOZ_TRY(NS_NewLocalFileWithPersistentDescriptor(
+        utf8String, reinterpret_cast<nsIFile**>(aRetVal)));
+    return NS_OK;
   }
 
   if (aType.Equals(NS_GET_IID(nsIRelativeFilePref))) {
@@ -2568,15 +2560,8 @@ nsPrefBranch::GetComplexValue(const char* aPrefName, const nsIID& aType,
     }
 
     nsCOMPtr<nsIFile> theFile;
-    rv = NS_NewNativeLocalFile(""_ns, getter_AddRefs(theFile));
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
-
-    rv = theFile->SetRelativeDescriptor(fromFile, Substring(++keyEnd, strEnd));
-    if (NS_FAILED(rv)) {
-      return rv;
-    }
+    MOZ_TRY(NS_NewLocalFileWithRelativeDescriptor(
+        fromFile, Substring(++keyEnd, strEnd), getter_AddRefs(theFile)));
 
     nsCOMPtr<nsIRelativeFilePref> relativePref = new nsRelativeFilePref();
     Unused << relativePref->SetFile(theFile);
@@ -5772,7 +5757,7 @@ void MaybeInitOncePrefs() {
 #define ALWAYS_PREF(name, base_id, full_id, cpp_type, default_value) \
   cpp_type sMirror_##full_id(default_value);
 #define ALWAYS_DATAMUTEX_PREF(name, base_id, full_id, cpp_type, default_value) \
-  cpp_type sMirror_##full_id("DataMutexString");
+  MOZ_RUNINIT cpp_type sMirror_##full_id("DataMutexString");
 #define ONCE_PREF(name, base_id, full_id, cpp_type, default_value) \
   cpp_type sMirror_##full_id(default_value);
 #include "mozilla/StaticPrefListAll.h"
@@ -6192,6 +6177,7 @@ static const PrefListEntry sDynamicPrefOverrideList[]{
     PREF_LIST_ENTRY("media.peerconnection.nat_simulator.mapping_type"),
     PREF_LIST_ENTRY("media.peerconnection.nat_simulator.redirect_address"),
     PREF_LIST_ENTRY("media.peerconnection.nat_simulator.redirect_targets"),
+    PREF_LIST_ENTRY("media.peerconnection.nat_simulator.network_delay_ms"),
     PREF_LIST_ENTRY("media.video_loopback_dev"),
     PREF_LIST_ENTRY("media.webspeech.service.endpoint"),
     PREF_LIST_ENTRY("network.gio.supported-protocols"),

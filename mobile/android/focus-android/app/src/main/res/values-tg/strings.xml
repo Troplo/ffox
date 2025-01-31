@@ -15,7 +15,7 @@
     <!-- This text is shown in the URL bar when it's empty -->
     <string name="urlbar_hint">Нишониеро ҷустуҷӯ кунед ё ворид намоед</string>
 
-    <string name="teaser">Тамошокунии хусусии худкор.\nТамошо кунед. Пок созед. Такрор намоед.</string>
+    <string name="teaser">Тамошобинии хусусии худкор.\nТамошо кунед. Пок созед. Такрор намоед.</string>
 
     <!-- "Snackbar" shown after the user has pressed the 'erase' button at the end of a browsing session -->
     <string name="feedback_erase">Таърихи тамошои шумо пок карда шуд.</string>
@@ -84,7 +84,6 @@
     <string name="share_dialog_title">Мубодила тавассути</string>
 
     <string name="notification_erase_title_android_14">Таърихи тамошоро пок мекунед?</string>
-    <string name="notification_erase_text_android_14" moz:RemovedIn="124" tools:ignore="UnusedResources">Барои ба таври бехатар пок кардани таърихи тамошо, лутфан, ба ин огоҳнома зер кунед ё онро тоза намоед.</string>
 
     <!-- Text shown in the notification description that pops up to remind the user that a browsing session is active
     for Android 14+. -->
@@ -485,7 +484,7 @@
          the app store installed on the device (usually that's Google Play). -->
     <string name="external_app_prompt_no_app">Ҳеҷ яке аз барномаҳои дастгоҳи шумо ин пайвандро кушода наметавонад. Шумо метавонед аз «%1$s» бароед ва барномаи мувофиқро тавассути «%2$s» ҷустуҷӯ кунед.</string>
     <!-- This label is shown above a list of apps that can be used to open a given link -->
-    <string name="external_multiple_apps_matched_exit">Аз тамошокунии махфӣ мебароед?</string>
+    <string name="external_multiple_apps_matched_exit">Аз тамошобинии махфӣ мебароед?</string>
 
     <!-- Snackbar that will be displayed after a download has completed. %1$s will be replaced with the file name. -->
     <string name="download_snackbar_finished">«%1$s» анҷом ёфт</string>
@@ -497,9 +496,6 @@
     <string name="snackbar_added_to_shortcuts">Ба миёнбурҳо илова карда шуд!</string>
 
     <string name="error_hostLookup_title">Сервер ёфт нашуд</string>
-
-    <!-- Content description (not visible, for screen readers etc.): This is the description for the close button from the new onboarding flow screen one and two -->
-    <string name="onboarding_close_button_content_description">Пӯшидан</string>
 
     <!-- New Onboarding flow first screen title -->
     <!-- %1$s will be replaced by the app name and build variant(e.g. Firefox Focus, Firefox Klar Nightly) -->
@@ -532,7 +528,7 @@
     <string name="firstrun_defaultbrowser_title">Махфияти худро тақвият диҳед</string>
 
     <!-- First run tour (Default browser): Text. -->
-    <string name="firstrun_defaultbrowser_text2">Тамошокунии хусусиро ба сатҳи нав баланд бардоред. Таблиғоту реклама ва муҳтавои дигареро, ки метавонад шуморо байни сомонаҳо пайгирӣ кунад ва вақти кушодани саҳифаҳоро хеле суст намоянд, манъ кунед.</string>
+    <string name="firstrun_defaultbrowser_text2">Тамошобинии хусусиро ба сатҳи нав баланд бардоред. Таблиғоту реклама ва муҳтавои дигареро, ки метавонад шуморо байни сомонаҳо пайгирӣ кунад ва вақти кушодани саҳифаҳоро хеле суст намоянд, манъ кунед.</string>
 
     <!-- First run tour (Search): Title -->
     <string name="firstrun_search_title">Ҷустуҷӯи шумо, Интернети шумо</string>
@@ -550,7 +546,7 @@
     <string name="firstrun_privacy_title">Махфиятро ба одати худ табдил диҳед</string>
 
     <!-- First run tour (Privacy): Text. %1$s will be replaced with the name of the app (e.g. Firefox Focus) -->
-    <string name="firstrun_privacy_text">«%1$s»-ро ҳамчун браузери пешфарзи худ танзим карда, истифода баред ва ҳамаи афзалиятҳои тамошокунии хусусиро ҳангоми кушодани саҳифаҳои сомонаҳо аз барномаҳои дигар ба даст оред.</string>
+    <string name="firstrun_privacy_text">«%1$s»-ро ҳамчун браузери пешфарзи худ танзим карда, истифода баред ва ҳамаи афзалиятҳои тамошобинии хусусиро ҳангоми кушодани саҳифаҳои сомонаҳо аз барномаҳои дигар ба даст оред.</string>
 
     <string name="firstrun_close_button">Хуб, фаҳмидам!</string>
     <string name="firstrun_skip_button">Нодида гузарондан</string>
@@ -579,7 +575,7 @@
     * To understand what notification channels are, see: https://www.androidcentral.com/notification-channels
     * To see how this string will look like in Android's UI, see: https://github.com/mozilla-mobile/focus-android/issues/863#issuecomment-324105723
     -->
-    <string name="notification_browsing_session_channel_name">Ҷаласаи тамошокунии хусусӣ</string>
+    <string name="notification_browsing_session_channel_name">Ҷаласаи тамошобинии хусусӣ</string>
 
     <!-- The user visible description of the "notification channel" (Android 8+ feature) for the ongoing notification shown while a browsing session is active.
     The recommended maximum length is 300 characters; the value may be truncated if it is too long. %1$s will be replaced with the name of the app (e.g. Firefox Focus).
@@ -818,7 +814,7 @@
     <string name="studies_learn_more">Маълумоти бештар</string>
 
     <!-- Dialog message shown when some changes are made on studies -->
-    <string name="studies_restart_app">Барои татбиқ кардани тағйирот барнома пӯшида мешавад</string>
+    <string name="studies_restart_app" moz:removedIn="135">Барои татбиқ кардани тағйирот барнома пӯшида мешавад</string>
 
     <!-- Title of the remove studies button -->
     <string name="studies_remove">Тоза кардан</string>
@@ -913,9 +909,6 @@
 
     <!-- Label for the button in the snackbar that switches to the newly opened tab -->
     <string name="open_new_tab_snackbar">Қатъу васл кардан</string>
-
-    <!-- Text displayed in a notification when the user enters full screen mode -->
-    <string name="full_screen_notification" moz:removedIn="130" tools:ignore="UnusedResources">Ба реҷаи экрани пурра ворид шуда истодааст</string>
 
     <!-- Preference for switching to a new tab immediately after opening -->
     <string name="preference_open_new_tab">Гузариши фаврӣ ба пайванди кушодашуда дар варақаи нав</string>
@@ -1073,11 +1066,11 @@
     <string name="promote_search_widget_dialog_title">Таърихи тамошо пок карда шуд! 🎉</string>
 
     <!-- Banner Info Message than will appear when user first enters in the app. The location is at the toolbar. -->
-    <string name="cfr_for_start_browsing">Ҷаласаи тамошокунии хусусиро оғоз намоед ва мо васоити пайгирӣ ва дигар чизҳои зарароварро аз роҳи шумо тоза мекунем.</string>
+    <string name="cfr_for_start_browsing">Ҷаласаи тамошобинии хусусиро оғоз намоед ва мо васоити пайгирӣ ва дигар чизҳои зарароварро аз роҳи шумо тоза мекунем.</string>
 
     <!-- This is the subtitle of promote search widget dialog. %1$s will get replaced with the name
     of the app (e.g. "Focus") -->
-    <string name="promote_search_widget_dialog_subtitle">Мо шуморо ба тамошокунии хусусӣ ворид мекунем, аммо дар оянда браузери худро ба воситаи виҷети «%1$s» аз экрани асосии худ зудтар оғоз намоед.</string>
+    <string name="promote_search_widget_dialog_subtitle">Мо шуморо ба тамошобинии хусусӣ ворид мекунем, аммо дар оянда браузери худро ба воситаи виҷети «%1$s» аз экрани асосии худ зудтар оғоз намоед.</string>
 
     <!-- This is te text from add search widget to home screen button .The button is located on
     promote search widget dialog. -->
@@ -1088,11 +1081,6 @@
     <string name="promote_search_widget_snackbar_message">Виҷет ба экрани асосӣ илова карда шуд</string>
 
     <!-- Messages explaining how to exit fullscreen mode -->
-    <!-- Message shown to explain how to exit fullscreen mode when gesture navigation is enabled -->
-    <string name="exit_fullscreen_with_gesture" moz:removedIn="132" tools:ignore="UnusedResources">Барои баромадан аз экрани пурра, аз боло кашед ва ишораи бозгаштро истифода баред</string>
-    <!-- Message shown to explain how to exit fullscreen mode when using back button navigation -->
-    <string name="exit_fullscreen_with_back_button" moz:removedIn="132" tools:ignore="UnusedResources">Барои баромадан аз экрани пурра, аз боло кашед ва тугмаи бозгаштро пахш кунед</string>
-
     <!-- Message shown to explain how to exit fullscreen mode when gesture navigation is enabled. -->
     <!-- Localisation note: this text should be as short as possible, max 68 chars -->
     <string name="exit_fullscreen_with_gesture_short">Аз боло кашед ва барои баромад ишораи бозгаштро истифода баред</string>

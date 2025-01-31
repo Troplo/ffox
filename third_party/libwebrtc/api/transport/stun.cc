@@ -10,10 +10,6 @@
 
 #include "api/transport/stun.h"
 
-#if defined(WEBRTC_POSIX)
-#include <netinet/in.h>
-#include <sys/socket.h>
-#endif
 #include <string.h>
 
 #include <algorithm>  // IWYU pragma: keep
@@ -36,6 +32,7 @@
 #include "rtc_base/ip_address.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/message_digest.h"
+#include "rtc_base/net_helpers.h"
 #include "rtc_base/socket_address.h"
 #include "system_wrappers/include/metrics.h"
 
@@ -364,24 +361,6 @@ bool StunMessage::ValidateMessageIntegrity32ForTesting(
     const char* data,
     size_t size,
     const std::string& password) {
-  return ValidateMessageIntegrityOfType(STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32,
-                                        kStunMessageIntegrity32Size, data, size,
-                                        password);
-}
-
-// Deprecated
-bool StunMessage::ValidateMessageIntegrity(const char* data,
-                                           size_t size,
-                                           const std::string& password) {
-  return ValidateMessageIntegrityOfType(STUN_ATTR_MESSAGE_INTEGRITY,
-                                        kStunMessageIntegritySize, data, size,
-                                        password);
-}
-
-// Deprecated
-bool StunMessage::ValidateMessageIntegrity32(const char* data,
-                                             size_t size,
-                                             const std::string& password) {
   return ValidateMessageIntegrityOfType(STUN_ATTR_GOOG_MESSAGE_INTEGRITY_32,
                                         kStunMessageIntegrity32Size, data, size,
                                         password);

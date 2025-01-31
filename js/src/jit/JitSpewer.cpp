@@ -63,7 +63,7 @@ class IonSpewer {
 };
 
 // IonSpewer singleton.
-static IonSpewer ionspewer;
+MOZ_RUNINIT static IonSpewer ionspewer;
 
 bool jitspew::detail::LoggingChecked = false;
 static_assert(JitSpew_Terminator <= 64,
@@ -648,6 +648,10 @@ void jit::DisableChannel(JitSpewChannel channel) {
   LoggingBits &= ~(uint64_t(1) << uint32_t(channel));
 }
 
+#endif /* JS_JITSPEW */
+
+#if defined(JS_JITSPEW) || defined(ENABLE_JS_AOT_ICS)
+
 const char* js::jit::ValTypeToString(JSValueType type) {
   switch (type) {
     case JSVAL_TYPE_DOUBLE:
@@ -679,4 +683,4 @@ const char* js::jit::ValTypeToString(JSValueType type) {
   }
 }
 
-#endif /* JS_JITSPEW */
+#endif /* defined(JS_JITSPEW) || defined(ENABLE_JS_AOT_ICS) */

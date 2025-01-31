@@ -1,13 +1,25 @@
+const lazy = {};
+
 const { HttpServer } = ChromeUtils.importESModule(
   "resource://testing-common/httpd.sys.mjs"
 );
 const { sinon } = ChromeUtils.importESModule(
   "resource://testing-common/Sinon.sys.mjs"
 );
+const { autocompleteUXTreatments } = ChromeUtils.importESModule(
+  "resource://gre/modules/FirefoxRelay.sys.mjs"
+);
 const { getFxAccountsSingleton } = ChromeUtils.importESModule(
   "resource://gre/modules/FxAccounts.sys.mjs"
 );
+ChromeUtils.defineESModuleGetters(lazy, {
+  RemoteSettings: "resource://services-settings/remote-settings.sys.mjs",
+});
 
+const allowListRemoteSettingsCollection = Services.prefs.getStringPref(
+  "signon.firefoxRelay.allowListRemoteSettingsCollection",
+  "fxrelay-allowlist"
+);
 const gFxAccounts = getFxAccountsSingleton();
 let gRelayHttpServer;
 let gRelayACOptionsTitles;
@@ -91,14 +103,26 @@ async function setUpMockRelayServer() {
   });
 }
 
+async function stubRemoteSettingsAllowList(
+  allowList = [{ domain: "example.org" }]
+) {
+  const allowListRS = await lazy.RemoteSettings("fxrelay-allowlist");
+  const rsSandbox = sinon.createSandbox();
+  rsSandbox.stub(allowListRS, "get").returns(allowList);
+  allowListRS.emit("sync");
+  return rsSandbox;
+}
+
 add_setup(async function () {
+  const allMessageIds = [];
+  for (const key in autocompleteUXTreatments) {
+    const treatment = autocompleteUXTreatments[key];
+    allMessageIds.push(...treatment.messageIds);
+  }
   gRelayACOptionsTitles = await new Localization([
     "browser/firefoxRelay.ftl",
     "toolkit/branding/brandings.ftl",
-  ]).formatMessages([
-    "firefox-relay-opt-in-title-1",
-    "firefox-relay-use-mask-title",
-  ]);
+  ]).formatMessages(allMessageIds);
 });
 
 function stubFxAccountsToSimulateSignedIn() {
@@ -142,6 +166,7 @@ async function clickRelayItemAndWaitForPopup(acPopup) {
   );
   relayItem.click();
   await notificationShownEvent;
+  return relayItem;
 }
 
 async function clickButtonAndWaitForPopupToClose(buttonToClick) {

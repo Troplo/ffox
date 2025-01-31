@@ -25,7 +25,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   UpdateLog: "resource://gre/modules/UpdateLog.sys.mjs",
   UpdateUtils: "resource://gre/modules/UpdateUtils.sys.mjs",
   WindowsRegistry: "resource://gre/modules/WindowsRegistry.sys.mjs",
-  ctypes: "resource://gre/modules/ctypes.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
 });
 
@@ -53,6 +52,12 @@ XPCOMUtils.defineLazyServiceGetter(
   "@mozilla.org/updates/update-service-stub;1",
   "nsIApplicationUpdateServiceStub"
 );
+XPCOMUtils.defineLazyServiceGetter(
+  lazy,
+  "UpdateMutex",
+  "@mozilla.org/updates/update-mutex;1",
+  "nsIUpdateMutex"
+);
 
 const UPDATESERVICE_CID = Components.ID(
   "{B3C290A6-3943-4B89-8BBE-C01EB7B3B311}"
@@ -61,22 +66,24 @@ const UPDATESERVICE_CID = Components.ID(
 const PREF_APP_UPDATE_ALTUPDATEDIRPATH = "app.update.altUpdateDirPath";
 const PREF_APP_UPDATE_BACKGROUNDERRORS = "app.update.backgroundErrors";
 const PREF_APP_UPDATE_BACKGROUNDMAXERRORS = "app.update.backgroundMaxErrors";
+const PREF_APP_UPDATE_BACKGROUND_ALLOWDOWNLOADSWITHOUTBITS =
+  "app.update.background.allowDownloadsWithoutBITS";
 const PREF_APP_UPDATE_BITS_ENABLED = "app.update.BITS.enabled";
 const PREF_APP_UPDATE_CANCELATIONS = "app.update.cancelations";
 const PREF_APP_UPDATE_CANCELATIONS_OSX = "app.update.cancelations.osx";
 const PREF_APP_UPDATE_CANCELATIONS_OSX_MAX = "app.update.cancelations.osx.max";
 const PREF_APP_UPDATE_CHECK_ONLY_INSTANCE_ENABLED =
   "app.update.checkOnlyInstance.enabled";
-const PREF_APP_UPDATE_CHECK_ONLY_INSTANCE_INTERVAL =
-  "app.update.checkOnlyInstance.interval";
-const PREF_APP_UPDATE_CHECK_ONLY_INSTANCE_TIMEOUT =
-  "app.update.checkOnlyInstance.timeout";
 const PREF_APP_UPDATE_DOWNLOAD_ATTEMPTS = "app.update.download.attempts";
 const PREF_APP_UPDATE_DOWNLOAD_MAXATTEMPTS = "app.update.download.maxAttempts";
 const PREF_APP_UPDATE_ELEVATE_NEVER = "app.update.elevate.never";
 const PREF_APP_UPDATE_ELEVATE_VERSION = "app.update.elevate.version";
 const PREF_APP_UPDATE_ELEVATE_ATTEMPTS = "app.update.elevate.attempts";
 const PREF_APP_UPDATE_ELEVATE_MAXATTEMPTS = "app.update.elevate.maxAttempts";
+const PREF_APP_UPDATE_INSTALL_LOCKOUT_ENABLED =
+  "app.update.multiSessionInstallLockout.enabled";
+const PREF_APP_UPDATE_INSTALL_LOCKOUT_TIMEOUT_MS =
+  "app.update.multiSessionInstallLockout.timeoutMs";
 const PREF_APP_UPDATE_LANGPACK_ENABLED = "app.update.langpack.enabled";
 const PREF_APP_UPDATE_LANGPACK_TIMEOUT = "app.update.langpack.timeout";
 const PREF_APP_UPDATE_NOTIFYDURINGDOWNLOAD = "app.update.notifyDuringDownload";
@@ -119,6 +126,7 @@ const FILE_UPDATE_MAR = "update.mar";
 const FILE_UPDATE_STATUS = "update.status";
 const FILE_UPDATE_TEST = "update.test";
 const FILE_UPDATE_VERSION = "update.version";
+const FILE_UPDATE_TIMESTAMP = "update.timestamp";
 
 const STATE_NONE = "null";
 const STATE_DOWNLOADING = "downloading";
@@ -264,18 +272,6 @@ const XML_SAVER_INTERVAL_MS = 200;
 // update before proceeding anyway.
 const LANGPACK_UPDATE_DEFAULT_TIMEOUT = 300000;
 
-// Interval between rechecks for other instances after the initial check finds
-// at least one other instance.
-const ONLY_INSTANCE_CHECK_DEFAULT_POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-
-// Wait this long after detecting that another instance is running (having been
-// polling that entire time) before giving up and applying the update anyway.
-const ONLY_INSTANCE_CHECK_DEFAULT_TIMEOUT_MS = 6 * 60 * 60 * 1000; // 6 hours
-
-// The other instance check timeout can be overridden via a pref, but we limit
-// that value to this so that the pref can't effectively disable the feature.
-const ONLY_INSTANCE_CHECK_MAX_TIMEOUT_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
-
 // Values to use when polling for staging. See `pollForStagingEnd` for more
 // details.
 const STAGING_POLLING_MIN_INTERVAL_MS = 15 * 1000; // 15 seconds
@@ -283,7 +279,11 @@ const STAGING_POLLING_MAX_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const STAGING_POLLING_ATTEMPTS_PER_INTERVAL = 5;
 const STAGING_POLLING_MAX_DURATION_MS = 1 * 60 * 60 * 1000; // 1 hour
 
-var gUpdateMutexHandle = null;
+// Timestamps further than this many milliseconds in the future will be
+// considered invalid.
+const MAX_UPDATE_INSTALL_LOCKOUT_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
+const DEFAULT_UPDATE_INSTALL_LOCKOUT_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 1 day
+
 // This value will be set to true if it appears that BITS is being used by
 // another user to download updates. We don't really want two users using BITS
 // at once. Computers with many users (ex: a school computer), should not end
@@ -323,26 +323,34 @@ ChromeUtils.defineLazyGetter(
   }
 );
 
-/**
- * gIsBackgroundTaskMode will be true if Firefox is currently running as a
- * background task. Otherwise it will be false.
- */
-ChromeUtils.defineLazyGetter(
-  lazy,
-  "gIsBackgroundTaskMode",
-  function aus_gCurrentlyRunningAsBackgroundTask() {
-    if (!("@mozilla.org/backgroundtasks;1" in Cc)) {
-      return false;
+function resetIsBackgroundTaskMode() {
+  /**
+   * gIsBackgroundTaskMode will be true if Firefox is currently running as a
+   * background task. Otherwise it will be false.
+   */
+  ChromeUtils.defineLazyGetter(
+    lazy,
+    "gIsBackgroundTaskMode",
+    function aus_gCurrentlyRunningAsBackgroundTask() {
+      if (!("@mozilla.org/backgroundtasks;1" in Cc)) {
+        return false;
+      }
+      const bts = Cc["@mozilla.org/backgroundtasks;1"].getService(
+        Ci.nsIBackgroundTasks
+      );
+      if (!bts) {
+        return false;
+      }
+      return bts.isBackgroundTaskMode;
     }
-    const bts = Cc["@mozilla.org/backgroundtasks;1"].getService(
-      Ci.nsIBackgroundTasks
-    );
-    if (!bts) {
-      return false;
-    }
-    return bts.isBackgroundTaskMode;
-  }
-);
+  );
+}
+resetIsBackgroundTaskMode();
+
+// Exported for testing only.
+export function testResetIsBackgroundTaskMode() {
+  resetIsBackgroundTaskMode();
+}
 
 /**
  * Changes `nsIApplicationUpdateService.currentState` and causes
@@ -399,15 +407,6 @@ function unwrap(obj) {
 const LangPackUpdates = new WeakMap();
 
 /**
- * When we're polling to see if other running instances of the application have
- * exited, there's no need to ever start polling again in parallel. To prevent
- * doing that, we keep track of the promise that resolves when polling completes
- * and return that if a second simultaneous poll is requested, so that the
- * multiple callers end up waiting for the same promise to resolve.
- */
-let gOtherInstancePollPromise;
-
-/**
  * Query the update sync manager to see if another instance of this same
  * installation of this application is currently running, under the context of
  * any operating system user (not just the current one).
@@ -438,83 +437,6 @@ function isOtherInstanceRunning() {
 }
 
 /**
- * Query the update sync manager to see if another instance of this same
- * installation of this application is currently running, under the context of
- * any operating system user (not just the one running this instance).
- * This function polls for the status of other instances continually
- * (asynchronously) until either none exist or a timeout expires.
- *
- * @return a Promise that resolves with false if at any point during polling no
- *         other instances can be found, or resolves with true if the timeout
- *         expires when other instances are still running
- */
-function waitForOtherInstances() {
-  // If we're already in the middle of a poll, reuse it rather than start again.
-  if (gOtherInstancePollPromise) {
-    return gOtherInstancePollPromise;
-  }
-
-  let timeout = Services.prefs.getIntPref(
-    PREF_APP_UPDATE_CHECK_ONLY_INSTANCE_TIMEOUT,
-    ONLY_INSTANCE_CHECK_DEFAULT_TIMEOUT_MS
-  );
-
-  // return immediately if timeout value is invalid.
-  if (timeout <= 0) {
-    return Promise.resolve(isOtherInstanceRunning());
-  }
-
-  // Don't allow the pref to set a super high timeout and break this feature.
-  if (timeout > ONLY_INSTANCE_CHECK_MAX_TIMEOUT_MS) {
-    timeout = ONLY_INSTANCE_CHECK_MAX_TIMEOUT_MS;
-  }
-
-  let interval = Services.prefs.getIntPref(
-    PREF_APP_UPDATE_CHECK_ONLY_INSTANCE_INTERVAL,
-    ONLY_INSTANCE_CHECK_DEFAULT_POLL_INTERVAL_MS
-  );
-
-  if (interval <= 0) {
-    interval = ONLY_INSTANCE_CHECK_DEFAULT_POLL_INTERVAL_MS;
-  }
-
-  // Don't allow an interval longer than the timeout.
-  interval = Math.min(interval, timeout);
-
-  let iterations = 0;
-  const maxIterations = Math.ceil(timeout / interval);
-
-  gOtherInstancePollPromise = new Promise(function (resolve) {
-    let poll = function () {
-      iterations++;
-      if (!isOtherInstanceRunning()) {
-        LOG("waitForOtherInstances - no other instances found, exiting");
-        resolve(false);
-        gOtherInstancePollPromise = undefined;
-      } else if (iterations >= maxIterations) {
-        LOG(
-          "waitForOtherInstances - timeout expired while other instances " +
-            "are still running"
-        );
-        resolve(true);
-        gOtherInstancePollPromise = undefined;
-      } else if (iterations + 1 == maxIterations && timeout % interval != 0) {
-        // In case timeout isn't a multiple of interval, set the next timeout
-        // for the remainder of the time rather than for the usual interval.
-        lazy.setTimeout(poll, timeout % interval);
-      } else {
-        lazy.setTimeout(poll, interval);
-      }
-    };
-
-    LOG("waitForOtherInstances - beginning polling");
-    poll();
-  });
-
-  return gOtherInstancePollPromise;
-}
-
-/**
  * Tests to make sure that we can write to a given directory.
  *
  * @param updateTestFile a test file in the directory that needs to be tested.
@@ -535,110 +457,14 @@ function testWriteAccess(updateTestFile, createDirectory) {
 }
 
 /**
- * Windows only function that closes a Win32 handle.
+ * Tests whether or not the current instance has the update mutex. Tries to
+ * acquire it if it is not held currently.
  *
- * @param handle The handle to close
- */
-function closeHandle(handle) {
-  if (handle) {
-    let lib = lazy.ctypes.open("kernel32.dll");
-    let CloseHandle = lib.declare(
-      "CloseHandle",
-      lazy.ctypes.winapi_abi,
-      lazy.ctypes.int32_t /* success */,
-      lazy.ctypes.void_t.ptr
-    ); /* handle */
-    CloseHandle(handle);
-    lib.close();
-  }
-}
-
-/**
- * Windows only function that creates a mutex.
- *
- * @param  aName
- *         The name for the mutex.
- * @param  aAllowExisting
- *         If false the function will close the handle and return null.
- * @return The Win32 handle to the mutex.
- */
-function createMutex(aName, aAllowExisting = true) {
-  if (AppConstants.platform != "win") {
-    throw Components.Exception("", Cr.NS_ERROR_NOT_IMPLEMENTED);
-  }
-
-  const INITIAL_OWN = 1;
-  const ERROR_ALREADY_EXISTS = 0xb7;
-  let lib = lazy.ctypes.open("kernel32.dll");
-  let CreateMutexW = lib.declare(
-    "CreateMutexW",
-    lazy.ctypes.winapi_abi,
-    lazy.ctypes.void_t.ptr /* return handle */,
-    lazy.ctypes.void_t.ptr /* security attributes */,
-    lazy.ctypes.int32_t /* initial owner */,
-    lazy.ctypes.char16_t.ptr
-  ); /* name */
-
-  let handle = CreateMutexW(null, INITIAL_OWN, aName);
-  let alreadyExists = lazy.ctypes.winLastError == ERROR_ALREADY_EXISTS;
-  if (handle && !handle.isNull() && !aAllowExisting && alreadyExists) {
-    closeHandle(handle);
-    handle = null;
-  }
-  lib.close();
-
-  if (handle && handle.isNull()) {
-    handle = null;
-  }
-
-  return handle;
-}
-
-/**
- * Windows only function that determines a unique mutex name for the
- * installation.
- *
- * @param aGlobal
- *        true if the function should return a global mutex. A global mutex is
- *        valid across different sessions.
- * @return Global mutex path
- */
-function getPerInstallationMutexName(aGlobal = true) {
-  if (AppConstants.platform != "win") {
-    throw Components.Exception("", Cr.NS_ERROR_NOT_IMPLEMENTED);
-  }
-
-  let hasher = Cc["@mozilla.org/security/hash;1"].createInstance(
-    Ci.nsICryptoHash
-  );
-  hasher.init(hasher.SHA1);
-
-  let exeFile = Services.dirsvc.get(KEY_EXECUTABLE, Ci.nsIFile);
-
-  var data = new TextEncoder().encode(exeFile.path.toLowerCase());
-
-  hasher.update(data, data.length);
-  return (
-    (aGlobal ? "Global\\" : "") + "MozillaUpdateMutex-" + hasher.finish(true)
-  );
-}
-
-/**
- * Whether or not the current instance has the update mutex. The update mutex
- * gives protection against 2 applications from the same installation updating:
- * 1) Running multiple profiles from the same installation path
- * 2) Two applications running in 2 different user sessions from the same path
- *
- * @return true if this instance holds the update mutex
+ * @return true if this instance now holds the update mutex or was already
+ *         holding
  */
 function hasUpdateMutex() {
-  if (AppConstants.platform != "win") {
-    return true;
-  }
-  if (!gUpdateMutexHandle) {
-    gUpdateMutexHandle = createMutex(getPerInstallationMutexName(true), false);
-  }
-  return !!gUpdateMutexHandle;
+  return lazy.UpdateMutex.tryLock();
 }
 
 /**
@@ -2322,7 +2148,10 @@ class Update {
     // Set the installDate value with the current time. If the update has an
     // installDate attribute this will be replaced with that value if it doesn't
     // equal 0.
-    this.installDate = new Date().getTime();
+    this._installDate = new Date().getTime();
+    // The `installDate` set above isn't especially legitimate. In some cases,
+    // we need to be able to tell when we have the real install date.
+    this.usingDefaultInstallDate = true;
     this.patchCount = this._patches.length;
 
     for (let i = 0; i < update.attributes.length; ++i) {
@@ -2614,6 +2443,15 @@ class Update {
     return null;
   }
 
+  get installDate() {
+    return this._installDate;
+  }
+
+  set installDate(date) {
+    this._installDate = date;
+    this.usingDefaultInstallDate = false;
+  }
+
   QueryInterface = ChromeUtils.generateQI([
     Ci.nsIUpdate,
     Ci.nsIPropertyBag,
@@ -2676,6 +2514,12 @@ export class UpdateService {
         Ci.nsIApplicationUpdateServiceInternal,
       ]),
     };
+
+    Services.prefs.addObserver(PREF_APP_UPDATE_INSTALL_LOCKOUT_ENABLED, this);
+    Services.prefs.addObserver(
+      PREF_APP_UPDATE_INSTALL_LOCKOUT_TIMEOUT_MS,
+      this
+    );
   }
 
   /**
@@ -2716,13 +2560,20 @@ export class UpdateService {
         break;
       case "quit-application":
         Services.obs.removeObserver(this, topic);
+        Services.prefs.removeObserver(
+          PREF_APP_UPDATE_INSTALL_LOCKOUT_ENABLED,
+          this
+        );
+        Services.prefs.removeObserver(
+          PREF_APP_UPDATE_INSTALL_LOCKOUT_TIMEOUT_MS,
+          this
+        );
 
-        if (AppConstants.platform == "win" && gUpdateMutexHandle) {
+        if (lazy.UpdateMutex.isLocked()) {
           // If we hold the update mutex, let it go!
           // The OS would clean this up sometime after shutdown,
           // but that would have no guarantee on timing.
-          closeHandle(gUpdateMutexHandle);
-          gUpdateMutexHandle = null;
+          lazy.UpdateMutex.unlock();
         }
         if (this._retryTimer) {
           this._retryTimer.cancel();
@@ -2747,13 +2598,20 @@ export class UpdateService {
         // In case any update checks are in progress.
         lazy.CheckSvc.stopAllChecks();
         break;
-      case "test-close-handle-update-mutex":
+      case "test-unlock-update-mutex":
         if (Cu.isInAutomation) {
-          if (AppConstants.platform == "win" && gUpdateMutexHandle) {
-            LOG("UpdateService:observe - closing mutex handle for testing");
-            closeHandle(gUpdateMutexHandle);
-            gUpdateMutexHandle = null;
+          if (lazy.UpdateMutex.isLocked()) {
+            LOG("UpdateService:observe - releasing update mutex for testing");
+            lazy.UpdateMutex.unlock();
           }
+        }
+        break;
+      case "nsPref:changed":
+        if (
+          data == PREF_APP_UPDATE_INSTALL_LOCKOUT_ENABLED ||
+          data == PREF_APP_UPDATE_INSTALL_LOCKOUT_TIMEOUT_MS
+        ) {
+          await this.writeTimestampFile();
         }
         break;
     }
@@ -3183,6 +3041,7 @@ export class UpdateService {
         LOG("UpdateService:#asyncInit - Cleaning up missing pending update.");
         cleanupReadyUpdate();
       }
+      await this.writeTimestampFile();
     } else {
       // If there was an I/O error it is assumed that the patch is not invalid
       // and it is set to pending so an attempt to apply it again will happen
@@ -3603,8 +3462,6 @@ export class UpdateService {
         );
       } else if (!hasUpdateMutex()) {
         AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_NO_MUTEX);
-      } else if (isOtherInstanceRunning()) {
-        AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_OTHER_INSTANCE);
       } else if (!this.canCheckForUpdates) {
         AUSTLMY.pingCheckCode(this._pingSuffix, AUSTLMY.CHK_UNABLE_TO_CHECK);
       }
@@ -3964,15 +3821,6 @@ export class UpdateService {
       return false;
     }
 
-    if (isOtherInstanceRunning()) {
-      // This doesn't block update checks, but we will have to wait until either
-      // the other instance is gone or we time out waiting for it.
-      LOG(
-        "UpdateService.canCheckForUpdates - another instance is holding the " +
-          "lock, will need to wait for it prior to checking for updates"
-      );
-    }
-
     LOG("UpdateService.canCheckForUpdates - able to check for updates");
     return true;
   }
@@ -3995,11 +3843,7 @@ export class UpdateService {
    * See nsIUpdateService.idl
    */
   get canApplyUpdates() {
-    return (
-      this.canUsuallyApplyUpdates &&
-      hasUpdateMutex() &&
-      !isOtherInstanceRunning()
-    );
+    return this.canUsuallyApplyUpdates && hasUpdateMutex();
   }
 
   /**
@@ -4232,6 +4076,7 @@ export class UpdateService {
       "Other instance of the application currently running: " +
         this.isOtherInstanceHandlingUpdates
     );
+    LOG("Current update state: " + this.getStateName(gUpdateState));
     LOG("Downloading: " + !!this.isDownloading);
     if (this._downloader && this._downloader.isBusy) {
       LOG("Downloading complete update: " + this._downloader.isCompleteUpdate);
@@ -4326,12 +4171,22 @@ export class UpdateService {
    *             to the `BitsRequest` that is returned.
    *           url
    *             The URL to download.
+   *           extraHeaders
+   *             String of extra headers to include, in the format accepted by
+   *             `IBackgroundCopyJobHttpOptions::SetCustomHeaders`: separated by
+   *             `\r\n`, terminated by an additional `\r\n`.
    * @return Promise<BitsRequest>
    *         Returns a request object
    * @throws BitsError
    *         On failure to connect to the BITS job.
    */
-  async makeBitsRequest({ activeListeners = false, bitsId, observer, url }) {
+  async makeBitsRequest({
+    activeListeners = false,
+    bitsId,
+    observer,
+    url,
+    extraHeaders,
+  }) {
     let noProgressTimeout = BITS_IDLE_NO_PROGRESS_TIMEOUT_SECS;
     let monitorInterval = BITS_IDLE_POLL_RATE_MS;
     // The monitor's timeout should be much greater than the longest monitor
@@ -4388,6 +4243,7 @@ export class UpdateService {
       Ci.nsIBits.PROXY_PRECONFIG,
       noProgressTimeout,
       monitorInterval,
+      extraHeaders,
       observer,
       null
     );
@@ -4449,6 +4305,88 @@ export class UpdateService {
     LOG(
       `UpdateService:cancelDownloadingUpdate - Successfully cleaned up BITS Job ${bitsId}`
     );
+  }
+
+  /**
+   * Writes a timestamp for the end of the install lockout timeout to
+   * 'update.timestamp'. Before this timestamp, Firefox will only install
+   * updates at startup if there are no other instances running. After this
+   * timestamp, Firefox will install updates at startup even if there are other
+   * instances running.
+   *
+   * Unless this is the initial write of this file, this function only writes to
+   * the file when we are reasonably sure we know when the timer ought to have
+   * started (i.e. when the update download finished). We want to make sure that
+   * we aren't writing a timestamp based on the current time to this file.
+   *
+   * If the update timeout feature is not enabled, this instead removes the
+   * timeout file, if present.
+   *
+   * @param  options
+   *         An optional object containing any of these keys:
+   *           dir
+   *             The patch directory where the update.timestamp file should be
+   *             written. Defaults to using `getReadyUpdateDir()`.
+   *           update
+   *             The nsIUpdate to write the timestamp for. Defaults to the
+   *             current `readyUpdate`.
+   *           isInitialWrite
+   *             Should be `true` if this is the first write of the timestamp
+   *             file for this update. If this is `true`, `update` must have a
+   *             valid `installDate` set (`usingDefaultInstallDate == false`).
+   */
+  async writeTimestampFile({ dir, update, isInitialWrite = false } = {}) {
+    if (!update) {
+      update = lazy.UM.internal.readyUpdate;
+    }
+    if (!update) {
+      LOG(
+        "UpdateService:writeTimestampFile - Not writing timestamp file. No update."
+      );
+      return;
+    }
+
+    const timeoutsEnabled = Services.prefs.getBoolPref(
+      PREF_APP_UPDATE_INSTALL_LOCKOUT_ENABLED,
+      true
+    );
+    if (timeoutsEnabled && update.usingDefaultInstallDate && !isInitialWrite) {
+      LOG(
+        "UpdateService:writeTimestampFile - Skipping timestamp update. Lack of valid data."
+      );
+      return;
+    }
+
+    const timestampFile = dir ? dir.clone() : getReadyUpdateDir();
+    timestampFile.append(FILE_UPDATE_TIMESTAMP);
+
+    const timeoutMs = Services.prefs.getIntPref(
+      PREF_APP_UPDATE_INSTALL_LOCKOUT_TIMEOUT_MS,
+      DEFAULT_UPDATE_INSTALL_LOCKOUT_TIMEOUT_MS
+    );
+
+    if (timeoutsEnabled && timeoutMs > 0) {
+      const timestampMs = Math.min(
+        update.installDate + timeoutMs,
+        Date.now() + MAX_UPDATE_INSTALL_LOCKOUT_TIMEOUT_MS
+      );
+      LOG(
+        `UpdateService:writeTimestampFile - Writing ${new Date(
+          timestampMs
+        )} (${timestampMs})`
+      );
+      writeStringToFile(timestampFile, timestampMs);
+    } else {
+      LOG(
+        `UpdateService:writeTimestampFile - Removing file. Feature ` +
+          `Enabled=${timeoutsEnabled}, Timeout=${timeoutMs}ms`
+      );
+      try {
+        await IOUtils.remove(timestampFile.path, { ignoreAbsent: true });
+      } catch (ex) {
+        LOG("UpdateService:writeTimestampFile - Failed to remove file: " + ex);
+      }
+    }
   }
 
   classID = UPDATESERVICE_CID;
@@ -5446,8 +5384,6 @@ export class CheckerService {
       await lazy.AUS.init();
     }
 
-    await waitForOtherInstances();
-
     let url;
     try {
       url = await this.getUpdateURL(checkType);
@@ -5466,9 +5402,8 @@ export class CheckerService {
     request.channel.loadFlags |= Ci.nsIRequest.INHIBIT_CACHING;
     // Disable cutting edge features, like TLS 1.3, where middleboxes might
     // brick us
-    request.channel.QueryInterface(
-      Ci.nsIHttpChannelInternal
-    ).beConservative = true;
+    request.channel.QueryInterface(Ci.nsIHttpChannelInternal).beConservative =
+      true;
 
     request.overrideMimeType("text/xml");
     // The Cache-Control header is only interpreted by proxies and the
@@ -6141,6 +6076,63 @@ class Downloader {
   }
 
   /**
+   * Given a patch URL, return a URL possibly modified with extra query
+   * parameters and extra headers.  The extras help identify whether this update
+   * is driven by a regular browsing Firefox or by a background update task.
+   *
+   * @param {string} [patchURL] Unmodified patch URL.
+   * @return { url, extraHeaders }
+   */
+  _maybeWithExtras(patchURL) {
+    let shouldAddExtras = true;
+    if (AppConstants.MOZ_APP_NAME !== "firefox") {
+      shouldAddExtras = false;
+    }
+    if (Services.policies) {
+      let policies = Services.policies.getActivePolicies();
+      if (policies) {
+        if ("AppUpdateURL" in policies) {
+          shouldAddExtras = false;
+        }
+      }
+    }
+
+    if (!shouldAddExtras) {
+      LOG("Downloader:_maybeWithExtras - Not adding extras");
+      return { url: patchURL, extraHeaders: "\r\n" };
+    }
+
+    LOG("Downloader:_maybeWithExtras - Adding extras");
+
+    let modeStr = lazy.gIsBackgroundTaskMode ? "1" : "0";
+    let extraHeaders = `X-BackgroundTaskMode: ${modeStr}\r\n`;
+    let extraParameters = [["backgroundTaskMode", modeStr]];
+
+    if (lazy.gIsBackgroundTaskMode) {
+      const bts = Cc["@mozilla.org/backgroundtasks;1"].getService(
+        Ci.nsIBackgroundTasks
+      );
+      extraHeaders += `X-BackgroundTaskName: ${bts.backgroundTaskName()}\r\n`;
+      extraParameters.push(["backgroundTaskName", bts.backgroundTaskName()]);
+    }
+
+    extraHeaders += "\r\n";
+
+    let url = patchURL;
+    let parsedUrl = URL.parse(url);
+    if (parsedUrl) {
+      for (let [p, v] of extraParameters) {
+        parsedUrl.searchParams.set(p, v);
+      }
+      url = parsedUrl.href;
+    } else {
+      LOG("Downloader:_maybeWithExtras - Failed to parse patch URL!");
+    }
+
+    return { url, extraHeaders };
+  }
+
+  /**
    * Download and stage the given update.
    * @param   update
    *          A nsIUpdate object to download a patch for. Cannot be null.
@@ -6194,13 +6186,28 @@ class Downloader {
       canUseBits = this._canUseBits(this._patch);
     }
 
+    // When using Firefox and Mozilla's update server, add extra headers and
+    // extra query parameters identifying whether this request is on behalf of a
+    // regular browsing profile (0) or a background task (1).  This helps
+    // understand bandwidth usage of background updates in production.
+    let { url, extraHeaders } = this._maybeWithExtras(this._patch.URL);
+
     if (!canUseBits) {
       this._pendingRequest = null;
 
       let patchFile = updateDir.clone();
       patchFile.append(FILE_UPDATE_MAR);
 
-      if (lazy.gIsBackgroundTaskMode) {
+      // Background updates generally should not fall back to internal (Necko)
+      // downloads: on Windows, they should only use Windows BITS.  In
+      // automation, this pref allows Necko for testing.
+      let allowDownloadsWithoutBITS =
+        Cu.isInAutomation &&
+        Services.prefs.getBoolPref(
+          PREF_APP_UPDATE_BACKGROUND_ALLOWDOWNLOADSWITHOUTBITS,
+          false
+        );
+      if (lazy.gIsBackgroundTaskMode && !allowDownloadsWithoutBITS) {
         // We don't normally run a background update if we can't use BITS, but
         // this branch is possible because we do fall back from BITS failures by
         // attempting an internal download.
@@ -6236,18 +6243,25 @@ class Downloader {
       LOG(
         "Downloader:downloadUpdate - Starting nsIIncrementalDownload with " +
           "url: " +
-          this._patch.URL +
+          url +
           ", path: " +
           patchFile.path +
           ", interval: " +
           interval
       );
-      let uri = Services.io.newURI(this._patch.URL);
+      let uri = Services.io.newURI(url);
 
       this._request = Cc[
         "@mozilla.org/network/incremental-download;1"
       ].createInstance(Ci.nsIIncrementalDownload);
-      this._request.init(uri, patchFile, DOWNLOAD_CHUNK_SIZE, interval);
+
+      this._request.init(
+        uri,
+        patchFile,
+        DOWNLOAD_CHUNK_SIZE,
+        interval,
+        extraHeaders
+      );
       this._request.start(this, null);
     } else {
       this._bitsActiveNotifications = this.hasDownloadListeners;
@@ -6257,7 +6271,8 @@ class Downloader {
         activeListeners: this.hasDownloadListeners,
         bitsId: this._patch.getProperty("bitsId"),
         observer: this,
-        url: this._patch.URL,
+        url,
+        extraHeaders,
       });
 
       let request;
@@ -6705,11 +6720,16 @@ class Downloader {
             `Downloader:onStopRequest - Ready to apply. Setting state to ` +
               `"${state}".`
           );
-          writeStatusFile(getReadyUpdateDir(), state);
-          writeVersionFile(getReadyUpdateDir(), this._update.appVersion);
-          this._update.installDate = new Date().getTime();
+          this._update.installDate = Date.now();
           this._update.statusText =
             lazy.gUpdateBundle.GetStringFromName("installPending");
+          writeStatusFile(readyDir, state);
+          writeVersionFile(readyDir, this._update.appVersion);
+          await this.updateService.writeTimestampFile({
+            dir: readyDir,
+            update: this._update,
+            isInitialWrite: true,
+          });
           Services.prefs.setIntPref(PREF_APP_UPDATE_DOWNLOAD_ATTEMPTS, 0);
         } else {
           LOG(

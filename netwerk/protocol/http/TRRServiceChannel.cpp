@@ -444,10 +444,6 @@ nsresult TRRServiceChannel::BeginConnect() {
     mConnectionInfo->SetNoSpdy(true);
   }
 
-  // If TimingEnabled flag is not set after OnModifyRequest() then
-  // clear the already recorded AsyncOpen value for consistency.
-  if (!LoadTimingEnabled()) mAsyncOpenTime = TimeStamp();
-
   // if this somehow fails we can go on without it
   Unused << gHttpHandler->AddConnectionHeader(&mRequestHead, mCaps);
 
@@ -651,8 +647,6 @@ nsresult TRRServiceChannel::SetupTransaction() {
   // See bug #466080. Transfer LOAD_ANONYMOUS flag to socket-layer.
   if (mLoadFlags & LOAD_ANONYMOUS) mCaps |= NS_HTTP_LOAD_ANONYMOUS;
 
-  if (LoadTimingEnabled()) mCaps |= NS_HTTP_TIMING_ENABLED;
-
   nsCOMPtr<nsIHttpPushListener> pushListener;
   NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup,
                                 NS_GET_IID(nsIHttpPushListener),
@@ -776,9 +770,8 @@ void TRRServiceChannel::MaybeStartDNSPrefetch() {
        this, mCaps & NS_HTTP_REFRESH_DNS ? ", refresh requested" : ""));
 
   OriginAttributes originAttributes;
-  mDNSPrefetch =
-      new nsDNSPrefetch(mURI, originAttributes, nsIRequest::GetTRRMode(), this,
-                        LoadTimingEnabled());
+  mDNSPrefetch = new nsDNSPrefetch(mURI, originAttributes,
+                                   nsIRequest::GetTRRMode(), this, true);
   nsIDNSService::DNSFlags dnsFlags = nsIDNSService::RESOLVE_DEFAULT_FLAGS;
   if (mCaps & NS_HTTP_REFRESH_DNS) {
     dnsFlags |= nsIDNSService::RESOLVE_BYPASS_CACHE;
@@ -1213,6 +1206,94 @@ TRRServiceChannel::OnDataAvailable(nsIRequest* request, nsIInputStream* input,
   return NS_ERROR_ABORT;
 }
 
+static void TelemetryReport(nsITimedChannel* aTimedChannel) {
+  TimeStamp asyncOpen;
+  nsresult rv = aTimedChannel->GetAsyncOpen(&asyncOpen);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  TimeStamp domainLookupStart;
+  rv = aTimedChannel->GetDomainLookupStart(&domainLookupStart);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  TimeStamp domainLookupEnd;
+  rv = aTimedChannel->GetDomainLookupEnd(&domainLookupEnd);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  TimeStamp connectStart;
+  rv = aTimedChannel->GetConnectStart(&connectStart);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  TimeStamp secureConnectionStart;
+  rv = aTimedChannel->GetSecureConnectionStart(&secureConnectionStart);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  TimeStamp connectEnd;
+  rv = aTimedChannel->GetConnectEnd(&connectEnd);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  TimeStamp requestStart;
+  rv = aTimedChannel->GetRequestStart(&requestStart);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  TimeStamp responseStart;
+  rv = aTimedChannel->GetResponseStart(&responseStart);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  TimeStamp responseEnd;
+  rv = aTimedChannel->GetResponseEnd(&responseEnd);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  const nsCString& key = TRRService::ProviderKey();
+  if (!domainLookupStart.IsNull()) {
+    mozilla::glean::networking::trr_dns_start.Get(key).AccumulateRawDuration(
+        domainLookupStart - asyncOpen);
+    if (!domainLookupEnd.IsNull()) {
+      mozilla::glean::networking::trr_dns_end.Get(key).AccumulateRawDuration(
+          domainLookupEnd - domainLookupStart);
+    }
+  }
+  if (!connectEnd.IsNull()) {
+    if (!connectStart.IsNull()) {
+      mozilla::glean::networking::trr_tcp_connection.Get(key)
+          .AccumulateRawDuration(connectEnd - connectStart);
+    }
+    if (!secureConnectionStart.IsNull()) {
+      mozilla::glean::networking::trr_tls_handshake.Get(key)
+          .AccumulateRawDuration(connectEnd - secureConnectionStart);
+    }
+  }
+  if (!requestStart.IsNull() && !responseEnd.IsNull()) {
+    mozilla::glean::networking::trr_open_to_first_sent.Get(key)
+        .AccumulateRawDuration(requestStart - asyncOpen);
+    mozilla::glean::networking::trr_first_sent_to_last_received.Get(key)
+        .AccumulateRawDuration(responseEnd - requestStart);
+    mozilla::glean::networking::trr_complete_load.Get(key)
+        .AccumulateRawDuration(responseEnd - asyncOpen);
+    if (!responseStart.IsNull()) {
+      mozilla::glean::networking::trr_open_to_first_received.Get(key)
+          .AccumulateRawDuration(responseStart - asyncOpen);
+    }
+  }
+}
+
 NS_IMETHODIMP
 TRRServiceChannel::OnStopRequest(nsIRequest* request, nsresult status) {
   LOG(("TRRServiceChannel::OnStopRequest [this=%p request=%p status=%" PRIx32
@@ -1243,6 +1324,7 @@ TRRServiceChannel::OnStopRequest(nsIRequest* request, nsresult status) {
   }
 
   ReleaseListeners();
+  TelemetryReport(this);
   return NS_OK;
 }
 

@@ -159,6 +159,8 @@ scheme host and port.""")
                                       help="A file listing URL prefix for tests")
     test_selection_group.add_argument("--exclude", action="append",
                                       help="URL prefix to exclude")
+    test_selection_group.add_argument("--exclude-file", action="store",
+                                      help="A file listing URL prefix for tests")
     test_selection_group.add_argument("--include-manifest", type=abs_path,
                                       help="Path to manifest listing tests to include")
     test_selection_group.add_argument("--test-groups", dest="test_groups_file", type=abs_path,
@@ -290,6 +292,9 @@ scheme host and port.""")
     config_group.add_argument("--no-suppress-handler-traceback", action="store_false",
                               dest="supress_handler_traceback",
                               help="Write the stacktrace for exceptions in server handlers")
+    config_group.add_argument("--ws-extra", action="append", default=None,
+                              dest="ws_extra",
+                              help="Extra paths containing websockets handlers")
 
     build_type = parser.add_mutually_exclusive_group()
     build_type.add_argument("--debug-build", dest="debug", action="store_true",
@@ -469,24 +474,31 @@ def set_from_config(kwargs):
 
     kwargs["product"] = products.Product(kwargs["config"], kwargs["product"])
 
-    keys = {"paths": [("prefs", "prefs_root", True),
-                      ("run_info", "run_info", True)],
-            "web-platform-tests": [("remote_url", "remote_url", False),
-                                   ("branch", "branch", False),
-                                   ("sync_path", "sync_path", True)],
-            "SSL": [("openssl_binary", "openssl_binary", True),
-                    ("certutil_binary", "certutil_binary", True),
-                    ("ca_cert_path", "ca_cert_path", True),
-                    ("host_cert_path", "host_cert_path", True),
-                    ("host_key_path", "host_key_path", True)]}
+    keys = {"paths": [("prefs", "prefs_root", "path"),
+                      ("run_info", "run_info", "path"),
+                      ("ws_extra", "ws_extra", "paths")],
+            "web-platform-tests": [("remote_url", "remote_url", "str"),
+                                   ("branch", "branch", "str"),
+                                   ("sync_path", "sync_path", "path")],
+            "SSL": [("openssl_binary", "openssl_binary", "path"),
+                    ("certutil_binary", "certutil_binary", "path"),
+                    ("ca_cert_path", "ca_cert_path", "path"),
+                    ("host_cert_path", "host_cert_path", "path"),
+                    ("host_key_path", "host_key_path", "path")]}
+
+    getters = {
+        "str": "get",
+        "path": "get_path",
+        "paths": "get_paths"
+    }
 
     for section, values in keys.items():
-        for config_value, kw_value, is_path in values:
+        for config_value, kw_value, prop_type in values:
+            if prop_type not in getters:
+                raise ValueError(f"Unknown config property type {prop_type}")
+            getter_name = getters[prop_type]
             if kw_value in kwargs and kwargs[kw_value] is None:
-                if not is_path:
-                    new_value = kwargs["config"].get(section, config.ConfigDict({})).get(config_value)
-                else:
-                    new_value = kwargs["config"].get(section, config.ConfigDict({})).get_path(config_value)
+                new_value = getattr(kwargs["config"].get(section, config.ConfigDict({})), getter_name)(config_value)
                 kwargs[kw_value] = new_value
 
     test_paths = get_test_paths(kwargs["config"],

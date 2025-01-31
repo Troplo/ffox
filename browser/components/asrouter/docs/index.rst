@@ -68,6 +68,10 @@ icons) and access to a set of enhanced user actions such as triggering URLs,
 launching menus, or installing addons, which can be attached to interactive
 elements (such as buttons).
 
+Warning! Before reading, you should consider whether a `Messaging Experiment is relevant for your needs`__.
+
+.. __: https://docs.google.com/document/d/1S45a_nFn8QRM8gvsxCM6HHROrIQlQQl6fUlJ2j63PGI/edit
+
 Current templates include\:
 
 .. In theory, we ought to be able to use the :glob: directive here to
@@ -84,6 +88,7 @@ Current templates include\:
   infobars
   spotlight
   private-browsing
+  multi-message
 
 Detailed Docs
 -------------
@@ -96,6 +101,13 @@ Detailed Docs
 
 .. __: /toolkit/components/messaging-system/docs
 
+* If interested in messaging experimentation through Nimbus, see `Messaging System: Experimenter Onboarding`__.
+
+.. __: https://mozilla-hub.atlassian.net/wiki/spaces/FIREFOX/pages/233406786/OMC+Experimenter+Onboarding
+
+
+
+
 .. In theory, we ought to be able to use the :glob: directive here to
 .. automatically generate the list below. For unknown reasons, however,
 .. `mach doc` _sometimes_ gets confused and refuses to find patterns like
@@ -103,11 +115,13 @@ Detailed Docs
 .. toctree::
   :maxdepth: 2
 
+  building-and-testing
   debugging-docs
+  frequency-caps
   first-run
   messaging-glossary
   remote_cfr
-  simple-cfr-template
   targeting-attributes
   targeting-guide
   telemetry
+  skylight

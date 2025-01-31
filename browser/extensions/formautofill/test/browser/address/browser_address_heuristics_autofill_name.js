@@ -223,7 +223,7 @@ add_heuristic_tests([
     ],
   },
   {
-    description: `two adjacent name sections: name(0) is invalid and not filled, name(1) is a new section and detected as name`,
+    description: `two adjacent name sections`,
     fixtureData: `
                <form>
                    <input placeholder="Name">
@@ -234,16 +234,11 @@ add_heuristic_tests([
 
     expectedResult: [
       {
-        invalid: true,
         fields: [
           {
             fieldName: "name",
             reason: "regex-heuristic",
           },
-        ],
-      },
-      {
-        fields: [
           {
             fieldName: "name",
             reason: "regex-heuristic",
@@ -256,6 +251,86 @@ add_heuristic_tests([
             fieldName: "tel",
             reason: "regex-heuristic",
           },
+        ],
+      },
+    ],
+  },
+  {
+    description: `two names with identical firstname ids, with name=lastname second`,
+    fixtureData: `
+               <form>
+                   <input id="firstname" name="firstname">
+                   <input id="firstname" name="lastname">
+                   <input id="email">
+                   <input id="tel">
+               </form>`,
+    expectedResult: [
+      {
+        fields: [
+          { fieldName: "given-name", reason: "regex-heuristic" },
+          { fieldName: "family-name", reason: "update-heuristic" },
+          { fieldName: "email", reason: "regex-heuristic" },
+          { fieldName: "tel", reason: "regex-heuristic" },
+        ],
+      },
+    ],
+  },
+  {
+    description: `two names with identical firstname ids, with name=lastname first`,
+    fixtureData: `
+               <form>
+                   <input id="firstname" name="lastname">
+                   <input id="firstname" name="firstname">
+                   <input id="email">
+                   <input id="tel">
+               </form>`,
+    expectedResult: [
+      {
+        fields: [
+          { fieldName: "family-name", reason: "update-heuristic" },
+          { fieldName: "given-name", reason: "regex-heuristic" },
+          { fieldName: "email", reason: "regex-heuristic" },
+          { fieldName: "tel", reason: "regex-heuristic" },
+        ],
+      },
+    ],
+  },
+  {
+    description: `two names with identical firstname ids, with labels`,
+    fixtureData: `
+               <form>
+                   <label>Last Name: <input name="firstname"></label>
+                   <label>First Name: <input name="firstname"></label>
+                   <input id="email">
+                   <input id="tel">
+               </form>`,
+    expectedResult: [
+      {
+        fields: [
+          { fieldName: "family-name", reason: "update-heuristic" },
+          { fieldName: "given-name", reason: "regex-heuristic" },
+          { fieldName: "email", reason: "regex-heuristic" },
+          { fieldName: "tel", reason: "regex-heuristic" },
+        ],
+      },
+    ],
+  },
+  {
+    description: `two names with identical firstname ids, no name`,
+    fixtureData: `
+               <form>
+                   <input id="firstname">
+                   <input id="firstname">
+                   <input id="email">
+                   <input id="tel">
+               </form>`,
+    expectedResult: [
+      {
+        fields: [
+          { fieldName: "given-name", reason: "regex-heuristic" },
+          { fieldName: "given-name", reason: "regex-heuristic" },
+          { fieldName: "email", reason: "regex-heuristic" },
+          { fieldName: "tel", reason: "regex-heuristic" },
         ],
       },
     ],

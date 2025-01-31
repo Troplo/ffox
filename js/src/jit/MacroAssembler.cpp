@@ -444,16 +444,6 @@ void MacroAssembler::freeListAllocate(Register result, Register temp,
   }
 }
 
-void MacroAssembler::callFreeStub(Register slots) {
-  // This register must match the one in JitRuntime::generateFreeStub.
-  const Register regSlots = CallTempReg0;
-
-  push(regSlots);
-  movePtr(slots, regSlots);
-  call(runtime()->jitRuntime()->freeStub());
-  pop(regSlots);
-}
-
 // Inlined equivalent of gc::AllocateObject, without failure case handling.
 void MacroAssembler::allocateObject(Register result, Register temp,
                                     gc::AllocKind allocKind,
@@ -588,6 +578,64 @@ void MacroAssembler::createArrayWithFixedElements(
     loadPtr(Address(result, NativeObject::offsetOfSlots()), dynamicSlotsTemp);
     fillSlotsWithUndefined(Address(dynamicSlotsTemp, 0), temp, 0,
                            numUsedDynamicSlots);
+  }
+}
+
+void MacroAssembler::createFunctionClone(Register result, Register canonical,
+                                         Register envChain, Register temp,
+                                         gc::AllocKind allocKind, Label* fail) {
+  MOZ_ASSERT(allocKind == gc::AllocKind::FUNCTION ||
+             allocKind == gc::AllocKind::FUNCTION_EXTENDED);
+  MOZ_ASSERT(result != temp);
+
+  // Allocate object.
+  size_t numDynamicSlots = 0;
+  gc::Heap initialHeap = gc::Heap::Default;
+  allocateObject(result, temp, allocKind, numDynamicSlots, initialHeap, fail);
+
+  // Initialize shape field.
+  loadPtr(Address(canonical, JSObject::offsetOfShape()), temp);
+  storePtr(temp, Address(result, JSObject::offsetOfShape()));
+
+  // Initialize dynamic slots and elements pointers.
+  storePtr(ImmPtr(emptyObjectSlots),
+           Address(result, NativeObject::offsetOfSlots()));
+  storePtr(ImmPtr(emptyObjectElements),
+           Address(result, NativeObject::offsetOfElements()));
+
+  // Initialize FlagsAndArgCountSlot.
+  storeValue(Address(canonical, JSFunction::offsetOfFlagsAndArgCount()),
+             Address(result, JSFunction::offsetOfFlagsAndArgCount()), temp);
+
+  // Initialize NativeFuncOrInterpretedEnvSlot.
+  storeValue(JSVAL_TYPE_OBJECT, envChain,
+             Address(result, JSFunction::offsetOfEnvironment()));
+#ifdef DEBUG
+  // The new function must be allocated in the nursery if the nursery is
+  // enabled. Assert no post-barrier is needed.
+  Label ok;
+  branchPtrInNurseryChunk(Assembler::Equal, result, temp, &ok);
+  branchPtrInNurseryChunk(Assembler::NotEqual, envChain, temp, &ok);
+  assumeUnreachable("Missing post write barrier in createFunctionClone");
+  bind(&ok);
+#endif
+
+  // Initialize NativeJitInfoOrInterpretedScriptSlot. This is a BaseScript*
+  // pointer stored as PrivateValue.
+  loadPrivate(Address(canonical, JSFunction::offsetOfJitInfoOrScript()), temp);
+  storePrivateValue(temp,
+                    Address(result, JSFunction::offsetOfJitInfoOrScript()));
+
+  // Initialize AtomSlot.
+  storeValue(Address(canonical, JSFunction::offsetOfAtom()),
+             Address(result, JSFunction::offsetOfAtom()), temp);
+
+  // Initialize extended slots.
+  if (allocKind == gc::AllocKind::FUNCTION_EXTENDED) {
+    for (size_t i = 0; i < FunctionExtended::NUM_EXTENDED_SLOTS; i++) {
+      Address addr(result, FunctionExtended::offsetOfExtendedSlot(i));
+      storeValue(UndefinedValue(), addr);
+    }
   }
 }
 
@@ -3902,13 +3950,8 @@ void MacroAssembler::loadBaselineFramePtr(Register framePtr, Register dest) {
   subPtr(Imm32(BaselineFrame::Size()), dest);
 }
 
-static const uint8_t* ContextInlinedICScriptPtr(CompileRuntime* rt) {
-  return (static_cast<const uint8_t*>(rt->mainContextPtr()) +
-          JSContext::offsetOfInlinedICScript());
-}
-
 void MacroAssembler::storeICScriptInJSContext(Register icScript) {
-  storePtr(icScript, AbsoluteAddress(ContextInlinedICScriptPtr(runtime())));
+  storePtr(icScript, AbsoluteAddress(runtime()->addressOfInlinedICScript()));
 }
 
 void MacroAssembler::handleFailure() {
@@ -4835,7 +4878,7 @@ CodeOffset MacroAssembler::callWithABI(wasm::BytecodeOffset bytecode,
     MOZ_CRASH("instanceOffset is Nothing only for unsupported abi calls.");
   }
   CodeOffset raOffset = call(
-      wasm::CallSiteDesc(bytecode.offset(), wasm::CallSite::Symbolic), imm);
+      wasm::CallSiteDesc(bytecode.offset(), wasm::CallSiteKind::Symbolic), imm);
 
   callWithABIPost(stackAdjust, result, /* callFromWasm = */ true);
 
@@ -5603,17 +5646,17 @@ void MacroAssembler::branchTestObjectNeedsProxyResultValidation(
 }
 
 void MacroAssembler::wasmTrap(wasm::Trap trap,
-                              wasm::BytecodeOffset bytecodeOffset) {
+                              const wasm::TrapSiteDesc& trapSiteDesc) {
   FaultingCodeOffset fco = wasmTrapInstruction();
   MOZ_ASSERT_IF(!oom(),
                 currentOffset() - fco.get() == WasmTrapInstructionLength);
 
-  append(trap, wasm::TrapSite(wasm::TrapMachineInsn::OfficialUD, fco,
-                              bytecodeOffset));
+  append(trap,
+         wasm::TrapSite(wasm::TrapMachineInsn::OfficialUD, fco, trapSiteDesc));
 }
 
 std::pair<CodeOffset, uint32_t> MacroAssembler::wasmReserveStackChecked(
-    uint32_t amount, wasm::BytecodeOffset trapOffset) {
+    uint32_t amount, const wasm::TrapSiteDesc& trapSiteDesc) {
   if (amount > MAX_UNCHECKED_LEAF_FRAME_SIZE) {
     // The frame is large.  Don't bump sp until after the stack limit check so
     // that the trap handler isn't called with a wild sp.
@@ -5629,7 +5672,7 @@ std::pair<CodeOffset, uint32_t> MacroAssembler::wasmReserveStackChecked(
               scratch, &ok);
 
     bind(&trap);
-    wasmTrap(wasm::Trap::StackOverflow, trapOffset);
+    wasmTrap(wasm::Trap::StackOverflow, trapSiteDesc);
     CodeOffset trapInsnOffset = CodeOffset(currentOffset());
 
     bind(&ok);
@@ -5642,13 +5685,12 @@ std::pair<CodeOffset, uint32_t> MacroAssembler::wasmReserveStackChecked(
   branchStackPtrRhs(Assembler::Below,
                     Address(InstanceReg, wasm::Instance::offsetOfStackLimit()),
                     &ok);
-  wasmTrap(wasm::Trap::StackOverflow, trapOffset);
+  wasmTrap(wasm::Trap::StackOverflow, trapSiteDesc);
   CodeOffset trapInsnOffset = CodeOffset(currentOffset());
   bind(&ok);
   return std::pair<CodeOffset, uint32_t>(trapInsnOffset, amount);
 }
 
-#ifdef ENABLE_WASM_TAIL_CALLS
 static void MoveDataBlock(MacroAssembler& masm, Register base, int32_t from,
                           int32_t to, uint32_t size) {
   MOZ_ASSERT(base != masm.getStackPointer());
@@ -5656,20 +5698,20 @@ static void MoveDataBlock(MacroAssembler& masm, Register base, int32_t from,
     return;  // noop
   }
 
-#  ifdef JS_CODEGEN_ARM64
+#ifdef JS_CODEGEN_ARM64
   vixl::UseScratchRegisterScope temps(&masm);
   const Register scratch = temps.AcquireX().asUnsized();
-#  elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_X86)
+#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_X86)
   static constexpr Register scratch = ABINonArgReg0;
   masm.push(scratch);
-#  elif defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_MIPS64) || \
-      defined(JS_CODEGEN_RISCV64)
+#elif defined(JS_CODEGEN_LOONG64) || defined(JS_CODEGEN_MIPS64) || \
+    defined(JS_CODEGEN_RISCV64)
   ScratchRegisterScope scratch(masm);
-#  elif !defined(JS_CODEGEN_NONE)
+#elif !defined(JS_CODEGEN_NONE)
   const Register scratch = ScratchReg;
-#  else
+#else
   const Register scratch = InvalidReg;
-#  endif
+#endif
 
   if (to < from) {
     for (uint32_t i = 0; i < size; i += sizeof(void*)) {
@@ -5684,17 +5726,17 @@ static void MoveDataBlock(MacroAssembler& masm, Register base, int32_t from,
     }
   }
 
-#  if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_X86)
+#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_X86)
   masm.pop(scratch);
-#  endif
+#endif
 }
 
 struct ReturnCallTrampolineData {
-#  ifdef JS_CODEGEN_ARM
+#ifdef JS_CODEGEN_ARM
   uint32_t trampolineOffset;
-#  else
+#else
   CodeLabel trampoline;
-#  endif
+#endif
 };
 
 static ReturnCallTrampolineData MakeReturnCallTrampoline(MacroAssembler& masm) {
@@ -5703,19 +5745,19 @@ static ReturnCallTrampolineData MakeReturnCallTrampoline(MacroAssembler& masm) {
   ReturnCallTrampolineData data;
 
   {
-#  if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64)
+#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64)
     AutoForbidPoolsAndNops afp(&masm, 1);
-#  elif defined(JS_CODEGEN_RISCV64)
+#elif defined(JS_CODEGEN_RISCV64)
     BlockTrampolinePoolScope block_trampoline_pool(&masm, 1);
-#  endif
+#endif
 
     // Build simple trampoline code: load the instance slot from the frame,
     // restore FP, and return to prevous caller.
-#  ifdef JS_CODEGEN_ARM
+#ifdef JS_CODEGEN_ARM
     data.trampolineOffset = masm.currentOffset();
-#  else
+#else
     masm.bind(&data.trampoline);
-#  endif
+#endif
 
     masm.setFramePushed(AlignBytes(
         wasm::FrameWithInstances::sizeOfInstanceFieldsAndShadowStack(),
@@ -5729,16 +5771,16 @@ static ReturnCallTrampolineData MakeReturnCallTrampoline(MacroAssembler& masm) {
       InstanceReg);
   masm.switchToWasmInstanceRealm(ABINonArgReturnReg0, ABINonArgReturnReg1);
   masm.moveToStackPtr(FramePointer);
-#  ifdef JS_CODEGEN_ARM64
+#ifdef JS_CODEGEN_ARM64
   masm.pop(FramePointer, lr);
   masm.append(wasm::CodeRangeUnwindInfo::UseFpLr, masm.currentOffset());
   masm.Mov(PseudoStackPointer64, vixl::sp);
   masm.abiret();
-#  else
+#else
   masm.pop(FramePointer);
   masm.append(wasm::CodeRangeUnwindInfo::UseFp, masm.currentOffset());
   masm.ret();
-#  endif
+#endif
 
   masm.append(wasm::CodeRangeUnwindInfo::Normal, masm.currentOffset());
   masm.setFramePushed(savedPushed);
@@ -5799,9 +5841,9 @@ static void CollapseWasmFrameFast(MacroAssembler& masm,
   static constexpr Register tempForCaller = WasmTailCallInstanceScratchReg;
   static constexpr Register tempForFP = WasmTailCallFPScratchReg;
   static constexpr Register tempForRA = WasmTailCallRAScratchReg;
-#  ifndef JS_USE_LINK_REGISTER
+#ifndef JS_USE_LINK_REGISTER
   masm.push(tempForRA);
-#  endif
+#endif
 
   // Load the FP, RA, and instance slots into registers to preserve them while
   // the new frame is collapsed over the current one.
@@ -5839,10 +5881,10 @@ static void CollapseWasmFrameFast(MacroAssembler& masm,
       InstanceReg,
       Address(FramePointer, newArgDest + WasmCalleeInstanceOffsetBeforeCall));
 
-#  ifdef JS_USE_LINK_REGISTER
+#ifdef JS_USE_LINK_REGISTER
   // RA is already in its place, just move stack.
   masm.addToStackPtr(Imm32(framePushedAtStart + newArgDest));
-#  else
+#else
   // Push RA to new frame: store RA, restore temp, and move stack.
   int32_t newFrameOffset = newArgDest - sizeof(wasm::Frame);
   masm.storePtr(tempForRA,
@@ -5857,7 +5899,7 @@ static void CollapseWasmFrameFast(MacroAssembler& masm,
   masm.append(wasm::CodeRangeUnwindInfo::RestoreFp, masm.currentOffset());
   masm.addToStackPtr(Imm32(framePushedAtStart + newFrameOffset +
                            wasm::Frame::returnAddressOffset() + sizeof(void*)));
-#  endif
+#endif
 
   masm.movePtr(tempForFP, FramePointer);
   // Setting framePushed to pre-collapse state, to properly set that in the
@@ -5913,9 +5955,9 @@ static void CollapseWasmFrameSlow(MacroAssembler& masm,
                           : 0;
   masm.reserveStack(reserved);
 
-#  ifndef JS_USE_LINK_REGISTER
+#ifndef JS_USE_LINK_REGISTER
   masm.push(tempForRA);
-#  endif
+#endif
 
   // Load FP, RA and instance slots to preserve them from being overwritten.
   masm.loadPtr(Address(FramePointer, wasm::Frame::callerFPOffset()), tempForFP);
@@ -5956,7 +5998,7 @@ static void CollapseWasmFrameSlow(MacroAssembler& masm,
       InstanceReg,
       Address(FramePointer, newArgDest + WasmCalleeInstanceOffsetBeforeCall));
 
-#  ifdef JS_CODEGEN_ARM
+#ifdef JS_CODEGEN_ARM
   // ARM has no CodeLabel -- calculate PC directly.
   masm.mov(pc, tempForRA);
   masm.computeEffectiveAddress(
@@ -5964,20 +6006,20 @@ static void CollapseWasmFrameSlow(MacroAssembler& masm,
               int32_t(data.trampolineOffset - masm.currentOffset() - 4)),
       tempForRA);
   masm.append(desc, CodeOffset(data.trampolineOffset));
-#  else
+#else
   masm.mov(&data.trampoline, tempForRA);
 
   masm.addCodeLabel(data.trampoline);
   // Add slow trampoline callsite description, to be annotated in
   // stack/frame iterators.
   masm.append(desc, *data.trampoline.target());
-#  endif
+#endif
 
-#  ifdef JS_USE_LINK_REGISTER
+#ifdef JS_USE_LINK_REGISTER
   masm.freeStack(reserved);
   // RA is already in its place, just move stack.
   masm.addToStackPtr(Imm32(framePushedAtStart + newArgDest));
-#  else
+#else
   // Push RA to new frame: store RA, restore temp, and move stack.
   int32_t newFrameOffset = newArgDest - sizeof(wasm::Frame);
   masm.storePtr(tempForRA,
@@ -5993,7 +6035,7 @@ static void CollapseWasmFrameSlow(MacroAssembler& masm,
   masm.addToStackPtr(Imm32(framePushedAtStart + newFrameOffset +
                            wasm::Frame::returnAddressOffset() + reserved +
                            sizeof(void*)));
-#  endif
+#endif
 
   // Point FramePointer to hidden frame.
   masm.computeEffectiveAddress(Address(FramePointer, newFPOffset),
@@ -6030,7 +6072,6 @@ void MacroAssembler::wasmCollapseFrameSlow(
 
   bind(&done);
 }
-#endif  // ENABLE_WASM_TAIL_CALLS
 
 CodeOffset MacroAssembler::wasmCallImport(const wasm::CallSiteDesc& desc,
                                           const wasm::CalleeDesc& callee) {
@@ -6067,17 +6108,11 @@ CodeOffset MacroAssembler::wasmCallImport(const wasm::CallSiteDesc& desc,
 
   storePtr(InstanceReg,
            Address(getStackPointer(), WasmCalleeInstanceOffsetBeforeCall));
-  loadWasmPinnedRegsFromInstance();
+  loadWasmPinnedRegsFromInstance(mozilla::Nothing());
 
-#ifdef ENABLE_WASM_TAIL_CALLS
-  CodeOffset res = wasmMarkedSlowCall(desc, ABINonArgReg0);
-#else
-  CodeOffset res = call(desc, ABINonArgReg0);
-#endif
-  return res;
+  return wasmMarkedSlowCall(desc, ABINonArgReg0);
 }
 
-#ifdef ENABLE_WASM_TAIL_CALLS
 CodeOffset MacroAssembler::wasmReturnCallImport(
     const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee,
     const ReturnCallAdjustmentInfo& retCallInfo) {
@@ -6092,9 +6127,9 @@ CodeOffset MacroAssembler::wasmReturnCallImport(
                                offsetof(wasm::FuncImportInstanceData, code))),
       ABINonArgReg0);
 
-#  if !defined(JS_CODEGEN_NONE) && !defined(JS_CODEGEN_WASM32)
+#if !defined(JS_CODEGEN_NONE) && !defined(JS_CODEGEN_WASM32)
   static_assert(ABINonArgReg0 != InstanceReg, "by constraint");
-#  endif
+#endif
 
   // Switch to the callee's realm.
   loadPtr(
@@ -6114,10 +6149,10 @@ CodeOffset MacroAssembler::wasmReturnCallImport(
 
   storePtr(InstanceReg,
            Address(getStackPointer(), WasmCalleeInstanceOffsetBeforeCall));
-  loadWasmPinnedRegsFromInstance();
+  loadWasmPinnedRegsFromInstance(mozilla::Nothing());
 
   wasm::CallSiteDesc stubDesc(desc.lineOrBytecode(),
-                              wasm::CallSiteDesc::ReturnStub);
+                              wasm::CallSiteKind::ReturnStub);
   wasmCollapseFrameSlow(retCallInfo, stubDesc);
   jump(ABINonArgReg0);
   append(wasm::CodeRangeUnwindInfo::Normal, currentOffset());
@@ -6133,7 +6168,6 @@ CodeOffset MacroAssembler::wasmReturnCall(
   append(wasm::CodeRangeUnwindInfo::Normal, currentOffset());
   return offset;
 }
-#endif  // ENABLE_WASM_TAIL_CALLS
 
 CodeOffset MacroAssembler::wasmCallBuiltinInstanceMethod(
     const wasm::CallSiteDesc& desc, const ABIArg& instanceArg,
@@ -6155,15 +6189,14 @@ CodeOffset MacroAssembler::wasmCallBuiltinInstanceMethod(
   }
 
   CodeOffset ret = call(desc, builtin);
-  wasmTrapOnFailedInstanceCall(ReturnReg, failureMode,
-                               wasm::BytecodeOffset(desc.lineOrBytecode()));
+  wasmTrapOnFailedInstanceCall(ReturnReg, failureMode, desc.toTrapSiteDesc());
 
   return ret;
 }
 
 void MacroAssembler::wasmTrapOnFailedInstanceCall(
     Register resultRegister, wasm::FailureMode failureMode,
-    wasm::BytecodeOffset bytecodeOffset) {
+    const wasm::TrapSiteDesc& trapSiteDesc) {
   Label noTrap;
   switch (failureMode) {
     case wasm::FailureMode::Infallible:
@@ -6186,7 +6219,7 @@ void MacroAssembler::wasmTrapOnFailedInstanceCall(
                 &noTrap);
       break;
   }
-  wasmTrap(wasm::Trap::ThrowReported, bytecodeOffset);
+  wasmTrap(wasm::Trap::ThrowReported, trapSiteDesc);
   bind(&noTrap);
 }
 
@@ -6246,7 +6279,6 @@ void MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc,
   MOZ_ASSERT(callee.which() == wasm::CalleeDesc::WasmTable);
 
   const int shift = sizeof(wasm::FunctionTableElem) == 8 ? 3 : 4;
-  wasm::BytecodeOffset trapOffset(desc.lineOrBytecode());
   const Register calleeScratch = WasmTableCallScratchReg0;
   const Register index = WasmTableCallIndexReg;
 
@@ -6328,30 +6360,26 @@ void MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc,
   // Use the null pointer exception resulting from loading HeapReg from a null
   // instance to handle a call to a null slot.
   MOZ_ASSERT(nullCheckFailedLabel == nullptr);
-  loadWasmPinnedRegsFromInstance(mozilla::Some(trapOffset));
+  loadWasmPinnedRegsFromInstance(mozilla::Some(desc.toTrapSiteDesc()));
 #else
   MOZ_ASSERT(nullCheckFailedLabel != nullptr);
   branchTestPtr(Assembler::Zero, InstanceReg, InstanceReg,
                 nullCheckFailedLabel);
 
-  loadWasmPinnedRegsFromInstance();
+  loadWasmPinnedRegsFromInstance(mozilla::Nothing());
 #endif
   switchToWasmInstanceRealm(index, WasmTableCallScratchReg1);
 
   loadPtr(Address(calleeScratch, offsetof(wasm::FunctionTableElem, code)),
           calleeScratch);
 
-#ifdef ENABLE_WASM_TAIL_CALLS
   *slowCallOffset = wasmMarkedSlowCall(desc, calleeScratch);
-#else
-  *slowCallOffset = call(desc, calleeScratch);
-#endif
 
   // Restore registers and realm and join up with the fast path.
 
   loadPtr(Address(getStackPointer(), WasmCallerInstanceOffsetBeforeCall),
           InstanceReg);
-  loadWasmPinnedRegsFromInstance();
+  loadWasmPinnedRegsFromInstance(mozilla::Nothing());
   switchToWasmInstanceRealm(ABINonArgReturnReg0, ABINonArgReturnReg1);
   jump(&done);
 
@@ -6371,13 +6399,12 @@ void MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc,
   // slots in the frame do not have valid values.
 
   wasm::CallSiteDesc newDesc(desc.lineOrBytecode(),
-                             wasm::CallSiteDesc::IndirectFast);
+                             wasm::CallSiteKind::IndirectFast);
   *fastCallOffset = call(newDesc, calleeScratch);
 
   bind(&done);
 }
 
-#ifdef ENABLE_WASM_TAIL_CALLS
 void MacroAssembler::wasmReturnCallIndirect(
     const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee,
     Label* boundsCheckFailedLabel, Label* nullCheckFailedLabel,
@@ -6388,7 +6415,6 @@ void MacroAssembler::wasmReturnCallIndirect(
   MOZ_ASSERT(callee.which() == wasm::CalleeDesc::WasmTable);
 
   const int shift = sizeof(wasm::FunctionTableElem) == 8 ? 3 : 4;
-  wasm::BytecodeOffset trapOffset(desc.lineOrBytecode());
   const Register calleeScratch = WasmTableCallScratchReg0;
   const Register index = WasmTableCallIndexReg;
 
@@ -6458,25 +6484,25 @@ void MacroAssembler::wasmReturnCallIndirect(
            Address(getStackPointer(), WasmCallerInstanceOffsetBeforeCall));
   movePtr(newInstanceTemp, InstanceReg);
 
-#  ifdef WASM_HAS_HEAPREG
+#ifdef WASM_HAS_HEAPREG
   // Use the null pointer exception resulting from loading HeapReg from a null
   // instance to handle a call to a null slot.
   MOZ_ASSERT(nullCheckFailedLabel == nullptr);
-  loadWasmPinnedRegsFromInstance(mozilla::Some(trapOffset));
-#  else
+  loadWasmPinnedRegsFromInstance(mozilla::Some(desc.toTrapSiteDesc()));
+#else
   MOZ_ASSERT(nullCheckFailedLabel != nullptr);
   branchTestPtr(Assembler::Zero, InstanceReg, InstanceReg,
                 nullCheckFailedLabel);
 
-  loadWasmPinnedRegsFromInstance();
-#  endif
+  loadWasmPinnedRegsFromInstance(mozilla::Nothing());
+#endif
   switchToWasmInstanceRealm(index, WasmTableCallScratchReg1);
 
   loadPtr(Address(calleeScratch, offsetof(wasm::FunctionTableElem, code)),
           calleeScratch);
 
   wasm::CallSiteDesc stubDesc(desc.lineOrBytecode(),
-                              wasm::CallSiteDesc::ReturnStub);
+                              wasm::CallSiteKind::ReturnStub);
   wasmCollapseFrameSlow(retCallInfo, stubDesc);
   jump(calleeScratch);
   append(wasm::CodeRangeUnwindInfo::Normal, currentOffset());
@@ -6492,7 +6518,6 @@ void MacroAssembler::wasmReturnCallIndirect(
   jump(calleeScratch);
   append(wasm::CodeRangeUnwindInfo::Normal, currentOffset());
 }
-#endif  // ENABLE_WASM_TAIL_CALLS
 
 void MacroAssembler::wasmCallRef(const wasm::CallSiteDesc& desc,
                                  const wasm::CalleeDesc& callee,
@@ -6512,11 +6537,11 @@ void MacroAssembler::wasmCallRef(const wasm::CallSiteDesc& desc,
   size_t instanceSlotOffset = FunctionExtended::offsetOfExtendedSlot(
       FunctionExtended::WASM_INSTANCE_SLOT);
   static_assert(FunctionExtended::WASM_INSTANCE_SLOT < wasm::NullPtrGuardSize);
-  wasm::BytecodeOffset trapOffset(desc.lineOrBytecode());
   FaultingCodeOffset fco =
       loadPtr(Address(calleeFnObj, instanceSlotOffset), newInstanceTemp);
   append(wasm::Trap::NullPointerDereference,
-         wasm::TrapSite(wasm::TrapMachineInsnForLoadWord(), fco, trapOffset));
+         wasm::TrapSite(wasm::TrapMachineInsnForLoadWord(), fco,
+                        desc.toTrapSiteDesc()));
   branchPtr(Assembler::Equal, InstanceReg, newInstanceTemp, &fastCall);
 
   storePtr(InstanceReg,
@@ -6525,7 +6550,7 @@ void MacroAssembler::wasmCallRef(const wasm::CallSiteDesc& desc,
   storePtr(InstanceReg,
            Address(getStackPointer(), WasmCalleeInstanceOffsetBeforeCall));
 
-  loadWasmPinnedRegsFromInstance();
+  loadWasmPinnedRegsFromInstance(mozilla::Nothing());
   switchToWasmInstanceRealm(WasmCallRefCallScratchReg0,
                             WasmCallRefCallScratchReg1);
 
@@ -6535,16 +6560,12 @@ void MacroAssembler::wasmCallRef(const wasm::CallSiteDesc& desc,
       FunctionExtended::WASM_FUNC_UNCHECKED_ENTRY_SLOT);
   loadPtr(Address(calleeFnObj, uncheckedEntrySlotOffset), calleeScratch);
 
-#ifdef ENABLE_WASM_TAIL_CALLS
   *slowCallOffset = wasmMarkedSlowCall(desc, calleeScratch);
-#else
-  *slowCallOffset = call(desc, calleeScratch);
-#endif
 
   // Restore registers and realm and back to this caller's.
   loadPtr(Address(getStackPointer(), WasmCallerInstanceOffsetBeforeCall),
           InstanceReg);
-  loadWasmPinnedRegsFromInstance();
+  loadWasmPinnedRegsFromInstance(mozilla::Nothing());
   switchToWasmInstanceRealm(ABINonArgReturnReg0, ABINonArgReturnReg1);
   jump(&done);
 
@@ -6559,13 +6580,12 @@ void MacroAssembler::wasmCallRef(const wasm::CallSiteDesc& desc,
   // slots in the frame do not have valid values.
 
   wasm::CallSiteDesc newDesc(desc.lineOrBytecode(),
-                             wasm::CallSiteDesc::FuncRefFast);
+                             wasm::CallSiteKind::FuncRefFast);
   *fastCallOffset = call(newDesc, calleeScratch);
 
   bind(&done);
 }
 
-#ifdef ENABLE_WASM_TAIL_CALLS
 void MacroAssembler::wasmReturnCallRef(
     const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee,
     const ReturnCallAdjustmentInfo& retCallInfo) {
@@ -6583,11 +6603,11 @@ void MacroAssembler::wasmReturnCallRef(
   size_t instanceSlotOffset = FunctionExtended::offsetOfExtendedSlot(
       FunctionExtended::WASM_INSTANCE_SLOT);
   static_assert(FunctionExtended::WASM_INSTANCE_SLOT < wasm::NullPtrGuardSize);
-  wasm::BytecodeOffset trapOffset(desc.lineOrBytecode());
   FaultingCodeOffset fco =
       loadPtr(Address(calleeFnObj, instanceSlotOffset), newInstanceTemp);
   append(wasm::Trap::NullPointerDereference,
-         wasm::TrapSite(wasm::TrapMachineInsnForLoadWord(), fco, trapOffset));
+         wasm::TrapSite(wasm::TrapMachineInsnForLoadWord(), fco,
+                        desc.toTrapSiteDesc()));
   branchPtr(Assembler::Equal, InstanceReg, newInstanceTemp, &fastCall);
 
   storePtr(InstanceReg,
@@ -6596,7 +6616,7 @@ void MacroAssembler::wasmReturnCallRef(
   storePtr(InstanceReg,
            Address(getStackPointer(), WasmCalleeInstanceOffsetBeforeCall));
 
-  loadWasmPinnedRegsFromInstance();
+  loadWasmPinnedRegsFromInstance(mozilla::Nothing());
   switchToWasmInstanceRealm(WasmCallRefCallScratchReg0,
                             WasmCallRefCallScratchReg1);
 
@@ -6607,7 +6627,7 @@ void MacroAssembler::wasmReturnCallRef(
   loadPtr(Address(calleeFnObj, uncheckedEntrySlotOffset), calleeScratch);
 
   wasm::CallSiteDesc stubDesc(desc.lineOrBytecode(),
-                              wasm::CallSiteDesc::ReturnStub);
+                              wasm::CallSiteKind::ReturnStub);
   wasmCollapseFrameSlow(retCallInfo, stubDesc);
   jump(calleeScratch);
   append(wasm::CodeRangeUnwindInfo::Normal, currentOffset());
@@ -6623,11 +6643,10 @@ void MacroAssembler::wasmReturnCallRef(
   jump(calleeScratch);
   append(wasm::CodeRangeUnwindInfo::Normal, currentOffset());
 }
-#endif
 
 void MacroAssembler::wasmBoundsCheckRange32(
     Register index, Register length, Register limit, Register tmp,
-    wasm::BytecodeOffset bytecodeOffset) {
+    const wasm::TrapSiteDesc& trapSiteDesc) {
   Label ok;
   Label fail;
 
@@ -6637,17 +6656,17 @@ void MacroAssembler::wasmBoundsCheckRange32(
   jump(&ok);
 
   bind(&fail);
-  wasmTrap(wasm::Trap::OutOfBounds, bytecodeOffset);
+  wasmTrap(wasm::Trap::OutOfBounds, trapSiteDesc);
 
   bind(&ok);
 }
 
 #ifdef ENABLE_WASM_MEMORY64
-void MacroAssembler::wasmClampTable64Index(Register64 index, Register out) {
+void MacroAssembler::wasmClampTable64Address(Register64 address, Register out) {
   Label oob;
   Label ret;
-  branch64(Assembler::Above, index, Imm64(UINT32_MAX), &oob);
-  move64To32(index, out);
+  branch64(Assembler::Above, address, Imm64(UINT32_MAX), &oob);
+  move64To32(address, out);
   jump(&ret);
   bind(&oob);
   static_assert(wasm::MaxTableElemsRuntime < UINT32_MAX);
@@ -6992,6 +7011,12 @@ void MacroAssembler::branchWasmSTVIsSubtypeDynamicDepth(
 void MacroAssembler::extractWasmAnyRefTag(Register src, Register dest) {
   movePtr(src, dest);
   andPtr(Imm32(int32_t(wasm::AnyRef::TagMask)), dest);
+}
+
+void MacroAssembler::untagWasmAnyRef(Register src, Register dest,
+                                     wasm::AnyRefTag tag) {
+  MOZ_ASSERT(tag != wasm::AnyRefTag::ObjectOrNull, "No untagging needed");
+  computeEffectiveAddress(Address(src, -int32_t(tag)), dest);
 }
 
 void MacroAssembler::branchWasmAnyRefIsNull(bool isNull, Register src,
@@ -7600,8 +7625,7 @@ void MacroAssembler::convertWasmAnyRefToValue(Register instance, Register src,
                 &isObjectOrNull);
 
   // If we're not i31, object, or null, we must be a string
-  rshiftPtr(Imm32(wasm::AnyRef::TagShift), src);
-  lshiftPtr(Imm32(wasm::AnyRef::TagShift), src);
+  untagWasmAnyRef(src, src, wasm::AnyRefTag::String);
   moveValue(TypedOrValueRegister(MIRType::String, AnyRegister(src)), dst);
   jump(&done);
 
@@ -7882,19 +7906,19 @@ void MacroAssembler::boundsCheck32PowerOfTwo(Register index, uint32_t length,
 }
 
 void MacroAssembler::loadWasmPinnedRegsFromInstance(
-    mozilla::Maybe<wasm::BytecodeOffset> trapOffset) {
+    const wasm::MaybeTrapSiteDesc& trapSiteDesc) {
 #ifdef WASM_HAS_HEAPREG
   static_assert(wasm::Instance::offsetOfMemory0Base() < 4096,
                 "We count only on the low page being inaccessible");
   FaultingCodeOffset fco = loadPtr(
       Address(InstanceReg, wasm::Instance::offsetOfMemory0Base()), HeapReg);
-  if (trapOffset) {
+  if (trapSiteDesc) {
     append(
         wasm::Trap::IndirectCallToNull,
-        wasm::TrapSite(wasm::TrapMachineInsnForLoadWord(), fco, *trapOffset));
+        wasm::TrapSite(wasm::TrapMachineInsnForLoadWord(), fco, *trapSiteDesc));
   }
 #else
-  MOZ_ASSERT(!trapOffset);
+  MOZ_ASSERT(!trapSiteDesc);
 #endif
 }
 
@@ -9352,7 +9376,7 @@ void MacroAssembler::scrambleHashCode(Register result) {
 
 void MacroAssembler::prepareHashNonGCThing(ValueOperand value, Register result,
                                            Register temp) {
-  // Inline implementation of |OrderedHashTable::prepareHash()| and
+  // Inline implementation of |OrderedHashTableImpl::prepareHash()| and
   // |mozilla::HashGeneric(v.asRawBits())|.
 
 #ifdef DEBUG
@@ -9398,7 +9422,7 @@ void MacroAssembler::prepareHashNonGCThing(ValueOperand value, Register result,
 
 void MacroAssembler::prepareHashString(Register str, Register result,
                                        Register temp) {
-  // Inline implementation of |OrderedHashTable::prepareHash()| and
+  // Inline implementation of |OrderedHashTableImpl::prepareHash()| and
   // |JSAtom::hash()|.
 
 #ifdef DEBUG
@@ -9444,7 +9468,7 @@ void MacroAssembler::prepareHashString(Register str, Register result,
 }
 
 void MacroAssembler::prepareHashSymbol(Register sym, Register result) {
-  // Inline implementation of |OrderedHashTable::prepareHash()| and
+  // Inline implementation of |OrderedHashTableImpl::prepareHash()| and
   // |Symbol::hash()|.
 
   load32(Address(sym, JS::Symbol::offsetOfHash()), result);
@@ -9455,7 +9479,7 @@ void MacroAssembler::prepareHashSymbol(Register sym, Register result) {
 void MacroAssembler::prepareHashBigInt(Register bigInt, Register result,
                                        Register temp1, Register temp2,
                                        Register temp3) {
-  // Inline implementation of |OrderedHashTable::prepareHash()| and
+  // Inline implementation of |OrderedHashTableImpl::prepareHash()| and
   // |BigInt::hash()|.
 
   // Inline implementation of |mozilla::AddU32ToHash()|.
@@ -9522,21 +9546,24 @@ void MacroAssembler::prepareHashObject(Register setObj, ValueOperand value,
                                        Register temp2, Register temp3,
                                        Register temp4) {
 #ifdef JS_PUNBOX64
-  // Inline implementation of |OrderedHashTable::prepareHash()| and
+  // Inline implementation of |OrderedHashTableImpl::prepareHash()| and
   // |HashCodeScrambler::scramble(v.asRawBits())|.
 
-  // Load the |ValueSet| or |ValueMap|.
-  static_assert(SetObject::getDataSlotOffset() ==
-                MapObject::getDataSlotOffset());
-  loadPrivate(Address(setObj, SetObject::getDataSlotOffset()), temp1);
+  // Load |HashCodeScrambler*|. If the object has no buffer yet this will be
+  // nullptr. In this case we use 0 as hash number because the hash won't be
+  // used in MacroAssembler::orderedHashTableLookup when there are no entries.
+  Label done;
+  static_assert(MapObject::offsetOfHashCodeScrambler() ==
+                SetObject::offsetOfHashCodeScrambler());
+  loadPrivate(Address(setObj, SetObject::offsetOfHashCodeScrambler()), temp1);
+  move32(Imm32(0), result);
+  branchTestPtr(Assembler::Zero, temp1, temp1, &done);
 
-  // Load |HashCodeScrambler::mK0| and |HashCodeScrambler::mK0|.
-  static_assert(ValueSet::offsetOfImplHcsK0() == ValueMap::offsetOfImplHcsK0());
-  static_assert(ValueSet::offsetOfImplHcsK1() == ValueMap::offsetOfImplHcsK1());
+  // Load |HashCodeScrambler::mK0| and |HashCodeScrambler::mK1|.
   auto k0 = Register64(temp1);
   auto k1 = Register64(temp2);
-  load64(Address(temp1, ValueSet::offsetOfImplHcsK1()), k1);
-  load64(Address(temp1, ValueSet::offsetOfImplHcsK0()), k0);
+  load64(Address(temp1, mozilla::HashCodeScrambler::offsetOfMK1()), k1);
+  load64(Address(temp1, mozilla::HashCodeScrambler::offsetOfMK0()), k0);
 
   // Hash numbers are 32-bit values, so only hash the lower double-word.
   static_assert(sizeof(mozilla::HashNumber) == 4);
@@ -9637,6 +9664,8 @@ void MacroAssembler::prepareHashObject(Register setObj, ValueOperand value,
   move64To32(v0, result);
 
   scrambleHashCode(result);
+
+  bind(&done);
 #else
   MOZ_CRASH("Not implemented");
 #endif
@@ -9690,14 +9719,14 @@ void MacroAssembler::prepareHashValue(Register setObj, ValueOperand value,
   bind(&done);
 }
 
-template <typename OrderedHashTable>
+template <typename TableObject>
 void MacroAssembler::orderedHashTableLookup(Register setOrMapObj,
                                             ValueOperand value, Register hash,
                                             Register entryTemp, Register temp1,
                                             Register temp2, Register temp3,
                                             Register temp4, Label* found,
                                             IsBigInt isBigInt) {
-  // Inline implementation of |OrderedHashTable::lookup()|.
+  // Inline implementation of |OrderedHashTableImpl::lookup()|.
 
   MOZ_ASSERT_IF(isBigInt == IsBigInt::No, temp3 == InvalidReg);
   MOZ_ASSERT_IF(isBigInt == IsBigInt::No, temp4 == InvalidReg);
@@ -9714,6 +9743,13 @@ void MacroAssembler::orderedHashTableLookup(Register setOrMapObj,
   bind(&ok);
 #endif
 
+  // Jump to notFound if the hash table has no entries and may not have a
+  // buffer. Check this before calling Assert{Map,Set}ObjectHash because |hash|
+  // may be 0 when there's no hash code scrambler.
+  Label notFound;
+  unboxInt32(Address(setOrMapObj, TableObject::offsetOfLiveCount()), temp1);
+  branchTest32(Assembler::Zero, temp1, temp1, &notFound);
+
 #ifdef DEBUG
   PushRegsInMask(LiveRegisterSet(RegisterSet::Volatile()));
 
@@ -9727,11 +9763,12 @@ void MacroAssembler::orderedHashTableLookup(Register setOrMapObj,
   passABIArg(temp2);
   passABIArg(hash);
 
-  if constexpr (std::is_same_v<OrderedHashTable, ValueSet>) {
+  if constexpr (std::is_same_v<TableObject, SetObject>) {
     using Fn =
         void (*)(JSContext*, SetObject*, const Value*, mozilla::HashNumber);
     callWithABI<Fn, jit::AssertSetObjectHash>();
   } else {
+    static_assert(std::is_same_v<TableObject, MapObject>);
     using Fn =
         void (*)(JSContext*, MapObject*, const Value*, mozilla::HashNumber);
     callWithABI<Fn, jit::AssertMapObjectHash>();
@@ -9741,17 +9778,13 @@ void MacroAssembler::orderedHashTableLookup(Register setOrMapObj,
   PopRegsInMask(LiveRegisterSet(RegisterSet::Volatile()));
 #endif
 
-  // Load the |ValueSet| or |ValueMap|.
-  static_assert(SetObject::getDataSlotOffset() ==
-                MapObject::getDataSlotOffset());
-  loadPrivate(Address(setOrMapObj, SetObject::getDataSlotOffset()), temp1);
-
-  // Load the bucket.
+  // Determine the bucket by computing |hash >> object->hashShift|. The hash
+  // shift is stored as PrivateUint32Value.
   move32(hash, entryTemp);
-  load32(Address(temp1, OrderedHashTable::offsetOfImplHashShift()), temp2);
+  unboxInt32(Address(setOrMapObj, TableObject::offsetOfHashShift()), temp2);
   flexibleRshift32(temp2, entryTemp);
 
-  loadPtr(Address(temp1, OrderedHashTable::offsetOfImplHashTable()), temp2);
+  loadPrivate(Address(setOrMapObj, TableObject::offsetOfHashTable()), temp2);
   loadPtr(BaseIndex(temp2, entryTemp, ScalePointer), entryTemp);
 
   // Search for a match in this bucket.
@@ -9761,9 +9794,9 @@ void MacroAssembler::orderedHashTableLookup(Register setOrMapObj,
   {
     // Inline implementation of |HashableValue::operator==|.
 
-    static_assert(OrderedHashTable::offsetOfImplDataElement() == 0,
+    static_assert(TableObject::Table::offsetOfImplDataElement() == 0,
                   "offsetof(Data, element) is 0");
-    auto keyAddr = Address(entryTemp, OrderedHashTable::offsetOfEntryKey());
+    auto keyAddr = Address(entryTemp, TableObject::Table::offsetOfEntryKey());
 
     if (isBigInt == IsBigInt::No) {
       // Two HashableValues are equal if they have equal bits.
@@ -9796,10 +9829,12 @@ void MacroAssembler::orderedHashTableLookup(Register setOrMapObj,
       bind(&next);
     }
   }
-  loadPtr(Address(entryTemp, OrderedHashTable::offsetOfImplDataChain()),
+  loadPtr(Address(entryTemp, TableObject::Table::offsetOfImplDataChain()),
           entryTemp);
   bind(&start);
   branchTestPtr(Assembler::NonZero, entryTemp, entryTemp, &loop);
+
+  bind(&notFound);
 }
 
 void MacroAssembler::setObjectHas(Register setObj, ValueOperand value,
@@ -9808,8 +9843,8 @@ void MacroAssembler::setObjectHas(Register setObj, ValueOperand value,
                                   Register temp3, Register temp4,
                                   IsBigInt isBigInt) {
   Label found;
-  orderedHashTableLookup<ValueSet>(setObj, value, hash, result, temp1, temp2,
-                                   temp3, temp4, &found, isBigInt);
+  orderedHashTableLookup<SetObject>(setObj, value, hash, result, temp1, temp2,
+                                    temp3, temp4, &found, isBigInt);
 
   Label done;
   move32(Imm32(0), result);
@@ -9826,8 +9861,8 @@ void MacroAssembler::mapObjectHas(Register mapObj, ValueOperand value,
                                   Register temp3, Register temp4,
                                   IsBigInt isBigInt) {
   Label found;
-  orderedHashTableLookup<ValueMap>(mapObj, value, hash, result, temp1, temp2,
-                                   temp3, temp4, &found, isBigInt);
+  orderedHashTableLookup<MapObject>(mapObj, value, hash, result, temp1, temp2,
+                                    temp3, temp4, &found, isBigInt);
 
   Label done;
   move32(Imm32(0), result);
@@ -9844,8 +9879,8 @@ void MacroAssembler::mapObjectGet(Register mapObj, ValueOperand value,
                                   Register temp3, Register temp4,
                                   Register temp5, IsBigInt isBigInt) {
   Label found;
-  orderedHashTableLookup<ValueMap>(mapObj, value, hash, temp1, temp2, temp3,
-                                   temp4, temp5, &found, isBigInt);
+  orderedHashTableLookup<MapObject>(mapObj, value, hash, temp1, temp2, temp3,
+                                    temp4, temp5, &found, isBigInt);
 
   Label done;
   moveValue(UndefinedValue(), result);
@@ -9853,31 +9888,26 @@ void MacroAssembler::mapObjectGet(Register mapObj, ValueOperand value,
 
   // |temp1| holds the found entry.
   bind(&found);
-  loadValue(Address(temp1, ValueMap::Entry::offsetOfValue()), result);
+  loadValue(Address(temp1, MapObject::Table::Entry::offsetOfValue()), result);
 
   bind(&done);
 }
 
-template <typename OrderedHashTable>
+template <typename TableObject>
 void MacroAssembler::loadOrderedHashTableCount(Register setOrMapObj,
                                                Register result) {
-  // Inline implementation of |OrderedHashTable::count()|.
+  // Inline implementation of |OrderedHashTableImpl::count()|.
 
-  // Load the |ValueSet| or |ValueMap|.
-  static_assert(SetObject::getDataSlotOffset() ==
-                MapObject::getDataSlotOffset());
-  loadPrivate(Address(setOrMapObj, SetObject::getDataSlotOffset()), result);
-
-  // Load the live count.
-  load32(Address(result, OrderedHashTable::offsetOfImplLiveCount()), result);
+  // Load the live count, stored as PrivateUint32Value.
+  unboxInt32(Address(setOrMapObj, TableObject::offsetOfLiveCount()), result);
 }
 
 void MacroAssembler::loadSetObjectSize(Register setObj, Register result) {
-  loadOrderedHashTableCount<ValueSet>(setObj, result);
+  loadOrderedHashTableCount<SetObject>(setObj, result);
 }
 
 void MacroAssembler::loadMapObjectSize(Register mapObj, Register result) {
-  loadOrderedHashTableCount<ValueMap>(mapObj, result);
+  loadOrderedHashTableCount<MapObject>(mapObj, result);
 }
 
 // Can't push large frames blindly on windows, so we must touch frame memory

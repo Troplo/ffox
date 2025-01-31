@@ -80,17 +80,24 @@ callback interface UniFFICallbackHandler {
 // Functions to facilitate UniFFI scaffolding calls
 [ChromeOnly, Exposed=Window]
 namespace UniFFIScaffolding {
-  // Call a scaffolding function on the worker thread.
+  // Call a sync Rust function
+  //
+  // id is a unique identifier for the function, known to both the C++ and JS code
+  [Throws]
+  UniFFIScaffoldingCallResult callSync(UniFFIFunctionId id, UniFFIScaffoldingValue... args);
+
+  // Call an async Rust function
   //
   // id is a unique identifier for the function, known to both the C++ and JS code
   [Throws]
   Promise<UniFFIScaffoldingCallResult> callAsync(UniFFIFunctionId id, UniFFIScaffoldingValue... args);
 
-  // Call a scaffolding function on the main thread
+  // Call a sync Rust function, but wrap it to so that it behaves in JS as an async function
   //
   // id is a unique identifier for the function, known to both the C++ and JS code
   [Throws]
-  UniFFIScaffoldingCallResult callSync(UniFFIFunctionId id, UniFFIScaffoldingValue... args);
+  Promise<UniFFIScaffoldingCallResult> callAsyncWrapper(UniFFIFunctionId id, UniFFIScaffoldingValue... args);
+
 
   // Read a UniFFIPointer from an ArrayBuffer
   //

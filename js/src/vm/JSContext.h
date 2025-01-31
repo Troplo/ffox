@@ -88,10 +88,12 @@ class InternalJobQueue : public JS::JobQueue {
   ~InternalJobQueue() = default;
 
   // JS::JobQueue methods.
-  JSObject* getIncumbentGlobal(JSContext* cx) override;
+  bool getHostDefinedData(JSContext* cx,
+                          JS::MutableHandle<JSObject*> data) const override;
+
   bool enqueuePromiseJob(JSContext* cx, JS::HandleObject promise,
                          JS::HandleObject job, JS::HandleObject allocationSite,
-                         JS::HandleObject incumbentGlobal) override;
+                         JS::HandleObject hostDefinedData) override;
   void runJobs(JSContext* cx) override;
   bool empty() const override;
   bool isDrainingStopped() const override { return interrupted_; }
@@ -418,9 +420,6 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
   JS::NativeStackBase nativeStackBase() const { return *nativeStackBase_; }
 
  public:
-  /* If non-null, report JavaScript entry points to this monitor. */
-  js::ContextData<JS::dbg::AutoEntryMonitor*> entryMonitor;
-
   // In brittle mode, any failure will produce a diagnostic assertion rather
   // than propagating an error or throwing an exception. This is used for
   // intermittent crash diagnostics: if an operation is failing for unknown
@@ -804,7 +803,17 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
 
   // Checks if the page's Content-Security-Policy (CSP) allows
   // runtime code generation "unsafe-eval", or "wasm-unsafe-eval" for Wasm.
-  bool isRuntimeCodeGenEnabled(JS::RuntimeCode kind, js::HandleString code);
+  bool isRuntimeCodeGenEnabled(
+      JS::RuntimeCode kind, JS::Handle<JSString*> codeString,
+      JS::CompilationType compilationType,
+      JS::Handle<JS::StackGCVector<JSString*>> parameterStrings,
+      JS::Handle<JSString*> bodyString,
+      JS::Handle<JS::StackGCVector<JS::Value>> parameterArgs,
+      JS::Handle<JS::Value> bodyArg, bool* outCanCompileStrings);
+
+  // Get code to be used by eval for Object argument.
+  bool getCodeForEval(JS::HandleObject code,
+                      JS::MutableHandle<JSString*> outCode);
 
   size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
   size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
@@ -879,6 +888,8 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
   const void* addressOfRealm() const { return &realm_; }
 
   void* addressOfInlinedICScript() { return &inlinedICScript_; }
+
+  const void* addressOfJitActivation() const { return &jitActivation; }
 
   // Futex state, used by Atomics.wait() and Atomics.wake() on the Atomics
   // object.
@@ -955,11 +966,20 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
   js::ContextData<js::Debugger*> insideExclusiveDebuggerOnEval;
 
 #ifdef MOZ_EXECUTION_TRACING
+ private:
   // This holds onto the JS execution tracer, a system which when turned on
   // records function calls and other information about the JS which has been
   // run under this context.
   js::UniquePtr<js::ExecutionTracer> executionTracer_;
 
+  // See suspendExecutionTracing
+  bool executionTracerSuspended_ = false;
+
+  // Cleans up caches and realm flags associated with execution tracing, while
+  // leaving the underlying tracing buffers intact to be read from later.
+  void cleanUpExecutionTracingState();
+
+ public:
   js::ExecutionTracer& getExecutionTracer() {
     MOZ_ASSERT(hasExecutionTracer());
     return *executionTracer_;
@@ -969,9 +989,17 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
   [[nodiscard]] bool enableExecutionTracing();
   void disableExecutionTracing();
 
+  // suspendExecutionTracing will turn off tracing, and clean up the relevant
+  // flags on this context's realms, but still leave the trace around to be
+  // collected. This currently is only called when an error occurs during
+  // tracing.
+  void suspendExecutionTracing();
+
   // Returns true if there is currently an ExecutionTracer tracing this
   // context's execution.
-  bool hasExecutionTracer() { return !!executionTracer_; }
+  bool hasExecutionTracer() {
+    return !!executionTracer_ && !executionTracerSuspended_;
+  }
 #else
   bool hasExecutionTracer() { return false; }
 #endif

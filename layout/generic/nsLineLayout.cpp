@@ -1377,7 +1377,8 @@ void nsLineLayout::AddMarkerFrame(nsIFrame* aFrame,
 
   nsBlockFrame* blockFrame = do_QueryFrame(LineContainerFrame());
   MOZ_ASSERT(blockFrame, "must be for block");
-  if (!blockFrame->MarkerIsEmpty()) {
+  if (!blockFrame->MarkerIsEmpty(aFrame)) {
+    mLineIsEmpty = false;
     mHasMarker = true;
     mLineBox->SetHasMarker();
   }
@@ -1485,11 +1486,50 @@ bool nsLineLayout::NotifyOptionalBreakPosition(nsIFrame* aFrame,
 #define VALIGN_TOP 1
 #define VALIGN_BOTTOM 2
 
+void nsLineLayout::SetSpanForEmptyLine(PerSpanData* aPerSpanData,
+                                       WritingMode aWM,
+                                       const nsSize& aContainerSize,
+                                       nscoord aBStartEdge) {
+  for (PerFrameData* pfd = aPerSpanData->mFirstFrame; pfd; pfd = pfd->mNext) {
+    // Ideally, if the frame would collapse itself - but it depends on
+    // knowing that the line is empty.
+    if (!pfd->mFrame->IsInlineFrame() && !pfd->mFrame->IsRubyFrame() &&
+        !pfd->mFrame->IsPlaceholderFrame()) {
+      continue;
+    }
+    // Collapse the physical size to 0.
+    pfd->mBounds.BStart(aWM) = aBStartEdge;
+    pfd->mBounds.BSize(aWM) = 0;
+    // Initialize mBlockDirAlign (though it doesn't make much difference
+    // because we don't align empty boxes).
+    pfd->mBlockDirAlign = VALIGN_OTHER;
+    pfd->mFrame->SetRect(aWM, pfd->mBounds, aContainerSize);
+    if (pfd->mSpan) {
+      SetSpanForEmptyLine(pfd->mSpan, aWM, aContainerSize, aBStartEdge);
+    }
+  }
+}
+
 void nsLineLayout::VerticalAlignLine() {
   // Partially place the children of the block frame. The baseline for
   // this operation is set to zero so that the y coordinates for all
   // of the placed children will be relative to there.
   PerSpanData* psd = mRootSpan;
+  if (mLineIsEmpty) {
+    // This line is empty, and should be consisting of only inline elements.
+    // (inline-block elements would make the line non-empty).
+    SetSpanForEmptyLine(psd, mRootSpan->mWritingMode, ContainerSize(),
+                        mBStartEdge);
+
+    mFinalLineBSize = 0;
+    if (mGotLineBox) {
+      mLineBox->SetBounds(psd->mWritingMode, psd->mIStart, mBStartEdge,
+                          psd->mICoord - psd->mIStart, 0, ContainerSize());
+
+      mLineBox->SetLogicalAscent(0);
+    }
+    return;
+  }
   VerticalAlignFrames(psd);
 
   // *** Note that comments here still use the anachronistic term
@@ -2205,8 +2245,12 @@ void nsLineLayout::VerticalAlignFrames(PerSpanData* psd) {
             blockEnd = BLOCKDIR_ALIGN_FRAMES_NO_MAXIMUM;
           }
         }
-        if (blockStart < minBCoord) minBCoord = blockStart;
-        if (blockEnd > maxBCoord) maxBCoord = blockEnd;
+        if (blockStart < minBCoord) {
+          minBCoord = blockStart;
+        }
+        if (blockEnd > maxBCoord) {
+          maxBCoord = blockEnd;
+        }
 #ifdef NOISY_BLOCKDIR_ALIGN
         printf(
             "     [frame]raw: a=%d h=%d bp=%d,%d logical: h=%d leading=%d y=%d "
@@ -3327,8 +3371,12 @@ void nsLineLayout::RelativePositionFrames(PerSpanData* psd,
     overflowAreas.InkOverflow().UnionRect(
         psd->mFrame->mOverflowAreas.InkOverflow(), adjustedBounds);
   } else {
-    LogicalRect rect(wm, psd->mIStart, mBStartEdge, psd->mICoord - psd->mIStart,
-                     mFinalLineBSize);
+    // Note(dshin, bug 1940938): `mICoord` can be negative due to a negative
+    // `text-indent` value (i.e. "Outdenting"). Ensure that we have a valid
+    // overflow rect for that case.
+    const auto iStart = std::min(psd->mIStart, psd->mICoord);
+    const auto iSize = std::abs(psd->mICoord - psd->mIStart);
+    LogicalRect rect(wm, iStart, mBStartEdge, iSize, mFinalLineBSize);
     // The minimum combined area for the frames that are direct
     // children of the block starts at the upper left corner of the
     // line and is sized to match the size of the line's bounding box
@@ -3395,10 +3443,11 @@ void nsLineLayout::RelativePositionFrames(PerSpanData* psd,
     // Do this here (rather than along with setting the overflow rect
     // below) so we get leaf frames as well.  No need to worry
     // about the root span, since it doesn't have a frame.
-    if (frame->HasView())
+    if (frame->HasView()) {
       nsContainerFrame::SyncFrameViewAfterReflow(
           mPresContext, frame, frame->GetView(), r.InkOverflow(),
           nsIFrame::ReflowChildFlags::NoMoveView);
+    }
 
     overflowAreas.UnionWith(r + frame->GetPosition());
   }

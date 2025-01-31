@@ -2,13 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
-
 import { clearTimeout, setTimeout } from "resource://gre/modules/Timer.sys.mjs";
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
-
-export var PushServiceWebSocket;
-export var PushServiceHttp2;
 
 const lazy = {};
 
@@ -20,27 +15,12 @@ XPCOMUtils.defineLazyServiceGetter(
 );
 ChromeUtils.defineESModuleGetters(lazy, {
   PushCrypto: "resource://gre/modules/PushCrypto.sys.mjs",
+  PushServiceWebSocket: "resource://gre/modules/PushServiceWebSocket.sys.mjs",
   pushBroadcastService: "resource://gre/modules/PushBroadcastService.sys.mjs",
 });
 
-const CONNECTION_PROTOCOLS = (function () {
-  if ("android" != AppConstants.MOZ_WIDGET_TOOLKIT) {
-    ({ PushServiceWebSocket } = ChromeUtils.importESModule(
-      "resource://gre/modules/PushServiceWebSocket.sys.mjs"
-    ));
-    ({ PushServiceHttp2 } = ChromeUtils.importESModule(
-      "resource://gre/modules/PushServiceHttp2.sys.mjs"
-    ));
-    return [PushServiceWebSocket, PushServiceHttp2];
-  }
-  return [];
-})();
-
 ChromeUtils.defineLazyGetter(lazy, "console", () => {
-  let { ConsoleAPI } = ChromeUtils.importESModule(
-    "resource://gre/modules/Console.sys.mjs"
-  );
-  return new ConsoleAPI({
+  return console.createInstance({
     maxLogLevelPref: "dom.push.loglevel",
     prefix: "PushService",
   });
@@ -84,17 +64,8 @@ function getServiceForServerURI(uri) {
     "testing.allowInsecureServerURL",
     false
   );
-  if (AppConstants.MOZ_WIDGET_TOOLKIT == "android") {
-    if (uri.scheme == "https" || (allowInsecure && uri.scheme == "http")) {
-      return CONNECTION_PROTOCOLS;
-    }
-    return null;
-  }
   if (uri.scheme == "wss" || (allowInsecure && uri.scheme == "ws")) {
-    return PushServiceWebSocket;
-  }
-  if (uri.scheme == "https" || (allowInsecure && uri.scheme == "http")) {
-    return PushServiceHttp2;
+    return lazy.PushServiceWebSocket;
   }
   return null;
 }
@@ -452,7 +423,7 @@ export var PushService = {
           )
         );
       }
-      case CHANGING_SERVICE_EVENT:
+      case CHANGING_SERVICE_EVENT: {
         let [service, uri] = this._findService(serverURI);
         if (service) {
           if (this._state == PUSH_SERVICE_INIT) {
@@ -482,7 +453,7 @@ export var PushService = {
         // The new serverUri is empty or misconfigured - stop service.
         this._setState(PUSH_SERVICE_INIT);
         return this._stopService(STOPPING_SERVICE_EVENT);
-
+      }
       default:
         lazy.console.error("Unexpected event in _changeServerURL", event);
         return Promise.reject(new Error(`Unexpected event ${event}`));
@@ -707,17 +678,6 @@ export var PushService = {
   },
 
   /**
-   * Replaces an existing registration and notifies the associated service
-   * worker.
-   *
-   * @param {String} aOldKey The registration ID to replace.
-   * @param {PushRecord} aNewRecord The new record.
-   * @returns {Promise} Resolves once the worker has been notified.
-   */
-  updateRegistrationAndNotifyApp(aOldKey, aNewRecord) {
-    return this.updateRecordAndNotifyApp(aOldKey, _ => aNewRecord);
-  },
-  /**
    * Updates a registration and notifies the associated service worker.
    *
    * @param {String} keyID The registration ID to update.
@@ -749,16 +709,19 @@ export var PushService = {
     // is only going to happen on db upgrade from version 4 to higher.
     return keygen.then(
       ([pubKey, privKey]) => {
-        return this.updateRecordAndNotifyApp(record.keyID, record => {
-          if (!record.p256dhPublicKey || !record.p256dhPrivateKey) {
-            record.p256dhPublicKey = pubKey;
-            record.p256dhPrivateKey = privKey;
+        return this.updateRecordAndNotifyApp(record.keyID, recordToUpdate => {
+          if (
+            !recordToUpdate.p256dhPublicKey ||
+            !recordToUpdate.p256dhPrivateKey
+          ) {
+            recordToUpdate.p256dhPublicKey = pubKey;
+            recordToUpdate.p256dhPrivateKey = privKey;
           }
-          if (!record.hasAuthenticationSecret()) {
-            record.authenticationSecret =
+          if (!recordToUpdate.hasAuthenticationSecret()) {
+            recordToUpdate.authenticationSecret =
               lazy.PushCrypto.generateAuthenticationSecret();
           }
-          return record;
+          return recordToUpdate;
         });
       },
       error => {
@@ -857,8 +820,8 @@ export var PushService = {
           .then(lastVisit => {
             // Update the record, resetting the quota if the user has visited the
             // site since the last push.
-            return this._db.update(keyID, record => {
-              let newRecord = updateFunc(record);
+            return this._db.update(keyID, recordToUpdate => {
+              let newRecord = updateFunc(recordToUpdate);
               if (!newRecord) {
                 return null;
               }

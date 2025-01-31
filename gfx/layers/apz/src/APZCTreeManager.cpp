@@ -17,9 +17,10 @@
 #include "WRHitTester.h"            // for WRHitTester
 #include "apz/src/APZUtils.h"
 #include "mozilla/RecursiveMutex.h"
-#include "mozilla/dom/MouseEventBinding.h"  // for MouseEvent constants
 #include "mozilla/dom/BrowserParent.h"      // for AreRecordReplayTabsActive
-#include "mozilla/dom/Touch.h"              // for Touch
+#include "mozilla/dom/MouseEventBinding.h"  // for MouseEvent constants
+#include "mozilla/dom/InteractiveWidget.h"
+#include "mozilla/dom/Touch.h"  // for Touch
 #include "mozilla/gfx/CompositorHitTestInfo.h"
 #include "mozilla/gfx/LoggingConstants.h"
 #include "mozilla/gfx/Matrix.h"
@@ -284,7 +285,11 @@ APZCTreeManager::APZCTreeManager(LayersId aRootLayersId,
       mTestDataLock("APZTestDataLock"),
       mDPI(160.0),
       mHitTester(std::move(aHitTester)),
-      mScrollGenerationLock("APZScrollGenerationLock") {
+      mScrollGenerationLock("APZScrollGenerationLock"),
+      mInteractiveWidget(
+          dom::InteractiveWidgetUtils::DefaultInteractiveWidgetMode()),
+      mIsSoftwareKeyboardVisible(false),
+      mHaveOOPIframes(false) {
   AsyncPanZoomController::InitializeGlobalState();
   mApzcTreeLog.ConditionOnPrefFunction(StaticPrefs::apz_printtree);
 
@@ -462,7 +467,9 @@ std::vector<LayersId> APZCTreeManager::UpdateHitTestingTree(
                                  state.mNodesToDestroy.AppendElement(aNode);
                                });
   mRootNode = nullptr;
+  mHaveOOPIframes = false;
   Maybe<LayersId> asyncZoomContainerSubtree = Nothing();
+  LayersId currentRootContentLayersId{0};
   int asyncZoomContainerNestingDepth = 0;
   bool haveNestedAsyncZoomContainers = false;
   nsTArray<LayersId> subtreesWithRootContentOutsideAsyncZoomContainer;
@@ -510,10 +517,20 @@ std::vector<LayersId> APZCTreeManager::UpdateHitTestingTree(
             MutexAutoLock lock(mMapLock);
             mGeckoFixedLayerMargins =
                 aLayerMetrics.Metrics().GetFixedLayerMargins();
+            mInteractiveWidget =
+                aLayerMetrics.Metadata().GetInteractiveWidget();
+            mIsSoftwareKeyboardVisible =
+                aLayerMetrics.Metadata().IsSoftwareKeyboardVisible();
+            currentRootContentLayersId = layersId;
           } else {
             MOZ_ASSERT(aLayerMetrics.Metrics().GetFixedLayerMargins() ==
                            ScreenMargin(),
                        "fixed-layer-margins should be 0 on non-root layer");
+            if (currentRootContentLayersId.IsValid() &&
+                currentRootContentLayersId != layersId &&
+                mRootLayersId != layersId) {
+              mHaveOOPIframes = true;
+            }
           }
 
           // Note that this check happens after the potential increment of
@@ -910,8 +927,8 @@ void APZCTreeManager::SampleForWebRender(const Maybe<VsyncId>& aVsyncId,
     // We only care about the horizontal scrollbar.
     if (info.mScrollDirection == ScrollDirection::eHorizontal) {
       ScreenPoint translation =
-          apz::ComputeFixedMarginsOffset(GetCompositorFixedLayerMargins(lock),
-                                         SideBits::eBottom, ScreenMargin());
+          ComputeFixedMarginsOffset(GetCompositorFixedLayerMargins(lock),
+                                    SideBits::eBottom, ScreenMargin());
 
       LayerToParentLayerMatrix4x4 transform =
           LayerToParentLayerMatrix4x4::Translation(ViewAs<ParentLayerPixel>(
@@ -928,9 +945,9 @@ void APZCTreeManager::SampleForWebRender(const Maybe<VsyncId>& aVsyncId,
       continue;
     }
 
-    ScreenPoint translation = apz::ComputeFixedMarginsOffset(
-        GetCompositorFixedLayerMargins(lock), info.mFixedPosSides,
-        mGeckoFixedLayerMargins);
+    ScreenPoint translation =
+        ComputeFixedMarginsOffset(GetCompositorFixedLayerMargins(lock),
+                                  info.mFixedPosSides, mGeckoFixedLayerMargins);
 
     LayerToParentLayerMatrix4x4 transform =
         LayerToParentLayerMatrix4x4::Translation(ViewAs<ParentLayerPixel>(
@@ -948,7 +965,7 @@ void APZCTreeManager::SampleForWebRender(const Maybe<VsyncId>& aVsyncId,
       continue;
     }
 
-    ScreenPoint translation = apz::ComputeFixedMarginsOffset(
+    ScreenPoint translation = ComputeFixedMarginsOffset(
         GetCompositorFixedLayerMargins(lock), sides, mGeckoFixedLayerMargins);
 
     LayerToParentLayerMatrix4x4 transform =
@@ -1545,10 +1562,18 @@ APZEventResult APZCTreeManager::ReceiveInputEvent(
         // a no-op.
         FlushRepaintsToClearScreenToGeckoTransform();
       }
+      const bool endsDrag = DragTracker::EndsDrag(mouseInput);
+      if (endsDrag) {
+        mDragBlockHitResult = HitTestResult();
+      }
 
-      // TODO(botond): Is it necessary to do a hit test on every mouse-move?
-      state.mHit = GetTargetAPZC(mouseInput.mOrigin);
+      state.mHit = GetTargetAPZCForMouseInput(mouseInput);
+
       bool hitScrollbar = (bool)state.mHit.mScrollbarNode;
+      if (startsDrag && hitScrollbar) {
+        RecursiveMutexAutoLock lock(mTreeLock);
+        mDragBlockHitResult = mHitTester->CloneHitTestResult(lock, state.mHit);
+      }
 
       // When the mouse is outside the window we still want to handle dragging
       // but we won't find an APZC. Fallback to root APZC then.
@@ -2188,7 +2213,7 @@ void APZCTreeManager::AdjustEventPointForDynamicToolbar(
     ScreenIntPoint& aEventPoint, const HitTestResult& aHit) {
   if (aHit.mFixedPosSides != SideBits::eNone) {
     MutexAutoLock lock(mMapLock);
-    aEventPoint -= RoundedToInt(apz::ComputeFixedMarginsOffset(
+    aEventPoint -= RoundedToInt(ComputeFixedMarginsOffset(
         GetCompositorFixedLayerMargins(lock), aHit.mFixedPosSides,
         mGeckoFixedLayerMargins));
   } else if (aHit.mNode && aHit.mNode->GetStickyPositionAnimationId()) {
@@ -2200,8 +2225,8 @@ void APZCTreeManager::AdjustEventPointForDynamicToolbar(
     }
     MutexAutoLock lock(mMapLock);
     aEventPoint -= RoundedToInt(
-        apz::ComputeFixedMarginsOffset(GetCompositorFixedLayerMargins(lock),
-                                       sideBits, mGeckoFixedLayerMargins));
+        ComputeFixedMarginsOffset(GetCompositorFixedLayerMargins(lock),
+                                  sideBits, mGeckoFixedLayerMargins));
   }
 }
 
@@ -2388,9 +2413,11 @@ void APZCTreeManager::MaybeOverrideLayersIdForWheelEvent(InputData& aEvent) {
   APZThreadUtils::AssertOnControllerThread();
 
   InputBlockState* txn = nullptr;
-  if (aEvent.mInputType == SCROLLWHEEL_INPUT) {
+  if (aEvent.mInputType == SCROLLWHEEL_INPUT &&
+      aEvent.AsScrollWheelInput().mHandledByAPZ) {
     txn = mInputQueue->GetActiveWheelTransaction();
-  } else if (aEvent.mInputType == PANGESTURE_INPUT) {
+  } else if (aEvent.mInputType == PANGESTURE_INPUT &&
+             aEvent.AsPanGestureInput().mHandledByAPZ) {
     txn = mInputQueue->GetCurrentPanGestureBlock();
   }
 
@@ -2997,6 +3024,32 @@ APZCTreeManager::HitTestResult APZCTreeManager::GetTargetAPZC(
   return mHitTester->GetAPZCAtPoint(aPoint, lock);
 }
 
+APZCTreeManager::HitTestResult APZCTreeManager::GetTargetAPZCForMouseInput(
+    const MouseInput& aMouseInput) {
+  // If the mouse input isn't move or we are in a wheel transaction,
+  // we need to do hit testing anyway.
+  if (!StaticPrefs::apz_mousemove_hittest_optimization_enabled() ||
+      aMouseInput.mType != MouseInput::MOUSE_MOVE ||
+      mInputQueue->GetActiveWheelTransaction()) {
+    return GetTargetAPZC(aMouseInput.mOrigin);
+  }
+
+  // If we are in dragging state, reuse the original target without
+  // hit-testing again.
+  if (mDragBlockHitResult.mTargetApzc) {
+    RecursiveMutexAutoLock lock(mTreeLock);
+    return mHitTester->CloneHitTestResult(lock, mDragBlockHitResult);
+  }
+
+  // If we have no OOP iframes, we don't need to do hit-testing again since
+  // the layersId will never be changed.
+  RecursiveMutexAutoLock lock(mTreeLock);
+  if (!mHaveOOPIframes) {
+    return HitTestResult{};
+  }
+  return GetTargetAPZC(aMouseInput.mOrigin);
+}
+
 APZCTreeManager::TargetApzcForNodeResult APZCTreeManager::FindHandoffParent(
     const AsyncPanZoomController* aApzc) {
   RefPtr<HitTestingTreeNode> node = GetTargetNode(aApzc->GetGuid(), nullptr);
@@ -3065,11 +3118,6 @@ APZCTreeManager::BuildOverscrollHandoffChain(
         apzc->GetGuid().mLayersId, apzc->GetScrollHandoffParentId());
     apzc = scrollParent.get();
   }
-
-  // Now adjust the chain to account for scroll grabbing. Sorting is a bit
-  // of an overkill here, but scroll grabbing will likely be generalized
-  // to scroll priorities, so we might as well do it this way.
-  result->SortByScrollPriority();
 
   // Print the overscroll chain for debugging.
   for (uint32_t i = 0; i < result->Length(); ++i) {
@@ -3793,6 +3841,37 @@ void APZCTreeManager::SetFixedLayerMargins(ScreenIntCoord aTop,
   MutexAutoLock lock(mMapLock);
   mCompositorFixedLayerMargins.top = ScreenCoord(aTop);
   mCompositorFixedLayerMargins.bottom = ScreenCoord(aBottom);
+}
+
+ScreenPoint APZCTreeManager::ComputeFixedMarginsOffset(
+    const ScreenMargin& aCompositorFixedLayerMargins, SideBits aFixedSides,
+    const ScreenMargin& aGeckoFixedLayerMargins) const {
+  // If the software keybaord is visible and the interactive-widget is not
+  // resizes-content, we don't need to move the position:fixed or sticky
+  // elements at all.
+  if (mIsSoftwareKeyboardVisible &&
+      mInteractiveWidget != dom::InteractiveWidget::ResizesContent) {
+    return ScreenPoint(0, 0);
+  }
+
+  // Work out the necessary translation, in screen space.
+  ScreenPoint translation;
+
+  ScreenMargin effectiveMargin =
+      aCompositorFixedLayerMargins - aGeckoFixedLayerMargins;
+  if (aFixedSides & SideBits::eLeft) {
+    translation.x += effectiveMargin.left;
+  } else if (aFixedSides & SideBits::eRight) {
+    translation.x -= effectiveMargin.right;
+  }
+
+  if (aFixedSides & SideBits::eTop) {
+    translation.y += effectiveMargin.top;
+  } else if (aFixedSides & SideBits::eBottom) {
+    translation.y -= effectiveMargin.bottom;
+  }
+
+  return translation;
 }
 
 /*static*/

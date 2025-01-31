@@ -117,11 +117,34 @@
     <!-- The document title and heading of the error page shown when the browser gets stuck in an infinite loop when loading a website. -->
     <string name="mozac_browser_errorpages_redirect_loop_title">Сәхифә икенче сәхифәгә дөрес юнәлтми</string>
 
+    <!-- The error message shown when the browser gets stuck in an infinite loop when loading a website. -->
+    <string name="mozac_browser_errorpages_redirect_loop_message"><![CDATA[
+    <p>Браузер соралган элементны йөкләргә тырышудан ваз кичте, чөнки сайт сорауны беркайчан да бетми торган рәвештә башка җиргә юнәлтә.</p>
+    <ul>
+    <li>Сез бу сайт таләп иткән кукиларны сүндергән яки блокламагансыздыр бит?</li>
+    <li>Әгәр дә сайттан килгән кукиларны кабул итү проблеманы чишмәсә, димәк гаеп Сезнең җиһасыгызда түгел ә серверның үзендә .</li>
+    </ul>
+    ]]></string>
+
     <!-- The document title and heading of the error page shown when a website cannot be loaded because the browser is in offline mode. -->
     <string name="mozac_browser_errorpages_offline_title">Автоном эш режимы</string>
 
+    <!-- The error message shown when a website cannot be loaded because the browser is in offline mode. -->
+    <string name="mozac_browser_errorpages_offline_message"><![CDATA[
+    <p>Браузер үзенең автоном эш режимында эшли, шуңа күрә соралган сайтка тоташып булмый.</p>
+    <ul>
+    <li>Бу җиһаз актив челтәргә тоташканмы?</li>
+    <li>Онлайн режимына күчеп, битне яңадан йөкләү өчен, "Янәдән тырышып карау" төймәсенә басыгыз.</li>
+    </ul>
+    ]]></string>
+
     <!-- The document title and heading of the error page shown when the browser prevents loading a website on a restricted port. -->
     <string name="mozac_browser_errorpages_port_blocked_title">Порт куркынычсызлык саклау максатыннан ябык</string>
+
+    <!-- The error message shown when the browser prevents loading a website on a restricted port. -->
+    <string name="mozac_browser_errorpages_port_blocked_message"><![CDATA[
+    <p>Соралган адрес өчен күрсәтелгән порт (мәсәлән: <q>mozilla.org:80</q>, ягъни mozilla.org-тагы 80-нче порт) гадәттә веб-сайтлар белән тоташу өчен <em>кулланылмый</em>. Хәвефсезлек максатында браузер бу бәйләнешне өзде.</p>
+    ]]></string>
 
     <!-- The document title and heading of the error page shown when the Internet connection is disrupted while loading a website. -->
     <string name="mozac_browser_errorpages_net_reset_title">Бәйләнеш ташланды</string>
@@ -179,15 +202,27 @@
     <!-- The document title and heading of an error page. -->
     <string name="mozac_browser_errorpages_unknown_host_title">Адрес табылмады</string>
 
+    <!-- In the example, the two URLs in markup do not need to be translated. -->
+    <string name="mozac_browser_errorpages_unknown_host_message"><![CDATA[
+    <p>Браузер күрсәтелгән адрес өчен хост серверын таба алмады.</p>
+    <ul>
+    <li>Адресны язганда хата киткән булуы мөмкин, мәсәлән:
+    <strong>www</strong>.example.com урынына
+    <strong>ww</strong>.example.com.</li>
+    <li>Һичбер сәхифә дә ачылмаса, җиһазыгызның мобиль интернет яки Wi-Fi бәйләнешен тикшерегез.</li>
+    </ul>
+    ]]></string>
     <!-- The document title and heading of an error page. -->
-    <string name="mozac_browser_errorpages_no_internet_title">Интернетка тоташу юк</string>
-    <!-- The main body text of this error page. It will be shown beneath the title -->
-    <string name="mozac_browser_errorpages_no_internet_message">Челтәргә бәйләнешегезне тикшерегез яки бераздан битне яңадан йөкләп карагыз.</string>
+    <string name="mozac_browser_errorpages_no_internet_error_code">Хата коды: NS_ERROR_OFFLINE</string>
+
     <!-- Text that will show up on the button at the bottom of the error page -->
     <string name="mozac_browser_errorpages_no_internet_refresh_button">Яңарту</string>
 
     <!-- The document title and heading of an error page. -->
     <string name="mozac_browser_errorpages_malformed_uri_title">Яраксыз адрес</string>
+    <string name="mozac_browser_errorpages_malformed_uri_message"><![CDATA[
+    <p>Кертелгән адресның форматын танып булмады. Зинһар, адресның хатасызмы икәнен тикшереп, янәдән тырышып карагыз.</p>
+    ]]></string>
     <!-- The document title and heading of an error page. -->
     <string name="mozac_browser_errorpages_malformed_uri_title_alternative">Адрес хаталы</string>
     <!-- This string contains markup. The URL should not be localized. -->

@@ -55,10 +55,7 @@ class LazyTieringHeuristics {
   // Don't use this directly, except for logging etc.
   static uint32_t rawLevel() {
     uint32_t level = JS::Prefs::wasm_lazy_tiering_level();
-    // Clamp to range MIN_LEVEL .. MAX_LEVEL.
-    level = std::max<uint32_t>(level, MIN_LEVEL);
-    level = std::min<uint32_t>(level, MAX_LEVEL);
-    return level;
+    return std::clamp(level, MIN_LEVEL, MAX_LEVEL);
   }
 
   // Estimate the cost of compiling a function of bytecode size `bodyLength`
@@ -88,9 +85,8 @@ class LazyTieringHeuristics {
       thresholdF *= scale_[level - (MIN_LEVEL + 1)];
 
       // Clamp and convert.
-      thresholdF = std::max<float>(thresholdF, 10.0);   // at least 10
-      thresholdF = std::min<float>(thresholdF, 2.0e9);  // at most 2 billion
-      int32_t thresholdI = int32_t(thresholdF);
+      constexpr float thresholdHigh = 2.0e9f;  // at most 2 billion;
+      int32_t thresholdI = int32_t(std::clamp(thresholdF, 10.f, thresholdHigh));
       MOZ_RELEASE_ASSERT(thresholdI >= 0);
       return thresholdI;
     }
@@ -119,10 +115,7 @@ class InliningHeuristics {
   // Don't use these directly, except for logging etc.
   static uint32_t rawLevel() {
     uint32_t level = JS::Prefs::wasm_inlining_level();
-    // Clamp to range MIN_LEVEL .. MAX_LEVEL.
-    level = std::max<uint32_t>(level, MIN_LEVEL);
-    level = std::min<uint32_t>(level, MAX_LEVEL);
-    return level;
+    return std::clamp(level, MIN_LEVEL, MAX_LEVEL);
   }
   static bool rawDirectAllowed() { return JS::Prefs::wasm_direct_inlining(); }
   static bool rawCallRefAllowed() {
@@ -134,9 +127,7 @@ class InliningHeuristics {
   static uint32_t rawCallRefPercent() {
     uint32_t percent = JS::Prefs::wasm_call_ref_inlining_percent();
     // Clamp to range 10 .. 100 (%).
-    percent = std::max<uint32_t>(10, percent);
-    percent = std::min<uint32_t>(100, percent);
-    return percent;
+    return std::clamp(percent, 10u, 100u);
   }
 
   // Given a call of kind `callKind` to a function of bytecode size
@@ -149,7 +140,7 @@ class InliningHeuristics {
   static bool isSmallEnoughToInline(CallKind callKind, uint32_t inliningDepth,
                                     uint32_t bodyLength) {
     // If this fails, something's seriously wrong; bail out.
-    MOZ_RELEASE_ASSERT(inliningDepth <= 10);  // because 10 > (400 / 50)
+    MOZ_RELEASE_ASSERT(inliningDepth <= 10);  // because 10 > (320 / 40)
     // Check whether calls of this kind are currently allowed
     if ((callKind == CallKind::Direct && !rawDirectAllowed()) ||
         (callKind == CallKind::CallRef && !rawCallRefAllowed())) {
@@ -158,23 +149,117 @@ class InliningHeuristics {
     // Check the size is allowable.  This depends on how deep we are in the
     // stack and on the setting of level_.  We allow inlining of functions of
     // size up to the `baseSize[]` value at depth zero, but reduce the
-    // allowable size by 50 for each further level of inlining, so that only
+    // allowable size by 40 for each further level of inlining, so that only
     // smaller and smaller functions are allowed as we inline deeper.
     //
     // At some point `allowedSize` goes negative and thereby disallows all
     // further inlining.  Note that the `baseSize` entry for
     // `level_ == MIN_LEVEL (== 1)` is set so as to disallow inlining even at
     // depth zero.  Hence `level_ == MIN_LEVEL` disallows all inlining.
-    static constexpr int32_t baseSize[9] = {0,   50,  100, 150,
-                                            200,  // default
-                                            250, 300, 350, 400};
+    static constexpr int32_t baseSize[9] = {0,   40,  80,  120,
+                                            160,  // default
+                                            200, 240, 280, 320};
     uint32_t level = rawLevel();
     MOZ_RELEASE_ASSERT(level >= MIN_LEVEL && level <= MAX_LEVEL);
     int32_t allowedSize = baseSize[level - MIN_LEVEL];
-    allowedSize -= int32_t(50 * inliningDepth);
+    allowedSize -= int32_t(40 * inliningDepth);
     return allowedSize > 0 && bodyLength <= uint32_t(allowedSize);
   }
 };
+
+// [SMDOC] Per-function and per-module inlining limits
+
+// `class InliningHeuristics` makes inlining decisions on a per-call-site
+// basis.  Even with that in place, it is still possible to create a small
+// input function for which inlining produces a huge (1000 x) expansion.  Hence
+// we also need a backstop mechanism to limit growth of functions and of
+// modules as a whole.
+//
+// The following scheme is therefore implemented:
+//
+// * no function can have an inlining-based expansion of more than a constant
+//   factor (here, 99 x).
+//
+// * for a module as a whole there is also a max expansion factor, and this is
+//   much lower, perhaps 1 x.
+//
+// This means that
+//
+// * no individual function can cause too much trouble (due to the 99 x limit),
+//   yet any function that needs a lot of inlining can still get it. In
+//   practice most functions have an inlining expansion, at default settings,
+//   of much less than 5 x.
+//
+// * the module as a whole cannot chew up excessive resources.
+//
+// Once a limit is exhausted, Ion compilation is still possible, but no
+// inlining will be done.
+//
+// The per-module limit needs to be interpreted in the light of lazy tiering.
+// Many modules only tier up a small subset of their functions.  Hence the
+// relatively low per-module limit still allows a high level of expansion of
+// the functions that do get tiered up.
+//
+// In effect, the tiering mechanism gives hot functions (early tierer-uppers)
+// preferential access to the module-level inlining budget.  Colder functions
+// that tier up later may find the budget to be exhausted, in which case they
+// get no inlining.  It would be feasible to gradually reduce inlining
+// aggressiveness as the budget is used up, rather than have cliff-edge
+// behaviour, but it hardly seems worth the hassle.
+//
+// To implement this, we have
+//
+// * `int64_t WasmCodeMetadata::ProtectedOptimizationStats::inliningBudget`:
+//   this is initially set as the maximum copied-in bytecode length allowable
+//   for the module.  Inlining of individual call sites decreases the value and
+//   may drive it negative.  Once the value is negative, no more inlining is
+//   allowed.
+//
+// * `int64_t FunctionCompiler::inliningBudget_` does the same at a
+//   per-function level.  Its initial value takes into account the current
+//   value of the module-level budget; hence if the latter is exhausted, the
+//   function-level budget will be zero and so no inlining occurs.
+//
+// If either limit is exceeded, a message is printed on the
+// `MOZ_LOG=wasmCodeMetaStats:3` channel.
+
+// Allowing budgets to be driven negative means we slightly overshoot them.  An
+// alternative to be to ensure they can never be driven negative, in which case
+// we will slightly undershoot them instead, given that the sum of inlined
+// function sizes is unlikely to exactly match the budget.  We use the
+// overshoot scheme only because it makes it simple to decide when to log a
+// budget-overshoot message and not emit any duplicates.
+
+// There is a (logical, not-TSan-detectable) race condition in that the
+// inlining budget for a function is set in part from the module-level budget
+// at the time that compilation of the function begins, and the module-level
+// budget is updated when compilation of a function ends -- see
+// FunctionCompiler::initToplevel and ::finish.  If there are multiple
+// compilation threads, it can happen that multiple threads individually
+// overrun the module-level budget, and so collectively overshoot the budget
+// multiple times.
+//
+// The worst-case total overshoot is equal to the worst-case per-function
+// overshoot multiplied by the max number of functions that can be concurrently
+// compiled:
+//
+//   <max per-function overshoot, which
+//      == the largest body length that can be accepted
+//             by InliningHeuristics::isSmallEnoughToInline>
+//   * MaxPartialTier2CompileTasks
+//
+// which with current settings is 320 * 1 == 320.
+//
+// We never expect to hit either limit in normal operation -- they exist only
+// to protect against the worst case.  So the imprecision doesn't matter.
+
+// Setting the multiplier here to 1 means that inlining can copy in at maximum
+// the same amount of bytecode as is in the module; 2 means twice as much, etc,
+// and setting it to 0 would completely disable inlining.
+static constexpr int64_t PerModuleMaxInliningRatio = 1;
+
+// Same meaning as above, except at a per-function level.
+static constexpr int64_t PerFunctionMaxInliningRatio = 99;
 
 }  // namespace wasm
 }  // namespace js

@@ -194,6 +194,7 @@ class Selection;
 enum class ShadowRootMode : uint8_t;
 class ShadowRoot;
 struct StructuredSerializeOptions;
+class TrustedHTMLOrString;
 class WorkerPrivate;
 enum class ElementCallbackType;
 enum class ReferrerPolicy : uint8_t;
@@ -875,17 +876,6 @@ class nsContentUtils {
 
  public:
   /**
-   * Parse a margin string of format 'top, right, bottom, left' into
-   * an nsIntMargin.
-   *
-   * @param aString the string to parse
-   * @param aResult the resulting integer
-   * @return whether the value could be parsed
-   */
-  static bool ParseIntMarginValue(const nsAString& aString,
-                                  nsIntMargin& aResult);
-
-  /**
    * Parse the value of the <font size=""> attribute according to the HTML5
    * spec as of April 16, 2012.
    *
@@ -1199,11 +1189,6 @@ class nsContentUtils {
                                const char*** aArgNames);
 
   /**
-   * Returns true if this document is in a Private Browsing window.
-   */
-  static bool IsInPrivateBrowsing(const Document* aDoc);
-
-  /**
    * Returns true if this loadGroup uses Private Browsing.
    */
   static bool IsInPrivateBrowsing(nsILoadGroup* aLoadGroup);
@@ -1320,6 +1305,7 @@ class nsContentUtils {
   static void LogMessageToConsole(const char* aMsg);
 
   static bool SpoofLocaleEnglish();
+  static bool SpoofLocaleEnglish(const Document* aDocument);
 
   /**
    * Get the localized string named |aKey| in properties file |aFile|.
@@ -1885,7 +1871,9 @@ class nsContentUtils {
 
   MOZ_CAN_RUN_SCRIPT
   static void SetHTMLUnsafe(mozilla::dom::FragmentOrElement* aTarget,
-                            Element* aContext, const nsAString& aSource);
+                            Element* aContext,
+                            const mozilla::dom::TrustedHTMLOrString& aSource,
+                            bool aIsShadowRoot, mozilla::ErrorResult& aError);
   /**
    * Invoke the fragment parsing algorithm (innerHTML) using the HTML parser.
    *
@@ -2140,12 +2128,9 @@ class nsContentUtils {
    * @param aTargetSpec the target (like target=, may be empty).
    * @param aClick whether this was a click or not (if false, this method
    *               assumes you just hovered over the link).
-   * @param aIsTrusted If false, JS Context will be pushed to stack
-   *                   when the link is triggered.
    */
   static void TriggerLink(nsIContent* aContent, nsIURI* aLinkURI,
-                          const nsString& aTargetSpec, bool aClick,
-                          bool aIsTrusted);
+                          const nsString& aTargetSpec, bool aClick);
 
   /**
    * Get the link location.
@@ -2546,12 +2531,6 @@ class nsContentUtils {
   static void GetCommandOrWinText(nsAString& text);
   static void GetAltText(nsAString& text);
   static void GetModifierSeparatorText(nsAString& text);
-
-  /**
-   * Returns if aContent has the 'scrollgrab' property.
-   * aContent may be null (in this case false is returned).
-   */
-  static bool HasScrollgrab(nsIContent* aContent);
 
   /**
    * Flushes the layout tree (recursively)
@@ -3262,8 +3241,10 @@ class nsContentUtils {
    * take that into account.
    *
    * @param aMIMEType  The MIME type of the document being loaded.
+   * @param aIsSandboxed  If the document is loaded in an iframe sandbox.
    */
-  static uint32_t HtmlObjectContentTypeForMIMEType(const nsCString& aMIMEType);
+  static uint32_t HtmlObjectContentTypeForMIMEType(const nsCString& aMIMEType,
+                                                   bool aIsSandboxed);
 
   /**
    * Detect whether a string is a local-url.
@@ -3427,8 +3408,8 @@ class nsContentUtils {
    * Return safe area insets of window that defines as
    * https://drafts.csswg.org/css-env-1/#safe-area-insets.
    */
-  static mozilla::ScreenIntMargin GetWindowSafeAreaInsets(
-      nsIScreen* aScreen, const mozilla::ScreenIntMargin& aSafeareaInsets,
+  static mozilla::LayoutDeviceIntMargin GetWindowSafeAreaInsets(
+      nsIScreen* aScreen, const mozilla::LayoutDeviceIntMargin& aSafeareaInsets,
       const mozilla::LayoutDeviceIntRect& aWindowRect);
 
   struct SubresourceCacheValidationInfo {
@@ -3717,6 +3698,9 @@ nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType) {
     case nsIContentPolicy::TYPE_INTERNAL_EXTERNAL_RESOURCE:
       return ExtContentPolicy::TYPE_OTHER;
 
+    case nsIContentPolicy::TYPE_INTERNAL_JSON_PRELOAD:
+      return ExtContentPolicy::TYPE_JSON;
+
     case nsIContentPolicy::TYPE_INVALID:
     case nsIContentPolicy::TYPE_OTHER:
     case nsIContentPolicy::TYPE_SCRIPT:
@@ -3744,6 +3728,7 @@ nsContentUtils::InternalContentPolicyTypeToExternal(nsContentPolicyType aType) {
     case nsIContentPolicy::TYPE_PROXIED_WEBRTC_MEDIA:
     case nsIContentPolicy::TYPE_WEB_IDENTITY:
     case nsIContentPolicy::TYPE_WEB_TRANSPORT:
+    case nsIContentPolicy::TYPE_JSON:
       // NOTE: When adding something here make sure the enumerator is defined!
       return static_cast<ExtContentPolicyType>(aType);
 

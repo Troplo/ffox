@@ -18,6 +18,7 @@
 #include "ScopedNSSTypes.h"
 #include "mozilla/RandomNum.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/glean/GleanMetrics.h"
 #include "mozilla/net/DNS.h"
@@ -289,6 +290,9 @@ void Http3Session::Shutdown() {
       !isNSSError && !isEchRetry && !mConnInfo->GetWebTransport() &&
       !allowToRetryWithDifferentIPFamily && !mDontExclude) {
     gHttpHandler->ExcludeHttp3(mConnInfo);
+    if (mFirstHttpTransaction) {
+      mFirstHttpTransaction->DisableHttp3(false);
+    }
   }
 
   for (const auto& stream : mStreamTransactionHash.Values()) {
@@ -384,6 +388,15 @@ Http3Session::~Http3Session() {
       mTransactionsSenderBlockedByFlowControlCount);
 
   Shutdown();
+
+  // We only record the average interval for performance reason.
+  if (mTotelReadInterval) {
+    nsAutoCString key(mServer.EqualsLiteral("cloudflare") ? "cloudflare"_ns
+                                                          : "others"_ns);
+    glean::network::http3_avg_read_interval.Get(key).AccumulateRawDuration(
+        TimeDuration::FromMilliseconds(
+            static_cast<double>(mTotelReadInterval / mTotelReadIntervalCount)));
+  }
 }
 
 // This function may return a socket error.
@@ -399,6 +412,15 @@ nsresult Http3Session::ProcessInput(nsIUDPSocket* socket) {
   LOG(("Http3Session::ProcessInput writer=%p [this=%p state=%d]",
        mUdpConn.get(), this, mState));
 
+  PRIntervalTime now = PR_IntervalNow();
+  if (!mLastReadTime) {
+    mLastReadTime = now;
+  } else {
+    mTotelReadInterval +=
+        PR_IntervalToMilliseconds(PR_IntervalNow() - mLastReadTime);
+    mTotelReadIntervalCount++;
+    mLastReadTime = now;
+  }
   if (mUseNSPRForIO) {
     while (true) {
       nsTArray<uint8_t> data;
@@ -1065,10 +1087,19 @@ bool Http3Session::AddStream(nsAHttpTransaction* aHttpTransaction,
 
   nsHttpTransaction* trans = aHttpTransaction->QueryHttpTransaction();
 
+  bool firstStream = false;
   if (!mConnection) {
     // Get the connection from the first transaction.
     mConnection = aHttpTransaction->Connection();
+    firstStream = true;
   }
+
+  // Make sure we report the connectStart
+  auto reportConnectStart = MakeScopeExit([&] {
+    if (firstStream) {
+      OnTransportStatus(nullptr, NS_NET_STATUS_CONNECTING_TO, 0);
+    }
+  });
 
   if (IsClosing()) {
     LOG3(
@@ -1889,12 +1920,13 @@ void Http3Session::CloseStreamInternal(Http3StreamBase* aStream,
       MOZ_ASSERT(mConnectionIdleStart);
       MOZ_ASSERT(mConnectionIdleEnd);
 
+#ifndef ANDROID
       if (mConnectionIdleStart) {
-        Telemetry::AccumulateTimeDelta(
-            Telemetry::HTTP3_TIME_TO_REUSE_IDLE_CONNECTTION_MS,
-            NS_SUCCEEDED(aResult) ? "succeeded"_ns : "failed"_ns,
-            mConnectionIdleStart, mConnectionIdleEnd);
+        mozilla::glean::netwerk::http3_time_to_reuse_idle_connection
+            .Get(NS_SUCCEEDED(aResult) ? "succeeded"_ns : "failed"_ns)
+            .AccumulateRawDuration(mConnectionIdleEnd - mConnectionIdleStart);
       }
+#endif
 
       mConnectionIdleStart = TimeStamp();
       mConnectionIdleEnd = TimeStamp();

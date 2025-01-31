@@ -1,7 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* Test that MozParam condition="pref" values used in search URLs are from the
+/* Test that preference parameters used in search URLs are from the
  * default branch, and that their special characters are URL encoded. */
 
 "use strict";
@@ -25,6 +25,10 @@ const CONFIG = [
           params: [
             {
               name: "code",
+              enterpriseValue: "enterprise",
+            },
+            {
+              name: "code",
               experimentConfig: "code",
             },
             {
@@ -40,8 +44,6 @@ const CONFIG = [
 ];
 
 add_setup(async function () {
-  // The test engines used in this test need to be recognized as application
-  // provided engines, or their MozParams will be ignored.
   SearchTestUtils.setRemoteSettingsConfig(CONFIG);
 });
 
@@ -97,5 +99,18 @@ add_task(async function test_pref_cleared() {
     engine.getSubmission("foo").uri.spec,
     baseURL + "q=foo",
     "Should have just the base URL after the pref was cleared"
+  );
+});
+
+add_task(async function test_pref_updated_enterprise() {
+  // Set the pref to some value and enable enterprise mode at the same time.
+  defaultBranch.setCharPref("param.code", "supergood&id=unique123456");
+  await enableEnterprise();
+
+  const engine = Services.search.getEngineById("preferenceEngine");
+  Assert.equal(
+    engine.getSubmission("foo").uri.spec,
+    baseURL + "code=enterprise&q=foo",
+    "Enterprise parameter should override experiment config."
   );
 });

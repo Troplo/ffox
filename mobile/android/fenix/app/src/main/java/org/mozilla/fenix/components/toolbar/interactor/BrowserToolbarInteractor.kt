@@ -61,8 +61,13 @@ interface BrowserToolbarInteractor {
      * @param accessPoint The [MenuAccessPoint] that was used to navigate to the menu dialog.
      * @param customTabSessionId The ID of the custom tab session if navigating from
      * an external access point, and null otherwise.
+     * @param isSandboxCustomTab Whether or not the current custom tab is sandboxed.
      */
-    fun onMenuButtonClicked(accessPoint: MenuAccessPoint, customTabSessionId: String? = null)
+    fun onMenuButtonClicked(
+        accessPoint: MenuAccessPoint,
+        customTabSessionId: String? = null,
+        isSandboxCustomTab: Boolean = false,
+    )
 }
 
 /**
@@ -134,7 +139,11 @@ class DefaultBrowserToolbarInteractor(
         browserToolbarController.handleNewTabButtonLongClick()
     }
 
-    override fun onMenuButtonClicked(accessPoint: MenuAccessPoint, customTabSessionId: String?) {
-        browserToolbarController.handleMenuButtonClicked(accessPoint, customTabSessionId)
+    override fun onMenuButtonClicked(
+        accessPoint: MenuAccessPoint,
+        customTabSessionId: String?,
+        isSandboxCustomTab: Boolean,
+    ) {
+        browserToolbarController.handleMenuButtonClicked(accessPoint, customTabSessionId, isSandboxCustomTab)
     }
 }

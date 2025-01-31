@@ -4097,7 +4097,8 @@ void Selection::Modify(const nsAString& aAlter, const nsAString& aDirection,
   // the beginning/end of the line.
   RefPtr<nsFrameSelection> frameSelection = mFrameSelection;
   rv = frameSelection->MoveCaret(
-      forward ? eDirNext : eDirPrevious, extend, amount,
+      forward ? eDirNext : eDirPrevious,
+      nsFrameSelection::ExtendSelection(extend), amount,
       visual ? nsFrameSelection::eVisual : nsFrameSelection::eLogical);
 
   if (aGranularity.LowerCaseEqualsLiteral("line") && NS_FAILED(rv)) {
@@ -4476,8 +4477,7 @@ JSObject* Selection::WrapObject(JSContext* aCx,
 // AutoHideSelectionChanges
 AutoHideSelectionChanges::AutoHideSelectionChanges(
     const nsFrameSelection* aFrame)
-    : AutoHideSelectionChanges(
-          aFrame ? aFrame->GetSelection(SelectionType::eNormal) : nullptr) {}
+    : AutoHideSelectionChanges(aFrame ? &aFrame->NormalSelection() : nullptr) {}
 
 bool Selection::HasSameRootOrSameComposedDoc(const nsINode& aNode) {
   nsINode* root = aNode.SubtreeRoot();

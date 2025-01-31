@@ -161,13 +161,6 @@ ChromeUtils.defineLazyGetter(
     /^(?:[a-z+.-]+:\/*(?!\/))?\[(?:[0-9a-f]{0,4}:){0,7}[0-9a-f]{0,4}\]?(?::\d+|\/)?/i
 );
 
-// Regex used to detect spaces in URL credentials.
-ChromeUtils.defineLazyGetter(
-  lazy,
-  "DetectSpaceInCredentialsRegex",
-  () => /^[^/]*\s[^/]*@/
-);
-
 // Cache of known domains.
 ChromeUtils.defineLazyGetter(lazy, "knownDomains", () => {
   const branch = "browser.fixup.domainwhitelist.";
@@ -384,19 +377,29 @@ URIFixup.prototype = {
       uriString = uriString.replace(/^:?\/\//, "");
     }
 
+    let detectSpaceInCredentials = val => {
+      // Only search the first 512 chars for performance reasons.
+      let firstChars = val.slice(0, 512);
+      if (!firstChars.includes("@")) {
+        return false;
+      }
+      let credentials = firstChars.split("@")[0];
+      return !credentials.includes("/") && /\s/.test(credentials);
+    };
+
     // Avoid fixing up content that looks like tab-separated values.
     // Assume that 1 tab is accidental, but more than 1 implies this is
     // supposed to be tab-separated content.
     if (
       !isCommonProtocol &&
       lazy.maxOneTabRegex.test(uriString) &&
-      !lazy.DetectSpaceInCredentialsRegex.test(untrimmedURIString)
+      !detectSpaceInCredentials(untrimmedURIString)
     ) {
       let uriWithProtocol = fixupURIProtocol(uriString);
       if (uriWithProtocol) {
         info.fixedURI = uriWithProtocol;
         info.fixupChangedProtocol = true;
-        info.wasSchemelessInput = true;
+        info.schemelessInput = Ci.nsILoadInfo.SchemelessInputTypeSchemeless;
         maybeSetAlternateFixedURI(info, fixupFlags);
         info.preferredURI = info.fixedURI;
         // Check if it's a forced visit. The user can enforce a visit by
@@ -421,9 +424,9 @@ URIFixup.prototype = {
     // Memoize the public suffix check, since it may be expensive and should
     // only run once when necessary.
     let suffixInfo;
-    function checkSuffix(info) {
+    function checkSuffix(i) {
       if (!suffixInfo) {
-        suffixInfo = checkAndFixPublicSuffix(info);
+        suffixInfo = checkAndFixPublicSuffix(i);
       }
       return suffixInfo;
     }
@@ -699,11 +702,11 @@ URIFixupInfo.prototype = {
     return this._keywordAsSent || "";
   },
 
-  set wasSchemelessInput(changed) {
-    this._wasSchemelessInput = changed;
+  set schemelessInput(changed) {
+    this._schemelessInput = changed;
   },
-  get wasSchemelessInput() {
-    return !!this._wasSchemelessInput;
+  get schemelessInput() {
+    return this._schemelessInput ?? Ci.nsILoadInfo.SchemelessInputTypeUnset;
   },
 
   set fixupChangedProtocol(changed) {
@@ -791,10 +794,17 @@ function isDomainKnown(asciiHost) {
 function checkAndFixPublicSuffix(info) {
   let uri = info.fixedURI;
   let asciiHost = uri?.asciiHost;
+
+  // If the original input ends in a "。" character (U+3002), we consider the
+  // input a search query if there is no valid suffix.
+  // While the "。" character is equivalent to a period in domains, it's more
+  // commonly used to terminate search phrases. We're preserving the historical
+  // behavior of the ascii period for now, as that may be more commonly expected
+  // by technical users.
   if (
     !asciiHost ||
     !asciiHost.includes(".") ||
-    asciiHost.endsWith(".") ||
+    (asciiHost.endsWith(".") && !info.originalInput.endsWith("。")) ||
     isDomainKnown(asciiHost)
   ) {
     return { suffix: "", hasUnknownSuffix: false };
@@ -966,8 +976,11 @@ function fileURIFixup(uriString) {
  *          or null if fixing was not possible.
  */
 function fixupURIProtocol(uriString) {
-  let schemePos = uriString.indexOf("://");
-  if (schemePos == -1 || schemePos > uriString.search(/[:\/]/)) {
+  // The longest URI scheme on the IANA list is 36 chars + 3 for ://
+  let schemeChars = uriString.slice(0, 39);
+
+  let schemePos = schemeChars.indexOf("://");
+  if (schemePos == -1 || schemePos > schemeChars.search(/[:\/]/)) {
     uriString = "http://" + uriString;
   }
   try {

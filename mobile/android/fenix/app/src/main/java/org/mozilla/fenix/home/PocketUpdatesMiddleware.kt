@@ -16,10 +16,12 @@ import mozilla.components.lib.state.MiddlewareContext
 import mozilla.components.lib.state.Store
 import mozilla.components.service.pocket.PocketStoriesService
 import mozilla.components.service.pocket.PocketStory
+import mozilla.components.service.pocket.PocketStory.ContentRecommendation
 import mozilla.components.service.pocket.PocketStory.PocketRecommendedStory
 import mozilla.components.service.pocket.PocketStory.PocketSponsoredStory
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.AppAction
+import org.mozilla.fenix.components.appstate.AppAction.ContentRecommendationsAction
 import org.mozilla.fenix.components.appstate.AppState
 import org.mozilla.fenix.datastore.SelectedPocketStoriesCategories
 import org.mozilla.fenix.datastore.SelectedPocketStoriesCategories.SelectedPocketStoriesCategory
@@ -46,7 +48,7 @@ class PocketUpdatesMiddleware(
     ) {
         // Pre process actions
         when (action) {
-            is AppAction.PocketStoriesCategoriesChange -> {
+            is ContentRecommendationsAction.PocketStoriesCategoriesChange -> {
                 // Intercept the original action which would only update categories and
                 // dispatch a new action which also updates which categories are selected by the user
                 // from previous locally persisted data.
@@ -66,19 +68,19 @@ class PocketUpdatesMiddleware(
 
         // Post process actions
         when (action) {
-            is AppAction.PocketStoriesShown -> {
+            is ContentRecommendationsAction.PocketStoriesShown -> {
                 persistStoriesImpressions(
                     coroutineScope = coroutineScope,
                     pocketStoriesService = pocketStoriesService,
                     updatedStories = action.storiesShown,
                 )
             }
-            is AppAction.SelectPocketStoriesCategory,
-            is AppAction.DeselectPocketStoriesCategory,
+            is ContentRecommendationsAction.SelectPocketStoriesCategory,
+            is ContentRecommendationsAction.DeselectPocketStoriesCategory,
             -> {
                 persistSelectedCategories(
                     coroutineScope = coroutineScope,
-                    currentCategoriesSelections = context.state.pocketStoriesCategoriesSelections,
+                    currentCategoriesSelections = context.state.recommendationState.pocketStoriesCategoriesSelections,
                     selectedPocketCategoriesDataStore = selectedPocketCategoriesDataStore,
                 )
             }
@@ -108,6 +110,12 @@ internal fun persistStoriesImpressions(
                 .map {
                     it.copy(timesShown = it.timesShown.inc())
                 },
+        )
+
+        pocketStoriesService.updateRecommendationsImpressions(
+            recommendationsShown = updatedStories.filterIsInstance<ContentRecommendation>().map {
+                it.copy(impressions = it.impressions.inc())
+            },
         )
 
         pocketStoriesService.recordStoriesImpressions(
@@ -165,7 +173,7 @@ internal fun restoreSelectedCategories(
 ) {
     coroutineScope.launch {
         store.dispatch(
-            AppAction.PocketStoriesCategoriesSelectionsChange(
+            ContentRecommendationsAction.PocketStoriesCategoriesSelectionsChange(
                 currentCategories,
                 selectedPocketCategoriesDataStore.data.first()
                     .valuesList.map {

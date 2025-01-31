@@ -49,6 +49,7 @@
 #include "vm/FunctionFlags.h"
 #include "vm/Opcodes.h"
 #include "vm/RealmFuses.h"
+#include "wasm/WasmAnyRef.h"
 
 // [SMDOC] MacroAssembler multi-platform overview
 //
@@ -195,7 +196,9 @@
 #endif
 
 #define DEFINED_ON_RESULT_crash \
-  { MOZ_CRASH(); }
+  {                             \
+    MOZ_CRASH();                \
+  }
 #define DEFINED_ON_RESULT_define
 #define DEFINED_ON_RESULT_ = delete
 
@@ -295,7 +298,6 @@ struct AllocSiteInput
   explicit AllocSiteInput(Register reg) : Base(reg) {}
 };
 
-#ifdef ENABLE_WASM_TAIL_CALLS
 // Instance slots (including ShadowStackArea) and arguments size information
 // from two neighboring frames.
 // Used in Wasm tail calls to remove frame.
@@ -308,7 +310,6 @@ struct ReturnCallAdjustmentInfo {
       : newSlotsAndStackArgBytes(newSlotsAndStackArgBytes),
         oldSlotsAndStackArgBytes(oldSlotsAndStackArgBytes) {}
 };
-#endif  // ENABLE_WASM_TAIL_CALLS
 
 struct BranchWasmRefIsSubtypeRegisters {
   bool needSuperSTV;
@@ -687,9 +688,14 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                    CodeLocationLabel target)
       DEFINED_ON(x86, x64, arm, arm64, loong64, riscv64, wasm32, mips_shared);
 
+  // Creates a move of a patchable 32-bit value into `dest`.  On 64-bit
+  // targets, the value (`n`) is extended to 64 bits using the target
+  // architecture's standard 32-to-64 extension rule.  Hence consistent cross
+  // target behaviour is only provided for `n` in the range 0 .. 2^31-1
+  // inclusive.
   CodeOffset move32WithPatch(Register dest)
       DEFINED_ON(x86_shared, arm, arm64, loong64, mips_shared);
-  void patchMove32(CodeOffset offset, int32_t n)
+  void patchMove32(CodeOffset offset, Imm32 n)
       DEFINED_ON(x86_shared, arm, arm64, loong64, mips_shared);
 
  public:
@@ -1218,7 +1224,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
       DEFINED_ON(mips_shared, arm, arm64, loong64, riscv64, wasm32);
 
   inline void quotient64(Register rhs, Register srcDest, bool isUnsigned)
-      DEFINED_ON(arm64, loong64, riscv64);
+      DEFINED_ON(arm64, loong64, mips64, riscv64);
 
   // As above, but srcDest must be eax and tempEdx must be edx.
   inline void quotient32(Register rhs, Register srcDest, Register tempEdx,
@@ -1232,7 +1238,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
       DEFINED_ON(mips_shared, arm, arm64, loong64, riscv64, wasm32);
 
   inline void remainder64(Register rhs, Register srcDest, bool isUnsigned)
-      DEFINED_ON(arm64, loong64, riscv64);
+      DEFINED_ON(arm64, loong64, mips64, riscv64);
 
   // As above, but srcDest must be eax and tempEdx must be edx.
   inline void remainder32(Register rhs, Register srcDest, Register tempEdx,
@@ -1759,6 +1765,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   // Branches to |label| if |reg| is true. |reg| should be a C++ bool.
   inline void branchIfTrueBool(Register reg, Label* label);
+
+  inline void branchIfNotNullOrUndefined(ValueOperand val, Label* label);
 
   inline void branchIfRope(Register str, Label* label);
   inline void branchIfNotRope(Register str, Label* label);
@@ -3772,19 +3780,19 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   FaultingCodeOffset wasmTrapInstruction() PER_SHARED_ARCH;
 
-  void wasmTrap(wasm::Trap trap, wasm::BytecodeOffset bytecodeOffset);
+  void wasmTrap(wasm::Trap trap, const wasm::TrapSiteDesc& trapSiteDesc);
 
   // Load all pinned regs via InstanceReg.  If the trapOffset is something,
   // give the first load a trap descriptor with type IndirectCallToNull, so that
   // a null instance will cause a trap.
   void loadWasmPinnedRegsFromInstance(
-      mozilla::Maybe<wasm::BytecodeOffset> trapOffset = mozilla::Nothing());
+      const wasm::MaybeTrapSiteDesc& trapSiteDesc);
 
   // Returns a pair: the offset of the undefined (trapping) instruction, and
   // the number of extra bytes of stack allocated prior to the trap
   // instruction proper.
   std::pair<CodeOffset, uint32_t> wasmReserveStackChecked(
-      uint32_t amount, wasm::BytecodeOffset trapOffset);
+      uint32_t amount, const wasm::TrapSiteDesc& trapSiteDesc);
 
   // Emit a bounds check against the wasm heap limit, jumping to 'ok' if 'cond'
   // holds; this can be the label either of the access or of the trap.  The
@@ -3911,7 +3919,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                  bool isSaturating,
                                  Label* oolEntry) PER_SHARED_ARCH;
   void oolWasmTruncateCheckF64ToI32(FloatRegister input, Register output,
-                                    TruncFlags flags, wasm::BytecodeOffset off,
+                                    TruncFlags flags,
+                                    const wasm::TrapSiteDesc& trapSiteDesc,
                                     Label* rejoin)
       DEFINED_ON(arm, arm64, x86_shared, mips_shared, loong64, riscv64, wasm32);
 
@@ -3921,7 +3930,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                   bool isSaturating,
                                   Label* oolEntry) PER_SHARED_ARCH;
   void oolWasmTruncateCheckF32ToI32(FloatRegister input, Register output,
-                                    TruncFlags flags, wasm::BytecodeOffset off,
+                                    TruncFlags flags,
+                                    const wasm::TrapSiteDesc& trapSiteDesc,
                                     Label* rejoin)
       DEFINED_ON(arm, arm64, x86_shared, mips_shared, loong64, riscv64, wasm32);
 
@@ -3936,7 +3946,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                   Label* oolRejoin, FloatRegister tempDouble)
       DEFINED_ON(arm64, x86, x64, mips64, loong64, riscv64, wasm32);
   void oolWasmTruncateCheckF64ToI64(FloatRegister input, Register64 output,
-                                    TruncFlags flags, wasm::BytecodeOffset off,
+                                    TruncFlags flags,
+                                    const wasm::TrapSiteDesc& trapSiteDesc,
                                     Label* rejoin)
       DEFINED_ON(arm, arm64, x86_shared, mips_shared, loong64, riscv64, wasm32);
 
@@ -3949,7 +3960,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
                                    Label* oolRejoin, FloatRegister tempDouble)
       DEFINED_ON(arm64, x86, x64, mips64, loong64, riscv64, wasm32);
   void oolWasmTruncateCheckF32ToI64(FloatRegister input, Register64 output,
-                                    TruncFlags flags, wasm::BytecodeOffset off,
+                                    TruncFlags flags,
+                                    const wasm::TrapSiteDesc& trapSiteDesc,
                                     Label* rejoin)
       DEFINED_ON(arm, arm64, x86_shared, mips_shared, loong64, riscv64, wasm32);
 
@@ -3959,7 +3971,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   CodeOffset wasmCallImport(const wasm::CallSiteDesc& desc,
                             const wasm::CalleeDesc& callee);
 
-#ifdef ENABLE_WASM_TAIL_CALLS
   CodeOffset wasmReturnCallImport(const wasm::CallSiteDesc& desc,
                                   const wasm::CalleeDesc& callee,
                                   const ReturnCallAdjustmentInfo& retCallInfo);
@@ -3985,10 +3996,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
   CodeOffset wasmMarkedSlowCall(const wasm::CallSiteDesc& desc,
                                 const Register reg)
       DEFINED_ON(x86_shared, arm, arm64, loong64, mips64, riscv64);
-#endif
 
 #ifdef ENABLE_WASM_MEMORY64
-  void wasmClampTable64Index(Register64 index, Register out);
+  void wasmClampTable64Address(Register64 address, Register out);
 #endif
 
   // WasmTableCallIndexReg must contain the index of the indirect call.  This is
@@ -4010,7 +4020,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
                         mozilla::Maybe<uint32_t> tableSize,
                         CodeOffset* fastCallOffset, CodeOffset* slowCallOffset);
 
-#ifdef ENABLE_WASM_TAIL_CALLS
   // WasmTableCallIndexReg must contain the index of the indirect call.  This is
   // for wasm calls only.
   //
@@ -4023,7 +4032,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
                               Label* nullCheckFailedLabel,
                               mozilla::Maybe<uint32_t> tableSize,
                               const ReturnCallAdjustmentInfo& retCallInfo);
-#endif  // ENABLE_WASM_TAIL_CALLS
 
   // This function takes care of loading the callee's instance and address from
   // pinned reg.
@@ -4031,11 +4039,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
                    const wasm::CalleeDesc& callee, CodeOffset* fastCallOffset,
                    CodeOffset* slowCallOffset);
 
-#ifdef ENABLE_WASM_TAIL_CALLS
   void wasmReturnCallRef(const wasm::CallSiteDesc& desc,
                          const wasm::CalleeDesc& callee,
                          const ReturnCallAdjustmentInfo& retCallInfo);
-#endif  // ENABLE_WASM_TAIL_CALLS
 
   // WasmTableCallIndexReg must contain the index of the indirect call.
   // This is for asm.js calls only.
@@ -4056,7 +4062,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // after the call.
   void wasmTrapOnFailedInstanceCall(Register resultRegister,
                                     wasm::FailureMode failureMode,
-                                    wasm::BytecodeOffset bytecodeOffset);
+                                    const wasm::TrapSiteDesc& trapSiteDesc);
 
   // Performs a bounds check for ranged wasm operations like memory.fill or
   // array.fill. This handles the bizarre edge case in the wasm spec where a
@@ -4066,7 +4072,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   // `length` and `limit` will be unchanged.
   void wasmBoundsCheckRange32(Register index, Register length, Register limit,
                               Register tmp,
-                              wasm::BytecodeOffset bytecodeOffset);
+                              const wasm::TrapSiteDesc& trapSiteDesc);
 
   // Returns information about which registers are necessary for a
   // branchWasmRefIsSubtype call.
@@ -4151,6 +4157,9 @@ class MacroAssembler : public MacroAssemblerSpecific {
 
   // Extract the tag of wasm anyref `src`.
   void extractWasmAnyRefTag(Register src, Register dest);
+
+  // Remove the known tag of wasm anyref `src`.
+  void untagWasmAnyRef(Register src, Register dest, wasm::AnyRefTag tag);
 
   // Branch if the wasm anyref `src` is or is not the null value.
   void branchWasmAnyRefIsNull(bool isNull, Register src, Label* label);
@@ -4811,6 +4820,8 @@ class MacroAssembler : public MacroAssemblerSpecific {
       DEFINED_ON(mips_shared, loong64, riscv64);
 
   void atomicIsLockFreeJS(Register value, Register output);
+
+  void atomicPause() PER_SHARED_ARCH;
 
   // ========================================================================
   // Spectre Mitigations.
@@ -5515,11 +5526,11 @@ class MacroAssembler : public MacroAssemblerSpecific {
   enum class IsBigInt { No, Yes, Maybe };
 
   /**
-   * Search for a value in a OrderedHashTable.
+   * Search for a value in a MapObject or SetObject.
    *
    * When we jump to |found|, |entryTemp| holds the found hashtable entry.
    */
-  template <typename OrderedHashTable>
+  template <typename TableObject>
   void orderedHashTableLookup(Register setOrMapObj, ValueOperand value,
                               Register hash, Register entryTemp, Register temp1,
                               Register temp3, Register temp4, Register temp5,
@@ -5595,7 +5606,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
   }
 
  private:
-  template <typename OrderedHashTable>
+  template <typename TableObject>
   void loadOrderedHashTableCount(Register setOrMapObj, Register result);
 
  public:
@@ -5666,7 +5677,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
                    const TemplateNativeObject& templateObj);
 
  public:
-  void callFreeStub(Register slots);
   void createGCObject(Register result, Register temp,
                       const TemplateObject& templateObj, gc::Heap initialHeap,
                       Label* fail, bool initContents = true);
@@ -5686,6 +5696,10 @@ class MacroAssembler : public MacroAssemblerSpecific {
       uint32_t numUsedDynamicSlots, uint32_t numDynamicSlots,
       gc::AllocKind allocKind, gc::Heap initialHeap, Label* fail,
       const AllocSiteInput& allocSite = AllocSiteInput());
+
+  void createFunctionClone(Register result, Register canonical,
+                           Register envChain, Register temp,
+                           gc::AllocKind allocKind, Label* fail);
 
   void initGCThing(Register obj, Register temp,
                    const TemplateObject& templateObj, bool initContents = true);

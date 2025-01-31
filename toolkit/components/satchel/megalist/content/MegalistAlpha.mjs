@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { html } from "chrome://global/content/vendor/lit.all.mjs";
+import { html, when } from "chrome://global/content/vendor/lit.all.mjs";
 import { MozLitElement } from "chrome://global/content/lit-utils.mjs";
 
 const lazy = {};
@@ -14,6 +14,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
 // eslint-disable-next-line import/no-unassigned-import
 import "chrome://global/content/megalist/PasswordCard.mjs";
 // eslint-disable-next-line import/no-unassigned-import
+import "chrome://global/content/megalist/LoginFormComponent/login-form.mjs";
+// eslint-disable-next-line import/no-unassigned-import
 import "chrome://global/content/megalist/Dialog.mjs";
 
 // eslint-disable-next-line import/no-unassigned-import
@@ -24,12 +26,18 @@ const DISPLAY_MODES = {
   ALL: "SortByName",
 };
 
+const VIEW_MODES = {
+  LIST: "List",
+  ADD: "Add",
+  EDIT: "Edit",
+  ALERTS: "Alerts",
+};
+
 const INPUT_CHANGE_DELAY = 300;
 
 export class MegalistAlpha extends MozLitElement {
   constructor() {
     super();
-    this.selectedIndex = 0;
     this.searchText = "";
     this.records = [];
     this.header = null;
@@ -37,20 +45,26 @@ export class MegalistAlpha extends MozLitElement {
     this.reauthResolver = null;
     this.displayMode = DISPLAY_MODES.ALL;
     this.inputChangeTimeout = null;
+    this.viewMode = VIEW_MODES.LIST;
+    this.selectedRecord = null;
 
     window.addEventListener("MessageFromViewModel", ev =>
       this.#onMessageFromViewModel(ev)
+    );
+    window.addEventListener("SidebarWillHide", ev =>
+      this.#onSidebarWillHide(ev)
     );
   }
 
   static get properties() {
     return {
-      selectedIndex: { type: Number },
+      selectedRecord: { type: Object },
       searchText: { type: String },
       records: { type: Array },
       header: { type: Object },
       notification: { type: Object },
       displayMode: { type: String },
+      viewMode: { type: String },
     };
   }
 
@@ -58,6 +72,28 @@ export class MegalistAlpha extends MozLitElement {
     super.connectedCallback();
     this.#messageToViewModel("Refresh");
     this.#sendCommand(this.displayMode);
+  }
+
+  async getUpdateComplete() {
+    await super.getUpdateComplete();
+    const passwordCards = Array.from(
+      this.shadowRoot.querySelectorAll("password-card")
+    );
+    await Promise.all(passwordCards.map(el => el.updateComplete));
+  }
+
+  #onPasswordRevealClick(concealed, lineIndex) {
+    if (concealed) {
+      this.#messageToViewModel("Command", {
+        commandId: "Reveal",
+        snapshotId: lineIndex,
+      });
+    } else {
+      this.#messageToViewModel("Command", {
+        commandId: "Conceal",
+        snapshotId: lineIndex,
+      });
+    }
   }
 
   #onMessageFromViewModel({ detail }) {
@@ -79,12 +115,24 @@ export class MegalistAlpha extends MozLitElement {
   }
 
   #onAddButtonClick() {
-    // TODO: implement me!
+    this.viewMode = VIEW_MODES.ADD;
   }
 
   #onRadioButtonChange(e) {
     this.displayMode = e.target.value;
     this.#sendCommand(this.displayMode);
+  }
+
+  #onCancelLoginForm() {
+    switch (this.viewMode) {
+      case VIEW_MODES.EDIT:
+        this.#sendCommand("DiscardChanges", {
+          value: { passwordIndex: this.selectedRecord.password.lineIndex - 1 },
+        });
+        return;
+      default:
+        this.viewMode = VIEW_MODES.LIST;
+    }
   }
 
   #openMenu(e) {
@@ -123,10 +171,17 @@ export class MegalistAlpha extends MozLitElement {
 
   receiveSetNotification(notification) {
     this.notification = notification;
+    this.viewMode = notification.viewMode ?? this.viewMode;
   }
 
   receiveReauthResponse(isAuthorized) {
     this.reauthResolver?.(isAuthorized);
+  }
+
+  receiveDiscardChangesConfirmed() {
+    this.viewMode = VIEW_MODES.LIST;
+    this.selectedRecord = null;
+    this.notification = null;
   }
 
   reauthCommandHandler(commandFn) {
@@ -160,8 +215,22 @@ export class MegalistAlpha extends MozLitElement {
     };
   }
 
+  #onSidebarWillHide(e) {
+    // Prevent hiding the sidebar if a password is being edited and show a
+    // message asking to confirm if the user wants to discard their changes.
+    const shouldShowDiscardChangesPrompt =
+      this.viewMode === VIEW_MODES.EDIT &&
+      (!this.notification || this.notification?.id === "discard-changes") &&
+      !this.notification?.fromSidebar;
+
+    if (shouldShowDiscardChangesPrompt) {
+      this.#sendCommand("DiscardChanges", { value: { fromSidebar: true } });
+      e.preventDefault();
+    }
+  }
+
   // TODO: This should be passed to virtualized list with an explicit height.
-  renderListItem({ origin: displayOrigin, username, password }) {
+  renderListItem({ origin: displayOrigin, username, password }, index) {
     return html` <password-card
       @keypress=${e => {
         if (e.shiftKey && e.key === "Tab") {
@@ -182,6 +251,16 @@ export class MegalistAlpha extends MozLitElement {
       .password=${password}
       .messageToViewModel=${this.#messageToViewModel.bind(this)}
       .reauthCommandHandler=${commandFn => this.reauthCommandHandler(commandFn)}
+      .onPasswordRevealClick=${(concealed, lineIndex) =>
+        this.#onPasswordRevealClick(concealed, lineIndex)}
+      .handleEditButtonClick=${() => {
+        this.viewMode = VIEW_MODES.EDIT;
+        this.selectedRecord = this.records[index];
+      }}
+      .handleViewAlertClick=${() => {
+        this.viewMode = VIEW_MODES.ALERTS;
+        this.selectedRecord = this.records[index];
+      }}
     >
     </password-card>`;
   }
@@ -204,10 +283,79 @@ export class MegalistAlpha extends MozLitElement {
               }
             }}
           >
-            ${this.records.map(record => this.renderListItem(record))}
+            ${this.records.map((record, index) =>
+              this.renderListItem(record, index)
+            )}
           </div>
         `
       : this.renderEmptyState();
+  }
+
+  renderAlertsList() {
+    const { origin, username, password } = this.selectedRecord;
+    const alerts = [
+      {
+        displayAlert: origin.breached,
+        notification: origin.breachedNotification,
+      },
+      {
+        displayAlert: !username.value.length,
+        notification: username.noUsernameNotification,
+      },
+      {
+        displayAlert: password.vulnerable,
+        notification: password.vulnerableNotification,
+      },
+    ];
+
+    const handleButtonClick = async () => {
+      const isAuthenticated = await this.reauthCommandHandler(() =>
+        this.#messageToViewModel("Command", {
+          commandId: "Edit",
+          snapshotId: this.selectedRecord.password.lineIndex,
+        })
+      );
+
+      if (!isAuthenticated) {
+        return;
+      }
+
+      this.viewMode = VIEW_MODES.EDIT;
+    };
+
+    return html`
+      <moz-card class="alert-card" data-l10n-id="passwords-alert-card">
+        <moz-button
+          type="icon ghost"
+          iconSrc="chrome://browser/skin/back.svg"
+          data-l10n-id="passwords-alert-back-button"
+          @click=${() => (this.viewMode = VIEW_MODES.LIST)}
+        >
+        </moz-button>
+        <ul data-l10n-id="passwords-alert-list">
+          ${alerts.map(({ displayAlert, notification }) =>
+            when(
+              displayAlert,
+              () => html`
+                <li>
+                  <notification-message-bar
+                    .notification=${{
+                      ...notification,
+                      onButtonClick: handleButtonClick,
+                    }}
+                    .onDismiss=${() => (this.viewMode = VIEW_MODES.LIST)}
+                    .messageHandler=${(commandId, options) =>
+                      this.#sendCommand(commandId, options)}
+                  >
+                  </notification-message-bar>
+                </li>
+              `,
+              () => ""
+            )
+          )}
+        </ul>
+      </moz-card>
+    `;
   }
 
   renderEmptyState() {
@@ -227,6 +375,11 @@ export class MegalistAlpha extends MozLitElement {
     return html`
       <moz-card class="empty-state-card">
         <div class="no-logins-card-content">
+          <img
+            src="chrome://global/content/megalist/icons/cpm-fox-illustration.svg"
+            role="presentation"
+            alt=""
+          />
           <strong
             class="no-logins-card-heading"
             data-l10n-id="passwords-no-passwords-header"
@@ -245,7 +398,7 @@ export class MegalistAlpha extends MozLitElement {
             ></moz-button>
             <moz-button
               data-l10n-id="passwords-add-manually"
-              @click=${() => {}}
+              @click=${this.#onAddButtonClick}
             ></moz-button>
           </div>
         </div>
@@ -257,13 +410,60 @@ export class MegalistAlpha extends MozLitElement {
     return html` <moz-card
       class="empty-state-card"
       data-l10n-id="passwords-no-passwords-found-header"
-      data-l10n-attrs="heading"
     >
       <div
         class="empty-search-results"
         data-l10n-id="passwords-no-passwords-found-message"
       ></div>
     </moz-card>`;
+  }
+
+  renderLastRow() {
+    switch (this.viewMode) {
+      case VIEW_MODES.LIST:
+        return this.renderList();
+      case VIEW_MODES.ADD:
+        return html` <login-form
+          .onClose=${() => this.#onCancelLoginForm()}
+          .onSaveClick=${loginForm => {
+            this.#sendCommand("AddLogin", { value: loginForm });
+          }}
+        >
+        </login-form>`;
+      case VIEW_MODES.EDIT:
+        return html` <login-form
+          type="edit"
+          originValue=${this.selectedRecord.origin.href}
+          usernameValue=${this.selectedRecord.username.value}
+          ?passwordVisible=${!this.selectedRecord.password.concealed}
+          .passwordValue=${this.selectedRecord.password.value}
+          .onPasswordRevealClick=${() =>
+            this.#onPasswordRevealClick(
+              this.selectedRecord.password.concealed,
+              this.selectedRecord.password.lineIndex
+            )}
+          .onClose=${() => this.#onCancelLoginForm()}
+          .onSaveClick=${loginForm => {
+            loginForm.guid = this.selectedRecord.origin.guid;
+            const passwordIndex = this.selectedRecord.password.lineIndex - 1;
+            this.#sendCommand("UpdateLogin", {
+              value: { login: loginForm, passwordIndex },
+            });
+          }}
+          .onDeleteClick=${() => {
+            const login = {
+              origin: this.selectedRecord.origin,
+              guid: this.selectedRecord.origin.guid,
+            };
+            this.#sendCommand("DeleteLogin", { value: login });
+          }}
+        >
+        </login-form>`;
+      case VIEW_MODES.ALERTS:
+        return this.renderAlertsList();
+      default:
+        return "";
+    }
   }
 
   renderSearch() {
@@ -372,12 +572,22 @@ export class MegalistAlpha extends MozLitElement {
         <panel-item
           action="open-preferences"
           data-l10n-id="menu-menuitem-preferences"
-          @click=${() => this.#sendCommand("Settings")}
+          @click=${() => {
+            const command = this.header.commands.find(
+              command => command.id === "Settings"
+            );
+            this.#sendCommand("OpenLink", { value: command.url });
+          }}
         ></panel-item>
         <panel-item
           action="open-help"
           data-l10n-id="about-logins-menu-menuitem-help"
-          @click=${() => this.#sendCommand("Help")}
+          @click=${() => {
+            const command = this.header.commands.find(
+              command => command.id === "Help"
+            );
+            this.#sendCommand("OpenLink", { value: command.url });
+          }}
         ></panel-item>
       </panel-list>
     `;
@@ -393,6 +603,18 @@ export class MegalistAlpha extends MozLitElement {
     </div>`;
   }
 
+  async #scrollPasswordCardIntoView(guid) {
+    const matchingRecordIndex = this.records.findIndex(
+      record => record.origin.guid === guid
+    );
+    this.viewMode = VIEW_MODES.LIST;
+    await this.getUpdateComplete();
+    const passwordCard =
+      this.shadowRoot.querySelectorAll("password-card")[matchingRecordIndex];
+    passwordCard.scrollIntoView({ block: "center" });
+    passwordCard.originLine.focus();
+  }
+
   renderNotification() {
     if (!this.notification) {
       return "";
@@ -404,7 +626,9 @@ export class MegalistAlpha extends MozLitElement {
         .onDismiss=${() => {
           this.notification = null;
         }}
-        .messageHandler=${commandId => this.#sendCommand(commandId)}
+        .messageHandler=${(commandId, options) =>
+          this.#sendCommand(commandId, options)}
+        @view-login=${e => this.#scrollPasswordCardIntoView(e.detail.guid)}
       >
       </notification-message-bar>
     `;
@@ -418,7 +642,7 @@ export class MegalistAlpha extends MozLitElement {
       />
       <div class="container">
         ${this.renderFirstRow()} ${this.renderSecondRow()}
-        ${this.renderNotification()} ${this.renderList()}
+        ${this.renderNotification()} ${this.renderLastRow()}
       </div>
     `;
   }

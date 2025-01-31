@@ -43,22 +43,23 @@
       </html:moz-button-group>
       <toolbarseparator class="tab-group-edit-mode-only" />
       <html:div class="panel-body tab-group-edit-actions tab-group-edit-mode-only">
-        <toolbarbutton id="tabGroupEditor_addNewTabInGroup" class="subviewbutton" data-l10n-id="tab-group-editor-action-add-new"></toolbarbutton>
-        <toolbarbutton disabled="true" id="tabGroupEditor_moveGroupToNewWindow" class="subviewbutton" data-l10n-id="tab-group-editor-action-new-window"></toolbarbutton>
-        <toolbarbutton disabled="true" id="tabGroupEditor_saveAndCloseGroup" class="subviewbutton" data-l10n-id="tab-group-editor-action-save"></toolbarbutton>
-        <toolbarbutton id="tabGroupEditor_ungroupTabs" class="subviewbutton" data-l10n-id="tab-group-editor-action-ungroup"></toolbarbutton>
+        <toolbarbutton tabindex="0" id="tabGroupEditor_addNewTabInGroup" class="subviewbutton" data-l10n-id="tab-group-editor-action-new-tab"></toolbarbutton>
+        <toolbarbutton tabindex="0" id="tabGroupEditor_moveGroupToNewWindow" class="subviewbutton" data-l10n-id="tab-group-editor-action-new-window"></toolbarbutton>
+        <toolbarbutton tabindex="0" id="tabGroupEditor_saveAndCloseGroup" class="subviewbutton" data-l10n-id="tab-group-editor-action-save"></toolbarbutton>
+        <toolbarbutton tabindex="0" id="tabGroupEditor_ungroupTabs" class="subviewbutton" data-l10n-id="tab-group-editor-action-ungroup"></toolbarbutton>
       </html:div>
       <toolbarseparator class="tab-group-edit-mode-only" />
       <html:div class="tab-group-edit-mode-only panel-body tab-group-delete">
-        <toolbarbutton disabled="true" id="tabGroupEditor_deleteGroup" class="subviewbutton" data-l10n-id="tab-group-editor-action-delete"></toolbarbutton>
+        <toolbarbutton tabindex="0" id="tabGroupEditor_deleteGroup" class="subviewbutton" data-l10n-id="tab-group-editor-action-delete"></toolbarbutton>
       </html:div>
     </panel>
        `;
 
     #activeGroup;
-    #createMode;
     #cancelButton;
     #createButton;
+    #createMode;
+    #keepNewlyCreatedGroup;
     #nameField;
     #panel;
     #swatches;
@@ -93,11 +94,11 @@
       this.#populateSwatches();
 
       this.#cancelButton.addEventListener("click", () => {
-        this.#handleCancel();
+        this.close();
       });
 
       this.#createButton.addEventListener("click", () => {
-        this.#panel.hidePopup();
+        this.close(true);
       });
 
       this.#nameField.addEventListener("input", () => {
@@ -113,9 +114,27 @@
         });
 
       document
+        .getElementById("tabGroupEditor_moveGroupToNewWindow")
+        .addEventListener("command", () => {
+          gBrowser.replaceGroupWithWindow(this.activeGroup);
+        });
+
+      document
         .getElementById("tabGroupEditor_ungroupTabs")
         .addEventListener("command", () => {
           this.#handleUngroup();
+        });
+
+      document
+        .getElementById("tabGroupEditor_saveAndCloseGroup")
+        .addEventListener("command", () => {
+          this.#handleSaveAndClose();
+        });
+
+      document
+        .getElementById("tabGroupEditor_deleteGroup")
+        .addEventListener("command", () => {
+          this.#handleDelete();
         });
 
       this.panel.addEventListener("popupshown", this);
@@ -154,10 +173,6 @@
       this.#swatches = [];
     }
 
-    get activeGroup() {
-      return this.#activeGroup;
-    }
-
     get createMode() {
       return this.#createMode;
     }
@@ -165,6 +180,10 @@
     set createMode(mode) {
       this.#panel.classList.toggle("tab-group-editor-mode-create", mode);
       this.#createMode = mode;
+    }
+
+    get activeGroup() {
+      return this.#activeGroup;
     }
 
     set activeGroup(group = null) {
@@ -201,11 +220,20 @@
       return this.children[0];
     }
 
+    get #panelPosition() {
+      if (gBrowser.tabContainer.verticalMode) {
+        return SidebarController._positionStart
+          ? "topleft topright"
+          : "topright topleft";
+      }
+      return "bottomleft topleft";
+    }
+
     openCreateModal(group) {
       this.activeGroup = group;
       this.createMode = true;
       this.#panel.openPopup(group.firstChild, {
-        position: "bottomleft topleft",
+        position: this.#panelPosition,
       });
     }
 
@@ -213,21 +241,36 @@
       this.activeGroup = group;
       this.createMode = false;
       this.#panel.openPopup(group.firstChild, {
-        position: "bottomleft topleft",
+        position: this.#panelPosition,
       });
+      document.getElementById("tabGroupEditor_moveGroupToNewWindow").disabled =
+        gBrowser.openTabs.length == this.activeGroup?.tabs.length;
+    }
+
+    close(keepNewlyCreatedGroup = false) {
+      if (this.createMode) {
+        this.#keepNewlyCreatedGroup = keepNewlyCreatedGroup;
+      }
+      this.#panel.hidePopup();
     }
 
     on_popupshown() {
+      if (this.createMode) {
+        this.#keepNewlyCreatedGroup = false;
+      }
       this.#nameField.focus();
     }
 
     on_popuphidden() {
+      if (this.createMode && !this.#keepNewlyCreatedGroup) {
+        this.activeGroup.ungroupTabs();
+      }
       this.activeGroup = null;
     }
 
     on_keypress(event) {
       if (event.keyCode == KeyEvent.DOM_VK_RETURN) {
-        this.#panel.hidePopup();
+        this.close(true);
       }
     }
 
@@ -243,16 +286,11 @@
       }
     }
 
-    #handleCancel() {
-      this.activeGroup.ungroupTabs();
-      this.#panel.hidePopup();
-    }
-
     async #handleNewTabInGroup() {
       let lastTab = this.activeGroup?.tabs.at(-1);
       let onTabOpened = async aEvent => {
         this.activeGroup?.addTabs([aEvent.target]);
-        this.#panel.hidePopup();
+        this.close();
         window.removeEventListener("TabOpen", onTabOpened);
       };
       window.addEventListener("TabOpen", onTabOpened);
@@ -261,6 +299,15 @@
 
     #handleUngroup() {
       this.activeGroup?.ungroupTabs();
+    }
+
+    #handleSaveAndClose() {
+      this.activeGroup.save();
+      gBrowser.removeTabGroup(this.activeGroup);
+    }
+
+    #handleDelete() {
+      gBrowser.removeTabGroup(this.activeGroup);
     }
   }
 

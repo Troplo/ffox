@@ -148,12 +148,15 @@ fn build_configuration(
     };
     log::debug!("Client Info: {:#?}", client_info);
 
-    const SERVER: &str = "https://incoming.telemetry.mozilla.org";
     let localhost_port = static_prefs::pref!("telemetry.fog.test.localhost_port");
     let server = if localhost_port > 0 {
         format!("http://localhost:{}", localhost_port)
     } else {
-        String::from(SERVER)
+        if app_id_override == "thunderbird.desktop" {
+            String::from("https://incoming.thunderbird.net")
+        } else {
+            String::from("https://incoming.telemetry.mozilla.org")
+        }
     };
 
     let application_id = if app_id_override.is_empty() {
@@ -354,6 +357,9 @@ fn fog_test_reset_internal(
 
     // I'd prefer to reuse the uploader, but it gets moved into Glean so we build anew.
     conf.uploader = Some(Box::new(ViaductUploader) as Box<dyn glean::net::PingUploader>);
+
+    // Register all custom pings before we initialize.
+    pings::register_pings(None);
 
     glean::test_reset_glean(conf, client_info, true);
     Ok(())

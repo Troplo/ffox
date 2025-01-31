@@ -34,16 +34,19 @@
     <command id="cmd_help_importFromAnotherBrowser" />
     <command id="cmd_close" />
     <command id="cmd_closeWindow" />
+    <command id="cmd_minimizeWindow" />
+    <command id="cmd_maximizeWindow" />
+    <command id="cmd_restoreWindow" />
     <command id="cmd_toggleMute" />
-    <command id="cmd_CustomizeToolbars" oncommand="gCustomizeMode.enter();" />
+    <command id="cmd_CustomizeToolbars" />
     <command id="cmd_toggleOfflineStatus" />
     <command id="cmd_quitApplication" />
 
     <command id="View:AboutProcesses" />
     <command id="View:PageSource" />
     <command id="View:PageInfo" />
-    <command id="View:FullScreen" oncommand="BrowserCommands.fullScreen();" />
-    <command id="View:ReaderView" oncommand="AboutReaderParent.toggleReaderMode(event);" />
+    <command id="View:FullScreen" />
+    <command id="View:ReaderView" />
     <command id="View:PictureInPicture" />
     <command id="cmd_find" />
     <command id="cmd_findAgain" />
@@ -73,6 +76,9 @@
     <command id="Browser:ReloadSkipCache" disabled="true">
       <observes element="Browser:Reload" attribute="disabled"/>
     </command>
+    <command id="Profiles:CreateProfile" />
+    <command id="Profiles:ManageProfiles" />
+    <command id="Profiles:LaunchProfile" />
     <command id="Browser:NextTab" />
     <command id="Browser:PrevTab" />
     <command id="Browser:ShowAllTabs" />
@@ -93,7 +99,7 @@
     <command id="Tools:Sanitize" />
     <command id="Tools:PrivateBrowsing" />
     <command id="Browser:Screenshot" />
-    <command id="History:UndoCloseTab" oncommand="undoCloseTab();" data-l10n-args='{"tabCount": 1}' />
+    <command id="History:UndoCloseTab" data-l10n-args='{"tabCount": 1}' />
     <command id="History:UndoCloseWindow" />
     <command id="History:RestoreLastClosedTabOrWindowOrSession" />
     <command id="History:SearchHistory" />
@@ -104,7 +110,6 @@
     <command id="windowRecordingCmd" />
 #endif
 #ifdef XP_MACOSX
-    <command id="minimizeWindow" data-l10n-id="window-minimize-command" />
     <command id="zoomWindow" data-l10n-id="window-zoom-command" />
 #endif
   </commandset>
@@ -272,6 +277,22 @@
     <key id="key_stop_mac" modifiers="accel" data-l10n-id="nav-stop-shortcut" command="Browser:Stop"/>
 #endif
 
+    <key id="viewGenaiChatSidebarKb"
+         data-l10n-id="ai-chatbot-sidebar-shortcut"
+#ifdef XP_MACOSX
+         modifiers="control"
+#else
+         modifiers="accel,alt"
+#endif
+         />
+    <key id="toggleSidebarKb"
+         data-l10n-id="toggle-sidebar-shortcut"
+#ifdef XP_MACOSX
+         modifiers="control"
+#else
+         modifiers="control,alt"
+#endif
+        />
     <key id="key_gotoHistory"
          data-l10n-id="history-sidebar-shortcut"
 #ifdef XP_MACOSX
@@ -361,7 +382,7 @@
 #endif
 #ifdef XP_MACOSX
     <key id="key_minimizeWindow"
-         command="minimizeWindow"
+         command="cmd_minimizeWindow"
          data-l10n-id="window-minimize-shortcut"
          modifiers="accel"
          internal="true"/>

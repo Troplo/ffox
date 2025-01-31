@@ -23,6 +23,7 @@ const SUGGESTED_INDEX = 1;
 
 const SCOTCH_BONNET_PREF = "scotchBonnet.enableOverride";
 const ACTIONS_PREF = "secondaryActions.featureGate";
+const QUICK_ACTIONS_PREF = "suggest.quickactions";
 
 ChromeUtils.defineESModuleGetters(lazy, {
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
@@ -31,10 +32,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
 
 import { ActionsProviderQuickActions } from "resource:///modules/ActionsProviderQuickActions.sys.mjs";
 import { ActionsProviderContextualSearch } from "resource:///modules/ActionsProviderContextualSearch.sys.mjs";
+import { ActionsProviderTabGroups } from "resource:///modules/ActionsProviderTabGroups.sys.mjs";
 
 let globalActionsProviders = [
   ActionsProviderContextualSearch,
   ActionsProviderQuickActions,
+  ActionsProviderTabGroups,
 ];
 
 /**
@@ -54,8 +57,9 @@ class ProviderGlobalActions extends UrlbarProvider {
 
   isActive() {
     return (
-      lazy.UrlbarPrefs.get(SCOTCH_BONNET_PREF) ||
-      lazy.UrlbarPrefs.get(ACTIONS_PREF)
+      (lazy.UrlbarPrefs.get(SCOTCH_BONNET_PREF) ||
+        lazy.UrlbarPrefs.get(ACTIONS_PREF)) &&
+      lazy.UrlbarPrefs.get(QUICK_ACTIONS_PREF)
     );
   }
 
@@ -87,6 +91,11 @@ class ProviderGlobalActions extends UrlbarProvider {
     addCallback(this, result);
   }
 
+  onSelection(result, element) {
+    let key = element.dataset.action;
+    this.#actions.get(key).onSelection?.(result, element);
+  }
+
   onEngagement(queryContext, controller, details) {
     let key = details.element.dataset.action;
     let options = this.#actions.get(key).onPick(queryContext, controller);
@@ -94,6 +103,12 @@ class ProviderGlobalActions extends UrlbarProvider {
       details.element.ownerGlobal.gBrowser.selectedBrowser.focus();
     }
     controller.view.close();
+  }
+
+  onSearchSessionEnd(queryContext, controller, details) {
+    for (let provider of globalActionsProviders) {
+      provider.onSearchSessionEnd?.(queryContext, controller, details);
+    }
   }
 
   getViewTemplate(result) {
@@ -104,11 +119,19 @@ class ProviderGlobalActions extends UrlbarProvider {
           tag: "div",
           children: result.payload.results.map((key, i) => {
             let action = this.#actions.get(key);
+            let style;
+            if (action.dataset?.style) {
+              style = "";
+              for (let [prop, val] of Object.entries(action.dataset.style)) {
+                style += `${prop}: ${val};`;
+              }
+            }
             return {
               name: `button-${i}`,
               tag: "span",
               classList: ["urlbarView-action-btn"],
               attributes: {
+                style,
                 inputLength: result.payload.inputLength,
                 "data-action": key,
                 role: "button",

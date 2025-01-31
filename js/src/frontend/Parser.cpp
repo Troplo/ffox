@@ -1042,7 +1042,7 @@ static MOZ_ALWAYS_INLINE ParserBindingName* InitializeIndexedBindings(
 template <class SlotInfo, typename UnsignedInteger, typename... Step>
 static MOZ_ALWAYS_INLINE ParserBindingName* InitializeIndexedBindings(
     SlotInfo& slotInfo, ParserBindingName* start, ParserBindingName* cursor,
-    UnsignedInteger SlotInfo::*field, const ParserBindingNameVector& bindings,
+    UnsignedInteger SlotInfo::* field, const ParserBindingNameVector& bindings,
     Step&&... step) {
   slotInfo.*field =
       AssertedCast<UnsignedInteger>(PointerRangeSize(start, cursor));
@@ -1433,9 +1433,13 @@ static Maybe<VarScope::ParserData*> NewVarScopeData(FrontendContext* fc,
         return Nothing();
       }
     } else {
-      MOZ_ASSERT(
-          bi.kind() == BindingKind::Let || bi.kind() == BindingKind::Const,
-          "bad var scope BindingKind");
+      MOZ_ASSERT(bi.kind() == BindingKind::Let ||
+                     bi.kind() == BindingKind::Const
+#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+                     || bi.kind() == BindingKind::Using
+#endif
+                 ,
+                 "bad var scope BindingKind");
     }
   }
 
@@ -2566,7 +2570,8 @@ bool GeneralParser<ParseHandler, Unit>::matchOrInsertSemicolon(
     }
 
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-    if (!this->pc_->isUsingSyntaxAllowed() &&
+    if (options().explicitResourceManagement() &&
+        !this->pc_->isUsingSyntaxAllowed() &&
         anyChars.currentToken().type == TokenKind::Using) {
       error(JSMSG_USING_OUTSIDE_BLOCK_OR_MODULE);
       return false;
@@ -4325,7 +4330,7 @@ GeneralParser<ParseHandler, Unit>::bindingIdentifierOrPattern(
   }
 
   if (!TokenKindIsPossibleIdentifierName(tt)) {
-    error(JSMSG_NO_VARIABLE_NAME);
+    error(JSMSG_NO_VARIABLE_NAME, TokenKindToDesc(tt));
     return errorResult();
   }
 
@@ -4368,7 +4373,7 @@ GeneralParser<ParseHandler, Unit>::objectBindingPattern(
       }
 
       if (!TokenKindIsPossibleIdentifierName(tt)) {
-        error(JSMSG_NO_VARIABLE_NAME);
+        error(JSMSG_NO_VARIABLE_NAME, TokenKindToDesc(tt));
         return errorResult();
       }
 
@@ -4445,7 +4450,7 @@ GeneralParser<ParseHandler, Unit>::objectBindingPattern(
           return errorResult();
         }
       } else {
-        errorAt(namePos.begin, JSMSG_NO_VARIABLE_NAME);
+        errorAt(namePos.begin, JSMSG_NO_VARIABLE_NAME, TokenKindToDesc(tt));
         return errorResult();
       }
     }
@@ -4761,7 +4766,7 @@ GeneralParser<ParseHandler, Unit>::declarationName(DeclarationKind declKind,
                                                    Node* forInOrOfExpression) {
   // Anything other than possible identifier is an error.
   if (!TokenKindIsPossibleIdentifier(tt)) {
-    error(JSMSG_NO_VARIABLE_NAME);
+    error(JSMSG_NO_VARIABLE_NAME, TokenKindToDesc(tt));
     return errorResult();
   }
 
@@ -4829,6 +4834,13 @@ GeneralParser<ParseHandler, Unit>::declarationName(DeclarationKind declKind,
         errorAt(namePos.begin, JSMSG_BAD_CONST_DECL);
         return errorResult();
       }
+#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+      if (declKind == DeclarationKind::Using ||
+          declKind == DeclarationKind::AwaitUsing) {
+        errorAt(namePos.begin, JSMSG_BAD_USING_DECL);
+        return errorResult();
+      }
+#endif
     }
   }
 
@@ -6534,7 +6546,7 @@ bool GeneralParser<ParseHandler, Unit>::forHeadStart(
     tokenStream.consumeKnownToken(tt, TokenStream::SlashIsRegExp);
   }
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-  else if (tt == TokenKind::Await) {
+  else if (tt == TokenKind::Await && options().explicitResourceManagement()) {
     if (!pc_->isAsync()) {
       if (pc_->atModuleTopLevel()) {
         if (!options().topLevelAwait) {
@@ -6576,7 +6588,7 @@ bool GeneralParser<ParseHandler, Unit>::forHeadStart(
         anyChars.ungetToken();  // put back await token
       }
     }
-  } else if (tt == TokenKind::Using) {
+  } else if (tt == TokenKind::Using && options().explicitResourceManagement()) {
     tokenStream.consumeKnownToken(tt, TokenStream::SlashIsRegExp);
 
     // Look ahead to find either a 'of' token or if not identifier
@@ -9659,34 +9671,38 @@ GeneralParser<ParseHandler, Unit>::statementListItem(
 
       if (tt == TokenKind::Await && pc_->isAsync()) {
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
-        // Try finding evidence of a AwaitUsingDeclaration the syntax for which
-        // would be:
-        //   await [no LineTerminator here] using [no LineTerminator here]
-        //     identifier
+        if (options().explicitResourceManagement()) {
+          // Try finding evidence of a AwaitUsingDeclaration the syntax for
+          // which
+          // would be:
+          //   await [no LineTerminator here] using [no LineTerminator here]
+          //     identifier
 
-        TokenKind nextTokUsing = TokenKind::Eof;
-        // Scan with regex modifier because when its await expression, `/`
-        // should be treated as a regexp.
-        if (!tokenStream.peekTokenSameLine(&nextTokUsing,
-                                           TokenStream::SlashIsRegExp)) {
-          return errorResult();
-        }
-
-        if (nextTokUsing == TokenKind::Using &&
-            this->pc_->isUsingSyntaxAllowed()) {
-          tokenStream.consumeKnownToken(nextTokUsing,
-                                        TokenStream::SlashIsRegExp);
-          TokenKind nextTokIdentifier = TokenKind::Eof;
-          // Here we can use the Div modifier because if the next token is using
-          // then a `/` as the next token can only be considered a division.
-          if (!tokenStream.peekTokenSameLine(&nextTokIdentifier)) {
+          TokenKind nextTokUsing = TokenKind::Eof;
+          // Scan with regex modifier because when its await expression, `/`
+          // should be treated as a regexp.
+          if (!tokenStream.peekTokenSameLine(&nextTokUsing,
+                                             TokenStream::SlashIsRegExp)) {
             return errorResult();
           }
-          if (TokenKindIsPossibleIdentifier(nextTokIdentifier)) {
-            return lexicalDeclaration(yieldHandling,
-                                      DeclarationKind::AwaitUsing);
+
+          if (nextTokUsing == TokenKind::Using &&
+              this->pc_->isUsingSyntaxAllowed()) {
+            tokenStream.consumeKnownToken(nextTokUsing,
+                                          TokenStream::SlashIsRegExp);
+            TokenKind nextTokIdentifier = TokenKind::Eof;
+            // Here we can use the Div modifier because if the next token is
+            // using then a `/` as the next token can only be considered a
+            // division.
+            if (!tokenStream.peekTokenSameLine(&nextTokIdentifier)) {
+              return errorResult();
+            }
+            if (TokenKindIsPossibleIdentifier(nextTokIdentifier)) {
+              return lexicalDeclaration(yieldHandling,
+                                        DeclarationKind::AwaitUsing);
+            }
+            anyChars.ungetToken();  // put back using.
           }
-          anyChars.ungetToken();  // put back using.
         }
 #endif
         return expressionStatement(yieldHandling);
@@ -9815,7 +9831,8 @@ GeneralParser<ParseHandler, Unit>::statementListItem(
       if (!tokenStream.peekTokenSameLine(&nextTok)) {
         return errorResult();
       }
-      if (!TokenKindIsPossibleIdentifier(nextTok) ||
+      if (!options().explicitResourceManagement() ||
+          !TokenKindIsPossibleIdentifier(nextTok) ||
           !this->pc_->isUsingSyntaxAllowed()) {
         if (!tokenStream.peekToken(&nextTok)) {
           return errorResult();

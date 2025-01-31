@@ -10,7 +10,8 @@
 
 #include "rtc_base/async_udp_socket.h"
 
-#include "absl/types/optional.h"
+#include <optional>
+
 #include "api/units/time_delta.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
@@ -59,7 +60,7 @@ int AsyncUDPSocket::Send(const void* pv,
                          const rtc::PacketOptions& options) {
   rtc::SentPacket sent_packet(options.packet_id, rtc::TimeMillis(),
                               options.info_signaled_after_sent);
-  CopySocketInformationToPacketInfo(cb, *this, false, &sent_packet.info);
+  CopySocketInformationToPacketInfo(cb, *this, &sent_packet.info);
   int ret = socket_->Send(pv, cb);
   SignalSentPacket(this, sent_packet);
   return ret;
@@ -71,7 +72,7 @@ int AsyncUDPSocket::SendTo(const void* pv,
                            const rtc::PacketOptions& options) {
   rtc::SentPacket sent_packet(options.packet_id, rtc::TimeMillis(),
                               options.info_signaled_after_sent);
-  CopySocketInformationToPacketInfo(cb, *this, true, &sent_packet.info);
+  CopySocketInformationToPacketInfo(cb, *this, &sent_packet.info);
   int ret = socket_->SendTo(pv, cb, addr);
   SignalSentPacket(this, sent_packet);
   return ret;

@@ -46,7 +46,7 @@
     <!-- Content description for save to collection button while in multiselect mode in tab tray -->
     <string name="tab_tray_collection_button_multiselect_content_description">Enregistrar los onglets seleccionats dins la colleccion</string>
     <!-- Content description on checkmark while tab is selected in multiselect mode in tab tray -->
-    <string name="tab_tray_multiselect_selected_content_description">Seleccionat</string>
+    <string name="tab_tray_multiselect_selected_content_description" moz:removedIn="136" tools:ignore="UnusedResources">Seleccionat</string>
 
     <!-- Home - Bookmarks -->
     <!-- Title for the home screen section with bookmarks. -->
@@ -94,12 +94,6 @@
     <!-- Text for the negative action button -->
     <string name="open_in_app_cfr_negative_button_text">Ignorar</string>
 
-    <!-- Total cookie protection "contextual feature recommendation" (CFR) -->
-    <!-- Text for the message displayed in the contextual feature recommendation popup promoting the total cookie protection feature. -->
-    <string name="tcp_cfr_message" moz:removedIn="132" tools:ignore="UnusedResources">Nòstra foncionalitat la mai potenta de confidencialitat isola ja los traçadors intersites.</string>
-    <!-- Text displayed that links to website containing documentation about the "Total cookie protection" feature. -->
-    <string name="tcp_cfr_learn_more" moz:removedIn="132" tools:ignore="UnusedResources">Ne saber tocant la proteccion totala contra los cookies</string>
-
 
     <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
     <!-- Text for the message displayed in the contextual feature recommendation popup promoting the erase private browsing feature. -->
@@ -116,11 +110,11 @@
     <!-- Text for the message displayed for the popup promoting the long press of navigation in the navigation bar. -->
     <string name="navbar_navigation_buttons_cfr_message">Tocatz de longa las sagetas per sautar entre paginas de l’istoric d’aqueste onglet.</string>
 
-    <!-- Tablet navigation bar "contextual feature recommendation" (CFR) -->
-    <!-- Text for the title displayed in the contextual feature recommendation popup promoting the tablet navigation bar. -->
-    <string name="tablet_nav_bar_cfr_title" moz:removedIn="132" tools:ignore="UnusedResources">Nòu : sagetas per anar enrèire e endavant d’una tocada</string>
-    <!-- Text for the message displayed in the contextual feature recommendation popup promoting the tablet navigation bar. -->
-    <string name="tablet_nav_bar_cfr_message" moz:removedIn="132" tools:ignore="UnusedResources">Aprofechatz d’una navegacion mai rapida al cap dels dets.</string>
+    <!-- Address bar swipe "contextual feature recommendation" (CFR) -->
+    <!-- Text for the title displayed in the contextual feature recommendation popup promoting swipe of address bar. -->
+    <string name="address_bar_swipe_cfr_title">Lisar la barra d’aisina per cambiar d’onglets</string>
+    <!-- Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar. -->
+    <string name="address_bar_swipe_cfr_message">Lisatz a esquèrra o drecha per cambiar. Lisatz a esquèrra sus vòstre darrièra onglet per dobrir un onglet novèl.</string>
 
     <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
     <string name="camera_permissions_needed_message">Accès a la camèra necessari. Anatz als paramètres Android, tocatz Autorizacions puèi Autorizar.</string>
@@ -246,8 +240,12 @@
     <string name="browser_menu_open_in_regular_tab">Dobrir dins un onglet classic</string>
     <!-- Browser menu toggle that adds a shortcut to the site on the device home screen. -->
     <string name="browser_menu_add_to_homescreen">Apondre a l’ecran d’acuèlh</string>
+    <!-- Browser menu toggle that adds a PWA of the site on the device home screen. -->
+    <string name="browser_menu_add_app_to_homescreen">Apondre l’aplicacion a l’ecran d’acuèlh</string>
     <!-- Browser menu toggle that adds a shortcut to the site on the device home screen. -->
     <string name="browser_menu_add_to_homescreen_2">Apondre a l’ecran d’acuèlh…</string>
+    <!-- Browser menu toggle that adds a PWA of the site on the device home screen. -->
+    <string name="browser_menu_add_app_to_homescreen_2">Apondre l’aplicacion a l’ecran d’acuèlh…</string>
     <!-- Text for notifying users that Xiaomi devices require additional permissions to add to home screen -->
     <string name="browser_menu_add_to_homescreen_xiaomi">Los aparelhs Xiaomi pòdon aver besonh d\'autorizacions suplementàrias per apondre d\'acorchis a l\'ecran d\'acuèlh. Verificatz vòstres paramètres.</string>
     <!-- Content description (not visible, for screen readers etc.) for the Resync tabs button -->
@@ -322,6 +320,10 @@
     <string name="browser_menu_back_button_content_description">Tornar al menú principal</string>
     <!-- Content description (not visible, for screen readers etc.) for bottom sheet handlebar main menu. -->
     <string name="browser_main_menu_handlebar_content_description">Tampar lo panèl del menú principal</string>
+    <!-- Content description (not visible, for screen readers etc.) for main menu help button. -->
+    <string name="browser_main_menu_content_description_help_button">Ajuda</string>
+    <!-- Content description (not visible, for screen readers etc.) for main menu settings button. -->
+    <string name="browser_main_menu_content_description_settings_button">Paramètres</string>
     <!-- Content description (not visible, for screen readers etc.) for bottom sheet handlebar extensions menu. -->
     <string name="browser_extensions_menu_handlebar_content_description">Tampar lo panèl del menú de las extensions</string>
     <!-- Content description (not visible, for screen readers etc.) for bottom sheet handlebar save menu. -->
@@ -331,9 +333,23 @@
     <!-- Content description (not visible, for screen readers etc.) for bottom sheet handlebar custom tab menu. -->
     <string name="browser_custom_tab_menu_handlebar_content_description">Tampar lo panèl del menú dels onglets personalizats</string>
     <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu -->
-    <string name="browser_menu_tools_description_with_translate">Mòde lectura, traduire, imprimir, partejar, dobrir dins una aplicacion</string>
+    <string name="browser_menu_tools_description_with_translate" moz:removedIn="134" tools:ignore="UnusedResources">Mòde lectura, traduire, imprimir, partejar, dobrir dins una aplicacion</string>
     <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu -->
-    <string name="browser_menu_tools_description">Mòde lectura, imprimir, partejar, dobrir dins una aplicacion</string>
+    <string name="browser_menu_tools_description" moz:removedIn="134" tools:ignore="UnusedResources">Mòde lectura, imprimir, partejar, dobrir dins una aplicacion</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu
+         The first parameter is the label of the report site issue (for example: Report Site issue) -->
+    <string name="browser_menu_tools_description_with_translate_with_report_site" moz:removedIn="135" tools:ignore="UnusedResources">Mòde lectura, traduire, %s, imprimir, partejar, dobrir dins una aplicacion</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu when the "Report broken site" feature is available-->
+    <string name="browser_menu_tools_description_with_translate_with_report_site_2">Mòde lectura, traduire, senhalar un site copat, imprimir, partejar, dobrir dins una aplicacion</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu -->
+    <string name="browser_menu_tools_description_with_translate_without_report_site">Mòde lectura, traduire, imprimir, partejar, dobrir dins una aplicacion</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu
+         The first parameter is the label of the report site issue (for example: Report Site issue) -->
+    <string name="browser_menu_tools_description_with_report_site" moz:removedIn="135" tools:ignore="UnusedResources">Mòde lectura, %s, imprimir, partejar, dobrir dins una aplicacion</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu when the "Report broken site" feature is available-->
+    <string name="browser_menu_tools_description_with_report_site_2">Mòde lectura, senhalar un site copat, imprimir, partejar, dobrir dins una aplicacion</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu -->
+    <string name="browser_menu_tools_description_without_report_site">Mòde lectura, imprimir, partejar, dobrir dins una aplicacion</string>
     <!-- Browser menu label that navigates to the save sub-menu, which contains various save related menu items such as
          bookmarking a page, saving to collection, shortcut or as a PDF, and adding to home screen -->
     <string name="browser_menu_save">Enregistrar</string>
@@ -349,8 +365,12 @@
     <string name="browser_menu_turn_on_reader_view">Passar a la vista lectura</string>
     <!-- Browser menu label for turning OFF reader view of the current visited page -->
     <string name="browser_menu_turn_off_reader_view">Quitar lo mòde lectura</string>
+    <!-- Browser menu button that reopens a private tab as a regular tab -->
+    <string name="browser_menu_open_in_normal_tab">Desplaçar cap a un onglet non privat</string>
     <!-- Browser menu label for navigating to the translation feature, which provides language translation options the current visited page -->
     <string name="browser_menu_translate_page">Traduire la pagina…</string>
+    <!-- Browser menu label for navigating to the Web Compat Reporter feature, which provides users the ability to send bug reports for broken sites. -->
+    <string name="browser_menu_webcompat_reporter">Senhalar un site copat…</string>
     <!-- Browser menu label that is displayed when the current page has been translated by the translation feature.
          The first parameter is the name of the language that page was translated to (e.g. English). -->
     <string name="browser_menu_translated_to">Traduch en %1$s</string>
@@ -396,8 +416,6 @@
 
     <!-- Search Fragment -->
     <!-- Button in the search view that lets a user search by scanning a QR code -->
-    <string name="search_scan_button" moz:removedIn="133" tools:ignore="UnusedResources">Numerizar</string>
-    <!-- Button in the search view that lets a user search by scanning a QR code -->
     <string name="search_scan_button_2">Numerizar un còdi QR</string>
     <!-- Button in the search view when shortcuts are displayed that takes a user to the search engine settings -->
     <string name="search_shortcuts_engine_settings">Paramètres del motor de recèrca</string>
@@ -423,16 +441,16 @@
     <!-- Header text for the search selector menu -->
     <string name="search_header_menu_item_2">Aqueste còp cercar amb :</string>
 
-    <!-- Content description (not visible, for screen readers etc.): Search engine icon. The first parameter is the search engine name (for example: DuckDuckGo). -->
-    <string name="search_engine_icon_content_description" tools:ignore="UnusedResources" moz:removedIn="133">Motor de recèrca %s</string>
-
     <!-- Content description (not visible, for screen readers etc.): Search engine icon.
     The parameter is the search engine name (for example: DuckDuckGo). -->
     <string name="search_engine_icon_content_description_1">Motor de recèrca : %s</string>
 
+    <!-- Content description (not visible, for screen readers etc.) of the search engine selector from the search toolbar.
+    The parameter is the search engine name (for example: DuckDuckGo).
+    The colon character (in "%s:") is intended to have the screen reader make a small pause between the search engine name and the description of the button. -->
+    <string name="search_engine_selector_content_description">%s : selector de motor de recèrca</string>
+
     <!-- Home onboarding -->
-    <!-- Onboarding home screen popup dialog, shown on top of the Jump back in section. -->
-    <string name="onboarding_home_screen_jump_back_contextual_hint_2" moz:removedIn="132">Fasètz coneissença amb vòstra pagina d’acuèlh personalizada. Onglets recents, marcapaginas e resultats de recèrca apreissaràn aicí.</string>
     <!-- Home onboarding dialog welcome screen title text. -->
     <string name="onboarding_home_welcome_title_2">Benvengut dins un Internet mai personal</string>
     <!-- Home onboarding dialog welcome screen description text. -->
@@ -512,10 +530,6 @@
     <!-- Onboarding sub header for the add-ons card, used by Nimbus experiments. -->
     <string name="onboarding_add_on_sub_header" tools:ignore="UnusedResources">Apondètz d\'extensions tèrças per melhorar la seguretat, la productivitat e mai.</string>
     <!-- Onboarding add-ons card, for checking more add-ons on, used by Nimbus experiments. -->
-    <string name="onboarding_add_on_explore_more_extensions" tools:ignore="UnusedResources" moz:removedIn="133">Exploratz d’autras extensions.</string>
-    <!-- Onboarding add-ons card, button for start browsing, used by Nimbus experiments. -->
-    <string name="onboarding_add_on_start_browsing_button" tools:ignore="UnusedResources" moz:removedIn="133">Començar de navegar.</string>
-    <!-- Onboarding add-ons card, for checking more add-ons on, used by Nimbus experiments. -->
     <string name="onboarding_add_on_explore_more_extensions_2">Exploratz d’autras extensions</string>
     <!-- Onboarding add-ons card, button for start browsing, used by Nimbus experiments. -->
     <string name="onboarding_add_on_start_browsing_button_2">Començar de navegar</string>
@@ -525,20 +539,113 @@
     <string name="onboarding_add_on_ublock_description" tools:ignore="UnusedResources">Blocatz las publicitats amb eficacitat.</string>
     <!-- Privacy Badger name for the onboarding add-ons card, used by Nimbus experiments. Note: The word "Privacy Badger" is a brand name should NOT be translated -->
     <string name="onboarding_add_on_privacy_badger_name" tools:ignore="UnusedResources">Privacy Badger</string>
+    <!-- Privacy Badger description for the onboarding add-ons card, used by Nimbus experiments. -->
+    <string name="onboarding_add_on_privacy_badger_description" tools:ignore="UnusedResources">Una jòia de proteccion contra lo seguiment. Blocatz los elements de seguiment invisibles e las publicitats que vos espian.</string>
     <!-- Search by Image name for the onboarding add-ons card, used by Nimbus experiments. Note: The word "Search by Image" is a brand name should NOT be translated -->
     <string name="onboarding_add_on_search_by_image_name" tools:ignore="UnusedResources">Cercar per imatge</string>
 
+    <!-- Search by Image description for the onboarding add-ons card, used by Nimbus experiments. -->
+    <string name="onboarding_add_on_search_by_image_description" tools:ignore="UnusedResources">Trobatz un imatge interessant e obtenètz mai d’informacion.</string>
     <!-- Dark Reader name for the onboarding add-ons card, used by Nimbus experiments. Note: The word "Dark Reader" is a brand name should NOT be translated -->
     <string name="onboarding_add_on_dark_reader_name" tools:ignore="UnusedResources">Dark Reader</string>
 
+    <!-- Privacy Badger description for the onboarding add-ons card, used by Nimbus experiments. -->
+    <string name="onboarding_add_on_dark_reader_description" tools:ignore="UnusedResources">Mòde fosc personalizat pel web mobil.</string>
     <!-- Label for the number of reviews for an add-on. The parameter is for the formatted number of reviews e.g. "1,234", "12,345", "123,456". -->
     <string name="onboarding_add_on_reviews_label">Avises : %1$s</string>
     <!-- Content description for the add-on icon. -->
     <string name="onboarding_add_on_icon_content_description">Icòna del modul</string>
+    <!-- Content description for the an installed add-on icon. -->
+    <string name="onboarding_installed_add_on_icon_content_description">Icòna de module complementari installat</string>
+    <!-- Content description for the an installing add-on icon. -->
+    <string name="onboarding_installing_add_on_icon_content_description">Icòna d’installacion de modul complementari</string>
     <!-- Content description for the add add-on button. -->
     <string name="onboarding_add_on_add_button_content_description">Boton Apondre un modul complementari</string>
     <!-- Content description for the star rating group. -->
     <string name="onboarding_add_on_star_rating_content_description">Notat %1$s de 5</string>
+
+    <!-- Title for the privacy preferences dialog shown during onboarding. Note: The word "Firefox" should NOT be translated. -->
+    <string name="onboarding_preferences_dialog_title" tools:ignore="BrandUsage">Ajudatz-nos a melhorar Firefox</string>
+    <!-- Title for the crash reporting option in the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_crash_reporting_title">Enviar automaticament los rapòrts de plantatge</string>
+    <!-- Description for the crash reporting option in the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_crash_reporting_description"> Los rapòrts de plantatge nos permeton de diagnosticar e de corregir de problèmas amb lo navegador. Los rapòrts pòdon conténer de donadas personalas o sensiblas. </string>
+    <!-- Learn more link for the crash reporting option in the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_crash_reporting_learn_more" moz:removedIn="136" tools:ignore="UnusedResources">Ne saber mai suls rapòrts de plantatge</string>
+    <!-- Title for the usage data option in the privacy preferences dialog shown during onboarding. Note: The word "Mozilla" should NOT be translated. -->
+    <string name="onboarding_preferences_dialog_usage_data_title">Enviar de donadas tecnicas e d’interraccion a Mozilla</string>
+    <!-- Description for the usage data option in the privacy preferences dialog shown during onboarding. Note: The word "Firefox" should NOT be translated. -->
+    <string name="onboarding_preferences_dialog_usage_data_description" moz:removedIn="136" tools:ignore="BrandUsage,UnusedResources">Donadas a prepaus de  vòstre aparelh, la configuracion materiala, e cossí utilizatz Firefox ajudan a melhorar las caracteristicas, la performança, e l’estabilitat per los utilizaires en tot luòc.</string>
+    <!-- Learn more link for the usage data option in the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_usage_data_learn_more" moz:removedIn="136" tools:ignore="UnusedResources">Ne saber mai tocant las donadas d’utilizacion</string>
+    <!-- Positive button label for the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_positive_button">Acabat</string>
+    <!-- Negative button label for the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_negative_button">Anullar</string>
+
+    <!-- Terms of service onboarding title card label. 'Firefox' intentionally hardcoded here-->
+    <string name="onboarding_welcome_to_firefox" tools:ignore="BrandUsage">Benvenguda dins Firefox</string>
+    <!-- Terms of service onboarding page continue button label. -->
+    <string name="onboarding_term_of_service_agree_and_continue_button_label">Acceptar e contunhar</string>
+    <!-- Line one of the terms of service onboarding page. %1$s is replaced by an active link, using onboarding_term_of_service_line_one_link_text as text (“Firefox Terms of Use”). -->
+    <string name="onboarding_term_of_service_line_one" moz:removedIn="136" tools:ignore="BrandUsage, UnusedResources">En contunhant, acceptatz las %1$s de Firefox.</string>
+    <!-- Used as text for the link in onboarding_term_of_service_line_one. -->
+    <string name="onboarding_term_of_service_line_one_link_text" moz:removedIn="136" tools:ignore="UnusedResources">condicions d\'utilizacion</string>
+    <!-- Line two of the terms of service onboarding page. 'Firefox' is intentionally hardcoded. %1$s is replaced by an active link, using onboarding_term_of_service_line_two_link_text as text (“Privacy Notice”). -->
+    <string name="onboarding_term_of_service_line_two" moz:removedIn="136" tools:ignore="UnusedResources,BrandUsage">Firefox se tracha per vòstra vida privada. Legissètz mai tocant aquò dins nòstra %1$s.</string>
+    <!-- Used as text for the link in onboarding_term_of_service_line_two. -->
+    <string name="onboarding_term_of_service_line_two_link_text">politica de confidencialitat</string>
+    <!-- Line three of the terms of service onboarding page. 'Firefox' and 'Mozilla' are intentionally hardcoded. %1$S is replaced by an active link, using onboarding_term_of_service_line_three_link_text as text (“Manage”). -->
+    <string name="onboarding_term_of_service_line_three" tools:ignore="BrandUsage">Per ajudar a melhorar lo navegador, Firefox envia de donadas de diagnostic e d\'interaccion a Mozilla. %1$s</string>
+    <!-- Used as text for the link in onboarding_term_of_service_line_three. -->
+    <string name="onboarding_term_of_service_line_three_link_text">Gestion</string>
+
+    <!-- Onboarding header for the toolbar selection card, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_title" tools:ignore="UnusedResources">Causissètz ont conhar la barra d’aisinas</string>
+    <!-- Onboarding sub header for toolbar selection card, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_description" tools:ignore="UnusedResources">Gardatz las recèrcas a man.</string>
+    <!-- Onboarding label for 'Save and continue' button, used by Nimbus experiments. -->
+    <string name="onboarding_save_and_continue_button">Enregistrar e contunhar</string>
+    <!-- Onboarding toolbar selection card label for 'skip' button, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_skip_button" moz:removedIn="135" tools:ignore="UnusedResources">Passar</string>
+    <!-- Onboarding toolbar selection card label for 'top' option, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_top_option">Naut</string>
+    <!-- Onboarding toolbar selection card label for 'bottom' option, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_bottom_option">Bas</string>
+
+    <!-- Onboarding toolbar selection card content description for the main image. -->
+    <string name="onboarding_customize_toolbar_main_image_content_description">Imatge grand d’entèsta de la vista de seleccion de barra d’aisinas que mòstra una barra d’aisinas illustrada.</string>
+    <!-- Onboarding toolbar selection card content description for the toolbar placement image. %1$s is placeholder for either 'top' or 'bottom'. -->
+    <string name="onboarding_customize_toolbar_placement_content_description" moz:removedIn="135" tools:ignore="UnusedResources">Imatge de la barra d’aisinas %1$s</string>
+
+    <!-- Onboarding toolbar selection card content description for the toolbar placement image. -->
+    <string name="onboarding_customize_toolbar_placement_bottom_content_description">Imatge de la barra d’aisina inferiora</string>
+    <string name="onboarding_customize_toolbar_placement_top_content_description">Imatge de la barra d’aisina superiora</string>
+
+    <!-- Onboarding toolbar selection card label for 'Not now' button, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_not_now_button" moz:removedIn="136" tools:ignore="UnusedResources">Pas ara</string>
+
+    <!-- Onboarding header for the theme selection card, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_title" tools:ignore="UnusedResources">Causir un tèma</string>
+    <!-- Onboarding sub header for theme selection card, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_description" tools:ignore="UnusedResources">Vejatz lo web amb lo melhor angle.</string>
+    <!-- Onboarding label for 'Save and start browsing' button, used by Nimbus experiments. -->
+    <string name="onboarding_save_and_start_button">Enregistrar e començar de navegar</string>
+    <!-- Onboarding theme selection card label for 'skip' button, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_skip_button" moz:removedIn="135" tools:ignore="UnusedResources">Passar</string>
+    <!-- Onboarding theme selection card label for 'dark' option, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_dark_option">Escur</string>
+    <!-- Onboarding theme selection card label for 'light' option, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_light_option">Clar</string>
+    <!-- Onboarding theme selection card label for 'System auto' option, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_system_option">Sistèma auto</string>
+    <!-- Onboarding theme selection card content description for the main image. -->
+    <string name="onboarding_customize_theme_main_image_content_description">Imatge grand d’entèsta de la vista de la seleccion de tèma, que mòstra un artista illustrat e d’espleches creatius.</string>
+    <!-- Onboarding theme selection card content description for the theme selection image. %1$s is placeholder for either 'system', 'light' or 'dark'. -->
+    <string name="onboarding_customize_theme_content_description">Imatge del tèma %1$s</string>
+
+    <!-- Onboarding theme selection card label for 'Not now' button, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_not_now_button" moz:removedIn="136" tools:ignore="UnusedResources">Pas ara</string>
 
     <!-- Search Widget -->
     <!-- Content description for searching with a widget. The first parameter is the name of the application.-->
@@ -592,8 +699,6 @@
     <string name="preferences_category_advanced">Avançat</string>
     <!-- Preference category for privacy and security settings -->
     <string name="preferences_category_privacy_security">Vida privada e seguretat</string>
-    <!-- Preference for advanced site permissions -->
-    <string name="preferences_site_permissions" moz:removedIn="133" tools:ignore="UnusedResources">Autorizacions de site</string>
     <!-- Preference for advanced site settings -->
     <string name="preferences_site_settings">Paramètres de site</string>
     <!-- Preference for private browsing options -->
@@ -941,13 +1046,30 @@
     <string name="exceptions_empty_message_learn_more_link">Ne saber mai</string>
 
     <!-- Preference switch for usage and technical data collection -->
-    <string name="preference_usage_data">Donadas tecnicas e d’utilizacion</string>
+    <string name="preference_usage_data" moz:removedIn="134" tools:ignore="UnusedResources">Donadas tecnicas e d’utilizacion</string>
+    <!-- Preference switch for usage and technical data collection -->
+    <string name="preference_usage_data_1">Donadas tecnicas e d’interaccion</string>
+    <!-- Preference switch for usage and technical learn more link -->
+    <string name="preference_usage_data_learn_more" tools:ignore="UnusedResources">Ne saber mai</string>
     <!-- Preference description for usage and technical data collection -->
     <string name="preferences_usage_data_description">Parteja d’informacions sus las performàncias, lo material, l’utilizacion e las personalizacions a Mozilla per nos ajudar a melhorar %1$s</string>
     <!-- Preference switch for marketing data collection -->
     <string name="preferences_marketing_data">Donadas marketing</string>
     <!-- Preference description for marketing data collection -->
-    <string name="preferences_marketing_data_description2">Parteja de donadas basicas d’utilizacion amb Adjust, nòstre prestatari de marketing mobil</string>
+    <string name="preferences_marketing_data_description2" moz:removedIn="134" tools:ignore="UnusedResources">Parteja de donadas basicas d’utilizacion amb Adjust, nòstre prestatari de marketing mobil</string>
+    <!-- Preference description for marketing data collection. Note: The words "Firefox" and "Mozilla" should NOT be translated -->
+    <string name="preferences_marketing_data_description_3" tools:ignore="BrandUsage">Partetjar las informacions sus lo biais qu’avètz descobèrt Firefox amb los partenaris de marketing de Mozilla. Aquò nos ajuda a desvolopar Firefox e a crear un melhor Internet.</string>
+    <!-- Learn more link for marketing data preference -->
+    <string name="preferences_marketing_data_learn_more">Ne saber mai tocant las donadas de marketing</string>
+
+    <!-- Preference switch title for automatically submitting crash reports -->
+    <string name="preferences_automatically_send_crashes_title">Enviar automaticament los rapòrts de plantatge</string>
+    <string name="preferences_automatically_submit_crashes_title" moz:removedIn="136" tools:ignore="UnusedResources">Enviar automaticament los rapòrts de plantatge</string>
+
+    <!-- Preference switch description for automatically submitting crash reports -->
+    <string name="preferences_automatically_send_crashes_description">Aquò nos permet de diagnosticar e de corregir de problèmas amb lo navegador. Los rapòrts pòdon conténer de donadas personalas o sensiblas. </string>
+    <string name="preferences_automatically_submit_crashes_description" moz:removedIn="136" tools:ignore="UnusedResources">Partejar automaticament al lançament las donadas de plantatge amb Mozilla se se produsisson de plantatges.</string>
+
     <!-- Title for studies preferences -->
     <string name="preference_experiments_2">Estudis</string>
     <!-- Summary for studies preferences -->
@@ -1117,22 +1239,22 @@
     <string name="studies_learn_more">Ne saber mai</string>
 
     <!-- Dialog message shown after removing a study -->
-    <string name="studies_restart_app">L’aplicacion es a se tampar per aplicar las modificacions</string>
+    <string name="studies_restart_app" moz:removedIn="135">L’aplicacion es a se tampar per aplicar las modificacions</string>
     <!-- Dialog button to confirm the removing a study. -->
-    <string name="studies_restart_dialog_ok">D’acòrdi</string>
+    <string name="studies_restart_dialog_ok" moz:removedIn="135">D’acòrdi</string>
     <!-- Dialog button text for canceling removing a study. -->
-    <string name="studies_restart_dialog_cancel">Anullar</string>
+    <string name="studies_restart_dialog_cancel" moz:removedIn="135">Anullar</string>
 
     <!-- Toast shown after turning on/off studies preferences -->
-    <string name="studies_toast_quit_application" tools:ignore="UnusedResources">Tampadura de l’aplicacion per aplicar las modificacions…</string>
+    <string name="studies_toast_quit_application" moz:removedIn="135" tools:ignore="UnusedResources">Tampadura de l’aplicacion per aplicar las modificacions…</string>
 
     <!-- Sessions -->
     <!-- Title for the list of tabs -->
-    <string name="tab_header_label">Onglets dobèrts</string>
+    <string name="tab_header_label" moz:removedIn="135" tools:ignore="UnusedResources">Onglets dobèrts</string>
     <!-- Title for the list of tabs in the current private session -->
-    <string name="tabs_header_private_tabs_title">Onglets privats</string>
+    <string name="tabs_header_private_tabs_title" moz:removedIn="136" tools:ignore="UnusedResources">Onglets privats</string>
     <!-- Title for the list of tabs in the synced tabs -->
-    <string name="tabs_header_synced_tabs_title">Onglets sincronizats</string>
+    <string name="tabs_header_synced_tabs_title" moz:removedIn="136" tools:ignore="UnusedResources">Onglets sincronizats</string>
     <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
     <string name="add_tab">Apondre un onglet</string>
     <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
@@ -1234,6 +1356,43 @@
     <string name="download_delete_item_1">Suprimir</string>
 
 
+    <!-- WebCompat Reporter -->
+    <!-- The title of the Web Compat Reporter feature. This is displayed in the top app bar. -->
+    <string name="webcompat_reporter_screen_title">Senhalar un site copat</string>
+    <!-- The description of the Web Compat Reporter feature. This first parameter is the name of the application (For example: Fenix) -->
+    <string name="webcompat_reporter_description">Ajudatz a melhorar %1$s per totòm. Lo personal de Mozilla utiliza las informacions qu’enviatz per resòlvre de problèmas suls sites web.</string>
+    <!-- The text field label of the URL text field. This is displayed above the user-inputted URL. -->
+    <string name="webcompat_reporter_label_url">URL</string>
+    <!-- The error message of the URL text field when an invalid URL has been entered. -->
+    <string name="webcompat_reporter_url_error_invalid">Picatz una URL valida</string>
+    <!-- The label/title of an optional field in the Web Compat Reporter feature for explaining a high-level reason why the site is broken. -->
+    <string name="webcompat_reporter_label_whats_broken" moz:removedIn="136" tools:ignore="UnusedResources">Qu’es copat ? (facultatiu)</string>
+    <!-- The placeholder text for the dropdown where a user selects a high-level reason why the site is broken. -->
+    <string name="webcompat_reporter_choose_reason">Causissètz una rason</string>
+    <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
+    <string name="webcompat_reporter_label_description">Descrivètz lo problèma (facultatiu)</string>
+    <!-- The button text for navigating away from the feature to provide more information on the broken site's bug report. -->
+    <string name="webcompat_reporter_send_more_info">Enviar mai d’informacions</string>
+    <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
+    <string name="webcompat_reporter_cancel">Anullar</string>
+    <!-- The button text for the send button to submit the provided form data. -->
+    <string name="webcompat_reporter_send">Mandar</string>
+
+
+    <!-- These reason strings are dropdown options on a WebCompat reporter form, indicating what is broken on the site. -->
+    <!-- Broken site reason text for site slow or not working -->
+    <string name="webcompat_reporter_reason_slow">Site lent o non foncional</string>
+    <!-- Broken site reason text for images or videos -->
+    <string name="webcompat_reporter_reason_media">Imatges o vidèos</string>
+    <!-- Broken site reason text for buttons, links, and other content -->
+    <string name="webcompat_reporter_reason_content">Botons, ligams o autre contengut</string>
+    <!-- Broken site reason text for sign in or sign out -->
+    <string name="webcompat_reporter_reason_account">Connexion o desconnexion</string>
+    <!-- Broken site reason text for ad blocker -->
+    <string name="webcompat_reporter_reason_ad_blocker">Blocador de publicitat</string>
+    <!-- Broken site reason text for something else -->
+    <string name="webcompat_reporter_reason_other">Quicòm mai</string>
+
     <!-- Crashes -->
     <!-- Title text displayed on the tab crash page. This first parameter is the name of the application (For example: Fenix) -->
     <string name="tab_crash_title_2">%1$s a pas pogut cargar aquesta pagina.</string>
@@ -1247,6 +1406,8 @@
 
     <!-- Unsubmitted crash dialog title, The first parameter is the name of the app (e.g. Firefox)  -->
     <string name="unsubmitted_crash_dialog_title">%s a degut reaviar</string>
+    <!-- Unsubmitted crash dialog checkbox label for automatically sending reports in the future -->
+    <string name="unsubmitted_crash_dialog_checkbox_label">Enviar automaticament los rapòrts de plantatge</string>
     <!-- Unsubmitted crash dialog negative button to dismiss the dialog -->
     <string name="unsubmitted_crash_dialog_negative_button">Tampar</string>
     <!-- Unsubmitted crash dialog positive button to submit crash report -->
@@ -1263,8 +1424,6 @@
     <string name="bookmark_delete_negative">Anullar</string>
     <!-- Screen title for adding a bookmarks folder -->
     <string name="bookmark_add_folder">Apondre un dossièr</string>
-    <!-- Snackbar title shown after a bookmark has been created. -->
-    <string name="bookmark_saved_snackbar" moz:removedIn="132" tools:ignore="UnusedResources">Marcapagina apondut !</string>
     <!-- Snackbar title that confirms a bookmark was saved into a folder. Parameter will be replaced by the name of the folder the bookmark was saved into. -->
     <string name="bookmark_saved_in_folder_snackbar">Enregistrat dins « %s »</string>
     <!-- Snackbar edit button shown after a bookmark has been created. -->
@@ -1358,6 +1517,10 @@
     <string name="bookmark_empty_list_guest_description">Enregistratz los sites pendent la navegacion. Connectatz-vos per recuperar los marcapaginas dempuèi d\'autres aparelhs sincronizats.</string>
     <!-- Text for the button to navigate to sync authentication -->
     <string name="bookmark_empty_list_guest_cta">Se connectar a Sync</string>
+    <!-- Description for the bookmark list empty state when you're signed into sync. -->
+    <string name="bookmark_empty_list_authenticated_description">Salvatz de sites en navegant. Se recuperaràn tanben los marcapaginas d’autres aparelhs sincronizats.</string>
+    <!-- Description for the bookmark list empty state when you're in an empty folder. -->
+    <string name="bookmark_empty_list_folder_description">Ajustatz de marcapaginas pendent vòstre navegacion per tornar a vòstres sites preferits mai tard.</string>
     <!-- Description for the add new folder button when selecting a folder. -->
     <string name="bookmark_select_folder_new_folder_button_title">Dossièr novèl</string>
 
@@ -1612,8 +1775,6 @@
     <string name="snackbar_tabs_closed">Onglets tampats</string>
     <!-- Text shown in snackbar when user closes multiple inactive tabs. %1$s will be replaced with the number of tabs closed. -->
     <string name="snackbar_num_tabs_closed">Onglets tampats : %1$s</string>
-    <!-- Text shown in snackbar when user bookmarks a list of tabs -->
-    <string name="snackbar_message_bookmarks_saved" moz:removedIn="132" tools:ignore="UnusedResources">Marcapagina apondut !</string>
     <!-- Text shown in snackbar when user bookmarks a list of tabs. Parameter will be replaced by the name of the folder the bookmark was saved into.-->
     <string name="snackbar_message_bookmarks_saved_in">Marcapagina salvat dins « %s » !</string>
     <!-- Text shown in snackbar when user adds a site to shortcuts -->
@@ -2415,159 +2576,151 @@ Exemple :\nhttps://suggestqueries.google.com/complete/search?client=firefox&amp
 
     <!-- Review quality check feature-->
     <!-- Name for the review quality check feature used as title for the panel. -->
-    <string name="review_quality_check_feature_name_2">Verificador d’avises</string>
+    <string name="review_quality_check_feature_name_2" moz:removedIn="136" tools:ignore="UnusedResources">Verificador d’avises</string>
     <!-- Summary for grades A and B for review quality check adjusted grading. -->
-    <string name="review_quality_check_grade_a_b_description">Avises fisables</string>
+    <string name="review_quality_check_grade_a_b_description" moz:removedIn="136" tools:ignore="UnusedResources">Avises fisables</string>
     <!-- Summary for grade C for review quality check adjusted grading. -->
-    <string name="review_quality_check_grade_c_description">Mescladís d’avises fisables e non fisables</string>
+    <string name="review_quality_check_grade_c_description" moz:removedIn="136" tools:ignore="UnusedResources">Mescladís d’avises fisables e non fisables</string>
     <!-- Summary for grades D and F for review quality check adjusted grading. -->
-    <string name="review_quality_check_grade_d_f_description">Avises non fisables</string>
+    <string name="review_quality_check_grade_d_f_description" moz:removedIn="136" tools:ignore="UnusedResources">Avises non fisables</string>
     <!-- Text for title presenting the reliability of a product's reviews. -->
-    <string name="review_quality_check_grade_title">Quina es la fisabilitat d’aquestes avises ?</string>
+    <string name="review_quality_check_grade_title" moz:removedIn="136" tools:ignore="UnusedResources">Quina es la fisabilitat d’aquestes avises ?</string>
     <!-- Title for when the rating has been updated by the review checker -->
-    <string name="review_quality_check_adjusted_rating_title">Evaluacion corregida</string>
+    <string name="review_quality_check_adjusted_rating_title" moz:removedIn="136" tools:ignore="UnusedResources">Evaluacion corregida</string>
     <!-- Description for a product's adjusted star rating. The text presents that the product's reviews which were evaluated as unreliable were removed from the adjusted rating. -->
-    <string name="review_quality_check_adjusted_rating_description_2">Elaborat amb d’avises fisables</string>
+    <string name="review_quality_check_adjusted_rating_description_2" moz:removedIn="136" tools:ignore="UnusedResources">Elaborat amb d’avises fisables</string>
     <!-- Title for list of highlights from a product's review emphasizing a product's important traits. -->
-    <string name="review_quality_check_highlights_title">Elements essencials dels avises recents</string>
+    <string name="review_quality_check_highlights_title" moz:removedIn="136" tools:ignore="UnusedResources">Elements essencials dels avises recents</string>
     <!-- Title for section explaining how we analyze the reliability of a product's reviews. -->
-    <string name="review_quality_check_explanation_title">Coma determinam la qualitat d’un avís</string>
+    <string name="review_quality_check_explanation_title" moz:removedIn="136" tools:ignore="UnusedResources">Coma determinam la qualitat d’un avís</string>
     <!-- Paragraph explaining how we analyze the reliability of a product's reviews. First parameter is the Fakespot product name. In the phrase "Fakespot by Mozilla", "by" can be localized. Does not need to stay by. -->
-    <string name="review_quality_check_explanation_body_reliability">Utilizam una tecnologia d’IA de %s per Mozilla per verificar la fisabilitat des avises de produches. Vos ajudarà sonque a jutjar la qualitat dels avises non pas çò dels produches.</string>
+    <string name="review_quality_check_explanation_body_reliability" moz:removedIn="136" tools:ignore="UnusedResources">Utilizam una tecnologia d’IA de %s per Mozilla per verificar la fisabilitat des avises de produches. Vos ajudarà sonque a jutjar la qualitat dels avises non pas çò dels produches.</string>
     <!-- Paragraph explaining the grading system we use to classify the reliability of a product's reviews. -->
-    <string name="review_quality_check_info_review_grade_header"><![CDATA[Assignam als avises una <b>notacion alfabetica</b> de A a F.]]></string>
+    <string name="review_quality_check_info_review_grade_header" moz:removedIn="136" tools:ignore="UnusedResources"><![CDATA[Assignam als avises una <b>notacion alfabetica</b> de A a F.]]></string>
     <!-- Description explaining grades A and B for review quality check adjusted grading. -->
-    <string name="review_quality_check_info_grade_info_AB">Avises fisables. Pensam que los avises venon probablament de vertadièrs clients que daissèron d’avises sincèrs e objectius.</string>
+    <string name="review_quality_check_info_grade_info_AB" moz:removedIn="136" tools:ignore="UnusedResources">Avises fisables. Pensam que los avises venon probablament de vertadièrs clients que daissèron d’avises sincèrs e objectius.</string>
     <!-- Description explaining grade C for review quality check adjusted grading. -->
-    <string name="review_quality_check_info_grade_info_C">Pensam que los avises mesclan d’avises fisables e non fisables.</string>
+    <string name="review_quality_check_info_grade_info_C" moz:removedIn="136" tools:ignore="UnusedResources">Pensam que los avises mesclan d’avises fisables e non fisables.</string>
     <!-- Description explaining grades D and F for review quality check adjusted grading. -->
-    <string name="review_quality_check_info_grade_info_DF">Avises pas fisables. Pensam que los avises son probablament de falses o son biaissats.</string>
+    <string name="review_quality_check_info_grade_info_DF" moz:removedIn="136" tools:ignore="UnusedResources">Avises pas fisables. Pensam que los avises son probablament de falses o son biaissats.</string>
     <!-- Paragraph explaining how a product's adjusted grading is calculated. -->
-    <string name="review_quality_check_explanation_body_adjusted_grading"><![CDATA[L’<b>evaluacion corregida</b> es basada suls avises que pensam que son fisables.]]></string>
+    <string name="review_quality_check_explanation_body_adjusted_grading" moz:removedIn="136" tools:ignore="UnusedResources"><![CDATA[L’<b>evaluacion corregida</b> es basada suls avises que pensam que son fisables.]]></string>
     <!-- Paragraph explaining product review highlights. First parameter is the name of the retailer (e.g. Amazon). -->
-    <string name="review_quality_check_explanation_body_highlights"><![CDATA[<b>Notables</b> venon dels avises de %s dels darrièrs 80 jorns que pensam que son fisables.]]></string>
+    <string name="review_quality_check_explanation_body_highlights" moz:removedIn="136" tools:ignore="UnusedResources"><![CDATA[<b>Notables</b> venon dels avises de %s dels darrièrs 80 jorns que pensam que son fisables.]]></string>
     <!-- Text for learn more caption presenting a link with information about review quality. First parameter is for clickable text defined in review_quality_check_info_learn_more_link. -->
-    <string name="review_quality_check_info_learn_more">Per ne saber mai sus %s.</string>
+    <string name="review_quality_check_info_learn_more" moz:removedIn="136" tools:ignore="UnusedResources">Per ne saber mai sus %s.</string>
     <!-- Clickable text that links to review quality check SuMo page. First parameter is the Fakespot product name. -->
-    <string name="review_quality_check_info_learn_more_link_2">cossí %s determina la qualitat de l’avís</string>
+    <string name="review_quality_check_info_learn_more_link_2" moz:removedIn="136" tools:ignore="UnusedResources">cossí %s determina la qualitat de l’avís</string>
     <!-- Text for title of settings section. -->
-    <string name="review_quality_check_settings_title">Paramètres</string>
+    <string name="review_quality_check_settings_title" moz:removedIn="136" tools:ignore="UnusedResources">Paramètres</string>
     <!-- Text for label for switch preference to show recommended products from review quality check settings section. -->
-    <string name="review_quality_check_settings_recommended_products">Afichar de publicitats dins lo verificador d’avises</string>
+    <string name="review_quality_check_settings_recommended_products" moz:removedIn="136" tools:ignore="UnusedResources">Afichar de publicitats dins lo verificador d’avises</string>
     <!-- Description for switch preference to show recommended products from review quality check settings section. First parameter is for clickable text defined in review_quality_check_settings_recommended_products_learn_more.-->
-    <string name="review_quality_check_settings_recommended_products_description_2" tools:ignore="UnusedResources">Veiretz ocasionalament de publicitats per de produches pertinents. Fasèm sonque la reclama de produches amb avises fisables. %s</string>
+    <string name="review_quality_check_settings_recommended_products_description_2" moz:removedIn="136" tools:ignore="UnusedResources">Veiretz ocasionalament de publicitats per de produches pertinents. Fasèm sonque la reclama de produches amb avises fisables. %s</string>
     <!-- Clickable text that links to review quality check recommended products support article. -->
-    <string name="review_quality_check_settings_recommended_products_learn_more" tools:ignore="UnusedResources">Ne saber mai</string>
+    <string name="review_quality_check_settings_recommended_products_learn_more" moz:removedIn="136" tools:ignore="UnusedResources">Ne saber mai</string>
     <!-- Text for turning sidebar off button from review quality check settings section. -->
-    <string name="review_quality_check_settings_turn_off">Copar lo verificador d’avises</string>
+    <string name="review_quality_check_settings_turn_off" moz:removedIn="136" tools:ignore="UnusedResources">Copar lo verificador d’avises</string>
     <!-- Text for title of recommended product section. This is displayed above a product image, suggested as an alternative to the product reviewed. -->
-    <string name="review_quality_check_ad_title" tools:ignore="UnusedResources">Produits alternatius</string>
+    <string name="review_quality_check_ad_title" moz:removedIn="136" tools:ignore="UnusedResources">Produits alternatius</string>
     <!-- Caption for recommended product section indicating this is an ad by Fakespot. First parameter is the Fakespot product name. -->
-    <string name="review_quality_check_ad_caption" tools:ignore="UnusedResources">Publicitat de %s</string>
+    <string name="review_quality_check_ad_caption" moz:removedIn="136" tools:ignore="UnusedResources">Publicitat de %s</string>
     <!-- Caption for review quality check panel. First parameter is for clickable text defined in review_quality_check_powered_by_link. -->
-    <string name="review_quality_check_powered_by_2">Lo verificador d’avises fonciona gràcia a %s</string>
+    <string name="review_quality_check_powered_by_2" moz:removedIn="136" tools:ignore="UnusedResources">Lo verificador d’avises fonciona gràcia a %s</string>
     <!-- Clickable text that links to Fakespot.com. First parameter is the Fakespot product name. In the phrase "Fakespot by Mozilla", "by" can be localized. Does not need to stay by. -->
-    <string name="review_quality_check_powered_by_link" tools:ignore="UnusedResources">%s per Mozilla</string>
+    <string name="review_quality_check_powered_by_link" moz:removedIn="136" tools:ignore="UnusedResources">%s per Mozilla</string>
     <!-- Text for title of warning card informing the user that the current analysis is outdated. -->
-    <string name="review_quality_check_outdated_analysis_warning_title" tools:ignore="UnusedResources">Informacions novèlas d’evaluar</string>
+    <string name="review_quality_check_outdated_analysis_warning_title" moz:removedIn="136" tools:ignore="UnusedResources">Informacions novèlas d’evaluar</string>
     <!-- Text for button from warning card informing the user that the current analysis is outdated. Clicking this should trigger the product's re-analysis. -->
-    <string name="review_quality_check_outdated_analysis_warning_action" tools:ignore="UnusedResources">Verificar ara</string>
+    <string name="review_quality_check_outdated_analysis_warning_action" moz:removedIn="136" tools:ignore="UnusedResources">Verificar ara</string>
     <!-- Title for warning card informing the user that the current product does not have enough reviews for a review analysis. -->
-    <string name="review_quality_check_no_reviews_warning_title">I a pas encara pro d’avises</string>
+    <string name="review_quality_check_no_reviews_warning_title" moz:removedIn="136" tools:ignore="UnusedResources">I a pas encara pro d’avises</string>
     <!-- Text for body of warning card informing the user that the current product does not have enough reviews for a review analysis. -->
-    <string name="review_quality_check_no_reviews_warning_body">Quand aqueste produch aja mai d’avises, ne poirem verificar la qualitat.</string>
+    <string name="review_quality_check_no_reviews_warning_body" moz:removedIn="136" tools:ignore="UnusedResources">Quand aqueste produch aja mai d’avises, ne poirem verificar la qualitat.</string>
     <!-- Title for warning card informing the user that the current product is currently not available. -->
-    <string name="review_quality_check_product_availability_warning_title">Lo produit es pas disponible</string>
+    <string name="review_quality_check_product_availability_warning_title" moz:removedIn="136" tools:ignore="UnusedResources">Lo produit es pas disponible</string>
     <!-- Text for the body of warning card informing the user that the current product is currently not available. -->
-    <string name="review_quality_check_product_availability_warning_body">Se tornatz veire aqueste produch en estòc, senhalatz-lo e verificarem los avises.</string>
+    <string name="review_quality_check_product_availability_warning_body" moz:removedIn="136" tools:ignore="UnusedResources">Se tornatz veire aqueste produch en estòc, senhalatz-lo e verificarem los avises.</string>
     <!-- Clickable text for warning card informing the user that the current product is currently not available. Clicking this should inform the server that the product is available. -->
-    <string name="review_quality_check_product_availability_warning_action_2">Senhalar que’l produch es en estòc</string>
+    <string name="review_quality_check_product_availability_warning_action_2" moz:removedIn="136" tools:ignore="UnusedResources">Senhalar que’l produch es en estòc</string>
     <!-- Title for warning card informing the user that the current product's analysis is still processing. The parameter is the percentage progress (0-100%) of the analysis process (e.g. 56%). -->
-    <string name="review_quality_check_analysis_in_progress_warning_title_2">Evaluacion de la qualitat dels avises (%s)</string>
+    <string name="review_quality_check_analysis_in_progress_warning_title_2" moz:removedIn="136" tools:ignore="UnusedResources">Evaluacion de la qualitat dels avises (%s)</string>
     <!-- Text for body of warning card informing the user that the current product's analysis is still processing. -->
-    <string name="review_quality_check_analysis_in_progress_warning_body">Aquò trigar unes 60 segondas.</string>
+    <string name="review_quality_check_analysis_in_progress_warning_body" moz:removedIn="136" tools:ignore="UnusedResources">Aquò trigar unes 60 segondas.</string>
     <!-- Title for info card displayed after the user reports a product is back in stock. -->
-    <string name="review_quality_check_analysis_requested_info_title">Mercés pel senhalament !</string>
+    <string name="review_quality_check_analysis_requested_info_title" moz:removedIn="136" tools:ignore="UnusedResources">Mercés pel senhalament !</string>
     <!-- Text for body of info card displayed after the user reports a product is back in stock. -->
-    <string name="review_quality_check_analysis_requested_info_body">Deuriam aver d’informacions tocant los avises d’aqueste produch d’aquí 24 oras. Tornatz mai tard.</string>
+    <string name="review_quality_check_analysis_requested_info_body" moz:removedIn="136" tools:ignore="UnusedResources">Deuriam aver d’informacions tocant los avises d’aqueste produch d’aquí 24 oras. Tornatz mai tard.</string>
     <!-- Title for info card displayed when the user review checker while on a product that Fakespot does not analyze (e.g. gift cards, music). -->
-    <string name="review_quality_check_not_analyzable_info_title">Podèm pas verificar aquestes avises</string>
+    <string name="review_quality_check_not_analyzable_info_title" moz:removedIn="136" tools:ignore="UnusedResources">Podèm pas verificar aquestes avises</string>
     <!-- Text for body of info card displayed when the user review checker while on a product that Fakespot does not analyze (e.g. gift cards, music). -->
-    <string name="review_quality_check_not_analyzable_info_body">Malastrosament, podèm pas verificar la qualitat dels avises d’unes tipes de produches. Per exemple, las cartas present, la transmission de vidèo, la musica e los jòcs.</string>
+    <string name="review_quality_check_not_analyzable_info_body" moz:removedIn="136" tools:ignore="UnusedResources">Malastrosament, podèm pas verificar la qualitat dels avises d’unes tipes de produches. Per exemple, las cartas present, la transmission de vidèo, la musica e los jòcs.</string>
     <!-- Title for info card displayed when another user reported the displayed product is back in stock. -->
-    <string name="review_quality_check_analysis_requested_other_user_info_title" tools:ignore="UnusedResources">Mai d’info lèu</string>
+    <string name="review_quality_check_analysis_requested_other_user_info_title" moz:removedIn="136" tools:ignore="UnusedResources">Mai d’info lèu</string>
     <!-- Text for body of info card displayed when another user reported the displayed product is back in stock. -->
-    <string name="review_quality_check_analysis_requested_other_user_info_body" tools:ignore="UnusedResources">Deuriam aver d’informacions tocant los avises d’aqueste produch d’aquí 24 oras. Tornatz mai tard.</string>
+    <string name="review_quality_check_analysis_requested_other_user_info_body" moz:removedIn="136" tools:ignore="UnusedResources">Deuriam aver d’informacions tocant los avises d’aqueste produch d’aquí 24 oras. Tornatz mai tard.</string>
     <!-- Title for info card displayed to the user when analysis finished updating. -->
-    <string name="review_quality_check_analysis_updated_confirmation_title" tools:ignore="UnusedResources">Las analisis son a jorn</string>
+    <string name="review_quality_check_analysis_updated_confirmation_title" moz:removedIn="136" tools:ignore="UnusedResources">Las analisis son a jorn</string>
     <!-- Text for the action button from info card displayed to the user when analysis finished updating. -->
-    <string name="review_quality_check_analysis_updated_confirmation_action" tools:ignore="UnusedResources">Plan realizat</string>
+    <string name="review_quality_check_analysis_updated_confirmation_action" moz:removedIn="136" tools:ignore="UnusedResources">Plan realizat</string>
     <!-- Title for error card displayed to the user when an error occurred. -->
-    <string name="review_quality_check_generic_error_title">Cap d’info pas disponible pel moment</string>
+    <string name="review_quality_check_generic_error_title" moz:removedIn="136" tools:ignore="UnusedResources">Cap d’info pas disponible pel moment</string>
     <!-- Text for body of error card displayed to the user when an error occurred. -->
-    <string name="review_quality_check_generic_error_body">Sèm a trabalhar per resòlver aqueste problèma. Mercés de tornar ensajar mai tard.</string>
+    <string name="review_quality_check_generic_error_body" moz:removedIn="136" tools:ignore="UnusedResources">Sèm a trabalhar per resòlver aqueste problèma. Mercés de tornar ensajar mai tard.</string>
     <!-- Title for error card displayed to the user when the device is disconnected from the network. -->
-    <string name="review_quality_check_no_connection_title">Cap de connexion ret</string>
+    <string name="review_quality_check_no_connection_title" moz:removedIn="136" tools:ignore="UnusedResources">Cap de connexion ret</string>
     <!-- Text for body of error card displayed to the user when the device is disconnected from the network. -->
-    <string name="review_quality_check_no_connection_body">Verificatz la connexion ret puèi tornatz ensajar d’actualizar la pagina.</string>
+    <string name="review_quality_check_no_connection_body" moz:removedIn="136" tools:ignore="UnusedResources">Verificatz la connexion ret puèi tornatz ensajar d’actualizar la pagina.</string>
     <!-- Title for card displayed to the user for products whose reviews were not analyzed yet. -->
-    <string name="review_quality_check_no_analysis_title">Cap d’informacion suls avises pel moment</string>
+    <string name="review_quality_check_no_analysis_title" moz:removedIn="136" tools:ignore="UnusedResources">Cap d’informacion suls avises pel moment</string>
     <!-- Text for the body of card displayed to the user for products whose reviews were not analyzed yet. -->
-    <string name="review_quality_check_no_analysis_body">Per saber si los avises son fisables, verificatz lor qualitat. Sonque pren 60 segondas.</string>
+    <string name="review_quality_check_no_analysis_body" moz:removedIn="136" tools:ignore="UnusedResources">Per saber si los avises son fisables, verificatz lor qualitat. Sonque pren 60 segondas.</string>
     <!-- Text for button from body of card displayed to the user for products whose reviews were not analyzed yet. Clicking this should trigger a product analysis. -->
-    <string name="review_quality_check_no_analysis_link">Valorar la qualitat dels avises</string>
+    <string name="review_quality_check_no_analysis_link" moz:removedIn="136" tools:ignore="UnusedResources">Valorar la qualitat dels avises</string>
     <!-- Headline for review quality check contextual onboarding card. -->
-    <string name="review_quality_check_contextual_onboarding_title">Ensajatz nòstra guida de fisança pels avises de produches</string>
+    <string name="review_quality_check_contextual_onboarding_title" moz:removedIn="136" tools:ignore="UnusedResources">Ensajatz nòstra guida de fisança pels avises de produches</string>
     <!-- Description for review quality check contextual onboarding card. The first and last two parameters are for retailer names (e.g. Amazon, Walmart). The second parameter is for the name of the application (e.g. Firefox). -->
-    <string name="review_quality_check_contextual_onboarding_description">Agachatz quina fisabilitat acordar als avises de produches sus %1$s abans de crompar. Lo verificador d’avises, una foncionalitat experimentala de %2$s, es integrada al navegador. Fonciona tanben per %3$s e %4$s.</string>
+    <string name="review_quality_check_contextual_onboarding_description" moz:removedIn="136" tools:ignore="UnusedResources">Agachatz quina fisabilitat acordar als avises de produches sus %1$s abans de crompar. Lo verificador d’avises, una foncionalitat experimentala de %2$s, es integrada al navegador. Fonciona tanben per %3$s e %4$s.</string>
     <!-- Description for review quality check contextual onboarding card. The first parameters is for retailer name (e.g. Amazon). The second parameter is for the name of the application (e.g. Firefox). -->
-    <string name="review_quality_check_contextual_onboarding_description_one_vendor">Agachatz quina fisabilitat acordar als avises de produches sus %1$s abans de crompar. Lo verificador d’avises, una foncionalitat experimentala de %2$s, es integrada al navegador.</string>
+    <string name="review_quality_check_contextual_onboarding_description_one_vendor" moz:removedIn="136" tools:ignore="UnusedResources">Agachatz quina fisabilitat acordar als avises de produches sus %1$s abans de crompar. Lo verificador d’avises, una foncionalitat experimentala de %2$s, es integrada al navegador.</string>
     <!-- Paragraph presenting review quality check feature. First parameter is the Fakespot product name. Second parameter is for clickable text defined in review_quality_check_contextual_onboarding_learn_more_link. In the phrase "Fakespot by Mozilla", "by" can be localized. Does not need to stay by. -->
-    <string name="review_quality_check_contextual_onboarding_learn_more">Amb lo poder de %1$s per Mozilla, vos ajudam a evitar los avises biaissats e non autentics. Nòstre modèl d’IA es a se melhorar en permanéncia per vos protegir quand crompatz. %2$s</string>
+    <string name="review_quality_check_contextual_onboarding_learn_more" moz:removedIn="136" tools:ignore="UnusedResources">Amb lo poder de %1$s per Mozilla, vos ajudam a evitar los avises biaissats e non autentics. Nòstre modèl d’IA es a se melhorar en permanéncia per vos protegir quand crompatz. %2$s</string>
     <!-- Clickable text from the contextual onboarding card that links to review quality check support article. -->
-    <string name="review_quality_check_contextual_onboarding_learn_more_link">Ne saber mai</string>
+    <string name="review_quality_check_contextual_onboarding_learn_more_link" moz:removedIn="136" tools:ignore="UnusedResources">Ne saber mai</string>
     <!-- Caption text to be displayed in review quality check contextual onboarding card above the opt-in button. First parameter is Firefox app name, third parameter is the Fakespot product name. Second & fourth are for clickable texts defined in review_quality_check_contextual_onboarding_privacy_policy_3 and review_quality_check_contextual_onboarding_terms_use. -->
-    <string name="review_quality_check_contextual_onboarding_caption_4">En seleccionant « Òc-ben, ensajar », acceptatz la %2$s de %1$s e la %4$s de %3$s.</string>
+    <string name="review_quality_check_contextual_onboarding_caption_4" moz:removedIn="136" tools:ignore="UnusedResources">En seleccionant « Òc-ben, ensajar », acceptatz la %2$s de %1$s e la %4$s de %3$s.</string>
     <!-- Clickable text from the review quality check contextual onboarding card that links to Fakespot privacy notice. -->
-    <string name="review_quality_check_contextual_onboarding_privacy_policy_3">politica de confidencialitat</string>
+    <string name="review_quality_check_contextual_onboarding_privacy_policy_3" moz:removedIn="136" tools:ignore="UnusedResources">politica de confidencialitat</string>
     <!-- Clickable text from the review quality check contextual onboarding card that links to Fakespot terms of use. -->
-    <string name="review_quality_check_contextual_onboarding_terms_use">condicions d’utilizacion</string>
+    <string name="review_quality_check_contextual_onboarding_terms_use" moz:removedIn="136" tools:ignore="UnusedResources">condicions d’utilizacion</string>
     <!-- Text for opt-in button from the review quality check contextual onboarding card. -->
-    <string name="review_quality_check_contextual_onboarding_primary_button_text">Òc-ben, ensajar</string>
+    <string name="review_quality_check_contextual_onboarding_primary_button_text" moz:removedIn="136" tools:ignore="UnusedResources">Òc-ben, ensajar</string>
     <!-- Text for opt-out button from the review quality check contextual onboarding card. -->
-    <string name="review_quality_check_contextual_onboarding_secondary_button_text">Mai tard</string>
-    <!-- Text for the first CFR presenting the review quality check feature. -->
-    <string name="review_quality_check_first_cfr_message" moz:removedIn="132" tools:ignore="UnusedResources">Verificatz se vos podètz fisar dels avises sul produch, abans de crompar.</string>
-    <!-- Text displayed in the first CFR presenting the review quality check feature that opens the review checker when clicked. -->
-    <string name="review_quality_check_first_cfr_action" moz:removedIn="132" tools:ignore="UnusedResources">Ensajar lo verificador d’avises</string>
-    <!-- Text for the second CFR presenting the review quality check feature. -->
-    <string name="review_quality_check_second_cfr_message" moz:removedIn="132" tools:ignore="UnusedResources">Aquestes avises son fisables ? Verificatz-o ara per veire una evaluacion corregida.</string>
-    <!-- Text displayed in the second CFR presenting the review quality check feature that opens the review checker when clicked. -->
-    <string name="review_quality_check_second_cfr_action" moz:removedIn="132" tools:ignore="UnusedResources">Dobrir lo verificador d’avises</string>
+    <string name="review_quality_check_contextual_onboarding_secondary_button_text" moz:removedIn="136" tools:ignore="UnusedResources">Mai tard</string>
     <!-- Content description (not visible, for screen readers etc.) for opening browser menu button to open review quality check bottom sheet. -->
-    <string name="review_quality_check_open_handle_content_description">Dobrir lo verificador d’avises</string>
+    <string name="review_quality_check_open_handle_content_description" moz:removedIn="136" tools:ignore="UnusedResources">Dobrir lo verificador d’avises</string>
     <!-- Content description (not visible, for screen readers etc.) for closing browser menu button to open review quality check bottom sheet. -->
-    <string name="review_quality_check_close_handle_content_description">Tampar lo verificador d’avises</string>
+    <string name="review_quality_check_close_handle_content_description" moz:removedIn="136" tools:ignore="UnusedResources">Tampar lo verificador d’avises</string>
     <!-- Content description (not visible, for screen readers etc.) for review quality check star rating. First parameter is the number of stars (1-5) representing the rating. -->
-    <string name="review_quality_check_star_rating_content_description">%1$s estelas de 5</string>
+    <string name="review_quality_check_star_rating_content_description" moz:removedIn="136" tools:ignore="UnusedResources">%1$s estelas de 5</string>
     <!-- Text for minimize button from highlights card. When clicked the highlights card should reduce its size. -->
-    <string name="review_quality_check_highlights_show_less">Ne veire mens</string>
+    <string name="review_quality_check_highlights_show_less" moz:removedIn="136" tools:ignore="UnusedResources">Ne veire mens</string>
     <!-- Text for maximize button from highlights card. When clicked the highlights card should expand to its full size. -->
-    <string name="review_quality_check_highlights_show_more">Ne veire mai</string>
+    <string name="review_quality_check_highlights_show_more" moz:removedIn="136" tools:ignore="UnusedResources">Ne veire mai</string>
     <!-- Text for highlights card quality category header. Reviews shown under this header should refer the product's quality. -->
-    <string name="review_quality_check_highlights_type_quality">Qualitat</string>
+    <string name="review_quality_check_highlights_type_quality" moz:removedIn="136" tools:ignore="UnusedResources">Qualitat</string>
     <!-- Text for highlights card price category header. Reviews shown under this header should refer the product's price. -->
-    <string name="review_quality_check_highlights_type_price">Prètz</string>
+    <string name="review_quality_check_highlights_type_price" moz:removedIn="136" tools:ignore="UnusedResources">Prètz</string>
     <!-- Text for highlights card shipping category header. Reviews shown under this header should refer the product's shipping. -->
-    <string name="review_quality_check_highlights_type_shipping">Expedicion</string>
+    <string name="review_quality_check_highlights_type_shipping" moz:removedIn="136" tools:ignore="UnusedResources">Expedicion</string>
 
     <!-- Text for highlights card packaging and appearance category header. Reviews shown under this header should refer the product's packaging and appearance. -->
-    <string name="review_quality_check_highlights_type_packaging_appearance">Embalatge e aparéncia</string>
+    <string name="review_quality_check_highlights_type_packaging_appearance" moz:removedIn="136" tools:ignore="UnusedResources">Embalatge e aparéncia</string>
     <!-- Text for highlights card competitiveness category header. Reviews shown under this header should refer the product's competitiveness. -->
-    <string name="review_quality_check_highlights_type_competitiveness">Competitivitat</string>
+    <string name="review_quality_check_highlights_type_competitiveness" moz:removedIn="136" tools:ignore="UnusedResources">Competitivitat</string>
 
     <!-- Text that is surrounded by quotes. The parameter is the actual text that is in quotes. An example of that text could be: Excellent craftsmanship, and that is displayed as “Excellent craftsmanship”. The text comes from a buyer's review that the feature is highlighting"   -->
-    <string name="surrounded_with_quotes">« %s »</string>
+    <string name="surrounded_with_quotes" moz:removedIn="136" tools:ignore="UnusedResources">« %s »</string>
 
     <!-- Accessibility services actions labels. These will be appended to accessibility actions like "Double tap to.." but not by or applications but by services like Talkback. -->
     <!-- Action label for elements that can be collapsed if interacting with them. Talkback will append this to say "Double tap to collapse". -->
@@ -2811,6 +2964,29 @@ Exemple :\nhttps://suggestqueries.google.com/complete/search?client=firefox&amp
     <!-- Button text on the data saving mode warning dialog used by the translations feature to allow users to cancel the action and not perform a download of the language file. -->
     <string name="download_language_file_dialog_negative_button_text">Anullar</string>
 
+    <!-- Unified Trust Panel -->
+    <!-- Title text for the protection panel banner when the site is not secure. -->
+    <string name="protection_panel_banner_not_secure_title">Mesfisatz-vos sus aqueste site</string>
+    <!-- Description text for the protection panel banner when the site is not secure. -->
+    <string name="protection_panel_banner_not_secure_description">La connexion es pas segura.</string>
+    <!-- Title text for the protection panel banner when tracking protection is disabled. -->
+    <string name="protection_panel_banner_not_protected_title">Avètz desactivat las proteccions</string>
+    <!-- Description text for the protection panel banner when tracking protection is disabled.
+        The first parameter is the name of the app defined in app_name (for example: Fenix) -->
+    <string name="protection_panel_banner_not_protected_description">%s es pas en servici. Vos suggerissèm de reactivar las proteccions.</string>
+    <!-- Title text for the protection panel banner when tracking protection is enabled.
+        The first parameter is the name of the app defined in app_name (for example: Fenix) -->
+    <string name="protection_panel_banner_protected_title">%s vos protegís</string>
+    <!-- Description text for the protection panel banner when tracking protection is enabled. -->
+    <string name="protection_panel_banner_protected_description">Sètz jos proteccion. Se trobam quicòm, vos assabentarem.</string>
+    <!-- Label text for the Enhanced Tracking Protection toggle. -->
+    <string name="protection_panel_etp_toggle_label">Proteccion renfortida contra lo seguiment</string>
+    <!-- Description text for the Enhanced Tracking Protection toggle when tracking protection is enabled. -->
+    <string name="protection_panel_etp_toggle_enabled_description">Se quicòm sembla copat sus aqueste site, ensajatz de desactivar las proteccions.</string>
+
+    <!-- Description text for the Enhanced Tracking Protection toggle when tracking protection is disabled. -->
+    <string name="protection_panel_etp_toggle_disabled_description">Las proteccions son desactivadas. Suggerissèm de las reactivar.</string>
+
     <!-- Debug drawer -->
     <!-- The user-facing title of the Debug Drawer feature. -->
     <string name="debug_drawer_title">Aisinas de desbugatge</string>
@@ -2901,6 +3077,10 @@ Exemple :\nhttps://suggestqueries.google.com/complete/search?client=firefox&amp
     <string name="microsurvey_survey_printing_title" tools:ignore="BrandUsage,UnusedResources">Quin es vòstre nivèl de satisfaccion de l’impression de Firefox ?</string>
     <!-- Text shown in the survey title for homepage microsurvey. Note: The word "Firefox" should NOT be translated. -->
     <string name="microsurvey_homepage_title" tools:ignore="BrandUsage,UnusedResources">Sètz satisfach de vòstra pagina d’acuèlh Firefox ?</string>
+    <!-- Text shown in the survey title for search experience microsurvey. Note: The word "Firefox" should NOT be translated. -->
+    <string name="microsurvey_search_title" tools:ignore="BrandUsage,UnusedResources">Quin es vòstre nivèl de satisfaccion de la recèrca amb Firefox ?</string>
+    <!-- Text shown in the survey title for sync experience microsurvey. Note: The word "Firefox" should NOT be translated. -->
+    <string name="microsurvey_sync_title" tools:ignore="BrandUsage,UnusedResources">Quin es vòstre nivèl de satisfaccion de la sincronizacion de Firefox ?</string>
     <!-- Accessibility -->
     <!-- Content description for the survey application icon. Note: The word "Firefox" should NOT be translated.  -->
     <string name="microsurvey_app_icon_content_description" tools:ignore="BrandUsage">Logotipe del Firefox</string>
@@ -2921,6 +3101,12 @@ Exemple :\nhttps://suggestqueries.google.com/complete/search?client=firefox&amp
     <!-- Content description for delete button where parameter will be the username of the login -->
     <string name="debug_drawer_logins_delete_login_button_content_description">Suprimir l’identificant amb lo nom d’utilizaire %s</string>
 
+    <!-- Debug drawer addresses -->
+    <!-- The title of the Addresses feature in the Debug Drawer. -->
+    <string name="debug_drawer_addresses_title">Adreças</string>
+    <!-- The title of the section header for the list of debug locales that can be enabled and disabled. -->
+    <string name="debug_drawer_addresses_debug_locales_header">Lengas de desbugatge d’activar</string>
+
     <!-- Debug drawer "contextual feature recommendation" (CFR) tools -->
     <!-- The title of the CFR Tools feature in the Debug Drawer -->
     <string name="debug_drawer_cfr_tools_title">Aisinas CFR</string>
@@ -2933,12 +3119,45 @@ Exemple :\nhttps://suggestqueries.google.com/complete/search?client=firefox&amp
     <string name="glean_debug_tools_title">Aisinas de desbugatge Glean</string>
 
     <!-- Messages explaining how to exit fullscreen mode -->
-    <!-- Message shown to explain how to exit fullscreen mode when gesture navigation is enabled -->
-    <string name="exit_fullscreen_with_gesture" moz:removedIn="132" tools:ignore="UnusedResources">Per sortir del mòde ecran complèt, lisatz d’ennaut e utilizatz lo gèst de retorn</string>
-    <!-- Message shown to explain how to exit fullscreen mode when using back button navigation -->
-    <string name="exit_fullscreen_with_back_button" moz:removedIn="132" tools:ignore="UnusedResources">Per sortir del mòde ecran complèt, lisatz d’ennaut e utilizatz quichatz retorn</string>
+    <!-- Message shown to explain how to exit fullscreen mode when gesture navigation is enabled. -->
+    <!-- Localisation note: this text should be as short as possible, max 68 chars -->
+    <string name="exit_fullscreen_with_gesture_short">Balajatz d’ennaut e utilizatz lo gèst de retorn per quitar</string>
+    <!-- Message shown to explain how to exit fullscreen mode when using back button navigation. -->
+    <!-- Localisation note: this text should be as short as possible, max 68 chars -->
+    <string name="exit_fullscreen_with_back_button_short">Balajatz d’ennaut e quichatz retorn per quitar</string>
 
     <!-- Beta Label Component !-->
     <!-- Text shown as a label or tag to indicate a feature or area is still undergoing active development. Note that here "Beta" should not be translated, as it is used as an icon styled element. -->
     <string name="beta_feature">BÈTA</string>
+
+    <!-- Root certificate expiration warnings -->
+    <!-- These strings for homepage cards and push notifications to be pushed to users running outdated versions of Firefox. We want to encourage these users to update to the latest version so their extensions and other features don't stop working when Firefox's old root certificate expires on 2025-03-14. For more information, see this SUMO article: https://support.mozilla.org/kb/root-certificate-expiration !-->
+    <!-- Homepage card button to open Google Play Store. "Update" is a verb. -->
+    <string name="certificate_warning_homepage_card_update_now_button" tools:ignore="UnusedResources">Metre a jorn ara</string>
+    <!-- Homepage card title about old Firefox version. "Update" is a verb. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_homepage_card_hca1_title" tools:ignore="BrandUsage,UnusedResources">Metètz a jorn lo navegador Firefox</string>
+    <!-- Homepage card message about old Firefox version -->
+    <string name="certificate_warning_homepage_card_hca1_message" tools:ignore="UnusedResources">Un certificat raiç expirarà, provocant l\'arrèst de cèrtas foncionalitats lo 14 de març.</string>
+    <!-- Homepage card title about old Firefox version. "Update" is a verb. -->
+    <string name="certificate_warning_homepage_card_hcr1_title" tools:ignore="UnusedResources">Cambiatz de version abans lo 14 de març.</string>
+    <!-- Homepage card message about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_homepage_card_hcr1_message" tools:ignore="BrandUsage,UnusedResources">Un certificat raiç expirarà, provocant l\'arrèst de cèrtas foncionalitats de vòstra version de Firefox.</string>
+    <!-- Homepage card title about old Firefox version -->
+    <string name="certificate_warning_homepage_card_hcw2_title" tools:ignore="UnusedResources">Mens de 7 jorns per realizar la mesa a jorn</string>
+    <!-- Homepage card message about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_homepage_card_hcw2_message" tools:ignore="BrandUsage,UnusedResources">A partir del 14 de març, los moduls complementaris e d’unas foncionalitats de Firefox quitaràn de foncionar perque un certificat raiç es a mand d\'expirar.</string>
+    <!-- Homepage card title about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_homepage_card_hcw3_title" tools:ignore="BrandUsage,UnusedResources">Darrièra oportunitat de gardar vòstre Firefox</string>
+    <!-- Homepage card message about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_homepage_card_hcw3_message" tools:ignore="BrandUsage,UnusedResources">Vòstre version de Firefox quitarà de foncionar corrèctament lo 14 de mars, perque un certificat raiç es a mand d’expirar.</string>
+    <!-- Push notification title about old Firefox version. "Update" is a noun. -->
+    <string name="certificate_warning_push_notification_update_recommended_title" tools:ignore="UnusedResources">Mesa a jorn recomandada</string>
+    <!-- Push notification message about old Firefox version -->
+    <string name="certificate_warning_push_notification_pnr1_message" tools:ignore="UnusedResources">Los moduls complementaris e d’autres foncionalitats quitaràn de foncionar lo 14 de març.</string>
+    <!-- Push notification title about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_push_notification_pnw2_title" tools:ignore="BrandUsage,UnusedResources">Utilizatz una version anciana de Firefox</string>
+    <!-- Push notification message about old Firefox version. "Update" is a verb. -->
+    <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">Realizatz la mesa a jorn abans loe 14 de març per téner d’utilizar vòstres moduls complementaris e d’autras foncionalitats.</string>
+    <!-- Push notification message about old Firefox version -->
+    <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">D’unas foncionalitats quitaràn de foncionar deman.</string>
 </resources>

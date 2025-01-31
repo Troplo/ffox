@@ -17,7 +17,6 @@
 #include "gfxPoint.h"
 #include "gfxRect.h"
 #include "mozilla/gfx/Rect.h"
-#include "nsAlgorithm.h"
 #include "nsChangeHint.h"
 #include "nsColor.h"
 #include "nsCOMPtr.h"
@@ -423,6 +422,12 @@ class SVGUtils final {
                                            gfxMatrix* aUserToOuterSVG);
 
   /**
+   * We need to track whether content has non-scaling-stroke because we can't
+   * asynchronously animate it with a scaling transform.
+   */
+  static void UpdateNonScalingStrokeStateBit(nsIFrame* aFrame);
+
+  /**
    * Compute the maximum possible device space stroke extents of a path given
    * the path's device space path extents, its stroke style and its ctm.
    *
@@ -447,8 +452,7 @@ class SVGUtils final {
    * the range of valid integers.
    */
   static int32_t ClampToInt(double aVal) {
-    return NS_lround(
-        std::max(double(INT32_MIN), std::min(double(INT32_MAX), aVal)));
+    return NS_lround(std::clamp(aVal, double(INT32_MIN), double(INT32_MAX)));
   }
 
   /**

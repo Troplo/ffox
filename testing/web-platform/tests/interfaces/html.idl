@@ -133,10 +133,18 @@ interface HTMLElement : Element {
   ElementInternals attachInternals();
 
   // The popover API
-  undefined showPopover();
+  undefined showPopover(optional ShowPopoverOptions options = {});
   undefined hidePopover();
-  boolean togglePopover(optional boolean force);
+  boolean togglePopover(optional (TogglePopoverOptions or boolean) options = {});
   [CEReactions] attribute DOMString? popover;
+};
+
+dictionary ShowPopoverOptions {
+  HTMLElement source;
+};
+
+dictionary TogglePopoverOptions : ShowPopoverOptions {
+  boolean force;
 };
 
 HTMLElement includes GlobalEventHandlers;
@@ -881,10 +889,12 @@ interface HTMLInputElement : HTMLElement {
   [HTMLConstructor] constructor();
 
   [CEReactions] attribute DOMString accept;
+  [CEReactions] attribute boolean alpha;
   [CEReactions] attribute DOMString alt;
   [CEReactions] attribute DOMString autocomplete;
   [CEReactions] attribute boolean defaultChecked;
   attribute boolean checked;
+  [CEReactions] attribute DOMString colorSpace;
   [CEReactions] attribute DOMString dirName;
   [CEReactions] attribute boolean disabled;
   readonly attribute HTMLFormElement? form;
@@ -2510,6 +2520,11 @@ interface MessageChannel {
   readonly attribute MessagePort port2;
 };
 
+interface mixin MessageEventTarget {
+  attribute EventHandler onmessage;
+  attribute EventHandler onmessageerror;
+};
+
 [Exposed=(Window,Worker,AudioWorklet), Transferable]
 interface MessagePort : EventTarget {
   undefined postMessage(any message, sequence<object> transfer);
@@ -2518,10 +2533,10 @@ interface MessagePort : EventTarget {
   undefined close();
 
   // event handlers
-  attribute EventHandler onmessage;
-  attribute EventHandler onmessageerror;
   attribute EventHandler onclose;
 };
+
+MessagePort includes MessageEventTarget;
 
 dictionary StructuredSerializeOptions {
   sequence<object> transfer = [];
@@ -2561,10 +2576,9 @@ interface DedicatedWorkerGlobalScope : WorkerGlobalScope {
   undefined postMessage(any message, optional StructuredSerializeOptions options = {});
 
   undefined close();
-
-  attribute EventHandler onmessage;
-  attribute EventHandler onmessageerror;
 };
+
+DedicatedWorkerGlobalScope includes MessageEventTarget;
 
 [Global=(Worker,SharedWorker),Exposed=SharedWorker]
 interface SharedWorkerGlobalScope : WorkerGlobalScope {
@@ -2587,8 +2601,6 @@ interface Worker : EventTarget {
 
   undefined postMessage(any message, sequence<object> transfer);
   undefined postMessage(any message, optional StructuredSerializeOptions options = {});
-  attribute EventHandler onmessage;
-  attribute EventHandler onmessageerror;
 };
 
 dictionary WorkerOptions {
@@ -2600,6 +2612,7 @@ dictionary WorkerOptions {
 enum WorkerType { "classic", "module" };
 
 Worker includes AbstractWorker;
+Worker includes MessageEventTarget;
 
 [Exposed=Window]
 interface SharedWorker : EventTarget {

@@ -798,7 +798,7 @@ void BrowsingContext::SetEmbedderElement(Element* aEmbedder) {
     }
 
     if (IsEmbedderTypeObjectOrEmbed()) {
-      Unused << SetSyntheticDocumentContainer(true);
+      Unused << SetIsSyntheticDocumentContainer(true);
     }
   }
 }
@@ -1563,9 +1563,9 @@ JSObject* BrowsingContext::ReadStructuredClone(JSContext* aCx,
   // Note: Do this check after reading our ID data. Returning null will abort
   // the decode operation anyway, but we should at least be as safe as possible.
   if (NS_WARN_IF(!NS_IsMainThread())) {
-    MOZ_DIAGNOSTIC_ASSERT(false,
-                          "We shouldn't be trying to decode a BrowsingContext "
-                          "on a background thread.");
+    MOZ_DIAGNOSTIC_CRASH(
+        "We shouldn't be trying to decode a BrowsingContext "
+        "on a background thread.");
     return nullptr;
   }
 
@@ -2297,7 +2297,7 @@ PopupBlocker::PopupControlState BrowsingContext::RevisePopupAbuseLevel(
     // PopupBlocker::openBlocked state.
     if ((abuse == PopupBlocker::openAllowed ||
          abuse == PopupBlocker::openControlled) &&
-        StaticPrefs::dom_block_multiple_popups() && !IsPopupAllowed() &&
+        !IsPopupAllowed() &&
         !ConsumeTransientUserActivationForMultiplePopupBlocking()) {
       nsContentUtils::ReportToConsole(nsIScriptError::warningFlag, "DOM"_ns,
                                       doc, nsContentUtils::eDOM_PROPERTIES,
@@ -2750,6 +2750,9 @@ void BrowsingContext::DidSet(FieldIndex<IDX_ExplicitActive>,
 
   PreOrderWalk([&](BrowsingContext* aContext) {
     if (nsCOMPtr<nsIDocShell> ds = aContext->GetDocShell()) {
+      if (auto* bc = BrowserChild::GetFrom(ds)) {
+        bc->UpdateVisibility();
+      }
       nsDocShell::Cast(ds)->ActivenessMaybeChanged();
     }
   });
@@ -3056,10 +3059,10 @@ void BrowsingContext::DidSet(FieldIndex<IDX_IsInBFCache>) {
   }
 }
 
-void BrowsingContext::DidSet(FieldIndex<IDX_SyntheticDocumentContainer>) {
+void BrowsingContext::DidSet(FieldIndex<IDX_IsSyntheticDocumentContainer>) {
   if (WindowContext* parentWindowContext = GetParentWindowContext()) {
-    parentWindowContext->UpdateChildSynthetic(this,
-                                              GetSyntheticDocumentContainer());
+    parentWindowContext->UpdateChildSynthetic(
+        this, GetIsSyntheticDocumentContainer());
   }
 }
 
@@ -3242,8 +3245,8 @@ bool BrowsingContext::CanSet(FieldIndex<IDX_UseGlobalHistory>,
 }
 
 auto BrowsingContext::CanSet(FieldIndex<IDX_UserAgentOverride>,
-                             const nsString& aUserAgent,
-                             ContentParent* aSource) -> CanSetResult {
+                             const nsString& aUserAgent, ContentParent* aSource)
+    -> CanSetResult {
   if (!IsTop()) {
     return CanSetResult::Deny;
   }
@@ -3252,8 +3255,8 @@ auto BrowsingContext::CanSet(FieldIndex<IDX_UserAgentOverride>,
 }
 
 auto BrowsingContext::CanSet(FieldIndex<IDX_PlatformOverride>,
-                             const nsString& aPlatform,
-                             ContentParent* aSource) -> CanSetResult {
+                             const nsString& aPlatform, ContentParent* aSource)
+    -> CanSetResult {
   if (!IsTop()) {
     return CanSetResult::Deny;
   }
@@ -3287,8 +3290,8 @@ bool BrowsingContext::CanSet(FieldIndex<IDX_EmbedderElementType>,
 }
 
 auto BrowsingContext::CanSet(FieldIndex<IDX_CurrentInnerWindowId>,
-                             const uint64_t& aValue,
-                             ContentParent* aSource) -> CanSetResult {
+                             const uint64_t& aValue, ContentParent* aSource)
+    -> CanSetResult {
   // Generally allow clearing this. We may want to be more precise about this
   // check in the future.
   if (aValue == 0) {
@@ -3829,9 +3832,8 @@ void BrowsingContext::HistoryGo(
     RefPtr<CanonicalBrowsingContext> self = Canonical();
     aResolver(self->HistoryGo(
         aOffset, aHistoryEpoch, aRequireUserInteraction, aUserActivation,
-        Canonical()->GetContentParent()
-            ? Some(Canonical()->GetContentParent()->ChildID())
-            : Nothing()));
+        self->GetContentParent() ? Some(self->GetContentParent()->ChildID())
+                                 : Nothing()));
   }
 }
 

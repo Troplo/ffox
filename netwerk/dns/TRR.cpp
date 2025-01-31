@@ -50,8 +50,9 @@
 namespace mozilla {
 namespace net {
 
-NS_IMPL_ISUPPORTS(TRR, nsIHttpPushListener, nsIInterfaceRequestor,
-                  nsIStreamListener, nsIRunnable, nsITimerCallback)
+NS_IMPL_ISUPPORTS_INHERITED(TRR, Runnable, nsIHttpPushListener,
+                            nsIInterfaceRequestor, nsIStreamListener,
+                            nsITimerCallback)
 
 // when firing off a normal A or AAAA query
 TRR::TRR(AHostResolver* aResolver, nsHostRecord* aRec, enum TrrType aType)
@@ -352,7 +353,7 @@ nsresult TRR::SendHTTPRequest() {
         LOG(("TRR::SendHTTPRequest use conn info:%s\n",
              trrConnInfo->HashKey().get()));
       } else {
-        MOZ_DIAGNOSTIC_ASSERT(false);
+        MOZ_DIAGNOSTIC_CRASH("host not equal to trrConnInfo origin");
       }
     } else {
       TRRService::Get()->InitTRRConnectionInfo();
@@ -438,11 +439,6 @@ nsresult TRR::SetupTRRServiceChannelInternal(nsIHttpChannel* aChannel,
   // set the *default* response content type
   if (NS_FAILED(httpChannel->SetContentType(aContentType))) {
     LOG(("TRR::SetupTRRServiceChannelInternal: couldn't set content-type!\n"));
-  }
-
-  nsCOMPtr<nsITimedChannel> timedChan(do_QueryInterface(httpChannel));
-  if (timedChan) {
-    timedChan->SetTimingEnabled(true);
   }
 
   return NS_OK;
@@ -946,9 +942,11 @@ nsresult TRR::FollowCname(nsIChannel* aChannel) {
 nsresult TRR::On200Response(nsIChannel* aChannel) {
   // decode body and create an AddrInfo struct for the response
   nsClassHashtable<nsCStringHashKey, DOHresp> additionalRecords;
-  RefPtr<TypeHostRecord> typeRec = do_QueryObject(mRec);
-  if (typeRec && typeRec->mOriginHost) {
-    GetOrCreateDNSPacket()->SetOriginHost(typeRec->mOriginHost);
+  if (RefPtr<TypeHostRecord> typeRec = do_QueryObject(mRec)) {
+    MutexAutoLock lock(typeRec->mResultsLock);
+    if (typeRec->mOriginHost) {
+      GetOrCreateDNSPacket()->SetOriginHost(typeRec->mOriginHost);
+    }
   }
   nsresult rv = GetOrCreateDNSPacket()->Decode(
       mHost, mType, mCname, StaticPrefs::network_trr_allow_rfc1918(), mDNS,

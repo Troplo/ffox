@@ -87,6 +87,7 @@ class DataTransfer final : public nsISupports, public nsWrapperCache {
                bool aIsExternal, bool aUserCancelled,
                bool aIsCrossDomainSubFrameDrop,
                mozilla::Maybe<nsIClipboard::ClipboardType> aClipboardType,
+               nsCOMPtr<nsIClipboardDataSnapshot> aClipboardDataSnapshot,
                DataTransferItemList* aItems, Element* aDragImage,
                uint32_t aDragImageX, uint32_t aDragImageY,
                bool aShowFailAnimation);
@@ -268,7 +269,7 @@ class DataTransfer final : public nsISupports, public nsWrapperCache {
    */
   uint32_t DropEffectInt() const { return mDropEffect; }
   void SetDropEffectInt(uint32_t aDropEffectInt) {
-    MOZ_RELEASE_ASSERT(aDropEffectInt < ArrayLength(sEffects),
+    MOZ_RELEASE_ASSERT(aDropEffectInt < std::size(sEffects),
                        "Bogus drop effect value");
     mDropEffect = aDropEffectInt;
   }
@@ -443,6 +444,11 @@ class DataTransfer final : public nsISupports, public nsWrapperCache {
       mozilla::Span<const char> aString,
       std::function<void(ParseExternalCustomTypesStringData&&)>&& aCallback);
 
+  // Clears this DataTransfer that was used for paste
+  void ClearForPaste();
+
+  bool HasPrivateHTMLFlavor() const;
+
  protected:
   // Retrieve a list of clipboard formats supported
   //
@@ -531,9 +537,8 @@ class DataTransfer final : public nsISupports, public nsWrapperCache {
   // drag and drop.
   mozilla::Maybe<nsIClipboard::ClipboardType> mClipboardType;
 
-  // The nsIClipboardDataSnapshot that is used for getting clipboard formats.
-  // XXXedgar we should get the actual data from this in the future, see bug
-  // 1879401.
+  // The nsIClipboardDataSnapshot that is used for getting clipboard formats and
+  // data.
   nsCOMPtr<nsIClipboardDataSnapshot> mClipboardDataSnapshot;
 
   // The items contained with the DataTransfer

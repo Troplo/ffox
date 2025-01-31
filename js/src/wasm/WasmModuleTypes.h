@@ -237,22 +237,6 @@ WASM_DECLARE_CACHEABLE_POD(FuncDesc);
 
 using FuncDescVector = Vector<FuncDesc, 0, SystemAllocPolicy>;
 
-struct FuncDefRange {
-  explicit FuncDefRange(uint32_t bytecodeOffset, uint32_t bodyLength)
-      : bytecodeOffset(bytecodeOffset), bodyLength(bodyLength) {}
-
-  // Bytecode offset of the beginning of the function body
-  uint32_t bytecodeOffset = 0;
-  // Length of the body, in bytes
-  uint32_t bodyLength = 0;
-
-  WASM_CHECK_CACHEABLE_POD(bytecodeOffset, bodyLength);
-};
-
-WASM_DECLARE_CACHEABLE_POD(FuncDefRange);
-
-using FuncDefRangeVector = Vector<FuncDefRange, 0, SystemAllocPolicy>;
-
 struct CallRefMetricsRange {
   explicit CallRefMetricsRange() {}
   explicit CallRefMetricsRange(uint32_t begin, uint32_t length)
@@ -278,41 +262,87 @@ struct CallRefMetricsRange {
 // 1:1 with the non-threadsafe CallRefMetrics that is stored on the instance.
 //
 // This class must be thread safe, as it's read and written from different
-// threads.
+// threads.  It is an array of up to 3 function indices, and the entire array
+// can be read/written atomically.  Each function index is represented in 20
+// bits, and 2 of the remaining 4 bits are used to indicate the array's current
+// size.
+//
+// Although unstated and unenforced here, it is expected that -- in the case
+// where more than one function index is stored -- the func index at `.get(0)`
+// is the "most important" in terms of inlining, that at `.get(1)` is the
+// second most important, etc.
+//
+// Note that the fact that this array has 3 elements is unrelated to the value
+// of CallRefMetrics::NUM_TRACKED.  The target-collection mechanism will work
+// properly even if CallRefMetrics::NUM_TRACKED is greater than 3, in which
+// case at most only 3 targets (probably the hottest ones) will get baked into
+// the CallRefHint.
 class CallRefHint {
  public:
-  using Repr = uint32_t;
+  using Repr = uint64_t;
+  static constexpr size_t NUM_ENTRIES = 3;
 
  private:
-  Repr state_;
+  // Representation is:
+  //
+  // 63  61   42  41   22  21    2  1    0
+  // |   |     |  |     |  |     |  |    |
+  // 00  index#2  index#1  index#0  length
+  static constexpr uint32_t ElemBits = 20;
+  static constexpr uint32_t LengthBits = 2;
+  static constexpr uint64_t Mask = (uint64_t(1) << ElemBits) - 1;
+  static_assert(js::wasm::MaxFuncs <= Mask);
+  static_assert(3 * ElemBits + LengthBits <= 8 * sizeof(Repr));
 
-  static constexpr Repr UnknownState = 0;
-  static constexpr Repr FirstInlineFuncState = UnknownState + 1;
+  Repr state_ = 0;
 
-  explicit CallRefHint(uint32_t state) : state_(state) {}
+  bool valid() const {
+    // Shift out the length field and all of the entries that the length field
+    // implies are occupied.  What remains should be all zeroes.
+    return (state_ >> (length() * ElemBits + LengthBits)) == 0;
+  }
 
  public:
-  static CallRefHint unknown() { return CallRefHint(UnknownState); }
-  static CallRefHint inlineFunc(uint32_t funcIndex) {
-    return CallRefHint(FirstInlineFuncState + funcIndex);
+  // We omit the obvious single-argument constructor that takes a `Repr`,
+  // because that is too easily confused with one that takes a function index,
+  // and in any case it is not necessary.
+
+  uint32_t length() const { return state_ & 3; }
+  bool empty() const { return length() == 0; }
+  bool full() const { return length() == 3; }
+
+  uint32_t get(uint32_t index) const {
+    MOZ_ASSERT(index < length());
+    uint64_t res = (state_ >> (index * ElemBits + LengthBits)) & Mask;
+    return uint32_t(res);
+  }
+  void set(uint32_t index, uint32_t funcIndex) {
+    MOZ_ASSERT(index < length());
+    MOZ_ASSERT(funcIndex <= Mask);
+    uint32_t shift = index * ElemBits + LengthBits;
+    uint64_t c = uint64_t(Mask) << shift;
+    uint64_t s = uint64_t(funcIndex) << shift;
+    state_ = (state_ & ~c) | s;
   }
 
-  static CallRefHint fromRepr(Repr repr) { return CallRefHint(repr); }
+  void append(uint32_t funcIndex) {
+    MOZ_RELEASE_ASSERT(!full());
+    // We know the lowest two bits of `state_` are not 0b11, so we can
+    // increment the length field by incrementing `state_` as a whole.
+    state_++;
+    set(length() - 1, funcIndex);
+  }
+
+  static CallRefHint fromRepr(Repr repr) {
+    CallRefHint res;
+    res.state_ = repr;
+    MOZ_ASSERT(res.valid());
+    return res;
+  }
   Repr toRepr() const { return state_; }
-
-  // This call_ref is to an unknown target, emit a normal indirect call.
-  bool isUnknown() const { return state_ == UnknownState; }
-
-  // This call_ref is to a single target from the same instance, try to inline
-  // it if there is budget for it.
-  bool isInlineFunc() const { return state_ >= FirstInlineFuncState; }
-
-  // The function index to inline.
-  uint32_t inlineFuncIndex() const {
-    MOZ_ASSERT(isInlineFunc());
-    return state_ - FirstInlineFuncState;
-  }
 };
+
+static_assert(sizeof(CallRefHint) == sizeof(CallRefHint::Repr));
 
 using MutableCallRefHint = mozilla::Atomic<CallRefHint::Repr>;
 using MutableCallRefHints =
@@ -500,23 +530,29 @@ using GlobalDescVector = Vector<GlobalDesc, 0, SystemAllocPolicy>;
 using TagOffsetVector = Vector<uint32_t, 2, SystemAllocPolicy>;
 
 class TagType : public AtomicRefCounted<TagType> {
-  ValTypeVector argTypes_;
+  SharedTypeDef type_;
   TagOffsetVector argOffsets_;
   uint32_t size_;
 
  public:
   TagType() : size_(0) {}
-  ~TagType();
 
-  const ValTypeVector& argTypes() const { return argTypes_; }
+  [[nodiscard]] bool initialize(const SharedTypeDef& funcType);
+
+  const TypeDef& type() const { return *type_; }
+  const ValTypeVector& argTypes() const { return type_->funcType().args(); }
   const TagOffsetVector& argOffsets() const { return argOffsets_; }
-  ResultType resultType() const { return ResultType::Vector(argTypes_); }
+  ResultType resultType() const { return ResultType::Vector(argTypes()); }
 
   uint32_t tagSize() const { return size_; }
 
-  [[nodiscard]] bool initialize(ValTypeVector&& argTypes);
+  static bool matches(const TagType& a, const TagType& b) {
+    // Note that this does NOT use subtyping. This is deliberate per the spec.
+    return a.type_ == b.type_;
+  }
 
   size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
+  WASM_DECLARE_FRIEND_SERIALIZE(TagType);
 };
 
 using MutableTagType = RefPtr<TagType>;
@@ -710,11 +746,13 @@ enum class LimitsKind {
   Table,
 };
 
+extern const char* ToString(LimitsKind kind);
+
 // Represents the resizable limits of memories and tables.
 
 struct Limits {
-  // `indexType` may be I64 when memory64 is enabled.
-  IndexType indexType;
+  // `addressType` may be I64 when memory64 is enabled.
+  AddressType addressType;
 
   // The initial and maximum limit. The unit is pages for memories and elements
   // for tables.
@@ -725,13 +763,13 @@ struct Limits {
   // memories.
   Shareable shared;
 
-  WASM_CHECK_CACHEABLE_POD(indexType, initial, maximum, shared);
+  WASM_CHECK_CACHEABLE_POD(addressType, initial, maximum, shared);
 
   Limits() = default;
   explicit Limits(uint64_t initial,
                   const mozilla::Maybe<uint64_t>& maximum = mozilla::Nothing(),
                   Shareable shared = Shareable::False)
-      : indexType(IndexType::I32),
+      : addressType(AddressType::I32),
         initial(initial),
         maximum(maximum),
         shared(shared) {}
@@ -759,7 +797,7 @@ struct MemoryDesc {
            limits.maximum.value() < (0x100000000 / PageSize);
   }
 
-  IndexType indexType() const { return limits.indexType; }
+  AddressType addressType() const { return limits.addressType; }
 
   // The initial length of this memory in pages.
   Pages initialPages() const { return Pages(limits.initial); }
@@ -771,13 +809,13 @@ struct MemoryDesc {
 
   // The initial length of this memory in bytes. Only valid for memory32.
   uint64_t initialLength32() const {
-    MOZ_ASSERT(indexType() == IndexType::I32);
+    MOZ_ASSERT(addressType() == AddressType::I32);
     // See static_assert after MemoryDesc for why this is safe.
     return limits.initial * PageSize;
   }
 
   uint64_t initialLength64() const {
-    MOZ_ASSERT(indexType() == IndexType::I64);
+    MOZ_ASSERT(addressType() == AddressType::I64);
     return limits.initial * PageSize;
   }
 
@@ -812,7 +850,7 @@ struct TableDesc {
         isAsmJS(isAsmJS),
         initExpr(std::move(initExpr)) {}
 
-  IndexType indexType() const { return limits.indexType; }
+  AddressType addressType() const { return limits.addressType; }
 
   uint64_t initialLength() const { return limits.initial; }
 

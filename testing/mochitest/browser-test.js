@@ -413,8 +413,8 @@ Tester.prototype = {
     let baseMsg = timedOut
       ? "Found a {elt} after previous test timed out"
       : this.currentTest
-      ? "Found an unexpected {elt} at the end of test run"
-      : "Found an unexpected {elt}";
+        ? "Found an unexpected {elt} at the end of test run"
+        : "Found an unexpected {elt}";
 
     // Remove stale tabs
     if (
@@ -806,6 +806,8 @@ Tester.prototype = {
 
       // eslint-disable-next-line no-undef
       await new Promise(resolve => SpecialPowers.flushPrefEnv(resolve));
+
+      window.SpecialPowers.cleanupAllClipboard();
 
       if (gConfig.cleanupCrashes) {
         let gdir = Services.dirsvc.get("UAppData", Ci.nsIFile);

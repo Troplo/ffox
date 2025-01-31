@@ -463,8 +463,10 @@ ChromeUtils.defineLazyGetter(this, "PopupNotifications", () => {
         return anchorElement;
       }
       let fallback = [
+        document.getElementById("searchmode-switcher-icon"),
         document.getElementById("identity-icon"),
         gURLBar.querySelector(".urlbar-search-button"),
+        document.getElementById("remote-control-icon"),
       ];
       return fallback.find(element => element?.checkVisibility()) ?? null;
     };
@@ -2524,10 +2526,8 @@ function FillHistoryMenu(event) {
       if (
         BrowserUtils.navigationRequireUserInteraction &&
         entry.hasUserInteraction === false &&
-        // Always allow going to the first and last navigation points.
+        // Always list the current and last navigation points.
         j != end - 1 &&
-        j != start &&
-        // Always display the current entry
         j != index
       ) {
         continue;
@@ -4653,10 +4653,12 @@ function updateToggleControlLabel(control) {
   control.setAttribute("label", control.getAttribute(`label-${prefix}checked`));
 }
 
-var TabletModeUpdater = {
+// Propagates Win10's tablet mode into the browser CSS. (Win11's tablet mode is
+// more like non-tablet mode and has no need for this.)
+const Win10TabletModeUpdater = {
   init() {
     if (AppConstants.platform == "win") {
-      this.update(WindowsUIUtils.inTabletMode);
+      this.update(WindowsUIUtils.inWin10TabletMode);
       Services.obs.addObserver(this, "tablet-mode-change");
     }
   },
@@ -4668,18 +4670,14 @@ var TabletModeUpdater = {
   },
 
   observe(subject, topic, data) {
-    this.update(data == "tablet-mode");
+    this.update(data == "win10-tablet-mode");
   },
 
   update(isInTabletMode) {
-    let wasInTabletMode = document.documentElement.hasAttribute("tabletmode");
     if (isInTabletMode) {
-      document.documentElement.setAttribute("tabletmode", "true");
+      document.documentElement.setAttribute("win10-tablet-mode", "true");
     } else {
-      document.documentElement.removeAttribute("tabletmode");
-    }
-    if (wasInTabletMode != isInTabletMode) {
-      gUIDensity.update();
+      document.documentElement.removeAttribute("win10-tablet-mode");
     }
   },
 };
@@ -4695,23 +4693,32 @@ var gUIDensity = {
   MODE_TOUCH: 2,
   uiDensityPref: "browser.uidensity",
   autoTouchModePref: "browser.touchmode.auto",
+  knownPrefs: new Set(["browser.uidensity", "browser.touchmode.auto"]),
 
   init() {
     this.update();
+    Services.obs.addObserver(this, "tablet-mode-change");
     Services.prefs.addObserver(this.uiDensityPref, this);
     Services.prefs.addObserver(this.autoTouchModePref, this);
   },
 
   uninit() {
+    Services.obs.removeObserver(this, "tablet-mode-change");
     Services.prefs.removeObserver(this.uiDensityPref, this);
     Services.prefs.removeObserver(this.autoTouchModePref, this);
   },
 
   observe(aSubject, aTopic, aPrefName) {
-    if (
-      aTopic != "nsPref:changed" ||
-      (aPrefName != this.uiDensityPref && aPrefName != this.autoTouchModePref)
-    ) {
+    const ok = (() => {
+      if (aTopic == "tablet-mode-change") {
+        return true;
+      }
+      if (aTopic == "nsPref:changed" && this.knownPrefs.has(aPrefName)) {
+        return true;
+      }
+      return false;
+    })();
+    if (!ok) {
       return;
     }
 
@@ -4719,13 +4726,14 @@ var gUIDensity = {
   },
 
   getCurrentDensity() {
-    // Automatically override the uidensity to touch in Windows tablet mode.
-    if (
-      AppConstants.platform == "win" &&
-      WindowsUIUtils.inTabletMode &&
-      Services.prefs.getBoolPref(this.autoTouchModePref)
-    ) {
-      return { mode: this.MODE_TOUCH, overridden: true };
+    // Automatically override the uidensity to touch in Windows tablet mode
+    // (either Win10 or Win11).
+    if (AppConstants.platform == "win") {
+      const inTablet =
+        WindowsUIUtils.inWin10TabletMode || WindowsUIUtils.inWin11TabletMode;
+      if (inTablet && Services.prefs.getBoolPref(this.autoTouchModePref)) {
+        return { mode: this.MODE_TOUCH, overridden: true };
+      }
     }
     return {
       mode: Services.prefs.getIntPref(this.uiDensityPref),
@@ -5491,11 +5499,11 @@ var WebAuthnPromptHelper = {
     } else if (data.prompt.type == "uv-invalid") {
       let retriesLeft = data.prompt.retries;
       let dialogText;
-      if (retriesLeft == 0) {
+      if (retriesLeft === 0) {
         // We can skip that because it will either be replaced
         // by uv-blocked or by PIN-prompt
         return;
-      } else if (retriesLeft < 0) {
+      } else if (retriesLeft == null || retriesLeft < 0) {
         dialogText = this._l10n.formatValueSync(
           "webauthn-uv-invalid-short-prompt"
         );
@@ -5531,11 +5539,13 @@ var WebAuthnPromptHelper = {
     let dialogText;
     if (!wasInvalid) {
       dialogText = this._l10n.formatValueSync("webauthn-pin-required-prompt");
-    } else if (retriesLeft < 0 || retriesLeft > 3) {
+    } else if (retriesLeft == null || retriesLeft < 0 || retriesLeft > 3) {
       // The token will need to be power cycled after three incorrect attempts,
       // so we show a short error message that does not include retriesLeft. It
       // would be confusing to display retriesLeft at this point, as the user
       // will feel that they only get three attempts.
+      // We also only show the short prompt in the case the token doesn't
+      // support/send a retries-counter. Then we simply don't know how many are left.
       dialogText = this._l10n.formatValueSync(
         "webauthn-pin-invalid-short-prompt"
       );
@@ -5836,7 +5846,7 @@ function warnAboutClosingWindow() {
 
   if (!isPBWindow && !toolbar.visible) {
     return gBrowser.warnAboutClosingTabs(
-      gBrowser.openTabCount,
+      gBrowser.openTabs.length,
       gBrowser.closingTabsEnum.ALL
     );
   }
@@ -5876,7 +5886,7 @@ function warnAboutClosingWindow() {
     return (
       isPBWindow ||
       gBrowser.warnAboutClosingTabs(
-        gBrowser.openTabCount,
+        gBrowser.openTabs.length,
         gBrowser.closingTabsEnum.ALL
       )
     );
@@ -5901,7 +5911,7 @@ function warnAboutClosingWindow() {
     AppConstants.platform != "macosx" ||
     isPBWindow ||
     gBrowser.warnAboutClosingTabs(
-      gBrowser.openTabCount,
+      gBrowser.openTabs.length,
       gBrowser.closingTabsEnum.ALL
     )
   );
@@ -6632,7 +6642,7 @@ var ToolbarIconColor = {
   _windowState: {
     active: false,
     fullscreen: false,
-    tabsintitlebar: false,
+    customtitlebar: false,
   },
   init() {
     this._initialized = true;
@@ -6699,8 +6709,8 @@ var ToolbarIconColor = {
       case "toolbarvisibilitychange":
         // toolbar changes dont require reset of the cached color values
         break;
-      case "tabsintitlebar":
-        this._windowState.tabsintitlebar = reasonValue;
+      case "customtitlebar":
+        this._windowState.customtitlebar = reasonValue;
         break;
     }
 
@@ -6767,26 +6777,34 @@ var PanicButtonNotifier = {
       this.createPanelIfNeeded();
       let popup = document.getElementById("panic-button-success-notification");
       popup.hidden = false;
+
       // To close the popup in 3 seconds after the popup is shown but left uninteracted.
-      let onTimeout = () => {
-        PanicButtonNotifier.close();
-        removeListeners();
+      let closePopup = () => {
+        popup.hidePopup();
       };
       popup.addEventListener("popupshown", function () {
-        PanicButtonNotifier.timer = setTimeout(onTimeout, 3000);
+        PanicButtonNotifier.timer = setTimeout(closePopup, 3000);
       });
+
+      let closeButton = document.getElementById(
+        "panic-button-success-closebutton"
+      );
+      closeButton.addEventListener("command", closePopup);
+
       // To prevent the popup from closing when user tries to interact with the
       // popup using mouse or keyboard.
       let onUserInteractsWithPopup = () => {
         clearTimeout(PanicButtonNotifier.timer);
-        removeListeners();
       };
       popup.addEventListener("mouseover", onUserInteractsWithPopup);
       window.addEventListener("keydown", onUserInteractsWithPopup);
+
       let removeListeners = () => {
         popup.removeEventListener("mouseover", onUserInteractsWithPopup);
         window.removeEventListener("keydown", onUserInteractsWithPopup);
         popup.removeEventListener("popuphidden", removeListeners);
+        closeButton.removeEventListener("command", closePopup);
+        clearTimeout(PanicButtonNotifier.timer);
       };
       popup.addEventListener("popuphidden", removeListeners);
 
@@ -6796,10 +6814,6 @@ var PanicButtonNotifier = {
     } catch (ex) {
       console.error(ex);
     }
-  },
-  close() {
-    let popup = document.getElementById("panic-button-success-notification");
-    popup.hidePopup();
   },
 };
 

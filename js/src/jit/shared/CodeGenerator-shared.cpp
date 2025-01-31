@@ -100,7 +100,6 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator* gen, LIRGraph* graph,
       // argument stack depth separately.
       MOZ_ASSERT(graph->argumentSlotCount() == 0);
 
-#ifdef ENABLE_WASM_TAIL_CALLS
       // An MWasmCall does not align the stack pointer at calls sites but
       // instead relies on the a priori stack adjustment. We need to insert
       // padding so that pushing the callee's frame maintains frame alignment.
@@ -115,15 +114,6 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator* gen, LIRGraph* graph,
 
       // Add the callee frame padding and stack args to frameDepth.
       frameDepth_ += calleeFramePadding + stackArgsWithPadding;
-#else
-      frameDepth_ += gen->wasmMaxStackArgBytes();
-
-      // An MWasmCall does not align the stack pointer at calls sites but
-      // instead relies on the a priori stack adjustment. This must be the
-      // last adjustment of frameDepth_.
-      frameDepth_ += ComputeByteAlignment(sizeof(wasm::Frame) + frameDepth_,
-                                          WasmStackAlignment);
-#endif
     }
 
 #ifdef JS_CODEGEN_ARM64
@@ -997,8 +987,8 @@ void CodeGeneratorShared::emitTruncateDouble(FloatRegister src, Register dest,
   MOZ_ASSERT(mir->isTruncateToInt32() || mir->isWasmBuiltinTruncateToInt32());
   wasm::BytecodeOffset bytecodeOffset =
       mir->isTruncateToInt32()
-          ? mir->toTruncateToInt32()->bytecodeOffset()
-          : mir->toWasmBuiltinTruncateToInt32()->bytecodeOffset();
+          ? mir->toTruncateToInt32()->trapSiteDesc().bytecodeOffset
+          : mir->toWasmBuiltinTruncateToInt32()->trapSiteDesc().bytecodeOffset;
   OutOfLineCode* ool = oolTruncateDouble(src, dest, mir, bytecodeOffset);
 
   masm.branchTruncateDoubleMaybeModUint32(src, dest, ool->entry());
@@ -1010,8 +1000,8 @@ void CodeGeneratorShared::emitTruncateFloat32(FloatRegister src, Register dest,
   MOZ_ASSERT(mir->isTruncateToInt32() || mir->isWasmBuiltinTruncateToInt32());
   wasm::BytecodeOffset bytecodeOffset =
       mir->isTruncateToInt32()
-          ? mir->toTruncateToInt32()->bytecodeOffset()
-          : mir->toWasmBuiltinTruncateToInt32()->bytecodeOffset();
+          ? mir->toTruncateToInt32()->trapSiteDesc().bytecodeOffset
+          : mir->toWasmBuiltinTruncateToInt32()->trapSiteDesc().bytecodeOffset;
   OutOfLineTruncateSlow* ool = new (alloc())
       OutOfLineTruncateSlow(src, dest, /* float32 */ true, bytecodeOffset);
   addOutOfLineCode(ool, mir);

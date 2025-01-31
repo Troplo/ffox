@@ -138,6 +138,10 @@ const char* const XPCJSRuntime::mStrings[] = {
     "indexedDB",        // IDX_INDEXEDDB
     "structuredClone",  // IDX_STRUCTUREDCLONE
     "locks",            // IDX_LOCKS
+#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+    "suppressed",  // IDX_SUPPRESSED
+    "error",       // IDX_ERROR
+#endif
 };
 
 /***************************************************************************/
@@ -1711,12 +1715,6 @@ static void ReportClassStats(const ClassInfo& classInfo, const nsACString& path,
                  "Data for global objects.");
   }
 
-  if (classInfo.objectsMallocHeapGlobalVarNamesSet > 0) {
-    REPORT_BYTES(path + "objects/malloc-heap/global-varnames-set"_ns, KIND_HEAP,
-                 classInfo.objectsMallocHeapGlobalVarNamesSet,
-                 "Set of global names.");
-  }
-
   if (classInfo.objectsMallocHeapMisc > 0) {
     REPORT_BYTES(path + "objects/malloc-heap/misc"_ns, KIND_HEAP,
                  classInfo.objectsMallocHeapMisc, "Miscellaneous object data.");
@@ -2564,11 +2562,11 @@ static void AccumulateTelemetryCallback(JSMetric id, uint32_t sample) {
       Telemetry::Accumulate(Telemetry::NAME, sample); \
       break;
 
-    FOR_EACH_JS_METRIC(CASE_ACCUMULATE)
+    FOR_EACH_JS_LEGACY_METRIC(CASE_ACCUMULATE)
 #undef CASE_ACCUMULATE
 
     default:
-      MOZ_CRASH("Bad metric id");
+      break;
   }
   // clang-format on
 
@@ -2619,6 +2617,46 @@ static void AccumulateTelemetryCallback(JSMetric id, uint32_t sample) {
       glean::javascript_gc::slice_time.AccumulateRawDuration(
           TimeDuration::FromMilliseconds(sample));
       break;
+    case JSMetric::ION_COMPILE_TIME:
+      glean::javascript_ion::compile_time.AccumulateRawDuration(
+          TimeDuration::FromMicroseconds(sample));
+      break;
+    case JSMetric::GC_BUDGET_MS_2:
+      glean::javascript_gc::budget.AccumulateRawDuration(
+          TimeDuration::FromMilliseconds(sample));
+      break;
+    case JSMetric::GC_BUDGET_OVERRUN:
+      glean::javascript_gc::budget_overrun.AccumulateRawDuration(
+          TimeDuration::FromMicroseconds(sample));
+      break;
+    case JSMetric::GC_ANIMATION_MS:
+      glean::javascript_gc::animation.AccumulateRawDuration(
+          TimeDuration::FromMilliseconds(sample));
+      break;
+    case JSMetric::GC_MAX_PAUSE_MS_2:
+      glean::javascript_gc::max_pause.AccumulateRawDuration(
+          TimeDuration::FromMilliseconds(sample));
+      break;
+    case JSMetric::GC_MARK_GRAY_MS_2:
+      glean::javascript_gc::mark_gray.AccumulateRawDuration(
+          TimeDuration::FromMilliseconds(sample));
+      break;
+    case JSMetric::GC_MARK_WEAK_MS:
+      glean::javascript_gc::mark_weak.AccumulateRawDuration(
+          TimeDuration::FromMilliseconds(sample));
+      break;
+    case JSMetric::GC_TIME_BETWEEN_S:
+      glean::javascript_gc::time_between.AccumulateRawDuration(
+          TimeDuration::FromSeconds(sample));
+      break;
+    case JSMetric::GC_TIME_BETWEEN_SLICES_MS:
+      glean::javascript_gc::time_between_slices.AccumulateRawDuration(
+          TimeDuration::FromMilliseconds(sample));
+      break;
+    case JSMetric::GC_TASK_START_DELAY_US:
+      glean::javascript_gc::task_start_delay.AccumulateRawDuration(
+          TimeDuration::FromMicroseconds(sample));
+      break;
     default:
       // The rest aren't relayed to Glean.
       break;
@@ -2635,6 +2673,12 @@ static void SetUseCounterCallback(JSObject* obj, JSUseCounter counter) {
       return;
     case JSUseCounter::WASM_LEGACY_EXCEPTIONS:
       SetUseCounter(obj, eUseCounter_custom_JS_wasm_legacy_exceptions);
+      return;
+    case JSUseCounter::ISHTMLDDA_FUSE:
+      SetUseCounter(obj, eUseCounter_custom_JS_isHTMLDDA_fuse);
+      return;
+    case JSUseCounter::OPTIMIZE_GET_ITERATOR_FUSE:
+      SetUseCounter(obj, eUseCounter_custom_JS_optimizeGetIterator_fuse);
       return;
     case JSUseCounter::COUNT:
       break;

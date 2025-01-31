@@ -91,8 +91,9 @@ public:
 
   MOZ_CAN_RUN_SCRIPT
   void MakeCall(JSContext* aCx, dom::UniFFICallbackHandler* aJsHandler, ErrorResult& aError) override {
-    Sequence<dom::UniFFIScaffoldingValue> uniffiArgs;
+    nsTArray<dom::UniFFIScaffoldingValue> uniffiArgs;
 
+    {%- if !handler.arguments.is_empty() %}
     // Setup
     if (!uniffiArgs.AppendElements({{ handler.arguments.len() }}, mozilla::fallible)) {
       aError.Throw(NS_ERROR_OUT_OF_MEMORY);
@@ -110,6 +111,7 @@ public:
         return;
     }
     {%- endfor %}
+    {%- endif %}
 
     // Stores the return value.  For now, we currently don't do anything with it, since we only support
     // fire-and-forget callbacks.
@@ -215,7 +217,9 @@ void DeregisterCallbackHandler(uint64_t aInterfaceId, ErrorResult& aError) {
 {%- for (preprocessor_condition, scaffolding_calls, preprocessor_condition_end) in all_scaffolding_calls.iter() %}
 {{ preprocessor_condition }}
 {%- for scaffolding_call in scaffolding_calls %}
-class {{ scaffolding_call.handler_class_name }} : public UniffiHandlerBase {
+{%- match scaffolding_call.async_info %}
+{%- when None %}
+class {{ scaffolding_call.handler_class_name }} : public UniffiSyncCallHandler {
 private:
   // PrepareRustArgs stores the resulting arguments in these fields
   {%- for arg in scaffolding_call.arguments %}
@@ -239,8 +243,7 @@ public:
     {%- endfor %}
   }
 
-  void MakeRustCall() override {
-    RustCallStatus callStatus{};
+  void MakeRustCall(RustCallStatus* aOutStatus) override {
     {%- match scaffolding_call.return_type %}
     {%- when Some(return_type) %}
     mUniffiReturnValue = {{ return_type.scaffolding_converter }}::FromRust(
@@ -248,7 +251,7 @@ public:
         {%- for arg in scaffolding_call.arguments %}
         {{ arg.scaffolding_converter }}::IntoRust(std::move({{ arg.var_name }})),
         {%- endfor %}
-        &callStatus
+        aOutStatus
       )
     );
     {%- else %}
@@ -256,14 +259,9 @@ public:
       {%- for arg in scaffolding_call.arguments %}
       {{ arg.scaffolding_converter }}::IntoRust(std::move({{ arg.var_name }})),
       {%- endfor %}
-      &callStatus
+      aOutStatus
     );
     {%- endmatch %}
-
-    mUniffiCallStatusCode = callStatus.code;
-    if (callStatus.error_buf.data) {
-      mUniffiCallStatusErrorBuf = OwnedRustBuffer(callStatus.error_buf);
-    }
   }
 
   virtual void ExtractSuccessfulCallResult(JSContext* aCx, dom::Optional<dom::UniFFIScaffoldingValue>& aDest, ErrorResult& aError) override {
@@ -279,19 +277,79 @@ public:
     {%- endmatch %}
   }
 };
+{%- when Some(async_info) %}
+class {{ scaffolding_call.handler_class_name }} : public UniffiAsyncCallHandler {
+public:
+  {{ scaffolding_call.handler_class_name }}() : UniffiAsyncCallHandler({{ async_info.poll_fn }}, {{ async_info.free_fn }}) { }
+
+private:
+  // Complete stores the result of the call in mUniffiReturnValue
+  {%- match scaffolding_call.return_type %}
+  {%- when Some(return_type) %}
+  typename {{ return_type.scaffolding_converter }}::IntermediateType mUniffiReturnValue;
+  {%- else %}
+  {%- endmatch %}
+
+protected:
+  // Convert a sequence of JS arguments and call the scaffolding function.
+  // Always called on the main thread since async Rust calls don't block, they
+  // return a future.
+  void PrepareArgsAndMakeRustCall(const dom::Sequence<dom::UniFFIScaffoldingValue>& aArgs, ErrorResult& aError) override {
+    {%- for arg in scaffolding_call.arguments %}
+    typename {{ arg.scaffolding_converter }}::IntermediateType {{ arg.var_name }};
+    {{ arg.scaffolding_converter }}::FromJs(aArgs[{{ loop.index0 }}], &{{ arg.var_name }}, aError);
+    if (aError.Failed()) {
+      return;
+    }
+    {%- endfor %}
+
+    mFutureHandle = {{ scaffolding_call.ffi_func_name }}(
+      {%- for arg in scaffolding_call.arguments %}
+      {{ arg.scaffolding_converter }}::IntoRust(std::move({{ arg.var_name }})){% if !loop.last %},{% endif %}
+      {%- endfor %}
+    );
+  }
+
+  void CallCompleteFn(RustCallStatus* aOutStatus) override {
+    {%- match scaffolding_call.return_type %}
+    {%- when Some(return_type) %}
+    mUniffiReturnValue = {{ return_type.scaffolding_converter }}::FromRust(
+      {{ async_info.complete_fn }}(mFutureHandle, aOutStatus));
+    {%- else %}
+    {{ async_info.complete_fn }}(mFutureHandle, aOutStatus);
+    {%- endmatch %}
+  }
+
+public:
+  void ExtractSuccessfulCallResult(JSContext* aCx, dom::Optional<dom::UniFFIScaffoldingValue>& aDest, ErrorResult& aError) override {
+    {%- match scaffolding_call.return_type %}
+    {%- when Some(return_type) %}
+    {{ return_type.scaffolding_converter }}::IntoJs(
+      aCx,
+      std::move(mUniffiReturnValue),
+      &aDest.Construct(),
+      aError
+    );
+    {%- else %}
+    {%- endmatch %}
+  }
+};
+{%- endmatch %}
 
 {%- endfor %}
 {{ preprocessor_condition_end }}
 {%- endfor %}
 
-UniquePtr<UniffiHandlerBase> GetHandler(uint64_t aId) {
+UniquePtr<UniffiSyncCallHandler> GetSyncCallHandler(uint64_t aId) {
   switch (aId) {
     {%- for (preprocessor_condition, scaffolding_calls, preprocessor_condition_end) in all_scaffolding_calls.iter() %}
 {{ preprocessor_condition }}
     {%- for call in scaffolding_calls %}
+    {%- if !call.is_async() %}
     case {{ call.function_id }}: {
       return MakeUnique<{{ call.handler_class_name }}>();
     }
+    {%- endif %}
     {%- endfor %}
 {{ preprocessor_condition_end }}
     {%- endfor %}
@@ -300,6 +358,26 @@ UniquePtr<UniffiHandlerBase> GetHandler(uint64_t aId) {
       return nullptr;
   }
 }
+
+UniquePtr<UniffiAsyncCallHandler> GetAsyncCallHandler(uint64_t aId) {
+  switch (aId) {
+    {%- for (preprocessor_condition, scaffolding_calls, preprocessor_condition_end) in all_scaffolding_calls.iter() %}
+{{ preprocessor_condition }}
+    {%- for call in scaffolding_calls %}
+    {%- if call.is_async() %}
+    case {{ call.function_id }}: {
+      return MakeUnique<{{ call.handler_class_name }}>();
+    }
+    {%- endif %}
+    {%- endfor %}
+{{ preprocessor_condition_end }}
+    {%- endfor %}
+
+    default:
+      return nullptr;
+  }
+}
+
 
 Maybe<already_AddRefed<UniFFIPointer>> ReadPointer(const GlobalObject& aGlobal, uint64_t aId, const ArrayBuffer& aArrayBuff, long aPosition, ErrorResult& aError) {
   const UniFFIPointerType* type;

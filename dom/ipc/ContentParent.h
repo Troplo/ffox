@@ -103,12 +103,8 @@ class RemoteWorkerServiceParent;
 class ThreadsafeContentParentHandle;
 struct CancelContentJSOptions;
 
-#define NS_CONTENTPARENT_IID                         \
-  {                                                  \
-    0xeeec9ebf, 0x8ecf, 0x4e38, {                    \
-      0x81, 0xda, 0xb7, 0x34, 0x13, 0x7e, 0xac, 0xf3 \
-    }                                                \
-  }
+#define NS_CONTENTPARENT_IID \
+  {0xeeec9ebf, 0x8ecf, 0x4e38, {0x81, 0xda, 0xb7, 0x34, 0x13, 0x7e, 0xac, 0xf3}}
 
 class ContentParent final : public PContentParent,
                             public nsIDOMProcessParent,
@@ -879,6 +875,7 @@ class ContentParent final : public PContentParent,
 
   bool DeallocPRemoteSpellcheckEngineParent(PRemoteSpellcheckEngineParent*);
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvCloneDocumentTreeInto(
       const MaybeDiscarded<BrowsingContext>& aSource,
       const MaybeDiscarded<BrowsingContext>& aTarget, PrintData&& aPrintData);
@@ -1000,19 +997,6 @@ class ContentParent final : public PContentParent,
       const nsTArray<RefPtr<nsIURI>>&);
 
   mozilla::ipc::IPCResult RecvSetURITitle(nsIURI* uri, const nsAString& title);
-
-  mozilla::ipc::IPCResult RecvShowAlert(nsIAlertNotification* aAlert);
-
-  mozilla::ipc::IPCResult RecvCloseAlert(const nsAString& aName,
-                                         bool aContextClosed);
-
-  mozilla::ipc::IPCResult RecvDisableNotifications(nsIPrincipal* aPrincipal);
-
-  mozilla::ipc::IPCResult RecvOpenNotificationSettings(
-      nsIPrincipal* aPrincipal);
-
-  mozilla::ipc::IPCResult RecvNotificationEvent(
-      const nsAString& aType, const NotificationEventData& aData);
 
   mozilla::ipc::IPCResult RecvLoadURIExternal(
       nsIURI* uri, nsIPrincipal* triggeringPrincipal,
@@ -1319,6 +1303,7 @@ class ContentParent final : public PContentParent,
       const bool& aCloneEntryChildren, const bool& aChannelExpired,
       const uint32_t& aCacheKey);
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvHistoryGo(
       const MaybeDiscarded<BrowsingContext>& aContext, int32_t aOffset,
       uint64_t aHistoryEpoch, bool aRequireUserInteraction,
@@ -1372,6 +1357,7 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvRemoveFromSessionHistory(
       const MaybeDiscarded<BrowsingContext>& aContext, const nsID& aChangeID);
 
+  MOZ_CAN_RUN_SCRIPT_BOUNDARY
   mozilla::ipc::IPCResult RecvHistoryReload(
       const MaybeDiscarded<BrowsingContext>& aContext,
       const uint32_t aReloadFlags);

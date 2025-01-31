@@ -29,7 +29,6 @@ var gExceptionPaths = [
   "chrome://activity-stream/content/data/content/tippytop/images/",
   "chrome://activity-stream/content/data/content/tippytop/favicons/",
   // These resources are referenced by messages delivered through Remote Settings
-  "chrome://activity-stream/content/data/content/assets/remote/",
   "chrome://activity-stream/content/data/content/assets/mobile-download-qr-new-user-cn.svg",
   "chrome://activity-stream/content/data/content/assets/mobile-download-qr-existing-user-cn.svg",
   "chrome://activity-stream/content/data/content/assets/mr-amo-collection.svg",
@@ -100,6 +99,9 @@ var gExceptionPaths = [
 
   // The ONNX runtime picks files to run programmaticaly
   "chrome://global/content/ml/",
+
+  // The profile avatars are directly referenced.
+  "chrome://browser/content/profiles/assets/",
 ];
 
 // These are not part of the omni.ja file, so we find them only when running
@@ -124,6 +126,9 @@ if (AppConstants.MOZ_BACKGROUNDTASKS) {
 var allowlist = [
   // security/manager/pki/resources/content/device_manager.js
   { file: "chrome://pippki/content/load_device.xhtml" },
+
+  // Intentionally unreferenced, see bug 1941134
+  { file: "resource://gre/res/designmode.css" },
 
   // The l10n build system can't package string files only for some platforms.
   // See bug 1339424 for why this is hard to fix.
@@ -307,6 +312,11 @@ var allowlist = [
   // Referenced programmatically
   { file: "chrome://browser/content/backup/BackupManifest.1.schema.json" },
   { file: "chrome://browser/content/backup/ArchiveJSONBlock.1.schema.json" },
+
+  // Bug 1733498 - Migrate necko errors l10n strings from .properties to Fluent
+  {
+    file: "resource://gre/localization/en-US/netwerk/necko.ftl",
+  },
 ];
 
 if (AppConstants.NIGHTLY_BUILD) {

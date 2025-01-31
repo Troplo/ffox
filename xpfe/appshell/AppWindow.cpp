@@ -73,6 +73,7 @@
 
 #ifdef XP_WIN
 #  include "mozilla/PreXULSkeletonUI.h"
+#  include "mozilla/WindowsVersion.h"
 #  include "nsIWindowsUIUtils.h"
 #endif
 
@@ -743,7 +744,9 @@ NS_IMETHODIMP AppWindow::Center(nsIAppWindow* aRelative, bool aScreen,
     return NS_OK;
   }
 
-  if (!aScreen && !aRelative) return NS_ERROR_INVALID_ARG;
+  if (!aScreen && !aRelative) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
   nsCOMPtr<nsIScreenManager> screenmgr =
       do_GetService("@mozilla.org/gfx/screenmanager;1", &result);
@@ -1235,7 +1238,7 @@ static Maybe<int32_t> ReadSize(const Element& aElement, nsAtom* aAttr,
   int32_t max = ReadIntAttribute(aElement, aMaxAttr)
                     .valueOr(std::numeric_limits<int32_t>::max());
 
-  return Some(std::min(max, std::max(*attr, min)));
+  return Some(std::clamp(*attr, min, max));
 }
 
 bool AppWindow::LoadSizeFromXUL(int32_t& aSpecWidth, int32_t& aSpecHeight) {
@@ -1501,7 +1504,7 @@ void AppWindow::SyncAttributesToWidget() {
 
   nsAutoString attr;
 
-  // Some attributes can change the client size (e.g. chromemargin on Windows
+  // Some attributes can change the client size (e.g. customtitlebar on Windows
   // and MacOS). But we might want to keep it.
   const LayoutDeviceIntSize oldClientSize = mWindow->GetClientSize();
   // We have to check now whether we want to restore the client size, as any
@@ -1509,19 +1512,21 @@ void AppWindow::SyncAttributesToWidget() {
   bool maintainClientSize = mDominantClientSize;
 
   // "hidechrome" attribute
-  if (windowElement->AttrValueIs(kNameSpaceID_None, nsGkAtoms::hidechrome,
-                                 nsGkAtoms::_true, eCaseMatters)) {
+  // FIXME(emilio): This should arguably be
+  // HideWindowChrome(windowElement->GetBoolAttr(...)), but that has
+  // side-effects in some platforms.
+  if (windowElement->GetBoolAttr(nsGkAtoms::hidechrome)) {
     mWindow->HideWindowChrome(true);
   }
-
   NS_ENSURE_TRUE_VOID(mWindow);
 
-  // "chromemargin" attribute
-  nsIntMargin margins;
-  windowElement->GetAttribute(u"chromemargin"_ns, attr);
-  if (nsContentUtils::ParseIntMarginValue(attr, margins)) {
-    mWindow->SetNonClientMargins(
-        LayoutDeviceIntMargin::FromUnknownMargin(margins));
+  // "customtitlebar" attribute
+  // FIXME(emilio): This should arguably be
+  // SetCustomTitlebar(windowElement->GetBoolAttr(...)), but that breaks with
+  // the early blank window which sets the custom titlebar via
+  // nsIDOMWindowUtils...
+  if (windowElement->GetBoolAttr(nsGkAtoms::customtitlebar)) {
+    mWindow->SetCustomTitlebar(true);
   }
 
   NS_ENSURE_TRUE_VOID(mWindow);
@@ -1550,18 +1555,17 @@ void AppWindow::SyncAttributesToWidget() {
   }
 
   // "drawtitle" attribute
-  windowElement->GetAttribute(u"drawtitle"_ns, attr);
-  mWindow->SetDrawsTitle(attr.LowerCaseEqualsLiteral("true"));
+  mWindow->SetDrawsTitle(windowElement->GetBoolAttr(nsGkAtoms::drawtitle));
   NS_ENSURE_TRUE_VOID(mWindow);
 
   // "toggletoolbar" attribute
-  windowElement->GetAttribute(u"toggletoolbar"_ns, attr);
-  mWindow->SetShowsToolbarButton(attr.LowerCaseEqualsLiteral("true"));
+  mWindow->SetShowsToolbarButton(
+      windowElement->HasAttribute(u"toggletoolbar"_ns));
   NS_ENSURE_TRUE_VOID(mWindow);
 
   // "macnativefullscreen" attribute
-  windowElement->GetAttribute(u"macnativefullscreen"_ns, attr);
-  mWindow->SetSupportsNativeFullscreen(attr.LowerCaseEqualsLiteral("true"));
+  mWindow->SetSupportsNativeFullscreen(
+      windowElement->HasAttribute(u"macnativefullscreen"_ns));
   NS_ENSURE_TRUE_VOID(mWindow);
 
   // "macanimationtype" attribute
@@ -1815,13 +1819,19 @@ nsresult AppWindow::MaybeSaveEarlyWindowPersistentValues(
   settings.rtlEnabled = intl::LocaleService::GetInstance()->IsAppLocaleRTL();
 
   bool isInTabletMode = false;
-  bool autoTouchModePref =
+  bool const autoTouchModePref =
       Preferences::GetBool("browser.touchmode.auto", false);
   if (autoTouchModePref) {
     nsCOMPtr<nsIWindowsUIUtils> uiUtils(
         do_GetService("@mozilla.org/windows-ui-utils;1"));
     if (!NS_WARN_IF(!uiUtils)) {
-      uiUtils->GetInTabletMode(&isInTabletMode);
+      // We switch to the touch-optimized layout in both Win10 and Win11 tablet-
+      // modes, since only the input mechanism is relevant. (See bug 1819421.)
+      if (IsWin11OrLater()) {
+        uiUtils->GetInWin11TabletMode(&isInTabletMode);
+      } else {
+        uiUtils->GetInWin10TabletMode(&isInTabletMode);
+      }
     }
   }
 
@@ -2340,7 +2350,7 @@ NS_IMETHODIMP
 AppWindow::BeforeStartLayout() {
   ApplyChromeFlags();
   // Ordering here is important, loading width/height values in
-  // LoadPersistentWindowState() depends on the chromemargin attribute (since
+  // LoadPersistentWindowState() depends on the customtitlebar attribute (since
   // we need to translate outer to inner sizes).
   SyncAttributesToWidget();
   LoadPersistentWindowState();
@@ -2873,7 +2883,7 @@ static bool sWaitingForHiddenWindowToLoadNativeMenus =
 #  endif
     ;
 
-static nsTArray<LoadNativeMenusListener> sLoadNativeMenusListeners;
+MOZ_RUNINIT static nsTArray<LoadNativeMenusListener> sLoadNativeMenusListeners;
 
 static void BeginLoadNativeMenus(Document* aDoc, nsIWidget* aParentWindow);
 

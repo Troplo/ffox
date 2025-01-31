@@ -28,6 +28,7 @@
 #include "mozilla/StaticMutex.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/Unused.h"
 
 #include "nsPrintfCString.h"
 #include "nsThreadUtils.h"
@@ -138,7 +139,7 @@ using namespace mozilla;
 namespace mozilla::phc {
 
 // Global instance that is retrieved by the process generating the crash report
-mozilla::phc::AddrInfo gAddrInfo;
+MOZ_GLOBINIT mozilla::phc::AddrInfo gAddrInfo;
 
 }  // namespace mozilla::phc
 
@@ -201,20 +202,20 @@ static const XP_CHAR dumpFileExtension[] = XP_TEXT(".dmp");
 
 static const XP_CHAR extraFileExtension[] = XP_TEXT(".extra");
 static const XP_CHAR memoryReportExtension[] = XP_TEXT(".memory.json.gz");
-static std::optional<xpstring> defaultMemoryReportPath = {};
+MOZ_RUNINIT static std::optional<xpstring> defaultMemoryReportPath = {};
 
 static const char kCrashMainID[] = "crash.main.3\n";
 
 static google_breakpad::ExceptionHandler* gExceptionHandler = nullptr;
 static mozilla::Atomic<bool> gEncounteredChildException(false);
-static nsCString gServerURL;
+MOZ_CONSTINIT static nsCString gServerURL;
 
-static xpstring pendingDirectory;
-static xpstring crashReporterPath;
-static xpstring memoryReportPath;
+MOZ_RUNINIT static xpstring pendingDirectory;
+MOZ_RUNINIT static xpstring crashReporterPath;
+MOZ_RUNINIT static xpstring memoryReportPath;
 
 // Where crash events should go.
-static xpstring eventsDirectory;
+MOZ_RUNINIT static xpstring eventsDirectory;
 
 // If this is false, we don't launch the crash reporter
 static bool doReport = true;
@@ -324,7 +325,7 @@ typedef LPTOP_LEVEL_EXCEPTION_FILTER(WINAPI* SetUnhandledExceptionFilter_func)(
 static WindowsDllInterceptor::FuncHookType<SetUnhandledExceptionFilter_func>
     stub_SetUnhandledExceptionFilter;
 static LPTOP_LEVEL_EXCEPTION_FILTER previousUnhandledExceptionFilter = nullptr;
-static WindowsDllInterceptor gKernel32Intercept;
+MOZ_RUNINIT static WindowsDllInterceptor gKernel32Intercept;
 static bool gBlockUnhandledExceptionFilter = true;
 
 static LPTOP_LEVEL_EXCEPTION_FILTER GetUnhandledExceptionFilter() {
@@ -369,7 +370,7 @@ static void SetJitExceptionHandler() {
 #  endif
 #endif  // defined(XP_WIN)
 
-static struct ReservedResources {
+MOZ_RUNINIT static struct ReservedResources {
 #if defined(XP_WIN) && !defined(HAVE_64BIT_BUILD)
   // This should be bigger than xul.dll plus a bit of extra space for
   // MinidumpWriteDump allocations.
@@ -414,33 +415,25 @@ static inline void my_u64tostring(uint64_t aValue, char* aBuffer,
 }
 #endif
 
-#ifdef XP_WIN
 static void CreateFileFromPath(const xpstring& path, nsIFile** file) {
-  NS_NewLocalFile(nsDependentString(path.c_str()), file);
+  Unused << NS_NewPathStringLocalFile(
+      DependentPathString(path.c_str(), path.size()), file);
 }
 
+[[nodiscard]]
 static std::optional<xpstring> CreatePathFromFile(nsIFile* file) {
-  nsAutoString path;
+  AutoPathString path;
+#ifdef XP_WIN
   nsresult rv = file->GetPath(path);
-  if (NS_FAILED(rv)) {
-    return {};
-  }
-  return xpstring(static_cast<wchar_t*>(path.get()), path.Length());
-}
 #else
-static void CreateFileFromPath(const xpstring& path, nsIFile** file) {
-  NS_NewNativeLocalFile(nsDependentCString(path.c_str()), file);
-}
-
-MAYBE_UNUSED static std::optional<xpstring> CreatePathFromFile(nsIFile* file) {
-  nsAutoCString path;
   nsresult rv = file->GetNativePath(path);
+#endif
   if (NS_FAILED(rv)) {
     return {};
   }
-  return xpstring(path.get(), path.Length());
+  return xpstring(static_cast<xpstring::const_pointer>(path.get()),
+                  path.Length());
 }
-#endif
 
 static time_t GetCurrentTimeForCrashTime() {
 #ifdef XP_LINUX
@@ -2830,12 +2823,18 @@ static void SetCrashEventsDir(nsIFile* aDir) {
   static const XP_CHAR eventsDirectoryEnv[] =
       XP_TEXT("MOZ_CRASHREPORTER_EVENTS_DIRECTORY");
 
-  nsCOMPtr<nsIFile> eventsDir = aDir;
+  nsCOMPtr<nsIFile> eventsDir;
 
   const char* env = PR_GetEnv("CRASHES_EVENTS_DIR");
   if (env && *env) {
-    NS_NewNativeLocalFile(nsDependentCString(env), getter_AddRefs(eventsDir));
-    EnsureDirectoryExists(eventsDir);
+    if (NS_SUCCEEDED(NS_NewNativeLocalFile(nsDependentCString(env),
+                                           getter_AddRefs(eventsDir)))) {
+      EnsureDirectoryExists(eventsDir);
+    }
+  }
+
+  if (!eventsDir) {
+    eventsDir = aDir;
   }
 
   std::optional<xpstring> path = CreatePathFromFile(eventsDir);
@@ -2984,18 +2983,10 @@ static bool GetPendingDir(nsIFile** dir) {
     return false;
   }
 
-  nsCOMPtr<nsIFile> pending = do_CreateInstance(NS_LOCAL_FILE_CONTRACTID);
-  if (!pending) {
-    NS_WARNING("Can't set up pending directory during shutdown.");
-    return false;
-  }
-#ifdef XP_WIN
-  pending->InitWithPath(nsDependentString(pendingDirectory.c_str()));
-#else
-  pending->InitWithNativePath(nsDependentCString(pendingDirectory.c_str()));
-#endif
-  pending.swap(*dir);
-  return true;
+  MOZ_ASSERT(!*dir);
+  return NS_SUCCEEDED(NS_NewPathStringLocalFile(
+      DependentPathString(pendingDirectory.c_str(), pendingDirectory.size()),
+      dir));
 }
 
 // The "limbo" dir is where minidumps go to wait for something else to
@@ -3236,9 +3227,11 @@ static void AddChildProcessAnnotations(
       // PHC is special for now, let's deal with it here
 #ifdef MOZ_PHC
       const auto& buffer = data.byte_buffer._0;
-      mozilla::phc::AddrInfo addr_info;
-      memcpy(&addr_info, buffer.Elements(), sizeof(addr_info));
-      PopulatePHCAnnotations(aAnnotations, &addr_info);
+      alignas(mozilla::phc::AddrInfo) char mem[sizeof(mozilla::phc::AddrInfo)];
+      memcpy(mem, buffer.Elements(), sizeof(mozilla::phc::AddrInfo));
+      const auto* addr_info =
+          reinterpret_cast<const mozilla::phc::AddrInfo*>(mem);
+      PopulatePHCAnnotations(aAnnotations, addr_info);
 #endif
       continue;
     }
@@ -3345,6 +3338,7 @@ static void OnChildProcessDumpRequested(
   if (!isSafeToDump) return;
 
   CreateFileFromPath(aFilePath, getter_AddRefs(minidump));
+  MOZ_ASSERT(minidump);
 
   ProcessId pid = aClientInfo.pid();
   if (ShouldReport()) {
@@ -3809,6 +3803,7 @@ bool CreateMinidumpsAndPair(ProcessHandle aTargetHandle,
 
   nsCOMPtr<nsIFile> targetMinidump;
   CreateFileFromPath(xpstring(minidumpPath), getter_AddRefs(targetMinidump));
+  MOZ_ASSERT(targetMinidump);
 
   // Create a dump of this process.
   if (!google_breakpad::ExceptionHandler::WriteMinidump(
@@ -3828,6 +3823,7 @@ bool CreateMinidumpsAndPair(ProcessHandle aTargetHandle,
 
   nsCOMPtr<nsIFile> incomingDump;
   CreateFileFromPath(xpstring(minidumpPath), getter_AddRefs(incomingDump));
+  MOZ_ASSERT(incomingDump);
 
   RenameAdditionalHangMinidump(incomingDump, targetMinidump, aIncomingPairName);
 

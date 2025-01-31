@@ -73,7 +73,7 @@ class nsWindow final : public nsBaseWidget {
  private:
   nsCOMPtr<nsIUserIdleServiceInternal> mIdleService;
   mozilla::ScreenIntCoord mDynamicToolbarMaxHeight{0};
-  mozilla::ScreenIntMargin mSafeAreaInsets;
+  mozilla::LayoutDeviceIntMargin mSafeAreaInsets;
   mozilla::widget::PlatformCompositorWidgetDelegate* mCompositorWidgetDelegate =
       nullptr;
   mozilla::Mutex mDestroyMutex{"nsWindow::mDestroyMutex"};
@@ -158,7 +158,7 @@ class nsWindow final : public nsBaseWidget {
                                 const LayoutDeviceIntRect& aRect,
                                 InitData* aInitData) override;
   void Destroy() override;
-  void DidChangeParent(nsIWidget* aNewParent) override;
+  void DidClearParent(nsIWidget*) override;
   float GetDPI() override;
   double GetDefaultScaleInternal() override;
   void Show(bool aState) override;
@@ -251,8 +251,8 @@ class nsWindow final : public nsBaseWidget {
 
   void UpdateDynamicToolbarOffset(mozilla::ScreenIntCoord aOffset);
 
-  mozilla::ScreenIntMargin GetSafeAreaInsets() const override;
-  void UpdateSafeAreaInsets(const mozilla::ScreenIntMargin& aSafeAreaInsets);
+  mozilla::LayoutDeviceIntMargin GetSafeAreaInsets() const override;
+  void UpdateSafeAreaInsets(const mozilla::LayoutDeviceIntMargin&);
 
   void KeyboardHeightChanged(mozilla::ScreenIntCoord aHeight);
 

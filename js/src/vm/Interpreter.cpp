@@ -458,6 +458,10 @@ bool js::RunScript(JSContext* cx, RunState& state) {
   // Since any script can conceivably GC, make sure it's safe to do so.
   cx->verifyIsSafeToGC();
 
+  // Don't run script while suppressing GC to not confuse JIT code that assumes
+  // some new objects will be allocated in the nursery.
+  MOZ_ASSERT(!cx->suppressGC);
+
   MOZ_ASSERT(cx->realm() == state.script()->realm());
 
   MOZ_DIAGNOSTIC_ASSERT(cx->realm()->isSystem() ||
@@ -1742,9 +1746,18 @@ ErrorObject* js::CreateSuppressedError(JSContext* cx,
   JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
                            JSMSG_ERROR_WAS_SUPPRESSED);
 
+  if (cx->isThrowingOutOfMemory()) {
+    return nullptr;
+  }
+
   JS::Rooted<JS::Value> thrownSuppressed(cx);
 
   if (!cx->getPendingException(&thrownSuppressed)) {
+    return nullptr;
+  }
+
+  if (!thrownSuppressed.isObject() ||
+      !thrownSuppressed.toObject().is<ErrorObject>()) {
     return nullptr;
   }
 
@@ -1969,7 +1982,6 @@ bool MOZ_NEVER_INLINE JS_HAZ_JSNATIVE_CALLER js::Interpret(JSContext* cx,
     return false;
   }
 
-  ActivationEntryMonitor entryMonitor(cx, entryFrame);
   InterpreterActivation activation(state, cx, entryFrame);
 
   /* The script is used frequently, so keep a local copy. */
@@ -5011,15 +5023,6 @@ bool js::DeleteNameOperation(JSContext* cx, Handle<PropertyName*> name,
 
   bool status = result.ok();
   res.setBoolean(status);
-
-#ifndef NIGHTLY_BUILD
-  if (status) {
-    // Deleting a name from the global object removes it from [[VarNames]].
-    if (pobj == env && env->is<GlobalObject>()) {
-      env->as<GlobalObject>().removeFromVarNames(name);
-    }
-  }
-#endif
 
   return true;
 }

@@ -157,6 +157,7 @@ struct FontListSizes {
 };
 
 class gfxUserFontSet;
+class LoadCmapsRunnable;
 
 class gfxPlatformFontList : public gfxFontInfoLoader {
   friend class InitOtherFamilyNamesRunnable;
@@ -245,6 +246,7 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
     return sPlatformFontList;
   }
 
+  void GetMissingFonts(nsTArray<nsCString>& aMissingFonts);
   void GetMissingFonts(nsCString& aMissingFonts);
 
   static bool Initialize(gfxPlatformFontList* aList);
@@ -381,12 +383,7 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
   // [Parent] Handle request from content process to start cmap loading.
   void StartCmapLoading(uint32_t aGeneration, uint32_t aStartIndex);
 
-  void CancelLoadCmapsTask() {
-    if (mLoadCmapsRunnable) {
-      mLoadCmapsRunnable->Cancel();
-      mLoadCmapsRunnable = nullptr;
-    }
-  }
+  void CancelLoadCmapsTask();
 
   // Populate aFamily with face records, and if aLoadCmaps is true, also load
   // their character maps (rather than leaving this to be done lazily).
@@ -870,6 +867,14 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
                                            SlantStyleRange aStyleForEntry)
       MOZ_REQUIRES(mLock);
 
+  // Add an entry for aName to the local names table, but only if it is not
+  // already present, or aName and aData.mFamilyName look like a better match
+  // than the existing entry.
+  void MaybeAddToLocalNameTable(
+      const nsACString& aName,
+      const mozilla::fontlist::LocalFaceRec::InitData& aData)
+      MOZ_REQUIRES(mLock);
+
   // load the bad underline blocklist from pref.
   void LoadBadUnderlineList();
 
@@ -1071,7 +1076,7 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
 
   RefPtr<gfxFontEntry> mDefaultFontEntry MOZ_GUARDED_BY(mLock);
 
-  RefPtr<mozilla::CancelableRunnable> mLoadCmapsRunnable;
+  RefPtr<LoadCmapsRunnable> mLoadCmapsRunnable;
   uint32_t mStartedLoadingCmapsFrom MOZ_GUARDED_BY(mLock) = 0xffffffffu;
 
   bool mFontFamilyWhitelistActive = false;

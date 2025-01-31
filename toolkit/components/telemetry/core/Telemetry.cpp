@@ -24,6 +24,7 @@
 #include "js/PropertyAndElement.h"  // JS_DefineElement, JS_DefineProperty
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/glean/GleanMetrics.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/BackgroundHangMonitor.h"
@@ -185,7 +186,8 @@ class TelemetryImpl final : public nsITelemetry, public nsIMemoryReporter {
   friend class nsFetchTelemetryData;
 };
 
-StaticDataMutex<TelemetryImpl*> TelemetryImpl::sTelemetry(nullptr, nullptr);
+MOZ_RUNINIT StaticDataMutex<TelemetryImpl*> TelemetryImpl::sTelemetry(nullptr,
+                                                                      nullptr);
 
 MOZ_DEFINE_MALLOC_SIZE_OF(TelemetryMallocSizeOf)
 
@@ -256,8 +258,11 @@ using PathChar = filesystem::Path::value_type;
 using PathCharPtr = const PathChar*;
 
 static uint32_t ReadLastShutdownDuration(PathCharPtr filename) {
-  RefPtr<nsLocalFile> file =
-      new nsLocalFile(nsTDependentString<PathChar>(filename));
+  nsCOMPtr<nsIFile> file;
+  if (NS_FAILED(NS_NewPathStringLocalFile(DependentPathString(filename),
+                                          getter_AddRefs(file)))) {
+    return 0;
+  }
   FILE* f;
   if (NS_FAILED(file->OpenANSIFileDesc("r", &f)) || !f) {
     return 0;
@@ -333,8 +338,7 @@ class nsFetchTelemetryData : public Runnable {
       telemetry->ReadLateWritesStacks(mProfileDir);
     }
 
-    TelemetryScalar::Set(Telemetry::ScalarID::BROWSER_TIMINGS_LAST_SHUTDOWN,
-                         lastShutdownDuration);
+    glean::browser_timings::last_shutdown.Set(lastShutdownDuration);
 
     nsCOMPtr<nsIRunnable> e =
         NewRunnableMethod("nsFetchTelemetryData::MainThread", this,
@@ -717,7 +721,9 @@ class GetLoadedModulesResultRunnable final : public Runnable {
 
       // Module name.
       JS::Rooted<JSString*> moduleName(
-          cx, JS_NewUCStringCopyZ(cx, info.GetModuleName().get()));
+          cx,
+          JS_NewUCStringCopyZ(
+              cx, NS_ConvertUTF8toUTF16(info.GetModuleName().c_str()).get()));
       if (!moduleName || !JS_DefineProperty(cx, moduleObj, "name", moduleName,
                                             JSPROP_ENUMERATE)) {
         mPromise->MaybeReject(NS_ERROR_FAILURE);
@@ -727,9 +733,11 @@ class GetLoadedModulesResultRunnable final : public Runnable {
       // Module debug name.
       JS::Rooted<JS::Value> moduleDebugName(cx);
 
-      if (!info.GetDebugName().IsEmpty()) {
+      if (!info.GetDebugName().empty()) {
         JS::Rooted<JSString*> str_moduleDebugName(
-            cx, JS_NewUCStringCopyZ(cx, info.GetDebugName().get()));
+            cx,
+            JS_NewUCStringCopyZ(
+                cx, NS_ConvertUTF8toUTF16(info.GetDebugName().c_str()).get()));
         if (!str_moduleDebugName) {
           mPromise->MaybeReject(NS_ERROR_FAILURE);
           return NS_OK;
@@ -748,9 +756,9 @@ class GetLoadedModulesResultRunnable final : public Runnable {
       // Module Breakpad identifier.
       JS::Rooted<JS::Value> id(cx);
 
-      if (!info.GetBreakpadId().IsEmpty()) {
+      if (!info.GetBreakpadId().empty()) {
         JS::Rooted<JSString*> str_id(
-            cx, JS_NewStringCopyZ(cx, info.GetBreakpadId().get()));
+            cx, JS_NewStringCopyZ(cx, info.GetBreakpadId().c_str()));
         if (!str_id) {
           mPromise->MaybeReject(NS_ERROR_FAILURE);
           return NS_OK;
@@ -768,9 +776,9 @@ class GetLoadedModulesResultRunnable final : public Runnable {
       // Module version.
       JS::Rooted<JS::Value> version(cx);
 
-      if (!info.GetVersion().IsEmpty()) {
+      if (!info.GetVersion().empty()) {
         JS::Rooted<JSString*> v(
-            cx, JS_NewStringCopyZ(cx, info.GetVersion().BeginReading()));
+            cx, JS_NewStringCopyZ(cx, info.GetVersion().c_str()));
         if (!v) {
           mPromise->MaybeReject(NS_ERROR_FAILURE);
           return NS_OK;
@@ -788,7 +796,8 @@ class GetLoadedModulesResultRunnable final : public Runnable {
 
 #  if defined(XP_WIN)
       // Cert Subject.
-      if (auto subject = mCertSubjects.Lookup(info.GetModulePath())) {
+      if (auto subject = mCertSubjects.Lookup(
+              NS_ConvertUTF8toUTF16(info.GetModulePath().c_str()))) {
         JS::Rooted<JSString*> jsOrg(cx, ToJSString(cx, *subject));
         if (!jsOrg) {
           mPromise->MaybeReject(NS_ERROR_FAILURE);
@@ -828,10 +837,12 @@ class GetLoadedModulesResultRunnable final : public Runnable {
     for (unsigned int i = 0, n = mRawModules.GetSize(); i != n; i++) {
       const SharedLibrary& info = mRawModules.GetEntry(i);
 
-      auto orgName = dllSvc->GetBinaryOrgName(info.GetModulePath().get());
+      auto orgName = dllSvc->GetBinaryOrgName(
+          NS_ConvertUTF8toUTF16(info.GetModulePath().c_str()).get());
       if (orgName) {
-        mCertSubjects.InsertOrUpdate(info.GetModulePath(),
-                                     nsDependentString(orgName.get()));
+        mCertSubjects.InsertOrUpdate(
+            NS_ConvertUTF8toUTF16(info.GetModulePath().c_str()),
+            nsDependentString(orgName.get()));
       }
     }
   }
@@ -1529,56 +1540,10 @@ TelemetryImpl::MsSystemNow(double* aResult) {
 // Telemetry Scalars IDL Implementation
 
 NS_IMETHODIMP
-TelemetryImpl::ScalarAdd(const nsACString& aName, JS::Handle<JS::Value> aVal,
-                         JSContext* aCx) {
-  return TelemetryScalar::Add(aName, aVal, aCx);
-}
-
-NS_IMETHODIMP
-TelemetryImpl::ScalarSet(const nsACString& aName, JS::Handle<JS::Value> aVal,
-                         JSContext* aCx) {
-  return TelemetryScalar::Set(aName, aVal, aCx);
-}
-
-NS_IMETHODIMP
-TelemetryImpl::ScalarSetMaximum(const nsACString& aName,
-                                JS::Handle<JS::Value> aVal, JSContext* aCx) {
-  return TelemetryScalar::SetMaximum(aName, aVal, aCx);
-}
-
-NS_IMETHODIMP
-TelemetryImpl::KeyedScalarAdd(const nsACString& aName, const nsAString& aKey,
-                              JS::Handle<JS::Value> aVal, JSContext* aCx) {
-  return TelemetryScalar::Add(aName, aKey, aVal, aCx);
-}
-
-NS_IMETHODIMP
-TelemetryImpl::KeyedScalarSet(const nsACString& aName, const nsAString& aKey,
-                              JS::Handle<JS::Value> aVal, JSContext* aCx) {
-  return TelemetryScalar::Set(aName, aKey, aVal, aCx);
-}
-
-NS_IMETHODIMP
-TelemetryImpl::KeyedScalarSetMaximum(const nsACString& aName,
-                                     const nsAString& aKey,
-                                     JS::Handle<JS::Value> aVal,
-                                     JSContext* aCx) {
-  return TelemetryScalar::SetMaximum(aName, aKey, aVal, aCx);
-}
-
-NS_IMETHODIMP
-TelemetryImpl::RegisterScalars(const nsACString& aCategoryName,
-                               JS::Handle<JS::Value> aScalarData,
-                               JSContext* cx) {
-  return TelemetryScalar::RegisterScalars(aCategoryName, aScalarData, false,
-                                          cx);
-}
-
-NS_IMETHODIMP
 TelemetryImpl::RegisterBuiltinScalars(const nsACString& aCategoryName,
                                       JS::Handle<JS::Value> aScalarData,
                                       JSContext* cx) {
-  return TelemetryScalar::RegisterScalars(aCategoryName, aScalarData, true, cx);
+  return TelemetryScalar::RegisterScalars(aCategoryName, aScalarData, cx);
 }
 
 NS_IMETHODIMP
@@ -1750,9 +1715,12 @@ void RecordShutdownEndTimeStamp() {
     return;
   }
 
-  nsTAutoString<PathChar> tmpName(name);
+  AutoPathString tmpName(name);
   tmpName.AppendLiteral(".tmp");
-  RefPtr<nsLocalFile> tmpFile = new nsLocalFile(tmpName);
+  nsCOMPtr<nsIFile> tmpFile;
+  if (NS_FAILED(NS_NewPathStringLocalFile(tmpName, getter_AddRefs(tmpFile)))) {
+    return;
+  }
   FILE* f;
   if (NS_FAILED(tmpFile->OpenANSIFileDesc("w", &f)) || !f) return;
   // On a normal release build this should be called just before
@@ -1772,10 +1740,14 @@ void RecordShutdownEndTimeStamp() {
     tmpFile->Remove(false);
     return;
   }
-  RefPtr<nsLocalFile> file = new nsLocalFile(name);
+  nsCOMPtr<nsIFile> file;
+  if (NS_FAILED(NS_NewPathStringLocalFile(name, getter_AddRefs(file)))) {
+    return;
+  }
   nsAutoString leafName;
-  file->GetLeafName(leafName);
-  tmpFile->RenameTo(nullptr, leafName);
+  if (NS_SUCCEEDED(file->GetLeafName(leafName))) {
+    tmpFile->RenameTo(nullptr, leafName);
+  }
 }
 
 }  // namespace mozilla
@@ -1824,7 +1796,12 @@ void AccumulateCategorical(HistogramID id, const nsTArray<nsCString>& labels) {
 void AccumulateTimeDelta(HistogramID aHistogram, TimeStamp start,
                          TimeStamp end) {
   if (start > end) {
+#if !defined(MOZ_WIDGET_ANDROID)
+    mozilla::glean::telemetry::clamping_time_hgrams
+        .Get(nsDependentCString(GetHistogramName(aHistogram)))
+        .Add(1);
     Accumulate(aHistogram, 0);
+#endif  // !defined(MOZ_WIDGET_ANDROID)
     return;
   }
   Accumulate(aHistogram, static_cast<uint32_t>((end - start).ToMilliseconds()));
@@ -1833,7 +1810,12 @@ void AccumulateTimeDelta(HistogramID aHistogram, TimeStamp start,
 void AccumulateTimeDelta(HistogramID aHistogram, const nsCString& key,
                          TimeStamp start, TimeStamp end) {
   if (start > end) {
+#if !defined(MOZ_WIDGET_ANDROID)
+    mozilla::glean::telemetry::clamping_time_hgrams
+        .Get(nsDependentCString(GetHistogramName(aHistogram)))
+        .Add(1);
     Accumulate(aHistogram, key, 0);
+#endif  // !defined(MOZ_WIDGET_ANDROID)
     return;
   }
   Accumulate(aHistogram, key,
@@ -1934,48 +1916,6 @@ void SetProfileDir(nsIFile* aProfD) {
     return;
   }
   sTelemetryIOObserver->AddPath(profDirPath, u"{profile}"_ns);
-}
-
-// Scalar API C++ Endpoints
-
-void ScalarAdd(mozilla::Telemetry::ScalarID aId, uint32_t aVal) {
-  TelemetryScalar::Add(aId, aVal);
-}
-
-void ScalarSet(mozilla::Telemetry::ScalarID aId, uint32_t aVal) {
-  TelemetryScalar::Set(aId, aVal);
-}
-
-void ScalarSet(mozilla::Telemetry::ScalarID aId, bool aVal) {
-  TelemetryScalar::Set(aId, aVal);
-}
-
-void ScalarSet(mozilla::Telemetry::ScalarID aId, const nsAString& aVal) {
-  TelemetryScalar::Set(aId, aVal);
-}
-
-void ScalarSetMaximum(mozilla::Telemetry::ScalarID aId, uint32_t aVal) {
-  TelemetryScalar::SetMaximum(aId, aVal);
-}
-
-void ScalarAdd(mozilla::Telemetry::ScalarID aId, const nsAString& aKey,
-               uint32_t aVal) {
-  TelemetryScalar::Add(aId, aKey, aVal);
-}
-
-void ScalarSet(mozilla::Telemetry::ScalarID aId, const nsAString& aKey,
-               uint32_t aVal) {
-  TelemetryScalar::Set(aId, aKey, aVal);
-}
-
-void ScalarSet(mozilla::Telemetry::ScalarID aId, const nsAString& aKey,
-               bool aVal) {
-  TelemetryScalar::Set(aId, aKey, aVal);
-}
-
-void ScalarSetMaximum(mozilla::Telemetry::ScalarID aId, const nsAString& aKey,
-                      uint32_t aVal) {
-  TelemetryScalar::SetMaximum(aId, aKey, aVal);
 }
 
 void ShutdownTelemetry() { TelemetryImpl::ShutdownTelemetry(); }

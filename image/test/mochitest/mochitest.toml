@@ -104,18 +104,8 @@ support-files = [
 ]
 
 ["test_animSVGImage.html"]
-skip-if = [
-  "os == 'android'",
-  "os == 'win'",
-  "os == 'mac' && os_version == '10.15'", # Bug 1370784, macosx due to bug 1549058
-]
 
 ["test_animSVGImage2.html"]
-skip-if = [
-  "os == 'win'", # Bug 1354561
-  "os == 'linux'", # Bug 1354561
-  "os == 'android'", # Bug 1354561
-]
 
 ["test_animated_css_image.html"]
 support-files = [

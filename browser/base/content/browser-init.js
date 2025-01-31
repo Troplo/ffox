@@ -102,12 +102,13 @@ var gBrowserInit = {
       toolbarMenubar.setAttribute("data-l10n-attrs", "toolbarname");
     }
 
-    // Run menubar initialization first, to avoid TabsInTitlebar code picking
+    // Run menubar initialization first, to avoid CustomTitlebar code picking
     // up mutations from it and causing a reflow.
     AutoHideMenubar.init();
-    // Update the chromemargin attribute so the window can be sized correctly.
+    // Update the customtitlebar attribute so the window can be sized
+    // correctly.
     window.TabBarVisibility.update();
-    TabsInTitlebar.init();
+    CustomTitlebar.init();
 
     new LightweightThemeConsumer(document);
 
@@ -132,8 +133,7 @@ var gBrowserInit = {
       .getInterface(Ci.nsIAppWindow).XULBrowserWindow = window.XULBrowserWindow;
     window.browserDOMWindow = new nsBrowserAccess();
 
-    gBrowser = window._gBrowser;
-    delete window._gBrowser;
+    gBrowser = new window.Tabbrowser();
     gBrowser.init();
 
     BrowserWindowTracker.track(window);
@@ -282,7 +282,7 @@ var gBrowserInit = {
 
     // Misc. inits.
     gUIDensity.init();
-    TabletModeUpdater.init();
+    Win10TabletModeUpdater.init();
     CombinedStopReload.ensureInitialized();
     gPrivateBrowsingUI.init();
     BrowserSearch.init();
@@ -609,21 +609,18 @@ var gBrowserInit = {
 
           let managedBookmarksPopup = document.createXULElement("menupopup");
           managedBookmarksPopup.setAttribute("id", "managed-bookmarks-popup");
-          managedBookmarksPopup.setAttribute(
-            "oncommand",
-            "PlacesToolbarHelper.openManagedBookmark(event);"
+          managedBookmarksPopup.addEventListener("command", event =>
+            PlacesToolbarHelper.openManagedBookmark(event)
           );
-          managedBookmarksPopup.setAttribute(
-            "ondragover",
-            "event.dataTransfer.effectAllowed='none';"
+          managedBookmarksPopup.addEventListener(
+            "dragover",
+            event => (event.dataTransfer.effectAllowed = "none")
           );
-          managedBookmarksPopup.setAttribute(
-            "ondragstart",
-            "PlacesToolbarHelper.onDragStartManaged(event);"
+          managedBookmarksPopup.addEventListener("dragstart", event =>
+            PlacesToolbarHelper.onDragStartManaged(event)
           );
-          managedBookmarksPopup.setAttribute(
-            "onpopupshowing",
-            "PlacesToolbarHelper.populateManagedBookmarks(this);"
+          managedBookmarksPopup.addEventListener("popupshowing", event =>
+            PlacesToolbarHelper.populateManagedBookmarks(event.currentTarget)
           );
           managedBookmarksPopup.setAttribute("placespopup", "true");
           managedBookmarksPopup.setAttribute("is", "places-popup");
@@ -651,10 +648,13 @@ var gBrowserInit = {
 
     CaptivePortalWatcher.delayedStartup();
 
-    ShoppingSidebarManager.ensureInitialized();
-
-    if (Services.prefs.getBoolPref("browser.profiles.enabled", false)) {
-      SelectableProfileService?.init();
+    if (
+      !Services.prefs.getBoolPref(
+        "browser.shopping.experience2023.integratedSidebar",
+        false
+      )
+    ) {
+      ShoppingSidebarManager.ensureInitialized();
     }
 
     SessionStore.promiseAllWindowsRestored.then(() => {
@@ -779,7 +779,7 @@ var gBrowserInit = {
         let globalHistoryOptions = undefined;
         let triggeringRemoteType = undefined;
         let forceAllowDataURI = false;
-        let wasSchemelessInput = false;
+        let schemelessInput = Ci.nsILoadInfo.SchemelessInputTypeUnset;
         if (window.arguments[1]) {
           if (!(window.arguments[1] instanceof Ci.nsIPropertyBag2)) {
             throw new Error(
@@ -818,9 +818,9 @@ var gBrowserInit = {
             forceAllowDataURI =
               extraOptions.getPropertyAsBool("forceAllowDataURI");
           }
-          if (extraOptions.hasKey("wasSchemelessInput")) {
-            wasSchemelessInput =
-              extraOptions.getPropertyAsBool("wasSchemelessInput");
+          if (extraOptions.hasKey("schemelessInput")) {
+            schemelessInput =
+              extraOptions.getPropertyAsUint32("schemelessInput");
           }
         }
 
@@ -845,7 +845,7 @@ var gBrowserInit = {
             fromExternal,
             globalHistoryOptions,
             triggeringRemoteType,
-            wasSchemelessInput,
+            schemelessInput,
           });
         } catch (e) {
           console.error(e);
@@ -1029,7 +1029,7 @@ var gBrowserInit = {
   onUnload() {
     gUIDensity.uninit();
 
-    TabsInTitlebar.uninit();
+    CustomTitlebar.uninit();
 
     ToolbarIconColor.uninit();
 
@@ -1065,7 +1065,7 @@ var gBrowserInit = {
 
     BookmarkingUI.uninit();
 
-    TabletModeUpdater.uninit();
+    Win10TabletModeUpdater.uninit();
 
     CaptivePortalWatcher.uninit();
 
@@ -1082,8 +1082,6 @@ var gBrowserInit = {
     NewTabPagePreloading.removePreloadedBrowser(window);
 
     FirefoxViewHandler.uninit();
-
-    SelectableProfileService?.uninit();
 
     // Now either cancel delayedStartup, or clean up the services initialized from
     // it.

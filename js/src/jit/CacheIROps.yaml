@@ -1397,6 +1397,36 @@
     templateObject: ObjectField
     array: ObjId
 
+- name: NewMapObjectResult
+  shared: true
+  transpile: true
+  cost_estimate: 5
+  args:
+    templateObject: ObjectField
+
+- name: NewSetObjectResult
+  shared: true
+  transpile: true
+  cost_estimate: 5
+  args:
+    templateObject: ObjectField
+
+- name: NewMapObjectFromIterableResult
+  shared: true
+  transpile: true
+  cost_estimate: 5
+  args:
+    templateObject: ObjectField
+    iterable: ValId
+
+- name: NewSetObjectFromIterableResult
+  shared: true
+  transpile: true
+  cost_estimate: 5
+  args:
+    templateObject: ObjectField
+    iterable: ValId
+
 - name: NewStringObjectResult
   shared: true
   transpile: true
@@ -1853,6 +1883,12 @@
   args:
     value: Int32Id
 
+- name: AtomicsPauseResult
+  shared: true
+  transpile: true
+  cost_estimate: 1
+  args:
+
 - name: CallNativeSetter
   shared: false
   transpile: true
@@ -2109,7 +2145,7 @@
     property: ValId
     trap: ObjId
     nargsAndFlags: UInt32Imm
-#endif
+  #endif
 
 # Meta ops generate no code, but contain data for the Warp Transpiler.
 - name: MetaScriptedThisShape
@@ -3200,13 +3236,22 @@
     shape: ShapeField
     site: AllocSiteField
 
-- name: CallStringConcatResult
+- name: NewFunctionCloneResult
+  shared: false
+  transpile: false
+  cost_estimate: 4
+  args:
+    canonical: ObjectField
+    allocKind: AllocKindImm
+
+- name: ConcatStringsResult
   shared: true
   transpile: true
   cost_estimate: 5
   args:
     lhs: StringId
     rhs: StringId
+    stub: JitCodeField
 
 - name: CallStringObjectConcatResult
   shared: false
@@ -3400,6 +3445,22 @@
     set: ObjId
     obj: ObjId
 
+- name: SetDeleteResult
+  shared: true
+  transpile: true
+  cost_estimate: 5
+  args:
+    set: ObjId
+    val: ValId
+
+- name: SetAddResult
+  shared: true
+  transpile: true
+  cost_estimate: 5
+  args:
+    set: ObjId
+    key: ValId
+
 - name: SetSizeResult
   shared: true
   transpile: true
@@ -3502,6 +3563,23 @@
   args:
     map: ObjId
     obj: ObjId
+
+- name: MapDeleteResult
+  shared: true
+  transpile: true
+  cost_estimate: 5
+  args:
+    map: ObjId
+    val: ValId
+
+- name: MapSetResult
+  shared: true
+  transpile: true
+  cost_estimate: 5
+  args:
+    map: ObjId
+    key: ValId
+    val: ValId
 
 - name: MapSizeResult
   shared: true

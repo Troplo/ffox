@@ -11,11 +11,11 @@ import io.mockk.spyk
 import io.mockk.verify
 import io.mockk.verifyOrder
 import mozilla.components.service.pocket.PocketStory
+import mozilla.components.service.pocket.PocketStory.ContentRecommendation
 import mozilla.components.service.pocket.PocketStory.PocketRecommendedStory
 import mozilla.components.service.pocket.PocketStory.PocketSponsoredStory
 import mozilla.components.service.pocket.ext.getCurrentFlightImpressions
 import mozilla.components.support.test.robolectric.testContext
-import mozilla.telemetry.glean.testing.GleanTestRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -29,10 +29,12 @@ import org.mozilla.fenix.GleanMetrics.Pings
 import org.mozilla.fenix.GleanMetrics.Pocket
 import org.mozilla.fenix.HomeActivity
 import org.mozilla.fenix.components.AppStore
-import org.mozilla.fenix.components.appstate.AppAction
+import org.mozilla.fenix.components.appstate.AppAction.ContentRecommendationsAction
 import org.mozilla.fenix.components.appstate.AppState
+import org.mozilla.fenix.components.appstate.recommendations.ContentRecommendationsState
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.settings
+import org.mozilla.fenix.helpers.FenixGleanTestRule
 import org.mozilla.fenix.helpers.FenixRobolectricTestRunner
 import org.mozilla.fenix.home.pocket.controller.DefaultPocketStoriesController
 import org.mozilla.fenix.utils.Settings
@@ -41,7 +43,7 @@ import org.mozilla.fenix.utils.Settings
 class DefaultPocketStoriesControllerTest {
 
     @get:Rule
-    val gleanTestRule = GleanTestRule(testContext)
+    val gleanTestRule = FenixGleanTestRule(testContext)
 
     private val homeActivity: HomeActivity = mockk(relaxed = true)
     private val settings: Settings = mockk(relaxed = true)
@@ -60,8 +62,10 @@ class DefaultPocketStoriesControllerTest {
         val store = spyk(
             AppStore(
                 AppState(
-                    pocketStoriesCategories = listOf(category1, category2),
-                    pocketStoriesCategoriesSelections = selections,
+                    recommendationState = ContentRecommendationsState(
+                        pocketStoriesCategories = listOf(category1, category2),
+                        pocketStoriesCategoriesSelections = selections,
+                    ),
                 ),
             ),
         )
@@ -69,8 +73,8 @@ class DefaultPocketStoriesControllerTest {
         assertNull(Pocket.homeRecsCategoryClicked.testGetValue())
 
         controller.handleCategoryClick(category2)
-        verify(exactly = 0) { store.dispatch(AppAction.SelectPocketStoriesCategory(category2.name)) }
-        verify { store.dispatch(AppAction.DeselectPocketStoriesCategory(category2.name)) }
+        verify(exactly = 0) { store.dispatch(ContentRecommendationsAction.SelectPocketStoriesCategory(category2.name)) }
+        verify { store.dispatch(ContentRecommendationsAction.DeselectPocketStoriesCategory(category2.name)) }
 
         assertNotNull(Pocket.homeRecsCategoryClicked.testGetValue())
         val event = Pocket.homeRecsCategoryClicked.testGetValue()!!
@@ -97,15 +101,17 @@ class DefaultPocketStoriesControllerTest {
         val store = spyk(
             AppStore(
                 AppState(
-                    pocketStoriesCategoriesSelections = listOf(
-                        category1,
-                        category2,
-                        category3,
-                        category4,
-                        category5,
-                        category6,
-                        category7,
-                        oldestSelectedCategory,
+                    recommendationState = ContentRecommendationsState(
+                        pocketStoriesCategoriesSelections = listOf(
+                            category1,
+                            category2,
+                            category3,
+                            category4,
+                            category5,
+                            category6,
+                            category7,
+                            oldestSelectedCategory,
+                        ),
                     ),
                 ),
             ),
@@ -115,8 +121,8 @@ class DefaultPocketStoriesControllerTest {
 
         controller.handleCategoryClick(PocketRecommendedStoriesCategory(newSelectedCategory.name))
 
-        verify { store.dispatch(AppAction.DeselectPocketStoriesCategory(oldestSelectedCategory.name)) }
-        verify { store.dispatch(AppAction.SelectPocketStoriesCategory(newSelectedCategory.name)) }
+        verify { store.dispatch(ContentRecommendationsAction.DeselectPocketStoriesCategory(oldestSelectedCategory.name)) }
+        verify { store.dispatch(ContentRecommendationsAction.SelectPocketStoriesCategory(newSelectedCategory.name)) }
 
         assertNotNull(Pocket.homeRecsCategoryClicked.testGetValue())
         val event = Pocket.homeRecsCategoryClicked.testGetValue()!!
@@ -141,14 +147,16 @@ class DefaultPocketStoriesControllerTest {
         val store = spyk(
             AppStore(
                 AppState(
-                    pocketStoriesCategoriesSelections = listOf(
-                        category1,
-                        category2,
-                        category3,
-                        category4,
-                        category5,
-                        category6,
-                        oldestSelectedCategory,
+                    recommendationState = ContentRecommendationsState(
+                        pocketStoriesCategoriesSelections = listOf(
+                            category1,
+                            category2,
+                            category3,
+                            category4,
+                            category5,
+                            category6,
+                            oldestSelectedCategory,
+                        ),
                     ),
                 ),
             ),
@@ -158,8 +166,8 @@ class DefaultPocketStoriesControllerTest {
 
         controller.handleCategoryClick(PocketRecommendedStoriesCategory(newSelectedCategoryName))
 
-        verify(exactly = 0) { store.dispatch(AppAction.DeselectPocketStoriesCategory(oldestSelectedCategory.name)) }
-        verify { store.dispatch(AppAction.SelectPocketStoriesCategory(newSelectedCategoryName)) }
+        verify(exactly = 0) { store.dispatch(ContentRecommendationsAction.DeselectPocketStoriesCategory(oldestSelectedCategory.name)) }
+        verify { store.dispatch(ContentRecommendationsAction.SelectPocketStoriesCategory(newSelectedCategoryName)) }
 
         assertNotNull(Pocket.homeRecsCategoryClicked.testGetValue())
         val event = Pocket.homeRecsCategoryClicked.testGetValue()!!
@@ -181,7 +189,7 @@ class DefaultPocketStoriesControllerTest {
 
         controller.handleStoryShown(storyShown, storyGridLocation)
 
-        verify { store.dispatch(AppAction.PocketStoriesShown(listOf(storyShown))) }
+        verify { store.dispatch(ContentRecommendationsAction.PocketStoriesShown(listOf(storyShown))) }
     }
 
     @Test
@@ -206,7 +214,7 @@ class DefaultPocketStoriesControllerTest {
 
             controller.handleStoryShown(storyShown, 1 to 2)
 
-            verify { store.dispatch(AppAction.PocketStoriesShown(listOf(storyShown))) }
+            verify { store.dispatch(ContentRecommendationsAction.PocketStoriesShown(listOf(storyShown))) }
             assertNotNull(Pocket.homeRecsSpocShown.testGetValue())
             assertEquals(1, Pocket.homeRecsSpocShown.testGetValue()!!.size)
             val data = Pocket.homeRecsSpocShown.testGetValue()!!.single().extra
@@ -221,12 +229,26 @@ class DefaultPocketStoriesControllerTest {
     fun `WHEN new stories are shown THEN update the State and record telemetry`() {
         val store = spyk(AppStore())
         val controller = createController(appStore = store)
-        val storiesShown: List<PocketStory> = mockk()
+        val recommendation = mockk<ContentRecommendation>()
+        val story = mockk<PocketStory>()
+        val sponsoredStory = mockk<PocketSponsoredStory>()
+        val storiesShown = listOf(recommendation, story, sponsoredStory)
+
         assertNull(Pocket.homeRecsShown.testGetValue())
 
         controller.handleStoriesShown(storiesShown)
 
-        verify { store.dispatch(AppAction.PocketStoriesShown(storiesShown)) }
+        verify {
+            store.dispatch(
+                ContentRecommendationsAction.PocketStoriesShown(
+                    storiesShown = listOf(
+                        recommendation,
+                        story,
+                    ),
+                ),
+            )
+        }
+
         assertNotNull(Pocket.homeRecsShown.testGetValue())
         assertEquals(1, Pocket.homeRecsShown.testGetValue()!!.size)
         assertNull(Pocket.homeRecsShown.testGetValue()!!.single().extra)

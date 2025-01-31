@@ -56,6 +56,19 @@ impl Counter for LabeledCounterMetric {
         match self {
             LabeledCounterMetric::Parent(p) => p.add(amount),
             LabeledCounterMetric::Child { id, label } => {
+                #[cfg(feature = "with_gecko")]
+                if gecko_profiler::can_accept_markers() {
+                    gecko_profiler::add_marker(
+                        "LabeledCounter::add",
+                        super::profiler_utils::TelemetryProfilerCategory,
+                        Default::default(),
+                        super::profiler_utils::IntLikeMetricMarker::new(
+                            *id,
+                            Some(label.clone()),
+                            amount,
+                        ),
+                    );
+                }
                 with_ipc_payload(move |payload| {
                     if let Some(map) = payload.labeled_counters.get_mut(id) {
                         if let Some(v) = map.get_mut(label) {
@@ -129,7 +142,10 @@ mod test {
         let metric = &metrics::test_only_ipc::a_labeled_counter;
         metric.get("a_label").add(1);
 
-        assert_eq!(1, metric.get("a_label").test_get_value("store1").unwrap());
+        assert_eq!(
+            1,
+            metric.get("a_label").test_get_value("test-ping").unwrap()
+        );
     }
 
     #[test]
@@ -144,6 +160,16 @@ mod test {
         {
             // scope for need_ipc RAII
             let _raii = ipc::test_set_need_ipc(true);
+
+            // clear the per-process submetric cache,
+            // or else we'll be given the parent-process child metric.
+            {
+                let mut map = crate::metrics::__glean_metric_maps::submetric_maps::COUNTER_MAP
+                    .write()
+                    .expect("Write lock for COUNTER_MAP was poisoned");
+                map.clear();
+            }
+
             let child_metric = parent_metric.get(label);
 
             let metric_id = child_metric.metric_id();
@@ -162,6 +188,15 @@ mod test {
                     "Stored the correct value in the ipc payload"
                 );
             });
+
+            // clear the per-process submetric cache again,
+            // or else we'll be given the child-process child metric below.
+            {
+                let mut map = crate::metrics::__glean_metric_maps::submetric_maps::COUNTER_MAP
+                    .write()
+                    .expect("Write lock for COUNTER_MAP was poisoned");
+                map.clear();
+            }
         }
 
         assert!(
@@ -172,7 +207,10 @@ mod test {
 
         assert_eq!(
             45,
-            parent_metric.get(label).test_get_value("store1").unwrap(),
+            parent_metric
+                .get(label)
+                .test_get_value("test-ping")
+                .unwrap(),
             "Values from the 'processes' should be summed"
         );
     }

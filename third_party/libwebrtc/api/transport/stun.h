@@ -14,9 +14,6 @@
 // This file contains classes for dealing with the STUN protocol, as specified
 // in RFC 5389, and its descendants.
 
-#if defined(WEBRTC_POSIX)
-#include <sys/socket.h>
-#endif
 #include <stddef.h>
 #include <stdint.h>
 
@@ -30,6 +27,7 @@
 #include "rtc_base/byte_buffer.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/ip_address.h"
+#include "rtc_base/net_helpers.h"
 #include "rtc_base/socket_address.h"
 
 namespace cricket {
@@ -95,13 +93,17 @@ enum StunAddressFamily {
 
 // These are the types of STUN error codes defined in RFC 5389.
 enum StunErrorCode {
+  // Not an actual error from RFC 5389 and not emitted via icecandidateerror.
+  STUN_ERROR_NOT_AN_ERROR = 0,
   STUN_ERROR_TRY_ALTERNATE = 300,
   STUN_ERROR_BAD_REQUEST = 400,
   STUN_ERROR_UNAUTHORIZED = 401,
   STUN_ERROR_UNKNOWN_ATTRIBUTE = 420,
   STUN_ERROR_STALE_NONCE = 438,
   STUN_ERROR_SERVER_ERROR = 500,
-  STUN_ERROR_GLOBAL_FAILURE = 600
+  STUN_ERROR_GLOBAL_FAILURE = 600,
+  // https://w3c.github.io/webrtc-pc/#dom-rtcpeerconnectioniceerrorevent-errorcode
+  STUN_ERROR_SERVER_NOT_REACHABLE = 701,
 };
 
 // Strings for the error codes above.
@@ -291,19 +293,6 @@ class StunMessage {
   // for all attributes that `attribute_type_mask` return true
   bool EqualAttributes(const StunMessage* other,
                        std::function<bool(int type)> attribute_type_mask) const;
-
-  // Validates that a STUN message in byte buffer form
-  // has a correct MESSAGE-INTEGRITY value.
-  // These functions are not recommended and will be deprecated; use
-  // ValidateMessageIntegrity(password) on the parsed form instead.
-  [[deprecated("Use member function")]] static bool ValidateMessageIntegrity(
-      const char* data,
-      size_t size,
-      const std::string& password);
-  [[deprecated("Use member function")]] static bool ValidateMessageIntegrity32(
-      const char* data,
-      size_t size,
-      const std::string& password);
 
   // Expose raw-buffer ValidateMessageIntegrity function for testing.
   static bool ValidateMessageIntegrityForTesting(const char* data,
@@ -687,7 +676,8 @@ enum TurnErrorType {
   STUN_ERROR_UNSUPPORTED_PROTOCOL = 442
 };
 
-extern const int SERVER_NOT_REACHABLE_ERROR;
+[[deprecated("Use STUN_ERROR_SERVER_NOT_REACHABLE")]] extern const int
+    SERVER_NOT_REACHABLE_ERROR;
 
 extern const char STUN_ERROR_REASON_FORBIDDEN[];
 extern const char STUN_ERROR_REASON_ALLOCATION_MISMATCH[];

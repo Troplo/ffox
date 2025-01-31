@@ -26,20 +26,10 @@
 }
 
 @media (-moz-windows-accent-color-in-titlebar) or (-moz-windows-mica) {
-  :root[tabsintitlebar] {
+  :root[customtitlebar] {
     @media (-moz-windows-mica) {
       &:not([lwtheme]) {
         background-color: transparent;
-
-        /* Accent color in titlebar overrides Mica. */
-        @media not (-moz-windows-accent-color-in-titlebar) {
-          /* Hide the Firefox buttons since Windows draws their own.
-           * FIXME(emilio): Find a way of hiding the native buttons, or make them
-           * taller, this is very hacky. */
-          .titlebar-buttonbox {
-            opacity: 0;
-          }
-        }
       }
     }
 
@@ -91,7 +81,13 @@
   -moz-context-properties: stroke;
   stroke: currentColor;
 
-  :root[tabletmode] & {
+  /* Win10's tablet mode is non-windowed -- windows can't be moved or resized
+     freely. In theory "minimize" might still make sense, but for simplicity we
+     just hide everything but "close".
+
+     (This is not called for in Win11's tablet mode, which _is_ windowed.)
+  */
+  :root[win10-tablet-mode] &:not(.titlebar-close) {
     display: none;
   }
 

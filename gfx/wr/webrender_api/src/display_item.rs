@@ -6,7 +6,7 @@ use euclid::{SideOffsets2D, Angle};
 use peek_poke::PeekPoke;
 use std::ops::Not;
 // local imports
-use crate::font;
+use crate::{font, SnapshotImageKey};
 use crate::{APZScrollGeneration, HasScrollLinkedEffect, PipelineId, PropertyBinding};
 use crate::serde::{Serialize, Deserialize};
 use crate::color::ColorF;
@@ -876,10 +876,40 @@ pub struct ReferenceFrame {
     pub key: SpatialTreeItemKey,
 }
 
+/// If passed in a stacking context display item, inform WebRender that
+/// the contents of the stacking context should be retained into a texture
+/// and associated to an image key.
+///
+/// Image display items can then display the cached snapshot using the
+/// same image key.
+///
+/// The flow for creating/using/deleting snapshots is the same as with
+/// regular images:
+///  - The image key must have been created with `Transaction::add_snapshot_image`.
+///  - The current scene must not contain references to the snapshot when
+///    `Transaction::delete_snapshot_image` is called.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
+pub struct SnapshotInfo {
+    /// The image key to associate the snapshot with.
+    pub key: SnapshotImageKey,
+    /// The bounds of the snapshot in local space.
+    ///
+    /// This rectangle is relative to the same coordinate space as the
+    /// child items of the stacking context.
+    pub area: LayoutRect,
+    /// If true, detach the stacking context from the scene and only
+    /// render it into the snapshot.
+    /// If false, the stacking context rendered in the frame normally
+    /// in addition to being cached into the snapshot.
+    pub detached: bool,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, PeekPoke)]
 pub struct PushStackingContextDisplayItem {
     pub origin: LayoutPoint,
     pub spatial_id: SpatialId,
+    pub snapshot: Option<SnapshotInfo>,
     pub prim_flags: PrimitiveFlags,
     pub ref_frame_offset: LayoutVector2D,
     pub stacking_context: StackingContext,
@@ -1077,10 +1107,10 @@ pub struct FloodPrimitive {
 
 impl FloodPrimitive {
     pub fn sanitize(&mut self) {
-        self.color.r = self.color.r.min(1.0).max(0.0);
-        self.color.g = self.color.g.min(1.0).max(0.0);
-        self.color.b = self.color.b.min(1.0).max(0.0);
-        self.color.a = self.color.a.min(1.0).max(0.0);
+        self.color.r = self.color.r.clamp(0.0, 1.0);
+        self.color.g = self.color.g.clamp(0.0, 1.0);
+        self.color.b = self.color.b.clamp(0.0, 1.0);
+        self.color.a = self.color.a.clamp(0.0, 1.0);
     }
 }
 
@@ -1101,7 +1131,7 @@ pub struct OpacityPrimitive {
 
 impl OpacityPrimitive {
     pub fn sanitize(&mut self) {
-        self.opacity = self.opacity.min(1.0).max(0.0);
+        self.opacity = self.opacity.clamp(0.0, 1.0);
     }
 }
 
@@ -2043,22 +2073,30 @@ impl BorderRadius {
         }
     }
 
-    pub fn is_uniform(&self) -> Option<f32> {
-        match self.is_uniform_size() {
-            Some(radius) if radius.width == radius.height => Some(radius.width),
-            _ => None,
-        }
+    pub fn all_sides_uniform(&self) -> bool {
+        let corner_is_uniform = |corner: &LayoutSize| corner.width == corner.height;
+        corner_is_uniform(&self.top_left) &&
+        corner_is_uniform(&self.top_right) &&
+        corner_is_uniform(&self.bottom_right) &&
+        corner_is_uniform(&self.bottom_left)
     }
 
-    pub fn is_uniform_size(&self) -> Option<LayoutSize> {
-        let uniform_radius = self.top_left;
-        if self.top_right == uniform_radius && self.bottom_left == uniform_radius &&
-            self.bottom_right == uniform_radius
-        {
-            Some(uniform_radius)
-        } else {
-            None
+    pub fn can_use_fast_path_in(&self, rect: &LayoutRect) -> bool {
+        if !self.all_sides_uniform() {
+            // The fast path needs uniform sides.
+            return false;
         }
+        // The shader code that evaluates the rounded corners in the fast path relies on each
+        // corner fitting into their quadrant of the quad. In other words the radius cannot
+        // exceed half of the length of the sides they are on. That necessarily holds if all the
+        // radii are the same.
+        let tl = self.top_left.width;
+        if tl == self.bottom_right.width && tl == self.top_right.width && tl == self.bottom_left.width {
+            return true;
+        }
+        let half_size = rect.size() * 0.5;
+        let fits = |v: f32| v <= half_size.width && v <= half_size.height;
+        fits(tl) && fits(self.bottom_right.width) && fits(self.top_right.width) && fits(self.bottom_left.width)
     }
 
     /// Return whether, in each corner, the radius in *either* direction is zero.

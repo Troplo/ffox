@@ -211,11 +211,6 @@ textarea::-moz-text-control-editing-root {
   overflow: inherit;
 }
 
-input:read-write,
-textarea:read-write {
-  -moz-user-modify: read-write !important;
-}
-
 select {
   margin: 0;
   border-color: ButtonBorder;
@@ -523,7 +518,7 @@ input[type=color] {
 /* https://github.com/whatwg/html/issues/9976 */
 input:not([type=image i], [type=range i], [type=checkbox i], [type=radio i]) {
   overflow: clip !important;
-  overflow-clip-margin: 0px !important;
+  overflow-clip-margin: 0 !important;
 }
 
 button,

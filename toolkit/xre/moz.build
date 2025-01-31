@@ -90,9 +90,16 @@ elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "cocoa":
         "../components/printingui",
     ]
 elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "uikit":
+    EXPORTS.GeckoView += [
+        "IOSBootstrap.h",
+    ]
     UNIFIED_SOURCES += [
+        "IOSBootstrap.mm",
         "nsNativeAppSupportDefault.cpp",
         "UIKitDirProvider.mm",
+    ]
+    LOCAL_INCLUDES += [
+        "!/build",
     ]
 elif CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
     UNIFIED_SOURCES += [
@@ -122,11 +129,6 @@ if CONFIG["MOZ_X11"]:
     EXPORTS += ["nsX11ErrorHandler.h"]
     UNIFIED_SOURCES += [
         "nsX11ErrorHandler.cpp",
-    ]
-
-if CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
-    UNIFIED_SOURCES += [
-        "nsAndroidStartup.cpp",
     ]
 
 if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
@@ -161,6 +163,7 @@ if CONFIG["MOZ_UPDATER"]:
     if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
         UNIFIED_SOURCES += [
             "nsUpdateDriver.cpp",
+            "nsUpdateMutex.cpp",
             "nsUpdateSyncManager.cpp",
         ]
 
@@ -244,6 +247,7 @@ LOCAL_INCLUDES += [
     "/dom/webbrowserpersist",
     "/js/xpconnect/loader",
     "/testing/gtest/mozilla",
+    "/third_party/sqlite3/ext/",
     "/toolkit/crashreporter",
     "/xpcom/build",
 ]

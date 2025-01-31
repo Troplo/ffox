@@ -13,6 +13,7 @@ support-files = [
   "early_hint_asset_html.sjs",
   "early_hint_csp_options_html.sjs",
   "early_hint_preconnect_html.sjs",
+  "file_channel.html",
   "post.html",
   "res.css",
   "res.css^headers^",
@@ -174,6 +175,8 @@ support-files = ["file_lnk.lnk",]
 
 ["browser_http_index_format.js"]
 
+["browser_necko_l10n.js"]
+
 ["browser_nsIFormPOSTActionChannel.js"]
 skip-if = ["true"] # protocol handler and channel does not work in content process
 
@@ -203,6 +206,8 @@ support-files = [
   "damonbowling.jpg^headers^",
   "file_favicon.html",
 ]
+
+["browser_test_file_channel_observer.js"]
 
 ["browser_test_offline_tab.js"]
 

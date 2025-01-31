@@ -19,7 +19,6 @@
 #include <algorithm>
 #include <iterator>
 
-#include "jsdate.h"
 #include "jsfriendapi.h"
 #include "jsmath.h"
 #include "jsnum.h"
@@ -31,6 +30,7 @@
 #  include "builtin/intl/Collator.h"
 #  include "builtin/intl/DateTimeFormat.h"
 #  include "builtin/intl/DisplayNames.h"
+#  include "builtin/intl/DurationFormat.h"
 #  include "builtin/intl/IntlObject.h"
 #  include "builtin/intl/ListFormat.h"
 #  include "builtin/intl/Locale.h"
@@ -52,6 +52,7 @@
 #include "frontend/BytecodeCompiler.h"    // CompileGlobalScriptToStencil
 #include "frontend/CompilationStencil.h"  // js::frontend::CompilationStencil
 #include "frontend/FrontendContext.h"     // AutoReportFrontendContext
+#include "frontend/StencilXdr.h"  // js::EncodeStencil, js::DecodeStencil
 #include "jit/AtomicOperations.h"
 #include "jit/InlinableNatives.h"
 #include "jit/TrampolineNatives.h"
@@ -1819,6 +1820,26 @@ static bool intrinsic_ToBigInt(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
+static bool intrinsic_NumberToBigInt(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  MOZ_ASSERT(args.length() == 1);
+  MOZ_ASSERT(args[0].isNumber());
+  BigInt* res = NumberToBigInt(cx, args[0].toNumber());
+  if (!res) {
+    return false;
+  }
+  args.rval().setBigInt(res);
+  return true;
+}
+
+static bool intrinsic_BigIntToNumber(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  MOZ_ASSERT(args.length() == 1);
+  MOZ_ASSERT(args[0].isBigInt());
+  args.rval().setNumber(BigInt::numberValue(args[0].toBigInt()));
+  return true;
+}
+
 static bool intrinsic_NewWrapForValidIterator(JSContext* cx, unsigned argc,
                                               Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
@@ -1954,6 +1975,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
                     intrinsic_ArrayIteratorPrototypeOptimizable, 0, 0,
                     IntrinsicArrayIteratorPrototypeOptimizable),
     JS_FN("AssertionFailed", intrinsic_AssertionFailed, 1, 0),
+    JS_FN("BigIntToNumber", intrinsic_BigIntToNumber, 1, 0),
     JS_FN("CallArrayBufferMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<ArrayBufferObject>>, 2, 0),
     JS_FN("CallArrayIteratorMethodIfWrapped",
@@ -2128,6 +2150,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
                     IntrinsicNewStringIterator),
     JS_FN("NewWrapForValidIterator", intrinsic_NewWrapForValidIterator, 0, 0),
     JS_FN("NoPrivateGetter", intrinsic_NoPrivateGetter, 1, 0),
+    JS_FN("NumberToBigInt", intrinsic_NumberToBigInt, 1, 0),
     JS_INLINABLE_FN("ObjectHasPrototype", intrinsic_ObjectHasPrototype, 2, 0,
                     IntrinsicObjectHasPrototype),
     JS_INLINABLE_FN(
@@ -2239,6 +2262,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
           CallNonGenericSelfhostedMethod<Is<DateTimeFormatObject>>, 2, 0),
     JS_FN("intl_CallDisplayNamesMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<DisplayNamesObject>>, 2, 0),
+    JS_FN("intl_CallDurationFormatMethodIfWrapped",
+          CallNonGenericSelfhostedMethod<Is<DurationFormatObject>>, 2, 0),
     JS_FN("intl_CallListFormatMethodIfWrapped",
           CallNonGenericSelfhostedMethod<Is<ListFormatObject>>, 2, 0),
     JS_FN("intl_CallNumberFormatMethodIfWrapped",
@@ -2270,6 +2295,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("intl_FormatRelativeTime", intl_FormatRelativeTime, 4, 0),
     JS_FN("intl_GetCalendarInfo", intl_GetCalendarInfo, 1, 0),
     JS_FN("intl_GetPluralCategories", intl_GetPluralCategories, 1, 0),
+    JS_FN("intl_GetTimeSeparator", intl_GetTimeSeparator, 2, 0),
     JS_INLINABLE_FN("intl_GuardToCollator",
                     intrinsic_GuardToBuiltin<CollatorObject>, 1, 0,
                     IntlGuardToCollator),
@@ -2279,6 +2305,9 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_INLINABLE_FN("intl_GuardToDisplayNames",
                     intrinsic_GuardToBuiltin<DisplayNamesObject>, 1, 0,
                     IntlGuardToDisplayNames),
+    JS_INLINABLE_FN("intl_GuardToDurationFormat",
+                    intrinsic_GuardToBuiltin<DurationFormatObject>, 1, 0,
+                    IntlGuardToDurationFormat),
     JS_INLINABLE_FN("intl_GuardToListFormat",
                     intrinsic_GuardToBuiltin<ListFormatObject>, 1, 0,
                     IntlGuardToListFormat),
@@ -2349,7 +2378,6 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_INLINABLE_FN("std_Array_pop", array_pop, 0, 0, ArrayPop),
     JS_TRAMPOLINE_FN("std_Array_sort", array_sort, 1, 0, ArraySort),
     JS_FN("std_BigInt_valueOf", BigIntObject::valueOf, 0, 0),
-    JS_FN("std_Date_now", date_now, 0, 0),
     JS_FN("std_Function_apply", fun_apply, 2, 0),
     JS_FN("std_Map_entries", MapObject::entries, 0, 0),
     JS_FN("std_Map_get", MapObject::get, 1, 0),
@@ -2358,6 +2386,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_INLINABLE_FN("std_Math_floor", math_floor, 1, 0, MathFloor),
     JS_INLINABLE_FN("std_Math_max", math_max, 2, 0, MathMax),
     JS_INLINABLE_FN("std_Math_min", math_min, 2, 0, MathMin),
+    JS_INLINABLE_FN("std_Math_sign", math_sign, 1, 0, MathSign),
     JS_INLINABLE_FN("std_Math_trunc", math_trunc, 1, 0, MathTrunc),
     JS_INLINABLE_FN("std_Object_create", obj_create, 2, 0, ObjectCreate),
     JS_INLINABLE_FN("std_Object_isPrototypeOf", obj_isPrototypeOf, 1, 0,
@@ -2625,7 +2654,6 @@ bool JSRuntime::initSelfHostingStencil(JSContext* cx,
   FillSelfHostingCompileOptions(options);
 
   // Try initializing from Stencil XDR.
-  bool decodeOk = false;
   AutoPrintSelfHostingFrontendContext fc(cx);
   if (xdrCache.Length() > 0) {
     // Allow the VM to directly use bytecode from the XDR buffer without
@@ -2645,16 +2673,11 @@ bool JSRuntime::initSelfHostingStencil(JSContext* cx,
       }
     }
 
-    RefPtr<frontend::CompilationStencil> stencil(
-        cx->new_<frontend::CompilationStencil>(input->source));
-    if (!stencil) {
-      return false;
-    }
-    if (!stencil->deserializeStencils(&fc, options, xdrCache, &decodeOk)) {
-      return false;
-    }
-
-    if (decodeOk) {
+    JS::DecodeOptions decodeOption(options);
+    RefPtr<frontend::CompilationStencil> stencil;
+    JS::TranscodeResult result =
+        js::DecodeStencil(&fc, decodeOption, xdrCache, getter_AddRefs(stencil));
+    if (result == JS::TranscodeResult::Ok) {
       MOZ_ASSERT(input->atomCache.empty());
 
       MOZ_ASSERT(!hasSelfHostStencil());
@@ -2692,9 +2715,9 @@ bool JSRuntime::initSelfHostingStencil(JSContext* cx,
   }
   frontend::NoScopeBindingCache scopeCache;
   RefPtr<frontend::CompilationStencil> stencil =
-      frontend::CompileGlobalScriptToStencil(cx, &fc, cx->tempLifoAlloc(),
-                                             *input, &scopeCache, srcBuf,
-                                             ScopeKind::Global);
+      frontend::CompileGlobalScriptToStencilWithInput(
+          cx, &fc, cx->tempLifoAlloc(), *input, &scopeCache, srcBuf,
+          ScopeKind::Global);
   if (!stencil) {
     return false;
   }
@@ -2702,11 +2725,8 @@ bool JSRuntime::initSelfHostingStencil(JSContext* cx,
   // Serialize the stencil to XDR.
   if (xdrWriter) {
     JS::TranscodeBuffer xdrBuffer;
-    bool succeeded = false;
-    if (!stencil->serializeStencils(cx, *input, xdrBuffer, &succeeded)) {
-      return false;
-    }
-    if (!succeeded) {
+    JS::TranscodeResult result = js::EncodeStencil(cx, stencil, xdrBuffer);
+    if (result != JS::TranscodeResult::Ok) {
       JS_ReportErrorASCII(cx, "Encoding failure");
       return false;
     }
@@ -2754,7 +2774,7 @@ void JSRuntime::finishSelfHosting() {
       // instance.
       RefPtr<frontend::CompilationStencil> stencil;
       *getter_AddRefs(stencil) = selfHostStencil_;
-      MOZ_ASSERT(stencil->refCount == 1);
+      MOZ_ASSERT(!stencil->hasMultipleReference());
     }
   }
 
@@ -2921,6 +2941,14 @@ static bool GetComputedIntrinsic(JSContext* cx, Handle<PropertyName*> name,
   // only have to look for it in one place when performing `GetIntrinsic`.
   mozilla::Maybe<PropertyInfo> prop =
       computedIntrinsicsHolder->lookup(cx, name);
+#ifdef DEBUG
+  if (!prop) {
+    Fprinter out(stderr);
+    out.printf("SelfHosted intrinsic not found: ");
+    name->dumpPropertyName(out);
+    out.printf("\n");
+  }
+#endif
   MOZ_RELEASE_ASSERT(prop, "SelfHosted intrinsic not found");
   RootedValue value(cx, computedIntrinsicsHolder->getSlot(prop->slot()));
   return GlobalObject::addIntrinsicValue(cx, cx->global(), name, value);

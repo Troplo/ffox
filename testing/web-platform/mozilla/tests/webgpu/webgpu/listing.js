@@ -212,6 +212,14 @@ export const listing = [
       "api",
       "operation",
       "device",
+      "all_limits_and_features"
+    ]
+  },
+  {
+    "file": [
+      "api",
+      "operation",
+      "device",
       "lost"
     ]
   },
@@ -502,6 +510,14 @@ export const listing = [
       "operation",
       "sampling",
       "lod_clamp"
+    ]
+  },
+  {
+    "file": [
+      "api",
+      "operation",
+      "sampling",
+      "sampler_texture"
     ]
   },
   {
@@ -1116,6 +1132,16 @@ export const listing = [
       "encoding",
       "cmds",
       "render",
+      "indirect_multi_draw"
+    ]
+  },
+  {
+    "file": [
+      "api",
+      "validation",
+      "encoding",
+      "cmds",
+      "render",
       "setIndexBuffer"
     ]
   },
@@ -1307,6 +1333,13 @@ export const listing = [
     "file": [
       "api",
       "validation",
+      "non_filterable_texture"
+    ]
+  },
+  {
+    "file": [
+      "api",
+      "validation",
       "query_set",
       "create"
     ]
@@ -1433,6 +1466,14 @@ export const listing = [
       "validation",
       "render_pipeline",
       "depth_stencil_state"
+    ]
+  },
+  {
+    "file": [
+      "api",
+      "validation",
+      "render_pipeline",
+      "float32_blendable"
     ]
   },
   {
@@ -1671,6 +1712,14 @@ export const listing = [
       "encoding",
       "programmable",
       "pipeline_bind_group_compat"
+    ]
+  },
+  {
+    "file": [
+      "compat",
+      "api",
+      "validation",
+      "pipeline_creation"
     ]
   },
   {
@@ -2985,6 +3034,26 @@ export const listing = [
       "expression",
       "call",
       "builtin",
+      "quadBroadcast"
+    ]
+  },
+  {
+    "file": [
+      "shader",
+      "execution",
+      "expression",
+      "call",
+      "builtin",
+      "quadSwap"
+    ]
+  },
+  {
+    "file": [
+      "shader",
+      "execution",
+      "expression",
+      "call",
+      "builtin",
       "quantizeToF16"
     ]
   },
@@ -3175,6 +3244,16 @@ export const listing = [
       "expression",
       "call",
       "builtin",
+      "subgroupBitwise"
+    ]
+  },
+  {
+    "file": [
+      "shader",
+      "execution",
+      "expression",
+      "call",
+      "builtin",
       "subgroupBroadcast"
     ]
   },
@@ -3186,6 +3265,16 @@ export const listing = [
       "call",
       "builtin",
       "subgroupMul"
+    ]
+  },
+  {
+    "file": [
+      "shader",
+      "execution",
+      "expression",
+      "call",
+      "builtin",
+      "subgroupShuffle"
     ]
   },
   {
@@ -3356,6 +3445,16 @@ export const listing = [
       "call",
       "builtin",
       "textureStore"
+    ]
+  },
+  {
+    "file": [
+      "shader",
+      "execution",
+      "expression",
+      "call",
+      "builtin",
+      "texture_utils"
     ]
   },
   {

@@ -28,7 +28,6 @@
 #include "mozilla/dom/indexedDB/PBackgroundIndexedDBUtilsChild.h"
 #include "mozilla/dom/indexedDB/ThreadLocal.h"
 #include "mozilla/dom/quota/PQuotaChild.h"
-#include "mozilla/dom/RemoteWorkerChild.h"
 #include "mozilla/dom/RemoteWorkerControllerChild.h"
 #include "mozilla/dom/RemoteWorkerServiceChild.h"
 #include "mozilla/dom/ServiceWorkerChild.h"
@@ -128,7 +127,6 @@ void BackgroundChildImpl::ProcessingError(Result aCode, const char* aReason) {
       HANDLE_CASE(MsgNotAllowed);
       HANDLE_CASE(MsgPayloadError);
       HANDLE_CASE(MsgProcessingError);
-      HANDLE_CASE(MsgRouteError);
       HANDLE_CASE(MsgValueError);
 
 #undef HANDLE_CASE

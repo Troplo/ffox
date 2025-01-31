@@ -296,6 +296,11 @@ abstract class Settings {
     open var fetchPriorityEnabled: Boolean by UnsupportedSetting()
 
     /**
+     * Setting to control whether javascript.options.mem.gc_parallel_marking is enabled.
+     */
+    open var parallelMarkingEnabled: Boolean by UnsupportedSetting()
+
+    /**
      * Setting to control the cookie behavior opt-in partitioning.
      */
     open var cookieBehaviorOptInPartitioning: Boolean by UnsupportedSetting()
@@ -304,6 +309,11 @@ abstract class Settings {
      * Setting to control the cookie behavior opt-in partitioning in private browsing mode.
      */
     open var cookieBehaviorOptInPartitioningPBM: Boolean by UnsupportedSetting()
+
+    /**
+     * Setting to control how Certificate Transparency information is processed.
+     */
+    open var certificateTransparencyMode: Int by UnsupportedSetting()
 }
 
 /**
@@ -362,9 +372,11 @@ data class DefaultSettings(
     override var webContentIsolationStrategy: WebContentIsolationStrategy? =
         WebContentIsolationStrategy.ISOLATE_HIGH_VALUE,
     override var fetchPriorityEnabled: Boolean = true,
+    override var parallelMarkingEnabled: Boolean = false,
     val getDesktopMode: () -> Boolean = { false },
     override var cookieBehaviorOptInPartitioning: Boolean = false,
     override var cookieBehaviorOptInPartitioningPBM: Boolean = false,
+    override var certificateTransparencyMode: Int = 0,
 ) : Settings() {
     override val desktopModeEnabled: Boolean
         get() = getDesktopMode()

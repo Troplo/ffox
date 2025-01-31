@@ -195,7 +195,25 @@ module.exports = function (config) {
                 statements: 98.25,
                 lines: 98.2,
                 functions: 100,
-                branches: 74.63,
+                branches: 72.95,
+              },
+            "content-src/components/DiscoveryStreamComponents/CardSections/CardSections.jsx":
+              {
+                statements: 93.62,
+                lines: 93.48,
+                functions: 92.31,
+                branches: 60,
+              },
+            "content-src/components/DiscoveryStreamComponents/SectionContextMenu/SectionContextMenu.jsx":
+              {
+                statements: 0,
+                lines: 0,
+                functions: 0,
+                branches: 0,
+              },
+            "content-src/components/DiscoveryStreamComponents/AdBanner/AdBanner.jsx":
+              {
+                branches: 66.67,
               },
             "content-src/components/DiscoveryStreamComponents/**/*.jsx": {
               statements: 90.48,
@@ -253,6 +271,9 @@ module.exports = function (config) {
               lines: 96,
               functions: 96,
               branches: 70,
+            },
+            "content-src/lib/hooks.jsx": {
+              branches: 60,
             },
             "content-src/components/**/*.jsx": {
               statements: 51.1,

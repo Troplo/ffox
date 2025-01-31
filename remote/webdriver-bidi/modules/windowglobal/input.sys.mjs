@@ -143,48 +143,63 @@ class InputModule extends WindowGlobalBiDiModule {
   async _dispatchEvent(options) {
     const { eventName, details } = options;
 
-    switch (eventName) {
-      case "synthesizeKeyDown":
-        lazy.event.sendKeyDown(details.eventData, this.messageHandler.window);
-        break;
-      case "synthesizeKeyUp":
-        lazy.event.sendKeyUp(details.eventData, this.messageHandler.window);
-        break;
-      case "synthesizeMouseAtPoint":
-        lazy.event.synthesizeMouseAtPoint(
-          details.x,
-          details.y,
-          details.eventData,
-          this.messageHandler.window
+    try {
+      switch (eventName) {
+        case "synthesizeKeyDown":
+          lazy.event.sendKeyDown(details.eventData, this.messageHandler.window);
+          break;
+        case "synthesizeKeyUp":
+          lazy.event.sendKeyUp(details.eventData, this.messageHandler.window);
+          break;
+        case "synthesizeMouseAtPoint":
+          lazy.event.synthesizeMouseAtPoint(
+            details.x,
+            details.y,
+            details.eventData,
+            this.messageHandler.window
+          );
+          break;
+        case "synthesizeMultiTouch":
+          lazy.event.synthesizeMultiTouch(
+            details.eventData,
+            this.messageHandler.window
+          );
+          break;
+        case "synthesizeWheelAtPoint":
+          lazy.event.synthesizeWheelAtPoint(
+            details.x,
+            details.y,
+            details.eventData,
+            this.messageHandler.window
+          );
+          break;
+        default:
+          throw new Error(
+            `${eventName} is not a supported type for dispatching`
+          );
+      }
+    } catch (e) {
+      if (e.message.includes("NS_ERROR_FAILURE")) {
+        // Dispatching the event failed. Inform the RootTransport
+        // to retry dispatching the event.
+        throw new DOMException(
+          `Failed to dispatch event "${eventName}": ${e.message}`,
+          "AbortError"
         );
-        break;
-      case "synthesizeMultiTouch":
-        lazy.event.synthesizeMultiTouch(
-          details.eventData,
-          this.messageHandler.window
-        );
-        break;
-      case "synthesizeWheelAtPoint":
-        lazy.event.synthesizeWheelAtPoint(
-          details.x,
-          details.y,
-          details.eventData,
-          this.messageHandler.window
-        );
-        break;
-      default:
-        throw new Error(`${eventName} is not a supported type for dispatching`);
+      }
+
+      throw e;
     }
   }
 
-  _finalizeAction() {
+  async _finalizeAction() {
     // Terminate the current wheel transaction if there is one. Wheel
     // transactions should not live longer than a single action chain.
     ChromeUtils.endWheelTransaction();
 
     // Wait for the next animation frame to make sure the page's content
     // was updated.
-    return lazy.AnimationFramePromise(this.messageHandler.window);
+    await lazy.AnimationFramePromise(this.messageHandler.window);
   }
 
   async _getClientRects(options) {
@@ -219,9 +234,8 @@ class InputModule extends WindowGlobalBiDiModule {
   async setFiles(options) {
     const { element: sharedReference, files } = options;
 
-    const element = await this.#deserializeElementSharedReference(
-      sharedReference
-    );
+    const element =
+      await this.#deserializeElementSharedReference(sharedReference);
 
     if (
       !HTMLInputElement.isInstance(element) ||

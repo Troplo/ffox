@@ -7,6 +7,8 @@ const { topChromeWindow } = window.browsingContext;
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   GenAI: "resource:///modules/GenAI.sys.mjs",
+  LightweightThemeConsumer:
+    "resource://gre/modules/LightweightThemeConsumer.sys.mjs",
   SpecialMessageActions:
     "resource://messaging-system/lib/SpecialMessageActions.sys.mjs",
 });
@@ -25,6 +27,11 @@ XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
   "shortcutsPref",
   "browser.ml.chat.shortcuts"
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "sidebarRevampPref",
+  "sidebar.revamp"
 );
 
 ChromeUtils.defineLazyGetter(
@@ -61,8 +68,10 @@ function request(url = lazy.providerPref) {
 function renderChat() {
   const browser = document.createXULElement("browser");
   browser.setAttribute("disableglobalhistory", "true");
-  browser.setAttribute("type", "content");
+  browser.setAttribute("maychangeremoteness", "true");
+  browser.setAttribute("nodefaultsrc", "true");
   browser.setAttribute("remote", "true");
+  browser.setAttribute("type", "content");
   return document.body.appendChild(browser);
 }
 
@@ -226,6 +235,7 @@ addEventListener("change", handleChange);
 // Expose a promise for loading and rendering the chat browser element
 var browserPromise = new Promise((resolve, reject) => {
   addEventListener("load", async () => {
+    new lazy.LightweightThemeConsumer(document);
     try {
       node.chat = renderChat();
       node.provider = await renderProviders();
@@ -246,6 +256,7 @@ var browserPromise = new Promise((resolve, reject) => {
       opened: true,
       provider: lazy.GenAI.getProviderId(),
       reason: "load",
+      version: lazy.sidebarRevampPref ? "new" : "old",
     });
   });
 });
@@ -256,6 +267,7 @@ addEventListener("unload", () => {
     opened: false,
     provider: lazy.GenAI.getProviderId(),
     reason: "unload",
+    version: lazy.sidebarRevampPref ? "new" : "old",
   });
 });
 
@@ -509,7 +521,9 @@ function showOnboarding(length) {
         // Handle single select provider choice
         case ACTIONS.CHATBOT_SELECT: {
           const { config } = action;
-          if (!config) break;
+          if (!config) {
+            break;
+          }
 
           request(config.url);
           document.querySelector(".primary").disabled = false;

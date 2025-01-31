@@ -22,6 +22,7 @@ import { EmbeddedMigrationWizard } from "./EmbeddedMigrationWizard";
 import { AddonsPicker } from "./AddonsPicker";
 import { LinkParagraph } from "./LinkParagraph";
 import { ActionChecklist } from "./ActionChecklist";
+import { EmbeddedBrowser } from "./EmbeddedBrowser";
 
 export const MultiStageProtonScreen = props => {
   const { autoAdvance, handleAction, order } = props;
@@ -346,6 +347,14 @@ export class ProtonScreen extends React.PureComponent {
             message_id={this.props.messageId}
           />
         ) : null}
+        {content.tiles &&
+        content.tiles.type === "embedded_browser" &&
+        content.tiles.data?.url ? (
+          <EmbeddedBrowser
+            url={content.tiles.data.url}
+            style={content.tiles.data.style}
+          />
+        ) : null}
       </React.Fragment>
     );
   }
@@ -535,6 +544,8 @@ export class ProtonScreen extends React.PureComponent {
         )
       : "";
     const isEmbeddedMigration = content.tiles?.type === "migration-wizard";
+    const isSystemPromptStyleSpotlight =
+      content.isSystemPromptStyleSpotlight === true;
 
     return (
       <main
@@ -556,7 +567,7 @@ export class ProtonScreen extends React.PureComponent {
         <div
           className={`section-main ${
             isEmbeddedMigration ? "embedded-migration" : ""
-          }`}
+          }${isSystemPromptStyleSpotlight ? "system-prompt-spotlight" : ""}`}
           hide-secondary-section={
             content.hide_secondary_section
               ? String(content.hide_secondary_section)

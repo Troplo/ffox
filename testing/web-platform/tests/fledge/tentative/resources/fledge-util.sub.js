@@ -2,7 +2,9 @@
 
 const BASE_URL = document.baseURI.substring(0, document.baseURI.lastIndexOf('/') + 1);
 const BASE_PATH = (new URL(BASE_URL)).pathname;
-const RESOURCE_PATH = `${BASE_PATH}resources/`
+
+// Allow overriding to allow other repositories to use these utility functions.
+RESOURCE_PATH = `${BASE_PATH}resources/`
 
 const DEFAULT_INTEREST_GROUP_NAME = 'default name';
 
@@ -326,7 +328,7 @@ async function joinNegativeInterestGroup(
       `await joinInterestGroupWithoutDefaults(` +
           `test_instance, ${JSON.stringify(interestGroup)})`);
   } else {
-    await joinInterestGroupWithoutDefaults(test_instance, interestGroup);
+    await joinInterestGroupWithoutDefaults(test, interestGroup);
   }
 }
 
@@ -544,8 +546,10 @@ async function runReportTest(test, uuid, codeToInsert, expectedReportURLs,
 // - test/uuid: the test object and uuid from the test case (see generateUuid)
 // - buyers: array of strings, each a domain for a buyer participating in this
 //       auction
-// - actionNonce: string, the auction nonce for this auction, typically
+// - auctionNonce: string, the auction nonce for this auction, typically
 //       retrieved from a prior call to navigator.createAuctionNonce
+// - additionalBidsPromise: promise resolving to undefined, to be resolved when
+//       the additional bids have been retrieved with fetch().
 // - highestScoringOtherBid: the amount of the second-highest bid,
 //       or zero if there's no second-highest bid
 // - winningAdditionalBidId: the label of the winning bid
@@ -565,6 +569,25 @@ async function runAdditionalBidTest(test, uuid, buyers, auctionNonce,
   await waitForObservedRequests(
       uuid, [createHighestScoringOtherBidReportURL(uuid, highestScoringOtherBid),
              createBidderReportURL(uuid, winningAdditionalBidId)]);
+}
+
+// Similar to runAdditionalBidTest(), but expects no winner. It takes the
+// following arguments:
+// - test/uuid: the test object and uuid from the test case (see generateUuid)
+// - buyers: array of strings, each a domain for a buyer participating in this
+//       auction
+// - auctionNonce: string, the auction nonce for this auction, typically
+//       retrieved from a prior call to navigator.createAuctionNonce
+// - additionalBidsPromise: promise resolving to undefined, to be resolved when
+//       the additional bids have been retrieved with fetch().
+async function runAdditionalBidTestNoWinner(
+    test, uuid, buyers, auctionNonce, additionalBidsPromise) {
+  await runBasicFledgeTestExpectingNoWinner(test, uuid, {
+    interestGroupBuyers: buyers,
+    auctionNonce: auctionNonce,
+    additionalBids: additionalBidsPromise,
+    decisionLogicURL: createDecisionScriptURL(uuid)
+  });
 }
 
 // Runs "script" in "child_window" via an eval call. The "child_window" must
@@ -812,6 +835,38 @@ let additionalBidHelper = function() {
         secretKeysForInvalidSignatures = secretKeys;
   }
 
+  // Sets the seller nonce that will be used in the server response.
+  function setSellerNonce(additionalBid, sellerNonce) {
+    getAndMaybeInitializeTestMetadata(additionalBid).
+        sellerNonce = sellerNonce;
+  }
+
+  // Instructs the server to remove the auctionNonce from the bid, and only
+  // include it in the header.
+  function removeAuctionNonceFromBid(additionalBid) {
+    getAndMaybeInitializeTestMetadata(additionalBid).
+        removeAuctionNonceFromBid = true;
+  }
+
+  // Instructs the server to use `bidAuctionNonceOverride` as the `auctionNonce`
+  // in the bid, even it doesn't match the auctionNonce in the header. Overrides
+  // the behavior of removeAuctionNonceFromBid().
+  function setBidAuctionNonceOverride(additionalBid, bidAuctionNonceOverride) {
+    getAndMaybeInitializeTestMetadata(additionalBid).
+        bidAuctionNonceOverride = bidAuctionNonceOverride;
+  }
+
+  // Takes the auctionNonce and sellerNonce as strings, and combines them with
+  // SHA256, returning the result as a base64 string.
+  async function computeBidNonce(auctionNonce, sellerNonce) {
+    // Compute the bidNonce as hashed bytes.
+    const combined_utf8 = new TextEncoder().encode(auctionNonce + sellerNonce);
+    const hashed = await crypto.subtle.digest('SHA-256',combined_utf8);
+
+    // Convert the hashed bytes to base64.
+    return btoa(String.fromCharCode(...new Uint8Array(hashed)));
+  }
+
   // Adds a single negative interest group to an additional bid, as described at:
   // https://github.com/WICG/turtledove/blob/main/FLEDGE.md#622-how-additional-bids-specify-their-negative-interest-groups
   function addNegativeInterestGroup(additionalBid, negativeInterestGroup) {
@@ -846,6 +901,10 @@ let additionalBidHelper = function() {
     createAdditionalBid: createAdditionalBid,
     signWithSecretKeys: signWithSecretKeys,
     incorrectlySignWithSecretKeys: incorrectlySignWithSecretKeys,
+    setSellerNonce: setSellerNonce,
+    removeAuctionNonceFromBid: removeAuctionNonceFromBid,
+    setBidAuctionNonceOverride: setBidAuctionNonceOverride,
+    computeBidNonce: computeBidNonce,
     addNegativeInterestGroup: addNegativeInterestGroup,
     addNegativeInterestGroups: addNegativeInterestGroups,
     fetchAdditionalBids: fetchAdditionalBids

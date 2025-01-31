@@ -199,6 +199,19 @@ pref("app.update.langpack.enabled", true);
   pref("app.update.noWindowAutoRestart.delayMs", 300000);
 #endif
 
+// The Multi Session Install Lockout prevents updates from being installed at
+// startup when they normally would be if there are other instances using the
+// installation. We only do this for a limited amount of time before we go ahead
+// and apply the update anyways.
+// Hopefully, at some point, updating Firefox while it is running will not break
+// things and this mechanism can be removed.
+// Note that these prefs are bit dangerous because having different values in
+// different profiles could cause erratic behavior.
+// This feature is also affected by
+// `app.update.multiSessionInstallLockout.timeoutMs`, which is in the branding
+// section.
+pref("app.update.multiSessionInstallLockout.enabled", true);
+
 #if defined(MOZ_BACKGROUNDTASKS)
   // The amount of time, in seconds, before background tasks time out and exit.
   // Tasks can override this default (10 minutes).
@@ -402,6 +415,9 @@ pref("browser.urlbar.autoFill.adaptiveHistory.enabled", false);
 // autofill.
 pref("browser.urlbar.autoFill.adaptiveHistory.minCharsThreshold", 0);
 
+// Set default suggest intent threshold value of 0.5
+pref("browser.urlbar.intentThreshold", "0.5");
+
 // Set default NER threshold value of 0.5
 pref("browser.urlbar.nerThreshold", "0.5");
 
@@ -415,7 +431,7 @@ pref("browser.urlbar.filter.javascript", true);
 
 // Focus the content document when pressing the Escape key, if there's no
 // remaining typed history.
-pref("browser.urlbar.focusContentDocumentOnEsc", false);
+pref("browser.urlbar.focusContentDocumentOnEsc", true);
 
 // Enable a certain level of urlbar logging to the Browser Console. See
 // ConsoleInstance.webidl.
@@ -444,7 +460,14 @@ pref("browser.urlbar.suggest.quickactions",         true);
 pref("browser.urlbar.deduplication.enabled", false);
 pref("browser.urlbar.deduplication.thresholdDays", 7);
 
+#ifdef NIGHTLY_BUILD
+pref("browser.urlbar.scotchBonnet.enableOverride", true);
+#else
 pref("browser.urlbar.scotchBonnet.enableOverride", false);
+#endif
+
+// Whether or not Unified Search Button is shown always.
+pref("browser.urlbar.unifiedSearchButton.always", false);
 
 // Enable trending suggestions and recent searches.
 pref("browser.urlbar.trending.featureGate", true);
@@ -456,7 +479,11 @@ pref("browser.urlbar.richSuggestions.featureGate", true);
 pref("browser.search.param.search_rich_suggestions", "fen");
 
 // Feature gate pref for weather suggestions in the urlbar.
+#ifdef NIGHTLY_BUILD
+pref("browser.urlbar.weather.featureGate", true);
+#else
 pref("browser.urlbar.weather.featureGate", false);
+#endif
 
 // Enable clipboard suggestions feature, the pref should be removed once stable.
 pref("browser.urlbar.clipboard.featureGate", false);
@@ -465,6 +492,12 @@ pref("browser.urlbar.clipboard.featureGate", false);
 // the suggestion. 0 means the min length should be taken from Nimbus or remote
 // settings.
 pref("browser.urlbar.weather.minKeywordLength", 0);
+
+// The UI treatment to use for weather suggestions. Possible values:
+// 0: (default) Simplest UI with current temperature and location
+// 1: Simpler UI, adds current conditions, high/low, and URL
+// 2: Full UI, adds forecast
+pref("browser.urlbar.weather.uiTreatment", 0);
 
 // If `browser.urlbar.weather.featureGate` is true, this controls whether
 // weather suggestions are turned on.
@@ -820,13 +853,6 @@ pref("browser.shopping.experience2023.optedIn", 0);
 // to auto-activate the sidebar for non-opted-in users up to 2 times.
 pref("browser.shopping.experience2023.active", true);
 
-// Enables ad exposure telemetry for users opted in to the shopping experience:
-// when this pref is true, each time a product is analyzed, we record if an ad
-// was available for that product. This value will be toggled via a nimbus
-// experiment, so that we can pause collection if the ads server struggles
-// under load.
-pref("browser.shopping.experience2023.ads.exposure", false);
-
 // Enables the ad / recommended product feature for the shopping sidebar.
 // If enabled, users can disable the ad card using the separate pref
 // `browser.shopping.experience2023.ads.userEnabled` and visible toggle
@@ -862,7 +888,14 @@ pref("browser.shopping.experience2023.sidebarClosedCount", 0);
 pref("browser.shopping.experience2023.showKeepSidebarClosedMessage", true);
 
 // Integrates the Review Checker shopping feature into the global sidebar
+// shoppingSidebar pref should be opposite of this to disable
+// the custom shopping sidebar.
 pref("browser.shopping.experience2023.integratedSidebar", false);
+
+// Enables showing the Review Checker in the Shopping sidebar.
+// integratedSidebar pref should be opposite of this to disable
+// the Review Checker sidebar panel.
+pref("browser.shopping.experience2023.shoppingSidebar", true);
 
 // Spin the cursor while the page is loading
 pref("browser.spin_cursor_while_busy", false);
@@ -963,6 +996,11 @@ pref("browser.tabs.insertRelatedAfterCurrent", true);
 // for non-related links. Note that if this is set to true, it will trump
 // the value of browser.tabs.insertRelatedAfterCurrent.
 pref("browser.tabs.insertAfterCurrent", false);
+// When |insertRelatedAfterCurrent| is true opening a link from a pinned tab
+// results in the tabbar scrolling back to the beginning. Setting
+// |insertAfterCurrentExceptPinned| to true will add tabs at the end of the
+// tabbar.
+pref("browser.tabs.insertAfterCurrentExceptPinned", false);
 pref("browser.tabs.warnOnClose", false);
 pref("browser.tabs.warnOnCloseOtherTabs", true);
 pref("browser.tabs.warnOnOpen", true);
@@ -1013,8 +1051,14 @@ pref("browser.tabs.tooltipsShowPidAndActiveness", false);
 pref("browser.tabs.hoverPreview.enabled", true);
 pref("browser.tabs.hoverPreview.showThumbnails", true);
 
+#ifdef NIGHTLY_BUILD
+pref("browser.tabs.groups.enabled", true);
+#else
 pref("browser.tabs.groups.enabled", false);
+#endif
 pref("browser.tabs.groups.dragOverThresholdPercent", 20);
+pref("browser.tabs.groups.dragOverDelayMS", 30);
+pref("browser.tabs.dragdrop.moveOverThresholdPercent", 70);
 
 pref("browser.tabs.firefox-view.logLevel", "Warn");
 
@@ -1493,11 +1537,7 @@ pref("browser.bookmarks.editDialog.maxRecentFolders", 7);
   // On windows these levels are:
   // See - security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
   // SetSecurityLevelForContentProcess() for what the different settings mean.
-  #if defined(EARLY_BETA_OR_EARLIER)
-    pref("security.sandbox.content.level", 8);
-  #else
-    pref("security.sandbox.content.level", 7);
-  #endif
+  pref("security.sandbox.content.level", 8);
 
   // Pref controlling if messages relevant to sandbox violations are logged.
   pref("security.sandbox.logging.enabled", false);
@@ -1751,8 +1791,13 @@ pref("browser.partnerlink.campaign.topsites", "amzn_2020_a1");
 pref("browser.newtab.preload", true);
 
 // Mozilla Ad Routing Service (MARS) unified ads service
+#ifdef NIGHTLY_BUILD
+pref("browser.newtabpage.activity-stream.unifiedAds.tiles.enabled", true);
+pref("browser.newtabpage.activity-stream.unifiedAds.spocs.enabled", true);
+#else
 pref("browser.newtabpage.activity-stream.unifiedAds.tiles.enabled", false);
 pref("browser.newtabpage.activity-stream.unifiedAds.spocs.enabled", false);
+#endif
 pref("browser.newtabpage.activity-stream.unifiedAds.endpoint", "https://ads.mozilla.org/");
 
 // Weather widget for newtab
@@ -1888,15 +1933,9 @@ pref("browser.newtabpage.activity-stream.discoverystream.region-stories-config",
 pref("browser.newtabpage.activity-stream.discoverystream.region-bff-config", "US,DE,CA,GB,IE,CH,AT,BE,IN,FR,IT,ES");
 pref("browser.newtabpage.activity-stream.discoverystream.merino-provider.enabled", true);
 
-// Merino & topic selection related prefs in nightly only
-#if defined(EARLY_BETA_OR_EARLIER)
-  // List of regions that get topics selection by default.
-  pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.region-topics-config", "US, CA");
-  pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.onboarding.enabled", true);
-#else
-  pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.region-topics-config", "");
-  pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.onboarding.enabled", false);
-#endif
+// List of regions that get topics selection by default.
+pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.region-topics-config", "");
+pref("browser.newtabpage.activity-stream.discoverystream.topicSelection.onboarding.enabled", false);
 
 // List of locales that get topics selection by default.
 pref("browser.newtabpage.activity-stream.discoverystream.topicLabels.region-topic-label-config", "US, CA");
@@ -1907,6 +1946,12 @@ pref("browser.newtabpage.activity-stream.discoverystream.topicLabels.locale-topi
 pref("browser.newtabpage.activity-stream.discoverystream.contextualContent.locale-content-config", "en-US,en-GB,en-CA,de");
 // List of regions that get contextual content by default- TODO: update once development is closer to being finished
 pref("browser.newtabpage.activity-stream.discoverystream.contextualContent.region-content-config", "");
+
+// List of locales that get section layout by default
+pref("browser.newtabpage.activity-stream.discoverystream.sections.locale-content-config", "en-US,en-CA");
+// List of regions that get section layout by default
+pref("browser.newtabpage.activity-stream.discoverystream.sections.region-content-config", "");
+
 
 pref("browser.newtabpage.activity-stream.discoverystream.merino-provider.endpoint", "merino.services.mozilla.com");
 // List of regions that get spocs by default.
@@ -1976,6 +2021,16 @@ pref("messaging-system.rsexperimentloader.collection_id", "nimbus-desktop-experi
 pref("nimbus.debug", false);
 pref("nimbus.validation.enabled", true);
 
+// Enable the targeting context telemetry by default, but allow it to be
+// disabled, e.g., for artifact builds.
+// See-also: https://bugzilla.mozilla.org/show_bug.cgi?id=1936317
+// See-also: https://bugzilla.mozilla.org/show_bug.cgi?id=1936319
+#if defined(MOZ_ARTIFACT_BUILDS)
+  pref("nimbus.telemetry.targetingContextEnabled", false);
+#else
+  pref("nimbus.telemetry.targetingContextEnabled", true);
+#endif
+
 // Nimbus QA prefs. Used to monitor pref-setting test experiments.
 pref("nimbus.qa.pref-1", "default");
 pref("nimbus.qa.pref-2", "default");
@@ -2002,6 +2057,12 @@ pref("pdfjs.handleOctetStream", true);
 // Is the sidebar positioned ahead of the content browser
 pref("sidebar.position_start", true);
 pref("sidebar.revamp", false);
+// This is nightly only for now, as we need to address bug 1933527 and bug 1934039.
+#ifdef NIGHTLY_BUILD
+pref("sidebar.revamp.round-content-area", true);
+#else
+pref("sidebar.revamp.round-content-area", false);
+#endif
 pref("sidebar.animation.enabled", true);
 pref("sidebar.animation.duration-ms", 200);
 pref("sidebar.main.tools", "aichat,syncedtabs,history");
@@ -2019,6 +2080,7 @@ pref("browser.ml.chat.prompts.0", '{"id":"summarize","l10nId":"genai-prompts-sum
 pref("browser.ml.chat.prompts.1", '{"id":"explain","l10nId":"genai-prompts-explain"}');
 pref("browser.ml.chat.prompts.2", '{"id":"simplify","l10nId":"genai-prompts-simplify","targeting":"channel==\'nightly\'"}');
 pref("browser.ml.chat.prompts.3", '{"id":"quiz","l10nId":"genai-prompts-quiz","targeting":"!provider|regExpMatch(\'gemini\') || region == \'US\'"}');
+pref("browser.ml.chat.prompts.4", '{"id":"proofread", "l10nId":"genai-prompts-proofread"}');
 pref("browser.ml.chat.provider", "");
 pref("browser.ml.chat.shortcuts", true);
 pref("browser.ml.chat.shortcuts.custom", true);
@@ -2055,10 +2117,10 @@ pref("identity.fxaccounts.enabled", true);
 pref("identity.fxaccounts.remote.root", "https://accounts.firefox.com/");
 
 // The value of the context query parameter passed in fxa requests.
-pref("identity.fxaccounts.contextParam", "fx_desktop_v3");
+pref("identity.fxaccounts.contextParam", "oauth_webchannel_v1");
 
 // Whether to use the oauth flow for desktop or not
-pref("identity.fxaccounts.oauth.enabled", false);
+pref("identity.fxaccounts.oauth.enabled", true);
 
 // The remote URL of the FxA Profile Server
 pref("identity.fxaccounts.remote.profile.uri", "https://profile.accounts.firefox.com/v1");
@@ -2308,8 +2370,8 @@ pref("browser.vpn_promo.disallowed_regions", "ae,by,cn,cu,iq,ir,kp,om,ru,sd,sy,t
 pref("browser.vpn_promo.enabled", true);
 // Only show vpn card to certain regions. Comma separated string of two letter ISO 3166-1 country codes.
 // The most recent list of supported countries can be found at https://support.mozilla.org/en-US/kb/mozilla-vpn-countries-available-subscribe
-// The full list of supported country codes can also be found at https://github.com/mozilla/bedrock/search?q=VPN_COUNTRY_CODES
-pref("browser.contentblocking.report.vpn_regions", "ca,my,nz,sg,gb,gg,im,io,je,uk,vg,as,mp,pr,um,us,vi,de,fr,at,be,ch,es,it,ie,nl,se,fi,bg,cy,cz,dk,ee,hr,hu,lt,lu,lv,mt,pl,pt,ro,si,sk");
+// The full lists of supported country codes can also be found at https://github.com/mozilla/bedrock/search?q=VPN_COUNTRY_CODES and https://github.com/mozilla/bedrock/search?q=VPN_MOBILE_SUB_COUNTRY_CODES
+pref("browser.contentblocking.report.vpn_regions", "as,at,au,bd,be,bg,br,ca,ch,cl,co,cy,cz,de,dk,ee,eg,es,fi,fr,gb,gg,gr,hr,hu,id,ie,im,in,io,it,je,ke,kr,lt,lu,lv,ma,mp,mt,mx,my,ng,nl,no,nz,pl,pr,pt,ro,sa,se,sg,si,sk,sn,th,tr,tw,ua,ug,uk,um,us,vg,vi,vn,za");
 
 // Avoid advertising Focus in certain regions.  Comma separated string of two letter
 // ISO 3166-1 country codes.
@@ -2403,6 +2465,13 @@ pref("privacy.webrtc.showIndicatorsOnMacos14AndAbove", true);
 // Enable Fingerprinting Protection in private windows..
 pref("privacy.fingerprintingProtection.pbmode", true);
 
+// Enable Smartblock embed placeholders
+#ifdef NIGHTLY_BUILD
+  pref("extensions.webcompat.smartblockEmbeds.enabled", true);
+#else
+  pref("extensions.webcompat.smartblockEmbeds.enabled", false);
+#endif
+
 // Enable including the content in the window title.
 // PBM users might want to disable this to avoid a possible source of disk
 // leaks.
@@ -2429,6 +2498,13 @@ pref("browser.tabs.remote.warmup.unloadDelayMs", 2000);
 // For the about:tabcrashed page
 pref("browser.tabs.crashReporting.sendReport", true);
 pref("browser.tabs.crashReporting.includeURL", false);
+
+// Enables the "Unload Tab" context menu item
+#ifdef NIGHTLY_BUILD
+pref("browser.tabs.unloadTabInContextMenu", true);
+#else
+pref("browser.tabs.unloadTabInContextMenu", false);
+#endif
 
 // If true, unprivileged extensions may use experimental APIs on
 // nightly and developer edition.
@@ -2535,6 +2611,7 @@ pref("signon.firefoxRelay.feature", "available");
 // Should Firefox show Relay to all browsers, or only those signed-in to FxA?
 // Keep it hidden from about:config for now.
 // pref("signon.firefoxRelay.showToAllBrowsers", false);
+pref("signon.firefoxRelay.firstOfferVersionFallback", "control");
 pref("signon.management.page.breach-alerts.enabled", true);
 pref("signon.management.page.vulnerable-passwords.enabled", true);
 pref("signon.management.page.sort", "name");
@@ -2681,6 +2758,11 @@ pref("identity.fxaccounts.toolbar.pxiToolbarEnabled", true);
 pref("identity.fxaccounts.toolbar.pxiToolbarEnabled.monitorEnabled", true);
 pref("identity.fxaccounts.toolbar.pxiToolbarEnabled.relayEnabled", true);
 pref("identity.fxaccounts.toolbar.pxiToolbarEnabled.vpnEnabled", true);
+
+// Prefs to control Mozilla account panels that shows an updated flow
+// for users who don't have sync enabled
+pref("identity.fxaccounts.toolbar.syncSetup.enabled", false);
+pref("identity.fxaccounts.toolbar.syncSetup.panelAccessed", false);
 
 // Toolbox preferences
 pref("devtools.toolbox.footer.height", 250);
@@ -3062,7 +3144,11 @@ pref("devtools.debugger.hide-ignored-sources", false);
 pref("devtools.popup.disable_autohide", false);
 
 // Add support for high contrast mode
-pref("devtools.high-contrast-mode-support", false);
+#if defined(NIGHTLY_BUILD)
+  pref("devtools.high-contrast-mode-support", true);
+#else
+  pref("devtools.high-contrast-mode-support", false);
+#endif
 
 // FirstStartup service time-out in ms
 pref("first-startup.timeout", 30000);
@@ -3236,6 +3322,8 @@ pref("browser.backup.template.fallback-download.esr", "https://www.mozilla.org/f
 // Pref to enable the new profiles
 pref("browser.profiles.enabled", false);
 pref("browser.profiles.profile-name.updated", false);
+// Whether to allow the user to merge profile data
+pref("browser.profiles.sync.allow-danger-merge", false);
 
 pref("startup.homepage_override_url_nimbus", "");
 // These prefs are referring to the Fx update version

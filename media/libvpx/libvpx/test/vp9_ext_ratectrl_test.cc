@@ -175,6 +175,9 @@ vpx_rc_status_t rc_test_get_encodeframe_decision(
       static_cast<RateControllerForTest *>(rate_ctrl_model);
   frame_decision->q_index =
       test_controller->CalculateFrameDecision(frame_gop_index);
+  frame_decision->rdmult =
+      frame_decision->q_index * frame_decision->q_index / 2;
+  frame_decision->delta_q_uv = 0;
   return VPX_RC_OK;
 }
 

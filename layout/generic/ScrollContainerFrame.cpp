@@ -949,27 +949,6 @@ void ScrollContainerFrame::ReflowScrolledFrame(ScrollReflowInput& aState,
   // overflow area doesn't include the frame bounds.
   aMetrics->UnionOverflowAreasWithDesiredBounds();
 
-  auto* disp = StyleDisplay();
-  if (MOZ_UNLIKELY(disp->mOverflowClipBoxInline ==
-                   StyleOverflowClipBox::ContentBox)) {
-    // The scrolled frame is scrollable in the inline axis with
-    // `overflow-clip-box:content-box`. To prevent its content from being
-    // clipped at the scroll container's padding edges, we inflate its
-    // children's scrollable overflow area with its inline padding, and union
-    // its scrollable overflow area with its children's inflated scrollable
-    // overflow area.
-    OverflowAreas childOverflow;
-    mScrolledFrame->UnionChildOverflow(childOverflow);
-    nsRect childScrollableOverflow = childOverflow.ScrollableOverflow();
-
-    const LogicalMargin inlinePadding =
-        padding.ApplySkipSides(LogicalSides(wm, LogicalSides::BBoth));
-    childScrollableOverflow.Inflate(inlinePadding.GetPhysicalMargin(wm));
-
-    nsRect& so = aMetrics->ScrollableOverflow();
-    so = so.UnionEdges(childScrollableOverflow);
-  }
-
   aState.mContentsOverflowAreas = aMetrics->mOverflowAreas;
   aState.mScrollbarGutterFromLastReflow = scrollbarGutter;
   aState.mReflowedContentsWithHScrollbar = aAssumeHScroll;
@@ -1009,7 +988,9 @@ bool ScrollContainerFrame::GuessVScrollbarNeeded(
 
   // If this is the initial reflow, guess false because usually
   // we have very little content by then.
-  if (InInitialReflow()) return false;
+  if (InInitialReflow()) {
+    return false;
+  }
 
   if (mIsRoot) {
     nsIFrame* f = mScrolledFrame->PrincipalChildList().FirstChild();
@@ -1453,7 +1434,7 @@ Maybe<nscoord> ScrollContainerFrame::GetNaturalBaselineBOffset(
         LogicalMargin border = GetLogicalUsedBorder(aWM);
         const auto bSize = GetLogicalSize(aWM).BSize(aWM);
         // Clamp the baseline to the border rect. See bug 1791069.
-        return std::clamp(border.BStart(aWM) + aBaseline, 0, bSize);
+        return CSSMinMax(border.BStart(aWM) + aBaseline, 0, bSize);
       });
 }
 
@@ -2695,7 +2676,9 @@ void ScrollContainerFrame::MarkEverScrolled() {
 }
 
 void ScrollContainerFrame::MarkNotRecentlyScrolled() {
-  if (!mHasBeenScrolledRecently) return;
+  if (!mHasBeenScrolledRecently) {
+    return;
+  }
 
   mHasBeenScrolledRecently = false;
   SchedulePaint();
@@ -2794,10 +2777,10 @@ static nscoord ClampAndAlignWithPixels(nscoord aDesired, nscoord aBoundLower,
                                        nscoord aCurrent) {
   // Intersect scroll range with allowed range, by clamping the ends
   // of aRange to be within bounds
-  nscoord destLower = clamped(aDestLower, aBoundLower, aBoundUpper);
-  nscoord destUpper = clamped(aDestUpper, aBoundLower, aBoundUpper);
+  nscoord destLower = std::clamp(aDestLower, aBoundLower, aBoundUpper);
+  nscoord destUpper = std::clamp(aDestUpper, aBoundLower, aBoundUpper);
 
-  nscoord desired = clamped(aDesired, destLower, destUpper);
+  nscoord desired = std::clamp(aDesired, destLower, destUpper);
   if (StaticPrefs::layout_scroll_disable_pixel_alignment()) {
     return desired;
   }
@@ -3421,7 +3404,7 @@ void ScrollContainerFrame::AppendScrollPartsTo(nsDisplayListBuilder* aBuilder,
   AutoTArray<nsIFrame*, 3> scrollParts;
   for (nsIFrame* kid : PrincipalChildList()) {
     if (kid == mScrolledFrame ||
-        (kid->IsAbsPosContainingBlock() || overlayScrollbars) != aPositioned) {
+        (overlayScrollbars || kid->IsAbsPosContainingBlock()) != aPositioned) {
       continue;
     }
 
@@ -3435,7 +3418,7 @@ void ScrollContainerFrame::AppendScrollPartsTo(nsDisplayListBuilder* aBuilder,
   // This means that we will build scroll bar layers for out of budget
   // will-change: scroll position.
   const mozilla::layers::ScrollableLayerGuid::ViewID scrollTargetId =
-      IsScrollingActive()
+      aBuilder->BuildCompositorHitTestInfo() && IsScrollingActive()
           ? nsLayoutUtils::FindOrCreateIDFor(mScrolledFrame->GetContent())
           : mozilla::layers::ScrollableLayerGuid::NULL_SCROLL_ID;
 
@@ -4220,9 +4203,13 @@ void ScrollContainerFrame::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   // We want to call SetContainsNonMinimalDisplayPort if
   // mWillBuildScrollableLayer is true for any reason other than having a
   // minimal display port.
-  if (aBuilder->IsPaintingToWindow()) {
-    if (DisplayPortUtils::HasNonMinimalDisplayPort(GetContent()) ||
-        mZoomableByAPZ || nsContentUtils::HasScrollgrab(GetContent())) {
+  if (mWillBuildScrollableLayer && aBuilder->IsPaintingToWindow()) {
+    // Since mWillBuildScrollableLayer = HasDisplayPort || mZoomableByAPZ we can
+    // simplify this check to avoid getting the display port again.
+    if (mZoomableByAPZ ||
+        !GetContent()->GetProperty(nsGkAtoms::MinimalDisplayPort)) {
+      MOZ_ASSERT(DisplayPortUtils::HasNonMinimalDisplayPort(GetContent()) ||
+                 mZoomableByAPZ);
       aBuilder->SetContainsNonMinimalDisplayPort();
     }
   }
@@ -4554,9 +4541,7 @@ bool ScrollContainerFrame::DecideScrollableLayer(
   // the compositor can find the scrollable layer for async scrolling.
   // If the element is marked 'scrollgrab', also force building of a layer
   // so that APZ can implement scroll grabbing.
-  mWillBuildScrollableLayer = hasDisplayPort ||
-                              nsContentUtils::HasScrollgrab(content) ||
-                              mZoomableByAPZ;
+  mWillBuildScrollableLayer = hasDisplayPort || mZoomableByAPZ;
   return mWillBuildScrollableLayer;
 }
 
@@ -5024,6 +5009,13 @@ void ScrollContainerFrame::ScrollSnap(const nsPoint& aDestination,
   // site using `GetScrollPosition()` as |aStartPos|.
   if (auto snapDestination = GetSnapPointForDestination(
           ScrollUnit::DEVICE_PIXELS, snapFlags, pos, destination)) {
+    // Bail out if there's no scroll position change to do a workaround for bug
+    // 1665932 (even if the __layout__ scroll position is unchanged, the
+    // corresponding scroll offset update will change the __visual__ scroll
+    // offset in APZ).
+    if (snapDestination->mPosition == destination) {
+      return;
+    }
     destination = snapDestination->mPosition;
     ScrollToWithOrigin(
         destination, nullptr /* range */,
@@ -6004,8 +5996,7 @@ bool ScrollContainerFrame::IsScrollingActive() const {
 
   nsIContent* content = GetContent();
   return mHasBeenScrolledRecently || IsAlwaysActive() ||
-         DisplayPortUtils::HasDisplayPort(content) ||
-         nsContentUtils::HasScrollgrab(content);
+         DisplayPortUtils::HasDisplayPort(content);
 }
 
 void ScrollContainerFrame::FinishReflowForScrollbar(
@@ -6464,7 +6455,9 @@ void ScrollContainerFrame::AdjustScrollbarRectForResizer(
 }
 
 static void AdjustOverlappingScrollbars(nsRect& aVRect, nsRect& aHRect) {
-  if (aVRect.IsEmpty() || aHRect.IsEmpty()) return;
+  if (aVRect.IsEmpty() || aHRect.IsEmpty()) {
+    return;
+  }
 
   const nsRect oldVRect = aVRect;
   const nsRect oldHRect = aHRect;
@@ -6737,7 +6730,9 @@ static void ReduceRadii(nscoord aXBorder, nscoord aYBorder, nscoord& aXRadius,
                         nscoord& aYRadius) {
   // In order to ensure that the inside edge of the border has no
   // curvature, we need at least one of its radii to be zero.
-  if (aXRadius <= aXBorder || aYRadius <= aYBorder) return;
+  if (aXRadius <= aXBorder || aYRadius <= aYBorder) {
+    return;
+  }
 
   // For any corner where we reduce the radii, preserve the corner's shape.
   double ratio =
@@ -7972,11 +7967,13 @@ bool ScrollContainerFrame::CanApzScrollInTheseDirections(
     ScrollDirections aDirections) {
   ScrollStyles styles = GetScrollStyles();
   if (aDirections.contains(ScrollDirection::eHorizontal) &&
-      styles.mHorizontal == StyleOverflow::Hidden)
+      styles.mHorizontal == StyleOverflow::Hidden) {
     return false;
+  }
   if (aDirections.contains(ScrollDirection::eVertical) &&
-      styles.mVertical == StyleOverflow::Hidden)
+      styles.mVertical == StyleOverflow::Hidden) {
     return false;
+  }
   return true;
 }
 
@@ -8069,9 +8066,9 @@ void ScrollContainerFrame::ScheduleScrollAnimations() {
     return;
   }
 
-  const auto [element, type] =
+  const auto [element, request] =
       AnimationUtils::GetElementPseudoPair(elementOrPseudo);
-  const auto* scheduler = ProgressTimelineScheduler::Get(element, type);
+  const auto* scheduler = ProgressTimelineScheduler::Get(element, request);
   if (!scheduler) {
     // We don't have scroll timelines associated with this frame.
     return;

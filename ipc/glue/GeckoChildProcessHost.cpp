@@ -55,7 +55,7 @@
 #include "mozilla/glean/GleanMetrics.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/UniquePtrExtensions.h"
-#include "mozilla/ipc/BrowserProcessSubThread.h"
+#include "mozilla/ipc/IOThread.h"
 #include "mozilla/ipc/EnvironmentMap.h"
 #include "mozilla/ipc/NodeController.h"
 #include "mozilla/net/SocketProcessHost.h"
@@ -146,10 +146,6 @@ typedef mozilla::MozPromise<LaunchResults, LaunchError, true>
 // created. The parent process is given the ChildID of `0`, and each child
 // process is given a non-zero ID.
 static Atomic<int32_t> gChildCounter;
-
-static inline nsISerialEventTarget* IOThread() {
-  return XRE_GetIOMessageLoop()->SerialEventTarget();
-}
 
 class BaseProcessLauncher {
  public:
@@ -503,13 +499,14 @@ void GeckoChildProcessHost::Destroy() {
 
   using Value = ProcessHandlePromise::ResolveOrRejectValue;
   mDestroying = true;
-  whenReady->Then(XRE_GetIOMessageLoop()->SerialEventTarget(), __func__,
+  whenReady->Then(XRE_GetAsyncIOEventTarget(), __func__,
                   [this](const Value&) { delete this; });
 }
 
 // static
 mozilla::BinPathType BaseProcessLauncher::GetPathToBinary(
     FilePath& exePath, GeckoProcessType processType) {
+  exePath = {};
   BinPathType pathType = XRE_GetChildProcBinPathType(processType);
 
   if (pathType == BinPathType::Self) {
@@ -547,21 +544,25 @@ mozilla::BinPathType BaseProcessLauncher::GetPathToBinary(
     exePath = FilePath(char16ptr_t(gGREBinPath));
 #elif MOZ_WIDGET_COCOA
     nsCOMPtr<nsIFile> childProcPath;
-    NS_NewLocalFile(nsDependentString(gGREBinPath),
-                    getter_AddRefs(childProcPath));
-
-    // We need to use an App Bundle on OS X so that we can hide
-    // the dock icon. See Bug 557225.
-    childProcPath->AppendNative(bundleName);
-    childProcPath->AppendNative("Contents"_ns);
-    childProcPath->AppendNative("MacOS"_ns);
-    nsCString tempCPath;
-    childProcPath->GetNativePath(tempCPath);
-    exePath = FilePath(tempCPath.get());
+    if (NS_SUCCEEDED(NS_NewLocalFile(nsDependentString(gGREBinPath),
+                                     getter_AddRefs(childProcPath)))) {
+      // We need to use an App Bundle on OS X so that we can hide
+      // the dock icon. See Bug 557225.
+      if (NS_SUCCEEDED(childProcPath->AppendNative(bundleName)) &&
+          NS_SUCCEEDED(childProcPath->AppendNative("Contents"_ns)) &&
+          NS_SUCCEEDED(childProcPath->AppendNative("MacOS"_ns))) {
+        nsCString tempCPath;
+        if (NS_SUCCEEDED(childProcPath->GetNativePath(tempCPath))) {
+          exePath = FilePath(tempCPath.get());
+        }
+      }
+    }
 #else
     nsCString path;
-    NS_CopyUnicodeToNative(nsDependentString(gGREBinPath), path);
-    exePath = FilePath(path.get());
+    if (NS_SUCCEEDED(
+            NS_CopyUnicodeToNative(nsDependentString(gGREBinPath), path))) {
+      exePath = FilePath(path.get());
+    }
 #endif
   }
 
@@ -735,10 +736,10 @@ bool GeckoChildProcessHost::AsyncLaunch(
   MOZ_ASSERT(mHandlePromise == nullptr);
   mHandlePromise =
       mozilla::InvokeAsync<GeckoChildProcessHost*>(
-          IOThread(), launcher.get(), __func__, &BaseProcessLauncher::Launch,
-          this)
+          XRE_GetAsyncIOEventTarget(), launcher.get(), __func__,
+          &BaseProcessLauncher::Launch, this)
           ->Then(
-              IOThread(), __func__,
+              XRE_GetAsyncIOEventTarget(), __func__,
               [this](LaunchResults&& aResults) {
                 {
                   {
@@ -982,13 +983,14 @@ NS_IMETHODIMP
 IPCLaunchThreadObserver::Observe(nsISupports* aSubject, const char* aTopic,
                                  const char16_t* aData) {
   MOZ_RELEASE_ASSERT(strcmp(aTopic, "xpcom-shutdown-threads") == 0);
-  StaticMutexAutoLock lock(gIPCLaunchThreadMutex);
 
-  nsresult rv = NS_OK;
-  if (gIPCLaunchThread) {
-    rv = gIPCLaunchThread->Shutdown();
-    gIPCLaunchThread = nullptr;
+  nsCOMPtr<nsIThread> thread;
+  {
+    StaticMutexAutoLock lock(gIPCLaunchThreadMutex);
+    thread = gIPCLaunchThread.forget();
   }
+
+  nsresult rv = thread ? thread->Shutdown() : NS_OK;
   mozilla::Unused << NS_WARN_IF(NS_FAILED(rv));
   return rv;
 }
@@ -1349,9 +1351,6 @@ RefPtr<ProcessHandlePromise> PosixProcessLauncher::DoLaunch() {
 
 #ifdef XP_IOS
 RefPtr<ProcessHandlePromise> IosProcessLauncher::DoLaunch() {
-  MOZ_RELEASE_ASSERT(mLaunchOptions->fds_to_remap.size() == 3,
-                     "Unexpected fds_to_remap on iOS");
-
   ExtensionKitProcess::Kind kind = ExtensionKitProcess::Kind::WebContent;
   if (mProcessType == GeckoProcessType_GPU) {
     kind = ExtensionKitProcess::Kind::Rendering;
@@ -1392,6 +1391,23 @@ RefPtr<ProcessHandlePromise> IosProcessLauncher::DoLaunch() {
   }
   MOZ_ASSERT(xpc_array_get_count(fdsArray.get()) == mChildArgs.mFiles.size());
   xpc_dictionary_set_value(bootstrapMessage.get(), "fds", fdsArray.get());
+
+  DarwinObjectPtr<xpc_object_t> sendRightsArray =
+      AdoptDarwinObject(xpc_array_create_empty());
+  for (auto& sendRight : mChildArgs.mSendRights) {
+    // NOTE: As iOS doesn't expose an xpc_array_set_mach_send function, send
+    // rights are wrapped with single-key dictionaries.
+    DarwinObjectPtr<xpc_object_t> sendRightWrapper =
+        AdoptDarwinObject(xpc_dictionary_create_empty());
+    xpc_dictionary_set_mach_send(sendRightWrapper.get(), "port",
+                                 sendRight.get());
+    xpc_array_set_value(sendRightsArray.get(), XPC_ARRAY_APPEND,
+                        sendRightWrapper.get());
+  }
+  MOZ_ASSERT(xpc_array_get_count(sendRightsArray.get()) ==
+             mChildArgs.mSendRights.size());
+  xpc_dictionary_set_value(bootstrapMessage.get(), "sendRights",
+                           sendRightsArray.get());
 
   auto promise = MakeRefPtr<ProcessHandlePromise::Private>(__func__);
   ExtensionKitProcess::StartProcess(kind, [self = RefPtr{this}, promise,

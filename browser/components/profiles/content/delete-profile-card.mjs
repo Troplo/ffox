@@ -57,6 +57,13 @@ export class DeleteProfileCard extends MozLitElement {
     let { themeFg, themeBg } = this.data.profile;
     this.headerAvatar.style.fill = themeBg;
     this.headerAvatar.style.stroke = themeFg;
+
+    this.setFavicon();
+  }
+
+  setFavicon() {
+    let favicon = document.getElementById("favicon");
+    favicon.href = `chrome://browser/content/profiles/assets/16_${this.data.profile.avatar}.svg`;
   }
 
   cancelDelete() {
@@ -91,12 +98,12 @@ export class DeleteProfileCard extends MozLitElement {
           />
           <div id="profile-content">
             <div>
-              <h1
+              <h2
                 data-l10n-id="delete-profile-header"
                 data-l10n-args="${JSON.stringify({
                   profilename: this.data.profile.name,
                 })}"
-              ></h1>
+              ></h2>
               <p
                 class="sub-header"
                 data-l10n-id="delete-profile-description"

@@ -263,9 +263,8 @@ export class FeatureCallout {
         this._removePanelConflictListeners();
         this.doc.querySelector(`[src="${BUNDLE_SRC}"]`)?.remove();
         if (nextMessage) {
-          const isMessageUnblocked = await lazy.ASRouter.isUnblockedMessage(
-            nextMessage
-          );
+          const isMessageUnblocked =
+            await lazy.ASRouter.isUnblockedMessage(nextMessage);
           if (!isMessageUnblocked) {
             this.endTour();
             return;
@@ -602,6 +601,22 @@ export class FeatureCallout {
           scope = triggerTab;
         } else {
           continue;
+        }
+      }
+      if (selector.includes("::%shadow%")) {
+        let parts = selector.split("::%shadow%");
+        for (let i = 0; i < parts.length; i++) {
+          selector = parts[i].trim();
+          if (i === parts.length - 1) {
+            break;
+          }
+          let el = scope.querySelector(selector);
+          if (!el) {
+            break;
+          }
+          if (el.shadowRoot) {
+            scope = el.shadowRoot;
+          }
         }
       }
       let element = scope.querySelector(selector);
@@ -1581,6 +1596,8 @@ export class FeatureCallout {
    * @property {Number} [interval] Used only for `timeout` and `interval` event
    *   types. These don't set up real event listeners, but instead invoke the
    *   action on a timer.
+   * @property {Boolean} [every_window] Extend addEventListener to all windows?
+   *   Not compatible with `interval`.
    *
    * @typedef {Object} PageEventListenerAction Action sent to AboutWelcomeParent
    * @property {String} [type] Action type, e.g. `OPEN_URL`
@@ -1661,13 +1678,20 @@ export class FeatureCallout {
           .map(attr => `[${attr.name}="${attr.value}"]`)
           .join("")}`;
       }
-      if (this.doc.querySelectorAll(source).length > 1) {
+      let doc = target.ownerDocument;
+      if (doc.querySelectorAll(source).length > 1) {
         let uniqueAncestor = target.closest(`[id]:not(:scope, :root, body)`);
         if (uniqueAncestor) {
           source = `${this._getUniqueElementIdentifier(
             uniqueAncestor
           )} > ${source}`;
         }
+      }
+      if (doc !== this.doc) {
+        let windowIndex = [
+          ...Services.wm.getEnumerator("navigator:browser"),
+        ].indexOf(target.ownerGlobal);
+        source = `window${windowIndex + 1}: ${source}`;
       }
     }
     return source;

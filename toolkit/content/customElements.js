@@ -830,17 +830,23 @@
             "moz-five-star",
             "chrome://global/content/elements/moz-five-star.mjs",
           ],
+          [
+            "moz-input-text",
+            "chrome://global/content/elements/moz-input-text.mjs",
+          ],
           ["moz-label", "chrome://global/content/elements/moz-label.mjs"],
           [
             "moz-message-bar",
             "chrome://global/content/elements/moz-message-bar.mjs",
           ],
+          ["moz-option", "chrome://global/content/elements/moz-select.mjs"],
           ["moz-page-nav", "chrome://global/content/elements/moz-page-nav.mjs"],
           ["moz-radio", "chrome://global/content/elements/moz-radio-group.mjs"],
           [
             "moz-radio-group",
             "chrome://global/content/elements/moz-radio-group.mjs",
           ],
+          ["moz-select", "chrome://global/content/elements/moz-select.mjs"],
           [
             "moz-support-link",
             "chrome://global/content/elements/moz-support-link.mjs",

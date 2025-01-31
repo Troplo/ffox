@@ -52,9 +52,7 @@ def os_from_name(name):
 # Add names of builders to remove from LKGR finder to this list. This is
 # useful when a failure can be safely ignored while fixing it without
 # blocking the LKGR finder on it.
-skipped_lkgr_bots = [
-    "iOS Debug (simulator)",
-]
+skipped_lkgr_bots = []
 
 # Use LUCI Scheduler BBv2 names and add Scheduler realms configs.
 lucicfg.enable_experiment("crbug.com/1182002")
@@ -317,7 +315,7 @@ luci.cq_group(
     tree_status_host = "webrtc-status.appspot.com",
     watch = [cq.refset(repo = WEBRTC_GERRIT, refs = ["refs/heads/main"])],
     acls = [
-        acl.entry(acl.CQ_COMMITTER, groups = ["project-webrtc-committers"]),
+        acl.entry(acl.CQ_COMMITTER, groups = ["project-webrtc-submit-access"]),
         acl.entry(acl.CQ_DRY_RUNNER, groups = ["project-webrtc-tryjob-access"]),
     ],
     allow_owner_if_submittable = cq.ACTION_DRY_RUN,
@@ -329,7 +327,7 @@ luci.cq_group(
     name = "cq_branch",
     watch = [cq.refset(repo = WEBRTC_GERRIT, refs = ["refs/branch-heads/.+"])],
     acls = [
-        acl.entry(acl.CQ_COMMITTER, groups = ["project-webrtc-committers"]),
+        acl.entry(acl.CQ_COMMITTER, groups = ["project-webrtc-submit-access"]),
         acl.entry(acl.CQ_DRY_RUNNER, groups = ["project-webrtc-tryjob-access"]),
     ],
     retry_config = cq.RETRY_ALL_FAILURES,
@@ -406,6 +404,11 @@ luci.notifier(
         name = "infra_failure",
         body = io.read_file("luci-notify/email-templates/infra_failure.template"),
     ),
+)
+
+# Notify findit about completed builds for code coverage purposes
+luci.buildbucket_notification_topic(
+    name = "projects/findit-for-me/topics/buildbucket_notification",
 )
 
 # Tree closer definitions:
@@ -747,7 +750,7 @@ ios_try_job("ios_compile_arm64_dbg")
 ios_builder("iOS64 Release", "iOS|arm64|rel")
 ios_try_job("ios_compile_arm64_rel")
 ios_builder("iOS Debug (simulator)", "iOS|x64|sim")
-ios_try_job("ios_dbg_simulator", cq = None)
+ios_try_job("ios_dbg_simulator")
 ios_builder("iOS API Framework Builder", "iOS|fat|size", recipe = "ios_api_framework", prioritized = True)
 ios_try_job("ios_api_framework", recipe = "ios_api_framework")
 

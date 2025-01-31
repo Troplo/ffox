@@ -33,6 +33,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/BrowsingContextGroup.h"
+#include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/Element.h"
@@ -82,7 +83,7 @@ struct ListHelper {
   LinkedList<nsSHistory> mList;
 };
 
-static ListHelper gSHistoryList;
+MOZ_RUNINIT static ListHelper gSHistoryList;
 // Max viewers allowed total, across all SHistory objects - negative default
 // means we will calculate how many viewers to cache based on total memory
 int32_t nsSHistory::sHistoryMaxTotalViewers = -1;
@@ -303,14 +304,14 @@ uint32_t nsSHistory::CalcMaxTotalViewers() {
 #  define MAX_TOTAL_VIEWERS_BIAS 14
 #endif
 
-  // Calculate an estimate of how many ContentViewers we should cache based
-  // on RAM.  This assumes that the average ContentViewer is 4MB (conservative)
-  // and caps the max at 8 ContentViewers
+  // Calculate an estimate of how many DocumentViewers we should cache based
+  // on RAM.  This assumes that the average DocumentViewer is 4MB (conservative)
+  // and caps the max at 8 DocumentViewers
   //
-  // TODO: Should we split the cache memory betw. ContentViewer caching and
+  // TODO: Should we split the cache memory betw. DocumentViewer caching and
   // nsCacheService?
   //
-  // RAM    | ContentViewers | on Android
+  // RAM    | DocumentViewers | on Android
   // -------------------------------------
   // 32   Mb       0                0
   // 64   Mb       1                0
@@ -339,7 +340,7 @@ uint32_t nsSHistory::CalcMaxTotalViewers() {
 
   // This is essentially the same calculation as for nsCacheService,
   // except that we divide the final memory calculation by 4, since
-  // we assume each ContentViewer takes on average 4MB
+  // we assume each DocumentViewer takes on average 4MB
   uint32_t viewers = 0;
   double x = std::log(kBytesD) / std::log(2.0) - MAX_TOTAL_VIEWERS_BIAS;
   if (x > 0) {
@@ -1222,6 +1223,7 @@ nsSHistory::EvictAllDocumentViewers() {
   return NS_OK;
 }
 
+MOZ_CAN_RUN_SCRIPT
 static void FinishRestore(CanonicalBrowsingContext* aBrowsingContext,
                           nsDocShellLoadState* aLoadState,
                           SessionHistoryEntry* aEntry,
@@ -1280,11 +1282,11 @@ static void FinishRestore(CanonicalBrowsingContext* aBrowsingContext,
       }
     }
 
-    if (aBrowsingContext->IsActive()) {
-      loadingBC->PreOrderWalk([&](BrowsingContext* aContext) {
-        if (BrowserParent* bp = aContext->Canonical()->GetBrowserParent()) {
-          ProcessPriorityManager::BrowserPriorityChanged(bp, true);
-        }
+    // Ensure browser priority to matches `IsPriorityActive` after restoring.
+    if (BrowserParent* bp = loadingBC->GetBrowserParent()) {
+      bp->VisitAll([&](BrowserParent* aBp) {
+        ProcessPriorityManager::BrowserPriorityChanged(
+            aBp, aBrowsingContext->IsPriorityActive());
       });
     }
 
@@ -1372,22 +1374,24 @@ void nsSHistory::LoadURIOrBFCache(LoadEntryResult& aLoadEntry) {
                   currentFrameLoader->GetMaybePendingBrowsingContext()
                       ->Canonical()
                       ->GetCurrentWindowGlobal()) {
-            wgp->PermitUnload([canonicalBC, loadState, she, frameLoader,
-                               currentFrameLoader, canSave](bool aAllow) {
-              if (aAllow && !canonicalBC->IsReplaced()) {
-                FinishRestore(canonicalBC, loadState, she, frameLoader,
-                              canSave && canonicalBC->AllowedInBFCache(
-                                             Nothing(), nullptr));
-              } else if (currentFrameLoader->GetMaybePendingBrowsingContext()) {
-                nsISHistory* shistory =
-                    currentFrameLoader->GetMaybePendingBrowsingContext()
-                        ->Canonical()
-                        ->GetSessionHistory();
-                if (shistory) {
-                  shistory->InternalSetRequestedIndex(-1);
-                }
-              }
-            });
+            wgp->PermitUnload(
+                [canonicalBC, loadState, she, frameLoader, currentFrameLoader,
+                 canSave](bool aAllow) MOZ_CAN_RUN_SCRIPT_BOUNDARY_LAMBDA {
+                  if (aAllow && !canonicalBC->IsReplaced()) {
+                    FinishRestore(canonicalBC, loadState, she, frameLoader,
+                                  canSave && canonicalBC->AllowedInBFCache(
+                                                 Nothing(), nullptr));
+                  } else if (currentFrameLoader
+                                 ->GetMaybePendingBrowsingContext()) {
+                    nsISHistory* shistory =
+                        currentFrameLoader->GetMaybePendingBrowsingContext()
+                            ->Canonical()
+                            ->GetSessionHistory();
+                    if (shistory) {
+                      shistory->InternalSetRequestedIndex(-1);
+                    }
+                  }
+                });
             return;
           }
         }
@@ -2055,6 +2059,24 @@ nsSHistory::HasUserInteractionAtIndex(int32_t aIndex) {
     return false;
   }
   return entry->GetHasUserInteraction();
+}
+
+NS_IMETHODIMP
+nsSHistory::CanGoBackFromEntryAtIndex(int32_t aIndex, bool* aCanGoBack) {
+  *aCanGoBack = false;
+  if (!StaticPrefs::browser_navigation_requireUserInteraction()) {
+    *aCanGoBack = aIndex > 0;
+    return NS_OK;
+  }
+
+  for (int32_t i = aIndex - 1; i >= 0; i--) {
+    if (HasUserInteractionAtIndex(i)) {
+      *aCanGoBack = true;
+      break;
+    }
+  }
+
+  return NS_OK;
 }
 
 nsresult nsSHistory::LoadNextPossibleEntry(

@@ -23,6 +23,8 @@ ChromeUtils.defineESModuleGetters(this, {
 });
 
 const PREF_APP_UPDATE_AUTO = "app.update.auto";
+const PREF_APP_UPDATE_BACKGROUND_ALLOWDOWNLOADSWITHOUTBITS =
+  "app.update.background.allowDownloadsWithoutBITS";
 const PREF_APP_UPDATE_BACKGROUNDERRORS = "app.update.backgroundErrors";
 const PREF_APP_UPDATE_BACKGROUNDMAXERRORS = "app.update.backgroundMaxErrors";
 const PREF_APP_UPDATE_BADGEWAITTIME = "app.update.badgeWaitTime";
@@ -32,6 +34,10 @@ const PREF_APP_UPDATE_CHANNEL = "app.update.channel";
 const PREF_APP_UPDATE_DOWNLOAD_MAXATTEMPTS = "app.update.download.maxAttempts";
 const PREF_APP_UPDATE_DOWNLOAD_ATTEMPTS = "app.update.download.attempts";
 const PREF_APP_UPDATE_DISABLEDFORTESTING = "app.update.disabledForTesting";
+const PREF_APP_UPDATE_INSTALL_LOCKOUT_ENABLED =
+  "app.update.multiSessionInstallLockout.enabled";
+const PREF_APP_UPDATE_INSTALL_LOCKOUT_TIMEOUT_MS =
+  "app.update.multiSessionInstallLockout.timeoutMs";
 const PREF_APP_UPDATE_INTERVAL = "app.update.interval";
 const PREF_APP_UPDATE_LASTUPDATETIME =
   "app.update.lastUpdateTime.background-update-timer";
@@ -82,6 +88,7 @@ const FILE_LAST_UPDATE_ELEVATED_LOG = "last-update-elevated.log";
 const FILE_LAST_UPDATE_LOG = "last-update.log";
 const FILE_PRECOMPLETE = "precomplete";
 const FILE_PRECOMPLETE_BAK = "precomplete.bak";
+const FILE_TEST_PROCESS_UPDATES = "test_process_updates.txt";
 const FILE_UPDATE_CONFIG_JSON = "update-config.json";
 const FILE_UPDATE_ELEVATED_LOG = "update-elevated.log";
 const FILE_UPDATE_LOG = "update.log";
@@ -95,6 +102,7 @@ const FILE_UPDATE_VERSION = "update.version";
 const FILE_UPDATER_INI = "updater.ini";
 const FILE_UPDATES_XML = "updates.xml";
 const FILE_UPDATES_XML_TMP = "updates.xml.tmp";
+const FILE_UPDATE_TIMESTAMP = "update.timestamp";
 
 const UPDATE_SETTINGS_CONTENTS =
   "[Settings]\nACCEPTED_MAR_CHANNEL_IDS=xpcshell-test\n";
@@ -322,6 +330,19 @@ function writeVersionFile(aVersion) {
 }
 
 /**
+ * Writes the specified timestamp (in milliseconds since the epoch) to the
+ * multi session install timeout file.
+ *
+ * @param  aTimestampMs
+ *         The timestamp when the lockout window expires, in milliseconds since
+ *         the epoch.
+ */
+function writeMsilTimeoutFile(aTimestampMs) {
+  let file = getUpdateDirFile(FILE_UPDATE_TIMESTAMP);
+  writeFile(file, aTimestampMs.toString());
+}
+
+/**
  * Writes text to a file. This will replace existing text if the file exists
  * and create the file if it doesn't exist.
  *
@@ -376,6 +397,18 @@ function readStatusState() {
  */
 function readStatusFailedCode() {
   return readStatusFile().split(": ")[1];
+}
+
+/**
+ * Read the specified timestamp (in milliseconds since the epoch) to the
+ * multi session install timeout file.
+ *
+ * @return The timestamp read from the file, which will represent the end of the
+ *         lockout window. Returns `null` if the file doesn't exist.
+ */
+function readMsilTimeoutFile() {
+  let file = getUpdateDirFile(FILE_UPDATE_TIMESTAMP);
+  return readFile(file);
 }
 
 /**
@@ -453,6 +486,7 @@ function getUpdateDirFile(aLeafName, aWhichDir = null) {
     case FILE_ACTIVE_UPDATE_XML_TMP:
     case FILE_UPDATE_CONFIG_JSON:
     case FILE_BACKUP_UPDATE_CONFIG_JSON:
+    case FILE_TEST_PROCESS_UPDATES:
     case FILE_UPDATE_TEST:
     case FILE_UPDATES_XML:
     case FILE_UPDATES_XML_TMP:
@@ -473,6 +507,7 @@ function getUpdateDirFile(aLeafName, aWhichDir = null) {
     case FILE_UPDATE_STATUS:
     case FILE_UPDATE_VERSION:
     case FILE_UPDATER_INI:
+    case FILE_UPDATE_TIMESTAMP:
       file.append(DIR_UPDATES);
       if (aWhichDir == DIR_DOWNLOADING) {
         file.append(DIR_DOWNLOADING);
@@ -670,92 +705,6 @@ function getGREDir() {
  */
 function getGREBinDir() {
   return Services.dirsvc.get(NS_GRE_BIN_DIR, Ci.nsIFile);
-}
-
-/**
- * Gets the unique mutex name for the installation.
- *
- * @return Global mutex path.
- * @throws If the function is called on a platform other than Windows.
- */
-function getPerInstallationMutexName() {
-  if (AppConstants.platform != "win") {
-    throw new Error("Windows only function called by a different platform!");
-  }
-
-  let hasher = Cc["@mozilla.org/security/hash;1"].createInstance(
-    Ci.nsICryptoHash
-  );
-  hasher.init(hasher.SHA1);
-
-  let exeFile = Services.dirsvc.get(XRE_EXECUTABLE_FILE, Ci.nsIFile);
-  let data = new TextEncoder().encode(exeFile.path.toLowerCase());
-
-  hasher.update(data, data.length);
-  return "Global\\MozillaUpdateMutex-" + hasher.finish(true);
-}
-
-/**
- * Closes a Win32 handle.
- *
- * @param  aHandle
- *         The handle to close.
- * @throws If the function is called on a platform other than Windows.
- */
-function closeHandle(aHandle) {
-  if (AppConstants.platform != "win") {
-    throw new Error("Windows only function called by a different platform!");
-  }
-
-  let lib = ctypes.open("kernel32.dll");
-  let CloseHandle = lib.declare(
-    "CloseHandle",
-    ctypes.winapi_abi,
-    ctypes.int32_t /* success */,
-    ctypes.void_t.ptr
-  ); /* handle */
-  CloseHandle(aHandle);
-  lib.close();
-}
-
-/**
- * Creates a mutex.
- *
- * @param  aName
- *         The name for the mutex.
- * @return The Win32 handle to the mutex.
- * @throws If the function is called on a platform other than Windows.
- */
-function createMutex(aName) {
-  if (AppConstants.platform != "win") {
-    throw new Error("Windows only function called by a different platform!");
-  }
-
-  const INITIAL_OWN = 1;
-  const ERROR_ALREADY_EXISTS = 0xb7;
-  let lib = ctypes.open("kernel32.dll");
-  let CreateMutexW = lib.declare(
-    "CreateMutexW",
-    ctypes.winapi_abi,
-    ctypes.void_t.ptr /* return handle */,
-    ctypes.void_t.ptr /* security attributes */,
-    ctypes.int32_t /* initial owner */,
-    ctypes.char16_t.ptr
-  ); /* name */
-
-  let handle = CreateMutexW(null, INITIAL_OWN, aName);
-  lib.close();
-  let alreadyExists = ctypes.winLastError == ERROR_ALREADY_EXISTS;
-  if (handle && !handle.isNull() && alreadyExists) {
-    closeHandle(handle);
-    handle = null;
-  }
-
-  if (handle && handle.isNull()) {
-    handle = null;
-  }
-
-  return handle;
 }
 
 /**

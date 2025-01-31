@@ -41,6 +41,8 @@ neterror-generic-error = { -brand-short-name } can’t load this page for some r
 neterror-load-error-try-again = The site could be temporarily unavailable or too busy. Try again in a few moments.
 neterror-load-error-connection = If you are unable to load any pages, check your computer’s network connection.
 neterror-load-error-firewall = If your computer or network is protected by a firewall or proxy, make sure that { -brand-short-name } is permitted to access the web.
+# This warning is only shown on macOS Sequoia and later (see bug 1929377)
+neterror-load-osx-permission = If you are trying to load a local network page, please check that { -brand-short-name } has been granted Local Network permissions in the macOS Privacy & Security settings.
 
 neterror-captive-portal = You must log in to this network before you can access the internet.
 
@@ -176,3 +178,8 @@ certerror-mitm-what-can-you-do-about-it-attack-sts = If you are not familiar wit
 certerror-what-should-i-do-bad-sts-cert-explanation = <b>{ $hostname }</b> has a security policy called HTTP Strict Transport Security (HSTS), which means that { -brand-short-name } can only connect to it securely. You can’t add an exception to visit this site.
 
 cert-error-trust-certificate-transparency-what-can-you-do-about-it = Probably nothing, since it’s likely there’s a problem with the site itself.
+
+# Variables:
+#   $responsestatus (string) - HTTP response status code (e.g., 500).
+#   $responsestatustext (string) - HTTP response status text (e.g., "Internal Server Error").
+neterror-response-status-code = Error code: { $responsestatus } { $responsestatustext }

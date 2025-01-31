@@ -62,7 +62,10 @@
 
 #include "js/CharacterEncoding.h"  // JS::ConstUTF8CharsZ
 #include "js/ColumnNumber.h"       // JS::ColumnNumberOneOrigin
-#include "js/TypeDecls.h"          // JS::MutableHandle (fwd)
+#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+#  include "js/Prefs.h"  // JS::Prefs::*
+#endif
+#include "js/TypeDecls.h"  // JS::MutableHandle (fwd)
 
 namespace js {
 class FrontendContext;
@@ -125,13 +128,28 @@ class JS_PUBLIC_API PrefableCompileOptions {
   PrefableCompileOptions()
       : importAttributes_(false),
         sourcePragmas_(true),
-        throwOnAsmJSValidationFailure_(false) {}
+#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+        explicitResourceManagement_(
+            JS::Prefs::experimental_explicit_resource_management()),
+#endif
+        throwOnAsmJSValidationFailure_(false) {
+  }
 
   bool importAttributes() const { return importAttributes_; }
   PrefableCompileOptions& setImportAttributes(bool enabled) {
     importAttributes_ = enabled;
     return *this;
   }
+
+#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+  bool explicitResourceManagement() const {
+    return explicitResourceManagement_;
+  }
+  PrefableCompileOptions& setExplicitResourceManagement(bool enabled) {
+    explicitResourceManagement_ = enabled;
+    return *this;
+  }
+#endif
 
   // Enable/disable support for parsing '//(#@) source(Mapping)?URL=' pragmas.
   bool sourcePragmas() const { return sourcePragmas_; }
@@ -170,6 +188,9 @@ class JS_PUBLIC_API PrefableCompileOptions {
     PrintFields_(importAttributes_);
     PrintFields_(sourcePragmas_);
     PrintFields_(throwOnAsmJSValidationFailure_);
+#  ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+    PrintFields_(explicitResourceManagement_);
+#  endif
 #  undef PrintFields_
 
     switch (asmJSOption_) {
@@ -198,6 +219,12 @@ class JS_PUBLIC_API PrefableCompileOptions {
 
   // The context has specified that source pragmas should be parsed.
   bool sourcePragmas_ : 1;
+
+#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+  // The context has specified that explicit resource management syntax
+  // should be parsed.
+  bool explicitResourceManagement_ : 1;
+#endif
 
   // ==== asm.js options. ====
   bool throwOnAsmJSValidationFailure_ : 1;
@@ -381,6 +408,11 @@ class JS_PUBLIC_API TransitiveCompileOptions {
 
   bool importAttributes() const { return prefableOptions_.importAttributes(); }
   bool sourcePragmas() const { return prefableOptions_.sourcePragmas(); }
+#ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
+  bool explicitResourceManagement() const {
+    return prefableOptions_.explicitResourceManagement();
+  }
+#endif
   bool throwOnAsmJSValidationFailure() const {
     return prefableOptions_.throwOnAsmJSValidationFailure();
   }
@@ -696,13 +728,16 @@ class MOZ_STACK_CLASS JS_PUBLIC_API CompileOptions final
     return *this;
   }
 
+  void warnAboutConflictingDelazification() const;
   CompileOptions& setEagerDelazificationStrategy(
       DelazificationOption strategy) {
-    // forceFullParse is at the moment considered as a non-overridable strategy.
-    MOZ_RELEASE_ASSERT(eagerDelazificationStrategy_ !=
-                           DelazificationOption::ParseEverythingEagerly ||
-                       strategy ==
-                           DelazificationOption::ParseEverythingEagerly);
+    const auto PEE = DelazificationOption::ParseEverythingEagerly;
+    if (eagerDelazificationStrategy_ == PEE && strategy != PEE) {
+      // Parse Everything Eagerly cannot be replaced, do noting.
+      warnAboutConflictingDelazification();
+      return *this;
+    }
+
     eagerDelazificationStrategy_ = strategy;
     return *this;
   }
@@ -733,17 +768,22 @@ class JS_PUBLIC_API InstantiateOptions {
   bool hideScriptFromDebugger = false;
   bool deferDebugMetadata = false;
 
-  InstantiateOptions() = default;
+  DelazificationOption eagerDelazificationStrategy_ =
+      DelazificationOption::OnDemandOnly;
+
+  InstantiateOptions();
 
   explicit InstantiateOptions(const ReadOnlyCompileOptions& options)
       : skipFilenameValidation(options.skipFilenameValidation_),
         hideScriptFromDebugger(options.hideScriptFromDebugger_),
-        deferDebugMetadata(options.deferDebugMetadata_) {}
+        deferDebugMetadata(options.deferDebugMetadata_),
+        eagerDelazificationStrategy_(options.eagerDelazificationStrategy()) {}
 
   void copyTo(CompileOptions& options) const {
     options.skipFilenameValidation_ = skipFilenameValidation;
     options.hideScriptFromDebugger_ = hideScriptFromDebugger;
     options.deferDebugMetadata_ = deferDebugMetadata;
+    options.setEagerDelazificationStrategy(eagerDelazificationStrategy_);
   }
 
   bool hideFromNewScriptInitial() const {
@@ -759,6 +799,29 @@ class JS_PUBLIC_API InstantiateOptions {
     MOZ_ASSERT(skipFilenameValidation == false);
     MOZ_ASSERT(hideScriptFromDebugger == false);
     MOZ_ASSERT(deferDebugMetadata == false);
+    MOZ_ASSERT(eagerDelazificationStrategy_ ==
+               DelazificationOption::OnDemandOnly);
+  }
+
+  // Assert that all fields have values compatible with the default value.
+  //
+  // This can be used in the same way as assertDefault, in case the
+  // setForceFullParse() is used on the original compile options.
+  void assertCompatibleWithDefault() const {
+    MOZ_ASSERT(skipFilenameValidation == false);
+    MOZ_ASSERT(hideScriptFromDebugger == false);
+    MOZ_ASSERT(deferDebugMetadata == false);
+
+    // The instantiation step uses the eagerDelazificationStrategy_ field
+    // only for TransitiveCompileOptions::populateDelazificationCache().
+    //
+    // Both the default OnDemandOnly and
+    // the ParseEverythingEagerly from setForceFullParse() returns
+    // false, and they're are compatible.
+    MOZ_ASSERT(eagerDelazificationStrategy_ ==
+                   DelazificationOption::OnDemandOnly ||
+               eagerDelazificationStrategy_ ==
+                   DelazificationOption::ParseEverythingEagerly);
   }
 #endif
 };

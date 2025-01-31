@@ -289,8 +289,9 @@ export class TranslationsEngine {
     const transferables = [];
     if (enginePayload) {
       transferables.push(enginePayload.bergamotWasmArrayBuffer);
-      for (const files of enginePayload.languageModelFiles) {
-        for (const { buffer } of Object.values(files)) {
+      for (const translationModelPayload of enginePayload.translationModelPayloads) {
+        const { languageModelFiles } = translationModelPayload;
+        for (const { buffer } of Object.values(languageModelFiles)) {
           transferables.push(buffer);
         }
       }
@@ -316,9 +317,10 @@ export class TranslationsEngine {
    * @param {string} sourceText
    * @param {boolean} isHTML
    * @param {number} innerWindowId
+   * @param {number} translationId
    * @returns {Promise<string[]>}
    */
-  translate(sourceText, isHTML, innerWindowId) {
+  translate(sourceText, isHTML, innerWindowId, translationId) {
     this.keepAlive();
 
     const messageId = this.#messageId++;
@@ -359,6 +361,7 @@ export class TranslationsEngine {
         isHTML,
         sourceText,
         messageId,
+        translationId,
         innerWindowId,
       });
     });
@@ -390,6 +393,20 @@ export class TranslationsEngine {
     this.#worker.postMessage({
       type: "discard-translation-queue",
       innerWindowId,
+    });
+  }
+
+  /**
+   * Cancel a single translation.
+   *
+   * @param {number} innerWindowId
+   * @param {id} translationId
+   */
+  cancelSingleTranslation(innerWindowId, translationId) {
+    this.#worker.postMessage({
+      type: "cancel-single-translation",
+      innerWindowId,
+      translationId,
     });
   }
 
@@ -473,7 +490,7 @@ function listenForPortMessages(fromLanguage, toLanguage, innerWindowId, port) {
         break;
       }
       case "TranslationsPort:TranslationRequest": {
-        const { sourceText, isHTML, messageId } = data;
+        const { sourceText, isHTML, translationId } = data;
         const engine = await TranslationsEngine.getOrCreate(
           fromLanguage,
           toLanguage,
@@ -482,13 +499,25 @@ function listenForPortMessages(fromLanguage, toLanguage, innerWindowId, port) {
         const targetText = await engine.translate(
           sourceText,
           isHTML,
-          innerWindowId
+          innerWindowId,
+          translationId
         );
         port.postMessage({
           type: "TranslationsPort:TranslationResponse",
-          messageId,
+          translationId,
           targetText,
         });
+        break;
+      }
+      case "TranslationsPort:CancelSingleTranslation": {
+        const { translationId } = data;
+        TranslationsEngine.withCachedEngine(
+          fromLanguage,
+          toLanguage,
+          engine => {
+            engine.cancelSingleTranslation(innerWindowId, translationId);
+          }
+        );
         break;
       }
       case "TranslationsPort:DiscardTranslations": {

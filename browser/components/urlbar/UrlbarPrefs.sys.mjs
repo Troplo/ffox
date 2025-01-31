@@ -75,7 +75,7 @@ const PREF_URLBAR_DEFAULTS = new Map([
 
   // Whether to show a link for using the search functionality provided by the
   // active view if the the view utilizes OpenSearch.
-  ["contextualSearch.enabled", false],
+  ["contextualSearch.enabled", true],
 
   // Whether using `ctrl` when hitting return/enter in the URL bar
   // (or clicking 'go') should prefix 'www.' and suffix
@@ -157,6 +157,9 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // locales. Labels are not shown in other locales but likely will be in the
   // future.
   ["groupLabels.enabled", true],
+
+  // Set default intent threshold value of 0.5
+  ["intentThreshold", [0.5, "float"]],
 
   // Whether the results panel should be kept open during IME composition.
   ["keepPanelOpenDuringImeComposition", false],
@@ -389,7 +392,7 @@ const PREF_URLBAR_DEFAULTS = new Map([
   ["shortcuts.bookmarks", true],
   ["shortcuts.tabs", true],
   ["shortcuts.history", true],
-  ["shortcuts.actions", false],
+  ["shortcuts.actions", true],
 
   // Boolean to determine if the providers defined in `exposureResults`
   // should be displayed in search results. This can be set by a
@@ -499,6 +502,9 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // or only from the current container.
   ["switchTabs.searchAllContainers", true],
 
+  // The minimum number of characters needed to match a tab group name.
+  ["tabGroups.minSearchLength", 1],
+
   // The number of remaining times the user can interact with tab-to-search
   // onboarding results before we stop showing them.
   ["tabToSearch.onboard.interactionsLeft", 3],
@@ -539,6 +545,9 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // Note: This pref will be removed once the feature is stable.
   ["untrimOnUserInteraction.featureGate", false],
 
+  // Whether or not Unified Search Button is shown always.
+  ["unifiedSearchButton.always", false],
+
   // Feature gate pref for weather suggestions in the urlbar.
   ["weather.featureGate", false],
 
@@ -546,6 +555,10 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // trigger the suggestion. 0 means the min length should be taken from Nimbus
   // or remote settings.
   ["weather.minKeywordLength", 0],
+
+  // The number of times the user has clicked the "Show less frequently" command
+  // for weather suggestions.
+  ["weather.showLessFrequentlyCount", 0],
 
   // Feature gate pref for Yelp suggestions in the urlbar.
   ["yelp.featureGate", false],
@@ -582,16 +595,12 @@ const PREF_OTHER_DEFAULTS = new Map([
 // defaults are the values of their fallbacks.
 const NIMBUS_DEFAULTS = {
   addonsShowLessFrequentlyCap: 0,
-  experimentType: "",
   fakespotMinKeywordLength: null,
   pocketShowLessFrequentlyCap: 0,
   pocketSuggestIndex: null,
-  quickSuggestRemoteSettingsDataType: "data",
   quickSuggestScoreMap: null,
-  recordNavigationalSuggestionTelemetry: false,
-  weatherKeywordsMinimumLength: 0,
-  weatherKeywordsMinimumLengthCap: 0,
-  weatherSimpleUI: false,
+  weatherKeywordsMinimumLength: null,
+  weatherShowLessFrequentlyCap: null,
   yelpMinKeywordLength: null,
   yelpSuggestNonPriorityIndex: null,
 };
@@ -1585,7 +1594,7 @@ class Preferences {
   _getPrefValue(pref) {
     switch (pref) {
       case "shortcuts.actions": {
-        return this.get("scotchBonnet.enableOverride") || this._readPref(pref);
+        return this.get("scotchBonnet.enableOverride") && this._readPref(pref);
       }
       case "defaultBehavior": {
         let val = 0;

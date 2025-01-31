@@ -18,7 +18,7 @@
 //!   is known to be in some undefined state. Any transition away from UNINITIALIZED
 //!   will treat the contents as junk.
 
-use super::{range::RangedStates, PendingTransition, PendingTransitionList, TrackerIndex};
+use super::{range::RangedStates, PendingTransition, PendingTransitionList};
 use crate::{
     resource::{Texture, TextureInner, TextureView, Trackable},
     snatch::SnatchGuard,
@@ -826,32 +826,6 @@ impl DeviceTextureTracker {
             pending.into_hal(tex)
         })
     }
-
-    /// Unconditionally removes the given resource from the tracker.
-    ///
-    /// Returns true if the resource was removed.
-    ///
-    /// If the index is higher than the length of internal vectors,
-    /// false will be returned.
-    pub fn remove(&mut self, index: TrackerIndex) -> bool {
-        let index = index.as_usize();
-
-        if index >= self.metadata.size() {
-            return false;
-        }
-
-        self.tracker_assert_in_bounds(index);
-
-        unsafe {
-            if self.metadata.contains_unchecked(index) {
-                self.current_state_set.complex.remove(&index);
-                self.metadata.remove(index);
-                return true;
-            }
-        }
-
-        false
-    }
 }
 
 impl TextureTrackerSetSingle for DeviceTextureTracker {
@@ -1330,7 +1304,10 @@ unsafe fn barrier(
             barriers.push(PendingTransition {
                 id: index as _,
                 selector: texture_selector.clone(),
-                usage: current_simple..new_simple,
+                usage: hal::StateTransition {
+                    from: current_simple,
+                    to: new_simple,
+                },
             });
         }
         (SingleOrManyStates::Single(current_simple), SingleOrManyStates::Many(new_many)) => {
@@ -1346,7 +1323,10 @@ unsafe fn barrier(
                 barriers.push(PendingTransition {
                     id: index as _,
                     selector,
-                    usage: current_simple..new_state,
+                    usage: hal::StateTransition {
+                        from: current_simple,
+                        to: new_state,
+                    },
                 });
             }
         }
@@ -1369,7 +1349,10 @@ unsafe fn barrier(
                             mips: mip_id..mip_id + 1,
                             layers: layers.clone(),
                         },
-                        usage: current_layer_state..new_simple,
+                        usage: hal::StateTransition {
+                            from: current_layer_state,
+                            to: new_simple,
+                        },
                     });
                 }
             }
@@ -1398,7 +1381,10 @@ unsafe fn barrier(
                                 mips: mip_id..mip_id + 1,
                                 layers,
                             },
-                            usage: *current_layer_state..new_state,
+                            usage: hal::StateTransition {
+                                from: *current_layer_state,
+                                to: new_state,
+                            },
                         });
                     }
                 }

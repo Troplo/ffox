@@ -19,7 +19,7 @@ export const INTERSECTION_RATIO = 0.5;
 /**
  * Impression wrapper for Discovery Stream related React components.
  *
- * It makses use of the Intersection Observer API to detect the visibility,
+ * It makes use of the Intersection Observer API to detect the visibility,
  * and relies on page visibility to ensure the impression is reported
  * only when the component is visible on the page.
  *
@@ -113,12 +113,20 @@ export class ImpressionStats extends React.PureComponent {
               ...(link.shim ? { shim: link.shim } : {}),
               recommendation_id: link.recommendation_id,
               fetchTimestamp: link.fetchTimestamp,
+              corpus_item_id: link.corpus_item_id,
               scheduled_corpus_item_id: link.scheduled_corpus_item_id,
               recommended_at: link.recommended_at,
               received_rank: link.received_rank,
               topic: link.topic,
               is_list_card: link.is_list_card,
               ...(link.format ? { format: link.format } : {}),
+              ...(link.section
+                ? {
+                    section: link.section,
+                    section_position: link.section_position,
+                    is_secton_followed: link.is_secton_followed,
+                  }
+                : {}),
             })),
             firstVisibleTimestamp: this.props.firstVisibleTimestamp,
           })

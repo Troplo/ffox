@@ -27,7 +27,7 @@ include "mozilla/net/ClassOfService.h";
 using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using mozilla::net::RequestHeaderTuples from "mozilla/net/PHttpChannelParams.h";
 using struct nsHttpAtom from "nsHttp.h";
-using class mozilla::net::nsHttpResponseHead from "nsHttpResponseHead.h";
+[MoveOnly] using class mozilla::net::nsHttpResponseHead from "nsHttpResponseHead.h";
 using class mozilla::TimeStamp from "mozilla/TimeStamp.h";
 [RefCounted] using class nsIPropertyBag2 from "nsIPropertyBag2.h";
 [RefCounted] using class nsDOMNavigationTiming from "nsDOMNavigationTiming.h";
@@ -41,6 +41,7 @@ using mozilla::dom::RequestMode from "mozilla/dom/RequestBinding.h";
 using mozilla::net::LinkHeader from "nsNetUtil.h";
 using mozilla::dom::FeaturePolicyInfo from "mozilla/dom/FeaturePolicy.h";
 using nsILoadInfo::HTTPSUpgradeTelemetryType from "nsILoadInfo.h";
+using nsILoadInfo::SchemelessInputType from "nsILoadInfo.h";
 
 namespace mozilla {
 namespace net {
@@ -139,7 +140,7 @@ struct LoadInfoArgs
   RedirectHistoryEntryInfo[]  redirectChainIncludingInternalRedirects;
   RedirectHistoryEntryInfo[]  redirectChain;
   bool                        hasInjectedCookieForCookieBannerHandling;
-  bool                        wasSchemelessInput;
+  SchemelessInputType         schemelessInput;
   HTTPSUpgradeTelemetryType   httpsUpgradeTelemetry;
 
   /**
@@ -229,7 +230,7 @@ struct ParentLoadInfoForwarderArgs
 
   uint32_t httpsOnlyStatus;
 
-  bool wasSchemelessInput;
+  SchemelessInputType schemelessInput;
 
   HTTPSUpgradeTelemetryType httpsUpgradeTelemetry;
 
@@ -386,6 +387,7 @@ struct HttpChannelOpenArgs
   nsString                    classicScriptHintCharset;
   nsString                    documentCharacterSet;
   bool                        isUserAgentHeaderModified;
+  nsString                    initiatorType;
 };
 
 struct HttpChannelConnectArgs
@@ -652,6 +654,21 @@ struct DataChannelInfo
   uint32_t               loadFlags;
   LoadInfoArgs           loadInfo;
   nsCString              contentType;
+  uint64_t               channelId;
+};
+
+//-----------------------------------------------------------------------------
+// File IPDL structs
+//-----------------------------------------------------------------------------
+
+struct FileChannelInfo
+{
+  nullable nsIURI        uri;
+  nullable nsIURI        originalURI;
+  uint32_t               loadFlags;
+  LoadInfoArgs           loadInfo;
+  nsCString              contentType;
+  uint64_t               channelId;
 };
 
 struct RemoteStreamInfo {

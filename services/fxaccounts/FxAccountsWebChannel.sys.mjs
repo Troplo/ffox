@@ -45,6 +45,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   FxAccountsStorageManagerCanStoreField:
     "resource://gre/modules/FxAccountsStorage.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
+  SelectableProfileService:
+    "resource:///modules/profiles/SelectableProfileService.sys.mjs",
   Weave: "resource://services-sync/main.sys.mjs",
   WebChannel: "resource://gre/modules/WebChannel.sys.mjs",
 });
@@ -88,26 +90,37 @@ XPCOMUtils.defineLazyPreferenceGetter(
   false
 );
 
-// These engines were added years after Sync had been introduced, they need
-// special handling since they are system add-ons and are un-available on
-// older versions of Firefox.
-// These are only used in the non-oauth flows.
-const EXTRA_ENGINES = ["addresses", "creditcards"];
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "browserProfilesEnabled",
+  "browser.profiles.enabled",
+  false
+);
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "allowSyncMerge",
+  "browser.profiles.sync.allow-danger-merge",
+  false
+);
+
+ChromeUtils.defineLazyGetter(lazy, "l10n", function () {
+  return new Localization(["browser/sync.ftl", "branding/brand.ftl"], true);
+});
 
 // These engines will be displayed to the user to pick which they would like to
 // use.
 const CHOOSE_WHAT_TO_SYNC_ALWAYS_AVAILABLE = [
   "addons",
   "bookmarks",
-  "creditcards",
   "history",
   "passwords",
   "prefs",
   "tabs",
 ];
 
-// Engines which we need to inspect a pref to see if they are available in the oauth flows.
-const CHOOSE_WHAT_TO_SYNC_OPTIONALLY_AVAILABLE = ["addresses"];
+// Engines which we need to inspect a pref to see if they are available, and
+// possibly have their default preference value to disabled.
+const CHOOSE_WHAT_TO_SYNC_OPTIONALLY_AVAILABLE = ["addresses", "creditcards"];
 
 /**
  * A helper function that extracts the message and stack from an error object.
@@ -277,16 +290,48 @@ FxAccountsWebChannel.prototype = {
         await this._helpers.logout(data.uid);
         break;
       case COMMAND_CAN_LINK_ACCOUNT:
-        let canLinkAccount = this._helpers.shouldAllowRelink(data.email);
-
-        let response = {
-          command,
-          messageId: message.messageId,
-          data: { ok: canLinkAccount },
-        };
-
-        log.debug("FxAccountsWebChannel response", response);
-        this._channel.send(response, sendingContext);
+        {
+          let response = { command, messageId: message.messageId };
+          // If browser profiles are not enabled, then we use the old merge sync dialog
+          if (!lazy.browserProfilesEnabled) {
+            response.data = { ok: this._helpers.shouldAllowRelink(data.email) };
+            this._channel.send(response, sendingContext);
+            break;
+          }
+          // In the new sync warning, we give users a few more options to
+          // control what they want to do with their sync data
+          let result = await this._helpers.promptProfileSyncWarningIfNeeded(
+            data.email
+          );
+          switch (result.action) {
+            case "create-profile":
+              lazy.SelectableProfileService.createNewProfile();
+              response.data = { ok: false };
+              break;
+            case "switch-profile":
+              lazy.SelectableProfileService.launchInstance(result.data);
+              response.data = { ok: false };
+              break;
+            // Either no warning was shown, or user selected the continue option
+            // to link the account
+            case "continue":
+              response.data = { ok: true };
+              break;
+            case "cancel":
+              response.data = { ok: false };
+              break;
+            default:
+              log.error(
+                "Invalid FxAccountsWebChannel dialog response: ",
+                result.action
+              );
+              response.data = { ok: false };
+              break;
+          }
+          log.debug("FxAccountsWebChannel response", response);
+          // Send the response based on what the user selected above
+          this._channel.send(response, sendingContext);
+        }
         break;
       case COMMAND_SYNC_PREFERENCES:
         this._helpers.openSyncPreferences(browser, data.entryPoint);
@@ -320,7 +365,6 @@ FxAccountsWebChannel.prototype = {
         break;
       case COMMAND_FXA_STATUS:
         log.debug("fxa_status received");
-
         const service = data && data.service;
         const isPairing = data && data.isPairing;
         const context = data && data.context;
@@ -459,6 +503,27 @@ FxAccountsWebChannelHelpers.prototype = {
     );
   },
 
+  /**
+   * Checks if the user is potentially hitting an issue with the current
+   * account they're logging into. Returns the choice of the user if shown
+   * @returns {string} - The corresponding option the user pressed. Can be either:
+   * cancel, continue, switch-profile, or create-profile
+   */
+  async promptProfileSyncWarningIfNeeded(acctEmail) {
+    // Was a previous account signed into this profile or is there another profile currently signed in
+    // to the account we're signing into
+    let profileLinkedWithAcct =
+      await this._getProfileAssociatedWithAcct(acctEmail);
+    if (this._needRelinkWarning(acctEmail) || profileLinkedWithAcct) {
+      return this._promptForProfileSyncWarning(
+        acctEmail,
+        profileLinkedWithAcct
+      );
+    }
+    // The user has no warnings needed and can continue signing in
+    return { action: "continue" };
+  },
+
   async _initializeSync() {
     // A sync-specific hack - we want to ensure sync has been initialized
     // before we set the signed-in user.
@@ -474,12 +539,14 @@ FxAccountsWebChannelHelpers.prototype = {
 
   _setEnabledEngines(offeredEngines, declinedEngines) {
     if (offeredEngines && declinedEngines) {
-      EXTRA_ENGINES.forEach(engine => {
+      log.debug("Received offered engines", offeredEngines);
+      CHOOSE_WHAT_TO_SYNC_OPTIONALLY_AVAILABLE.forEach(engine => {
         if (
           offeredEngines.includes(engine) &&
           !declinedEngines.includes(engine)
         ) {
           // These extra engines are disabled by default.
+          log.debug(`Enabling optional engine '${engine}'`);
           Services.prefs.setBoolPref(`services.sync.engine.${engine}`, true);
         }
       });
@@ -488,83 +555,126 @@ FxAccountsWebChannelHelpers.prototype = {
       declinedEngines.forEach(engine => {
         Services.prefs.setBoolPref(`services.sync.engine.${engine}`, false);
       });
+    } else {
+      log.debug("Did not receive any engine selection information");
     }
   },
-  /**
-   * stores sync login info it in the fxaccounts service
+
+  /** Internal function used to configure the requested services.
    *
+   * The "services" param is an object as received from the FxA server.
+   */
+  async _enableRequestedServices(requestedServices) {
+    if (!requestedServices) {
+      log.warn(
+        "fxa login completed but we don't have a record of which services were enabled."
+      );
+      return;
+    }
+    log.debug(`services requested are ${Object.keys(requestedServices)}`);
+    if (requestedServices.sync) {
+      const xps = await this._initializeSync();
+      const { offeredEngines, declinedEngines } = requestedServices.sync;
+      this._setEnabledEngines(offeredEngines, declinedEngines);
+      log.debug("Webchannel is enabling sync");
+      await xps.Weave.Service.configure();
+    }
+  },
+
+  /**
+   * The login message is sent when the user user has initially logged in but may not be fully connected.
+   * * In the non-oauth flows, if the user is verified, then the browser itself is able to transition the
+   *   user to fully connected.
+   * * In the oauth flows, we will need an `oauth_login` message with our scoped keys to be fully connected.
    * @param accountData the user's account data and credentials
    */
   async login(accountData) {
-    const signedInUser = await this._fxAccounts.getSignedInUser();
+    // This is delicate for oauth flows and edge-cases. Consider (a) user logs in but does not verify,
+    // (b) browser restarts, (c) user select "finish setup", at which point they are again prompted for their password.
+    // In that scenario, we've been sent this `login` message *both* at (a) and at (c).
+    // Importantly, the message from (a) is the one that actually has the service information we care about
+    // (eg, the sync engine selections) - (c) *will* have `services.sync` but it will be an empty object.
+    // This means we need to take care to not lose the services from (a) when processing (c).
+    const signedInUser = await this._fxAccounts.getSignedInUser([
+      "requestedServices",
+    ]);
+    let existingServices;
     if (signedInUser) {
-      await this._disconnect();
+      if (signedInUser.uid != accountData.uid) {
+        log.warn(
+          "the webchannel found a different user signed in - signing them out."
+        );
+        await this._disconnect();
+      } else {
+        existingServices = signedInUser.requestedServices
+          ? JSON.parse(signedInUser.requestedServices)
+          : {};
+        log.debug(
+          "Webchannel is updating the info for an already logged in user."
+        );
+      }
+    } else {
+      log.debug("Webchannel is logging new a user in.");
     }
-    // We don't act on customizeSync anymore, it used to open a dialog inside
-    // the browser to selecte the engines to sync but we do it on the web now.
-    log.debug("Webchannel is logging a user in.");
+    // There are (or were) extra fields here we don't want to actually store.
     delete accountData.customizeSync;
+    delete accountData.verifiedCanLinkAccount;
+    if (lazy.oauthEnabled) {
+      // We once accidentally saw these from the server and got confused about who owned the key fetching.
+      delete accountData.keyFetchToken;
+      delete accountData.unwrapBKey;
+    }
 
-    // Save requested services for later.
-    const requestedServices = accountData.services;
+    // The "services" being connected - see above re our careful handling of existing data.
+    // Note that we don't attempt to merge any data - we keep the first value we see for a service
+    // and ignore that service subsequently (as it will be common for subsequent messages to
+    // name a service but not supply any data for it)
+    const requestedServices = {
+      ...(accountData.services ?? {}),
+      ...existingServices,
+    };
     delete accountData.services;
 
-    // the user has already been shown the "can link account"
-    // screen. No need to keep this data around.
-    delete accountData.verifiedCanLinkAccount;
-
-    // Remember who it was so we can log out next time.
+    // This `verified` check is really just for our tests and pre-oauth flows.
+    // However, in all cases it's misplaced - we should set it as soon as *sync*
+    // starts or is configured, as it's the merging done by sync it protects against.
+    // We should clean up handling of this pref in a followup.
     if (accountData.verified) {
       this.setPreviousAccountNameHashPref(accountData.email);
     }
 
     await this._fxAccounts.telemetry.recordConnection(
-      Object.keys(requestedServices || {}),
+      Object.keys(requestedServices),
       "webchannel"
     );
 
     if (lazy.oauthEnabled) {
-      // XXX - work around a server issue - we should never be handed these items in oauth flows.
-      // Fixed in https://github.com/mozilla/fxa/pull/17892, so this can probably be made more
-      // aggressive (eg, refuse to connect if they are present or similar)
-      delete accountData.keyFetchToken;
-      delete accountData.unwrapBKey;
+      // We need to remember the requested services because we can't act on them until we get the `oauth_login` message.
+      // And because we might not get that message in this browser session (eg, the browser might restart before the
+      // user enters their verification code), they are persisted with the account state.
+      log.debug(`storing info for services ${Object.keys(requestedServices)}`);
+      accountData.requestedServices = JSON.stringify(requestedServices);
       await this._fxAccounts._internal.setSignedInUser(accountData);
     } else {
-      const xps = await this._initializeSync();
+      // Note we don't persist anything in requestedServices for non oauth flows because we act on them now.
       await this._fxAccounts._internal.setSignedInUser(accountData);
-
-      if (requestedServices) {
-        // User has enabled Sync.
-        if (requestedServices.sync) {
-          const { offeredEngines, declinedEngines } = requestedServices.sync;
-          this._setEnabledEngines(offeredEngines, declinedEngines);
-          log.debug("Webchannel is enabling sync");
-          await xps.Weave.Service.configure();
-        }
-      }
+      await this._enableRequestedServices(requestedServices);
     }
     log.debug("Webchannel finished logging a user in.");
   },
 
   /**
-   * Disconnects the user from Sync and FxA
-   *
-   */
-  _disconnect() {
-    return SyncDisconnect.disconnect(false);
-  },
-
-  /**
    * Logins in to sync by completing an OAuth flow
-   * @param { Object } oauthData: The oauth code and state as returned by the server */
+   * @param { Object } oauthData: The oauth code and state as returned by the server
+   */
   async oauthLogin(oauthData) {
     log.debug("Webchannel is completing the oauth flow");
-    const xps = await this._initializeSync();
-    const { sessionToken, email } =
+    const { uid, sessionToken, email, requestedServices } =
       await this._fxAccounts._internal.getUserAccountData([
+        "uid",
         "sessionToken",
         "email",
+        "requestedServices",
       ]);
     // First we finish the ongoing oauth flow
     const { scopedKeys, refreshToken } =
@@ -583,28 +693,31 @@ FxAccountsWebChannelHelpers.prototype = {
     // Then, we persist the sync keys
     await this._fxAccounts._internal.setScopedKeys(scopedKeys);
 
-    // Now that we have the scoped keys, we set our status to verified
-    await this._fxAccounts._internal.setUserVerified();
-    // And work out what should be enabled.
-    const services = oauthData.services;
-    log.trace("Webchannel is enabling services", services);
-    if (services) {
-      if (services.sync) {
-        // User has enabled Sync.
-        log.debug("Webchannel is enabling sync");
-        const { offeredEngines, declinedEngines } = services.sync;
-        this._setEnabledEngines(offeredEngines, declinedEngines);
-        xps.Weave.Service.configure();
+    try {
+      let parsedRequestedServices;
+      if (requestedServices) {
+        parsedRequestedServices = JSON.parse(requestedServices);
       }
-    } else {
-      // To support fxa before it knew to send `services`, we assume it missing means "enable sync" and that the top-level
-      // payload has `offeredSyncEngines` and `declinedSyncEngines`
-      // TODO: remove this branch as soon as the above branch starts working - only old FxA servers need this!
-      const { declinedSyncEngines, offeredSyncEngines } = oauthData;
-      log.debug("Webchannel is enabling sync (deprecated message format");
-      this._setEnabledEngines(offeredSyncEngines, declinedSyncEngines);
-      xps.Weave.Service.configure();
+      await this._enableRequestedServices(parsedRequestedServices);
+    } finally {
+      // We don't want them hanging around in storage.
+      await this._fxAccounts._internal.updateUserAccountData({
+        uid,
+        requestedServices: null,
+      });
     }
+
+    // Now that we have the scoped keys, we set our status to verified.
+    // This will kick off Sync or other services we configured.
+    await this._fxAccounts._internal.setUserVerified();
+    log.debug("Webchannel completed oauth flows");
+  },
+
+  /**
+   * Disconnects the user from Sync and FxA
+   */
+  _disconnect() {
+    return SyncDisconnect.disconnect(false);
   },
 
   /**
@@ -635,7 +748,6 @@ FxAccountsWebChannelHelpers.prototype = {
     let browser = sendingContext.browsingContext.top.embedderElement;
     const isPrivateBrowsing =
       this._privateBrowsingUtils.isBrowserPrivate(browser);
-    log.debug("is private browsing", isPrivateBrowsing);
     return isPrivateBrowsing;
   },
 
@@ -659,13 +771,15 @@ FxAccountsWebChannelHelpers.prototype = {
     // with FxA as part of a Sync flow should work all the time. If
     // Sync is broken in PB mode, users will think Firefox is broken.
     // See https://bugzilla.mozilla.org/show_bug.cgi?id=1323853
-    log.debug("service", service);
-    return (
-      !this.isPrivateBrowsingMode(sendingContext) ||
-      service === "sync" ||
-      context === "fx_desktop_v3" ||
-      isPairing
+    //
+    // XXX - This hard-coded context seems bad?
+    let pb = this.isPrivateBrowsingMode(sendingContext);
+    let ok =
+      !pb || service === "sync" || context === "fx_desktop_v3" || isPairing;
+    log.debug(
+      `fxa status ok=${ok} - private=${pb}, service=${service}, context=${context}, pairing=${isPairing}`
     );
+    return ok;
   },
 
   /**
@@ -703,43 +817,29 @@ FxAccountsWebChannelHelpers.prototype = {
       capabilities,
     };
   },
+
   _getCapabilities() {
-    if (lazy.oauthEnabled) {
-      let engines = Array.from(CHOOSE_WHAT_TO_SYNC_ALWAYS_AVAILABLE);
-      for (let optionalEngine of CHOOSE_WHAT_TO_SYNC_OPTIONALLY_AVAILABLE) {
-        if (
-          Services.prefs.getBoolPref(
-            `services.sync.engine.${optionalEngine}.available`,
-            false
-          )
-        ) {
-          engines.push(optionalEngine);
-        }
+    // pre-oauth flows there we a strange setup where we just supplied the "extra" engines,
+    // whereas oauth flows want them all.
+    let engines = lazy.oauthEnabled
+      ? Array.from(CHOOSE_WHAT_TO_SYNC_ALWAYS_AVAILABLE)
+      : [];
+    for (let optionalEngine of CHOOSE_WHAT_TO_SYNC_OPTIONALLY_AVAILABLE) {
+      if (
+        Services.prefs.getBoolPref(
+          `services.sync.engine.${optionalEngine}.available`,
+          false
+        )
+      ) {
+        engines.push(optionalEngine);
       }
-      return {
-        multiService: true,
-        pairing: lazy.pairingEnabled,
-        choose_what_to_sync: true,
-        engines,
-      };
     }
     return {
       multiService: true,
       pairing: lazy.pairingEnabled,
-      engines: this._getAvailableExtraEngines(),
+      choose_what_to_sync: true,
+      engines,
     };
-  },
-
-  _getAvailableExtraEngines() {
-    return EXTRA_ENGINES.filter(engineName => {
-      try {
-        return Services.prefs.getBoolPref(
-          `services.sync.engine.${engineName}.available`
-        );
-      } catch (e) {
-        return false;
-      }
-    });
   },
 
   async changePassword(credentials) {
@@ -836,23 +936,79 @@ FxAccountsWebChannelHelpers.prototype = {
     );
   },
 
+  // Get the current name of the profile the user is currently on
+  _getCurrentProfileName() {
+    return lazy.SelectableProfileService?.currentProfile?.name;
+  },
+
+  async _getAllProfiles() {
+    return await lazy.SelectableProfileService.getAllProfiles();
+  },
+
+  /**
+   * Checks if a profile is associated with the given account email.
+   *
+   * @param {string} acctEmail - The email of the account to check.
+   * @returns {Promise<SelectableProfile|null>} - The profile associated with the account, or null if none.
+   */
+  async _getProfileAssociatedWithAcct(acctEmail) {
+    let profiles = await this._getAllProfiles();
+    let currentProfile = await this._getCurrentProfileName();
+    for (let profile of profiles) {
+      if (profile.name === currentProfile.name) {
+        continue; // Skip current profile
+      }
+
+      let profilePath = profile.path;
+      let signedInUserPath = PathUtils.join(profilePath, "signedInUser.json");
+      let signedInUser = await this._readJSONFileAsync(signedInUserPath);
+      if (
+        signedInUser?.accountData &&
+        signedInUser.accountData.email === acctEmail
+      ) {
+        // The account is signed into another profile
+        return profile;
+      }
+    }
+    return null;
+  },
+
+  async _readJSONFileAsync(filePath) {
+    try {
+      let data = await IOUtils.readJSON(filePath);
+      if (data && data.version !== 1) {
+        throw new Error(
+          `Unsupported signedInUser.json version: ${data.version}`
+        );
+      }
+      return data;
+    } catch (e) {
+      // File not found or error reading/parsing
+      return null;
+    }
+  },
+
   /**
    * Show the user a warning dialog that the data from the previous account
-   * and the new account will be merged.
+   * and the new account will be merged. _promptForSyncWarning should be
+   * used instead of this
    *
    * @private
    */
   _promptForRelink(acctName) {
-    let sb = Services.strings.createBundle(
-      "chrome://browser/locale/syncSetup.properties"
-    );
-    let continueLabel = sb.GetStringFromName("continue.label");
-    let title = sb.GetStringFromName("relinkVerify.title");
-    let description = sb.formatStringFromName("relinkVerify.description", [
-      acctName,
-    ]);
-    let body =
-      sb.GetStringFromName("relinkVerify.heading") + "\n\n" + description;
+    let [continueLabel, title, heading, description] =
+      lazy.l10n.formatValuesSync([
+        { id: "sync-setup-verify-continue" },
+        { id: "sync-setup-verify-title" },
+        { id: "sync-setup-verify-heading" },
+        {
+          id: "sync-setup-verify-description",
+          args: {
+            email: acctName,
+          },
+        },
+      ]);
+    let body = heading + "\n\n" + description;
     let ps = Services.prompt;
     let buttonFlags =
       ps.BUTTON_POS_0 * ps.BUTTON_TITLE_IS_STRING +
@@ -871,7 +1027,226 @@ FxAccountsWebChannelHelpers.prototype = {
       null,
       {}
     );
+    this.emitSyncWarningDialogTelemetry(
+      { 0: "continue", 1: "cancel" },
+      pressed,
+      false // old dialog doesn't have other profiles
+    );
     return pressed === 0; // 0 is the "continue" button
+  },
+
+  /**
+   * Similar to _promptForRelink but more offers more contextual warnings
+   * to the user to support browser profiles.
+   * @returns {string} - The corresponding option the user pressed. Can be either:
+   * cancel, continue, switch-profile, or create-profile
+   *
+   */
+  _promptForProfileSyncWarning(acctEmail, profileLinkedWithAcct) {
+    let currentProfile = this._getCurrentProfileName();
+    let title, heading, description, mergeLabel, switchLabel;
+    if (profileLinkedWithAcct) {
+      [title, heading, description, mergeLabel, switchLabel] =
+        lazy.l10n.formatValuesSync([
+          { id: "sync-account-in-use-header" },
+          {
+            id: lazy.allowSyncMerge
+              ? "sync-account-already-signed-in-header"
+              : "sync-account-in-use-header-merge",
+            args: {
+              acctEmail,
+              otherProfile: profileLinkedWithAcct.name,
+            },
+          },
+          {
+            id: lazy.allowSyncMerge
+              ? "sync-account-in-use-description-merge"
+              : "sync-account-in-use-description",
+            args: {
+              acctEmail,
+              currentProfile,
+              otherProfile: profileLinkedWithAcct.name,
+            },
+          },
+          {
+            id: "sync-button-sync-profile",
+            args: { profileName: currentProfile },
+          },
+          {
+            id: "sync-button-switch-profile",
+            args: { profileName: profileLinkedWithAcct.name },
+          },
+        ]);
+    } else {
+      // This current profile was previously associated with a different account
+      [title, heading, description, mergeLabel, switchLabel] =
+        lazy.l10n.formatValuesSync([
+          {
+            id: lazy.allowSyncMerge
+              ? "sync-profile-different-account-title-merge"
+              : "sync-profile-different-account-title",
+          },
+          {
+            id: "sync-profile-different-account-header",
+          },
+          {
+            id: lazy.allowSyncMerge
+              ? "sync-profile-different-account-description-merge"
+              : "sync-profile-different-account-description",
+            args: {
+              acctEmail,
+              profileName: currentProfile,
+            },
+          },
+          { id: "sync-button-sync-and-merge" },
+          { id: "sync-button-create-profile" },
+        ]);
+    }
+    let result = this.showWarningPrompt({
+      title,
+      body: `${heading}\n\n${description}`,
+      btnLabel1: lazy.allowSyncMerge ? mergeLabel : switchLabel,
+      btnLabel2: lazy.allowSyncMerge ? switchLabel : null,
+      isAccountLoggedIntoAnotherProfile: !!profileLinkedWithAcct,
+    });
+
+    // If the user chose to switch profiles, return the associated profile as well.
+    if (result === "switch-profile") {
+      return { action: result, data: profileLinkedWithAcct };
+    }
+
+    // For all other actions, just return the action name.
+    return { action: result };
+  },
+
+  /**
+   * Shows the user a warning prompt.
+   * @returns {string} - The corresponding option the user pressed. Can be either:
+   * cancel, continue, switch-profile, or create-profile
+   */
+  showWarningPrompt({
+    title,
+    body,
+    btnLabel1,
+    btnLabel2,
+    isAccountLoggedIntoAnotherProfile,
+  }) {
+    let ps = Services.prompt;
+    let buttonFlags;
+    let pressed;
+    let actionMap = {};
+
+    if (lazy.allowSyncMerge) {
+      // Merge allowed: two options + cancel
+      buttonFlags =
+        ps.BUTTON_POS_0 * ps.BUTTON_TITLE_IS_STRING +
+        ps.BUTTON_POS_1 * ps.BUTTON_TITLE_IS_STRING +
+        ps.BUTTON_POS_2 * ps.BUTTON_TITLE_CANCEL +
+        ps.BUTTON_POS_2_DEFAULT;
+
+      // Define action map based on context
+      if (isAccountLoggedIntoAnotherProfile) {
+        // Account is associated with another profile
+        actionMap = {
+          0: "continue", // merge option
+          1: "switch-profile",
+          2: "cancel",
+        };
+      } else {
+        // Profile was previously logged in with another account
+        actionMap = {
+          0: "continue", // merge option
+          1: "create-profile",
+          2: "cancel",
+        };
+      }
+
+      // Show the prompt
+      pressed = ps.confirmEx(
+        null,
+        title,
+        body,
+        buttonFlags,
+        btnLabel1,
+        btnLabel2,
+        null,
+        null,
+        {}
+      );
+    } else {
+      // Merge not allowed: one option + cancel
+      buttonFlags =
+        ps.BUTTON_POS_0 * ps.BUTTON_TITLE_IS_STRING +
+        ps.BUTTON_POS_1 * ps.BUTTON_TITLE_CANCEL +
+        ps.BUTTON_POS_1_DEFAULT;
+
+      // Define action map based on context
+      if (isAccountLoggedIntoAnotherProfile) {
+        // Account is associated with another profile
+        actionMap = {
+          0: "switch-profile",
+          1: "cancel",
+        };
+      } else {
+        // Profile was previously logged in with another account
+        actionMap = {
+          0: "create-profile",
+          1: "cancel",
+        };
+      }
+
+      // Show the prompt
+      pressed = ps.confirmEx(
+        null,
+        title,
+        body,
+        buttonFlags,
+        btnLabel1,
+        null,
+        null,
+        null,
+        {}
+      );
+    }
+
+    this.emitSyncWarningDialogTelemetry(
+      actionMap,
+      pressed,
+      isAccountLoggedIntoAnotherProfile
+    );
+    return actionMap[pressed] || "unknown";
+  },
+
+  emitSyncWarningDialogTelemetry(
+    actionMap,
+    pressed,
+    isAccountLoggedIntoAnotherProfile
+  ) {
+    let variant;
+
+    if (!lazy.browserProfilesEnabled) {
+      // Old merge dialog
+      variant = "old-merge";
+    } else if (isAccountLoggedIntoAnotherProfile) {
+      // Sync warning dialog for profile already associated
+      variant = lazy.allowSyncMerge
+        ? "sync-warning-allow-merge"
+        : "sync-warning";
+    } else {
+      // Sync warning dialog for a different account previously logged in
+      variant = lazy.allowSyncMerge
+        ? "merge-warning-allow-merge"
+        : "merge-warning";
+    }
+
+    // Telemetry extra options
+    let extraOptions = {
+      variant_shown: variant,
+      option_clicked: actionMap[pressed] || "unknown",
+    };
+
+    // Record telemetry
+    Glean.syncMergeDialog?.clicked?.record(extraOptions);
   },
 };
 

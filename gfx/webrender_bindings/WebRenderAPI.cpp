@@ -131,6 +131,13 @@ class NewRenderer : public RendererEvent {
       }
     }
 
+    // Only allow the layer compositor in nightly builds, for now.
+    bool use_layer_compositor = false;
+#ifdef NIGHTLY_BUILD
+    use_layer_compositor =
+        StaticPrefs::gfx_webrender_layer_compositor_AtStartup();
+#endif
+
     if (!wr_window_new(
             aWindowId, mSize.width, mSize.height,
             mWindowKind == WindowKind::MAIN, supportLowPriorityTransactions,
@@ -151,7 +158,8 @@ class NewRenderer : public RendererEvent {
             gfx::gfxVars::WebRenderRequiresHardwareDriver(),
             StaticPrefs::gfx_webrender_low_quality_pinch_zoom_AtStartup(),
             StaticPrefs::gfx_webrender_max_shared_surface_size_AtStartup(),
-            StaticPrefs::gfx_webrender_enable_subpixel_aa_AtStartup())) {
+            StaticPrefs::gfx_webrender_enable_subpixel_aa_AtStartup(),
+            use_layer_compositor)) {
       // wr_window_new puts a message into gfxCriticalNote if it returns false
       MOZ_ASSERT(errorMessage);
       mError->AssignASCII(errorMessage);
@@ -1059,6 +1067,14 @@ void TransactionBuilder::DeleteBlobImage(BlobImageKey aKey) {
   wr_resource_updates_delete_blob_image(mTxn, aKey);
 }
 
+void TransactionBuilder::AddSnapshotImage(wr::SnapshotImageKey aKey) {
+  wr_resource_updates_add_snapshot_image(mTxn, aKey);
+}
+
+void TransactionBuilder::DeleteSnapshotImage(wr::SnapshotImageKey aKey) {
+  wr_resource_updates_delete_snapshot_image(mTxn, aKey);
+}
+
 void TransactionBuilder::AddRawFont(wr::FontKey aKey, wr::Vec<uint8_t>& aBytes,
                                     uint32_t aIndex) {
   wr_resource_updates_add_raw_font(mTxn, aKey, &aBytes.inner, aIndex);
@@ -1206,7 +1222,7 @@ void DisplayListBuilder::End(layers::DisplayListData& aOutTransaction) {
 
 Maybe<wr::WrSpatialId> DisplayListBuilder::PushStackingContext(
     const wr::StackingContextParams& aParams, const wr::LayoutRect& aBounds,
-    const wr::RasterSpace& aRasterSpace) {
+    const wr::RasterSpace& aRasterSpace, const wr::SnapshotInfo* aSnapshot) {
   MOZ_ASSERT(mClipChainLeaf.isNothing(),
              "Non-empty leaf from clip chain given, but not used with SC!");
 
@@ -1220,7 +1236,7 @@ Maybe<wr::WrSpatialId> DisplayListBuilder::PushStackingContext(
       mWrState, aBounds, mCurrentSpaceAndClipChain.space, &aParams,
       aParams.mTransformPtr, aParams.mFilters.Elements(),
       aParams.mFilters.Length(), aParams.mFilterDatas.Elements(),
-      aParams.mFilterDatas.Length(), aRasterSpace);
+      aParams.mFilterDatas.Length(), aRasterSpace, aSnapshot);
 
   return spatialId.id != 0 ? Some(spatialId) : Nothing();
 }

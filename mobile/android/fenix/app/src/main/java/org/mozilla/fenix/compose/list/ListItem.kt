@@ -44,15 +44,17 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import mozilla.components.compose.base.Divider
+import mozilla.components.compose.base.annotation.LightDarkPreview
 import mozilla.components.ui.colors.PhotonColors
 import org.mozilla.fenix.R
-import org.mozilla.fenix.compose.Divider
 import org.mozilla.fenix.compose.Favicon
-import org.mozilla.fenix.compose.annotation.LightDarkPreview
 import org.mozilla.fenix.compose.button.RadioButton
 import org.mozilla.fenix.compose.ext.thenConditional
 import org.mozilla.fenix.theme.FirefoxTheme
@@ -183,6 +185,7 @@ fun TextListItem(
  * @param label The label in the list item.
  * @param url Website [url] for which the favicon will be shown.
  * @param modifier [Modifier] to be applied to the layout.
+ * @param labelModifier [Modifier] to be applied to the label.
  * @param description An optional description text below the label.
  * @param faviconPainter Optional painter to use when fetching a new favicon is unnecessary.
  * @param onClick Called when the user clicks on the item.
@@ -199,6 +202,7 @@ fun FaviconListItem(
     label: String,
     url: String,
     modifier: Modifier = Modifier,
+    labelModifier: Modifier = Modifier,
     description: String? = null,
     faviconPainter: Painter? = null,
     onClick: (() -> Unit)? = null,
@@ -212,6 +216,7 @@ fun FaviconListItem(
     ListItem(
         label = label,
         modifier = modifier,
+        labelModifier = labelModifier,
         description = description,
         onClick = onClick,
         onLongClick = onLongClick,
@@ -273,6 +278,7 @@ fun FaviconListItem(
  *
  * @param label The label in the list item.
  * @param modifier [Modifier] to be applied to the layout.
+ * @param labelModifier [Modifier] to be applied to the label.
  * @param labelTextColor [Color] to be applied to the label.
  * @param descriptionTextColor [Color] to be applied to the description.
  * @param maxLabelLines An optional maximum number of lines for the label text to span.
@@ -297,6 +303,7 @@ fun FaviconListItem(
 fun IconListItem(
     label: String,
     modifier: Modifier = Modifier,
+    labelModifier: Modifier = Modifier,
     labelTextColor: Color = FirefoxTheme.colors.textPrimary,
     descriptionTextColor: Color = FirefoxTheme.colors.textSecondary,
     maxLabelLines: Int = 1,
@@ -317,6 +324,7 @@ fun IconListItem(
     ListItem(
         label = label,
         modifier = modifier,
+        labelModifier = labelModifier,
         labelTextColor = labelTextColor,
         descriptionTextColor = descriptionTextColor,
         maxLabelLines = maxLabelLines,
@@ -736,6 +744,7 @@ private fun SelectableItemIcon(
  *
  * @param label The label in the list item.
  * @param modifier [Modifier] to be applied to the layout.
+ * @param labelModifier [Modifier] to be applied to the label.
  * @param labelTextColor [Color] to be applied to the label.
  * @param descriptionTextColor [Color] to be applied to the description.
  * @param maxLabelLines An optional maximum number of lines for the label text to span.
@@ -754,6 +763,7 @@ private fun SelectableItemIcon(
 private fun ListItem(
     label: String,
     modifier: Modifier = Modifier,
+    labelModifier: Modifier = Modifier,
     labelTextColor: Color = FirefoxTheme.colors.textPrimary,
     descriptionTextColor: Color = FirefoxTheme.colors.textSecondary,
     maxLabelLines: Int = 1,
@@ -793,9 +803,12 @@ private fun ListItem(
         ) {
             Text(
                 text = label,
+                modifier = labelModifier,
                 color = if (enabled) labelTextColor else FirefoxTheme.colors.textDisabled,
                 overflow = TextOverflow.Ellipsis,
-                style = FirefoxTheme.typography.subtitle1,
+                style = FirefoxTheme.typography.subtitle1.merge(
+                    platformStyle = PlatformTextStyle(includeFontPadding = true),
+                ),
                 maxLines = maxLabelLines,
             )
 
@@ -805,7 +818,16 @@ private fun ListItem(
                     color = if (enabled) descriptionTextColor else FirefoxTheme.colors.textDisabled,
                     overflow = TextOverflow.Ellipsis,
                     maxLines = maxDescriptionLines,
-                    style = FirefoxTheme.typography.body2,
+                    style = FirefoxTheme.typography.body2
+                        .merge(
+                            // Bug 1915867 - We must force the text direction to correctly truncate a LTR
+                            // description that is too long when the app in RTL mode - at least until this
+                            // bug gets fixed in Compose.
+                            // This isn't the most optional solution but it should have less side-effects
+                            // than forcing no letter spacing (which would be the best approach here).
+                            textDirection = TextDirection.Content,
+                            platformStyle = PlatformTextStyle(includeFontPadding = true),
+                        ),
                 )
             }
         }
@@ -981,7 +1003,7 @@ private fun ImageListItemPreview() {
         Column(Modifier.background(FirefoxTheme.colors.layer1)) {
             ImageListItem(
                 label = "label",
-                iconPainter = painterResource(R.drawable.googleg_standard_color_18),
+                iconPainter = painterResource(R.drawable.mozac_ic_web_extension_default_icon),
                 enabled = true,
                 onClick = {},
                 afterListAction = {

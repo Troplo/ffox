@@ -318,7 +318,7 @@ test-manifest:
     treeherder:
         symbol: misc(tm)
     run:
-        mach: lint -v -l test-manifest-alpha -l test-manifest-disable -l test-manifest-skip-if -f treeherder -f json:/builds/worker/mozlint.json .
+        mach: lint -v -l test-manifest-alpha -l test-manifest-disable -l test-manifest-skip-if -l test-manifest-toml -f treeherder -f json:/builds/worker/mozlint.json .
     when:
         files-changed:
             - '**/*.toml'
@@ -391,7 +391,7 @@ localization:
 
 
 l10n-conflicts:
-    description: l10n tests for strings with errors and conflicts with cross-channel
+    description: l10n tests for strings with errors and conflicts with firefox-l10n-source
     treeherder:
         symbol: l10n(l1nt-conflicts)
     always-target: false
@@ -578,6 +578,9 @@ perfdocs-verify:
             - 'testing/performance/**'
             - 'testing/perfdocs/**'
             - 'tools/lint/perfdocs.yml'
+            - 'toolkit/components/ml/tests/browser/**'
+            - '**/*_perf.js'
+
 
 condprof-addons-verify:
     description: |

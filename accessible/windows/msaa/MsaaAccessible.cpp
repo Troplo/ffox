@@ -27,7 +27,6 @@
 #include "sdnTextAccessible.h"
 #include "HyperTextAccessible-inl.h"
 #include "ServiceProvider.h"
-#include "Statistics.h"
 #include "ARIAMap.h"
 #include "mozilla/PresShell.h"
 
@@ -45,7 +44,7 @@ static const GUID IID_MsaaAccessible = {
     0x4afc,
     {0xa3, 0x2c, 0xd6, 0xb5, 0xc0, 0x10, 0x04, 0x6b}};
 
-MsaaIdGenerator MsaaAccessible::sIDGen;
+MOZ_RUNINIT MsaaIdGenerator MsaaAccessible::sIDGen;
 ITypeInfo* MsaaAccessible::gTypeInfo = nullptr;
 
 /* static */
@@ -216,7 +215,7 @@ void MsaaAccessible::FireWinEvent(Accessible* aTarget, uint32_t aEventType) {
                     nsIAccessibleEvent::EVENT_LAST_ENTRY,
                 "MSAA event map skewed");
 
-  if (aEventType == 0 || aEventType >= ArrayLength(gWinEventMap)) {
+  if (aEventType == 0 || aEventType >= std::size(gWinEventMap)) {
     MOZ_ASSERT_UNREACHABLE("invalid event type");
     return;
   }
@@ -564,7 +563,6 @@ MsaaAccessible::QueryInterface(REFIID iid, void** ppv) {
 
     *ppv = static_cast<ISimpleDOMNode*>(new sdnAccessible(WrapNotNull(this)));
   } else if (iid == IID_ISimpleDOMText && localAcc && localAcc->IsTextLeaf()) {
-    statistics::ISimpleDOMUsed();
     *ppv = static_cast<ISimpleDOMText*>(new sdnTextAccessible(this));
     static_cast<IUnknown*>(*ppv)->AddRef();
     return S_OK;

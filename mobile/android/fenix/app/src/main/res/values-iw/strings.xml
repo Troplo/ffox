@@ -46,7 +46,7 @@
     <string name="tab_tray_collection_button_multiselect_content_description">שמירת הלשוניות שנבחרו לאוסף</string>
 
     <!-- Content description on checkmark while tab is selected in multiselect mode in tab tray -->
-    <string name="tab_tray_multiselect_selected_content_description">נבחר</string>
+    <string name="tab_tray_multiselect_selected_content_description" moz:removedIn="136" tools:ignore="UnusedResources">נבחר</string>
 
     <!-- Home - Bookmarks -->
     <!-- Title for the home screen section with bookmarks. -->
@@ -96,12 +96,6 @@
     <!-- Text for the negative action button -->
     <string name="open_in_app_cfr_negative_button_text">סגירה</string>
 
-    <!-- Total cookie protection "contextual feature recommendation" (CFR) -->
-    <!-- Text for the message displayed in the contextual feature recommendation popup promoting the total cookie protection feature. -->
-    <string name="tcp_cfr_message" moz:removedIn="132" tools:ignore="UnusedResources">תכונת הפרטיות החזקה ביותר שלנו אי פעם מבודדת רכיבי מעקב חוצות אתרים.</string>
-    <!-- Text displayed that links to website containing documentation about the "Total cookie protection" feature. -->
-    <string name="tcp_cfr_learn_more" moz:removedIn="132" tools:ignore="UnusedResources">מידע נוסף על הגנת עוגיות מלאה</string>
-
     <!-- Private browsing erase action "contextual feature recommendation" (CFR) -->
     <!-- Text for the message displayed in the contextual feature recommendation popup promoting the erase private browsing feature. -->
     <string name="erase_action_cfr_message">יש להקיש כאן כדי להתחיל הפעלה פרטית חדשה. פעולה זו תמחק את ההיסטוריה והעוגיות שלך - הכל.</string>
@@ -117,11 +111,11 @@
     <!-- Text for the message displayed for the popup promoting the long press of navigation in the navigation bar. -->
     <string name="navbar_navigation_buttons_cfr_message">יש להקיש ולהחזיק את החצים כדי לדלג בין דפים בהיסטוריה של לשונית זו.</string>
 
-    <!-- Tablet navigation bar "contextual feature recommendation" (CFR) -->
-    <!-- Text for the title displayed in the contextual feature recommendation popup promoting the tablet navigation bar. -->
-    <string name="tablet_nav_bar_cfr_title" moz:removedIn="132" tools:ignore="UnusedResources">חדש: חצים אחורה וקדימה בלחיצה אחת</string>
-    <!-- Text for the message displayed in the contextual feature recommendation popup promoting the tablet navigation bar. -->
-    <string name="tablet_nav_bar_cfr_message" moz:removedIn="132" tools:ignore="UnusedResources">להינות מניווט מהיר יותר שנמצא תמיד בהישג יד.</string>
+    <!-- Address bar swipe "contextual feature recommendation" (CFR) -->
+    <!-- Text for the title displayed in the contextual feature recommendation popup promoting swipe of address bar. -->
+    <string name="address_bar_swipe_cfr_title">החלקה על סרגל הכלים תחליף בין לשוניות</string>
+    <!-- Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar. -->
+    <string name="address_bar_swipe_cfr_message">ניתן להחליק ימינה או שמאלה כדי להחליף בין לשוניות. החלקה שמאלה על הלשונית האחרונה שלך תפתח לשונית חדשה.</string>
 
     <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
     <string name="camera_permissions_needed_message">דרושה גישה למצלמה. יש לעבור להגדרות ה־Android, להקיש על הרשאות ולאחר מכן על ״לאפשר״.</string>
@@ -246,8 +240,12 @@
     <string name="browser_menu_open_in_regular_tab">פתיחה בלשונית רגילה</string>
     <!-- Browser menu toggle that adds a shortcut to the site on the device home screen. -->
     <string name="browser_menu_add_to_homescreen">הוספה למסך הבית</string>
+    <!-- Browser menu toggle that adds a PWA of the site on the device home screen. -->
+    <string name="browser_menu_add_app_to_homescreen">הוספת יישומון למסך הבית</string>
     <!-- Browser menu toggle that adds a shortcut to the site on the device home screen. -->
     <string name="browser_menu_add_to_homescreen_2">הוספה למסך הבית…</string>
+    <!-- Browser menu toggle that adds a PWA of the site on the device home screen. -->
+    <string name="browser_menu_add_app_to_homescreen_2">הוספת יישומון למסך הבית…</string>
     <!-- Text for notifying users that Xiaomi devices require additional permissions to add to home screen -->
     <string name="browser_menu_add_to_homescreen_xiaomi">ייתכן שמכשירי Xiaomi יזדקקו להרשאות נוספות כדי להוסיף קיצורי דרך למסך הבית. נא לבדוק את ההגדרות שלך.</string>
     <!-- Content description (not visible, for screen readers etc.) for the Resync tabs button -->
@@ -333,9 +331,23 @@
     <!-- Content description (not visible, for screen readers etc.) for bottom sheet handlebar tools menu. -->
     <string name="browser_tools_menu_handlebar_content_description">סגירת תפריט הכלים</string>
     <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu -->
-    <string name="browser_menu_tools_description_with_translate">תצוגת קריאה, תרגום, הדפסה, שיתוף, פתיחת יישומון</string>
+    <string name="browser_menu_tools_description_with_translate" moz:removedIn="134" tools:ignore="UnusedResources">תצוגת קריאה, תרגום, הדפסה, שיתוף, פתיחת יישומון</string>
     <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu -->
-    <string name="browser_menu_tools_description">תצוגת קריאה, הדפסה, שיתוף, פתיחת יישומון</string>
+    <string name="browser_menu_tools_description" moz:removedIn="134" tools:ignore="UnusedResources">תצוגת קריאה, הדפסה, שיתוף, פתיחת יישומון</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu
+         The first parameter is the label of the report site issue (for example: Report Site issue) -->
+    <string name="browser_menu_tools_description_with_translate_with_report_site" moz:removedIn="135" tools:ignore="UnusedResources">תצוגת קריאה, תרגום, %s, הדפסה, שיתוף, פתיחת יישומון</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu when the "Report broken site" feature is available-->
+    <string name="browser_menu_tools_description_with_translate_with_report_site_2">תצוגת קריאה, תרגום, דיווח על אתר שבור, הדפסה, שיתוף, פתיחת יישומון</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu -->
+    <string name="browser_menu_tools_description_with_translate_without_report_site">תצוגת קריאה, תרגום, הדפסה, שיתוף, פתיחת יישומון</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu
+         The first parameter is the label of the report site issue (for example: Report Site issue) -->
+    <string name="browser_menu_tools_description_with_report_site" moz:removedIn="135" tools:ignore="UnusedResources">תצוגת קריאה, %s, הדפסה, שיתוף, פתיחת יישומון</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu when the "Report broken site" feature is available-->
+    <string name="browser_menu_tools_description_with_report_site_2">תצוגת קריאה, דיווח על אתר שבור, הדפסה, שיתוף, פתיחת יישומון</string>
+    <!-- Browser menu description that describes the various tools related menu items inside of the tools sub-menu -->
+    <string name="browser_menu_tools_description_without_report_site">תצוגת קריאה, הדפסה, שיתוף, פתיחת יישומון</string>
     <!-- Browser menu label that navigates to the save sub-menu, which contains various save related menu items such as
          bookmarking a page, saving to collection, shortcut or as a PDF, and adding to home screen -->
     <string name="browser_menu_save">שמירה</string>
@@ -352,8 +364,12 @@
     <string name="browser_menu_turn_on_reader_view">הפעלת תצוגת קריאה</string>
     <!-- Browser menu label for turning OFF reader view of the current visited page -->
     <string name="browser_menu_turn_off_reader_view">כיבוי תצוגת קריאה</string>
+    <!-- Browser menu button that reopens a private tab as a regular tab -->
+    <string name="browser_menu_open_in_normal_tab">העברה ללשונית שאינה פרטית</string>
     <!-- Browser menu label for navigating to the translation feature, which provides language translation options the current visited page -->
     <string name="browser_menu_translate_page">תרגום הדף…</string>
+    <!-- Browser menu label for navigating to the Web Compat Reporter feature, which provides users the ability to send bug reports for broken sites. -->
+    <string name="browser_menu_webcompat_reporter">דיווח על אתר שבור…</string>
     <!-- Browser menu label that is displayed when the current page has been translated by the translation feature.
          The first parameter is the name of the language that page was translated to (e.g. English). -->
     <string name="browser_menu_translated_to">תורגם ל%1$s</string>
@@ -399,8 +415,6 @@
 
     <!-- Search Fragment -->
     <!-- Button in the search view that lets a user search by scanning a QR code -->
-    <string name="search_scan_button" moz:removedIn="133" tools:ignore="UnusedResources">סריקה</string>
-    <!-- Button in the search view that lets a user search by scanning a QR code -->
     <string name="search_scan_button_2">סריקת קוד QR</string>
     <!-- Button in the search view when shortcuts are displayed that takes a user to the search engine settings -->
     <string name="search_shortcuts_engine_settings">הגדרות מנוע חיפוש</string>
@@ -426,16 +440,16 @@
     <!-- Header text for the search selector menu -->
     <string name="search_header_menu_item_2">הפעם לחפש ב:</string>
 
-    <!-- Content description (not visible, for screen readers etc.): Search engine icon. The first parameter is the search engine name (for example: DuckDuckGo). -->
-    <string name="search_engine_icon_content_description" tools:ignore="UnusedResources" moz:removedIn="133">מנוע חיפוש %s</string>
-
     <!-- Content description (not visible, for screen readers etc.): Search engine icon.
     The parameter is the search engine name (for example: DuckDuckGo). -->
     <string name="search_engine_icon_content_description_1">מנוע חיפוש: %s</string>
 
+    <!-- Content description (not visible, for screen readers etc.) of the search engine selector from the search toolbar.
+    The parameter is the search engine name (for example: DuckDuckGo).
+    The colon character (in "%s:") is intended to have the screen reader make a small pause between the search engine name and the description of the button. -->
+    <string name="search_engine_selector_content_description">‏%s: בורר מנוע חיפוש</string>
+
     <!-- Home onboarding -->
-    <!-- Onboarding home screen popup dialog, shown on top of the Jump back in section. -->
-    <string name="onboarding_home_screen_jump_back_contextual_hint_2" moz:removedIn="132">הכירו את דף הבית המותאם אישית שלכם. לשוניות אחרונות, סימניות ותוצאות חיפוש יופיעו כאן.</string>
     <!-- Home onboarding dialog welcome screen title text. -->
     <string name="onboarding_home_welcome_title_2">ברוכים הבאים לאינטרנט אישי יותר</string>
     <!-- Home onboarding dialog welcome screen description text. -->
@@ -515,10 +529,6 @@
     <!-- Onboarding sub header for the add-ons card, used by Nimbus experiments. -->
     <string name="onboarding_add_on_sub_header" tools:ignore="UnusedResources">הוספת הרחבות צד־שלישי כדי לשפר את האבטחה והפרודקטיביות שלך, ועוד.</string>
     <!-- Onboarding add-ons card, for checking more add-ons on, used by Nimbus experiments. -->
-    <string name="onboarding_add_on_explore_more_extensions" tools:ignore="UnusedResources" moz:removedIn="133">עיון בהרחבות נוספות.</string>
-    <!-- Onboarding add-ons card, button for start browsing, used by Nimbus experiments. -->
-    <string name="onboarding_add_on_start_browsing_button" tools:ignore="UnusedResources" moz:removedIn="133">התחלת גלישה.</string>
-    <!-- Onboarding add-ons card, for checking more add-ons on, used by Nimbus experiments. -->
     <string name="onboarding_add_on_explore_more_extensions_2">עיון בהרחבות נוספות</string>
     <!-- Onboarding add-ons card, button for start browsing, used by Nimbus experiments. -->
     <string name="onboarding_add_on_start_browsing_button_2">התחלת גלישה</string>
@@ -551,6 +561,88 @@
     <string name="onboarding_add_on_add_button_content_description">כפתור להוספת התוספת</string>
     <!-- Content description for the star rating group. -->
     <string name="onboarding_add_on_star_rating_content_description">דירוג %1$s מתוך 5</string>
+
+    <!-- Title for the privacy preferences dialog shown during onboarding. Note: The word "Firefox" should NOT be translated. -->
+    <string name="onboarding_preferences_dialog_title" tools:ignore="BrandUsage">עזרו לנו לשפר את Firefox</string>
+    <!-- Title for the crash reporting option in the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_crash_reporting_title">שליחת דיווחי קריסה באופן אוטומטי</string>
+    <!-- Description for the crash reporting option in the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_crash_reporting_description">דיווחי קריסה מאפשרים לנו לאבחן ולתקן בעיות בדפדפן. דיווחים עשויים לכלול נתונים אישיים או רגישים.</string>
+
+    <!-- Learn more link for the crash reporting option in the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_crash_reporting_learn_more" moz:removedIn="136" tools:ignore="UnusedResources">מידע נוסף על דיווחי קריסה</string>
+    <!-- Description for the usage data option in the privacy preferences dialog shown during onboarding. Note: The word "Firefox" should NOT be translated. -->
+    <string name="onboarding_preferences_dialog_usage_data_description" moz:removedIn="136" tools:ignore="BrandUsage,UnusedResources">נתונים על המכשיר שלך, תצורת החומרה והאופן שבו Firefox משמש אותך עוזרים לשפר את היכולות, הביצועים והיציבות עבור משתמשים בכל מקום.</string>
+    <!-- Learn more link for the usage data option in the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_usage_data_learn_more" moz:removedIn="136" tools:ignore="UnusedResources">מידע נוסף על נתוני שימוש</string>
+    <!-- Positive button label for the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_positive_button">סיום</string>
+    <!-- Negative button label for the privacy preferences dialog shown during onboarding. -->
+    <string name="onboarding_preferences_dialog_negative_button">ביטול</string>
+
+    <!-- Terms of service onboarding title card label. 'Firefox' intentionally hardcoded here-->
+    <string name="onboarding_welcome_to_firefox" tools:ignore="BrandUsage">ברוכים הבאים אל Firefox</string>
+    <!-- Terms of service onboarding page continue button label. -->
+    <string name="onboarding_term_of_service_agree_and_continue_button_label">הסכמה והמשך</string>
+
+    <!-- Line one of the terms of service onboarding page. %1$s is replaced by an active link, using onboarding_term_of_service_line_one_link_text as text (“Firefox Terms of Use”). -->
+    <string name="onboarding_term_of_service_line_one" moz:removedIn="136" tools:ignore="BrandUsage, UnusedResources">בחירה בהמשך מהווה הסכמה ל%1$s של Firefox.</string>
+    <!-- Used as text for the link in onboarding_term_of_service_line_one. -->
+    <string name="onboarding_term_of_service_line_one_link_text" moz:removedIn="136" tools:ignore="UnusedResources">תנאי השירות</string>
+    <!-- Line two of the terms of service onboarding page. 'Firefox' is intentionally hardcoded. %1$s is replaced by an active link, using onboarding_term_of_service_line_two_link_text as text (“Privacy Notice”). -->
+    <string name="onboarding_term_of_service_line_two" moz:removedIn="136" tools:ignore="UnusedResources,BrandUsage">‏Firefox דואג לפרטיות שלך. מידע נוסף ב%1$s שלנו.</string>
+    <!-- Used as text for the link in onboarding_term_of_service_line_two. -->
+    <string name="onboarding_term_of_service_line_two_link_text">הצהרת הפרטיות</string>
+    <!-- Line three of the terms of service onboarding page. 'Firefox' and 'Mozilla' are intentionally hardcoded. %1$S is replaced by an active link, using onboarding_term_of_service_line_three_link_text as text (“Manage”). -->
+    <string name="onboarding_term_of_service_line_three" tools:ignore="BrandUsage">כדי לסייע בשיפור הדפדפן, Firefox שולח נתוני אבחון ואינטראקציה ל־Mozilla. %1$s</string>
+    <!-- Used as text for the link in onboarding_term_of_service_line_three. -->
+    <string name="onboarding_term_of_service_line_three_link_text">ניהול</string>
+    <!-- Onboarding header for the toolbar selection card, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_title" tools:ignore="UnusedResources">בחירת מיקום סרגל הכלים</string>
+    <!-- Onboarding sub header for toolbar selection card, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_description" tools:ignore="UnusedResources">לשמור חיפושים בהישג יד.</string>
+    <!-- Onboarding label for 'Save and continue' button, used by Nimbus experiments. -->
+    <string name="onboarding_save_and_continue_button">שמירה והמשך</string>
+    <!-- Onboarding toolbar selection card label for 'skip' button, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_skip_button" moz:removedIn="135" tools:ignore="UnusedResources">דילוג</string>
+    <!-- Onboarding toolbar selection card label for 'top' option, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_top_option">למעלה</string>
+    <!-- Onboarding toolbar selection card label for 'bottom' option, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_bottom_option">למטה</string>
+
+    <!-- Onboarding toolbar selection card content description for the main image. -->
+    <string name="onboarding_customize_toolbar_main_image_content_description">תמונת כותרת גדולה של תצוגת בחירת סרגל הכלים המציגה סרגל כלים מאויר.</string>
+    <!-- Onboarding toolbar selection card content description for the toolbar placement image. %1$s is placeholder for either 'top' or 'bottom'. -->
+    <string name="onboarding_customize_toolbar_placement_content_description" moz:removedIn="135" tools:ignore="UnusedResources">תמונה של סרגל הכלים %1$s</string>
+
+    <!-- Onboarding toolbar selection card content description for the toolbar placement image. -->
+    <string name="onboarding_customize_toolbar_placement_bottom_content_description">תמונה של סרגל הכלים התחתון</string>
+    <string name="onboarding_customize_toolbar_placement_top_content_description">תמונה של סרגל הכלים העליון</string>
+
+    <!-- Onboarding toolbar selection card label for 'Not now' button, used by Nimbus experiments. -->
+    <string name="onboarding_customize_toolbar_not_now_button" moz:removedIn="136" tools:ignore="UnusedResources">לא כעת</string>
+
+    <!-- Onboarding header for the theme selection card, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_title" tools:ignore="UnusedResources">בחירת ערכת נושא</string>
+    <!-- Onboarding sub header for theme selection card, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_description" tools:ignore="UnusedResources">לגלוש ברשת בתאורה הטובה ביותר.</string>
+    <!-- Onboarding label for 'Save and start browsing' button, used by Nimbus experiments. -->
+    <string name="onboarding_save_and_start_button">שמירה והתחלת הגלישה</string>
+    <!-- Onboarding theme selection card label for 'skip' button, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_skip_button" moz:removedIn="135" tools:ignore="UnusedResources">דילוג</string>
+    <!-- Onboarding theme selection card label for 'dark' option, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_dark_option">כהה</string>
+    <!-- Onboarding theme selection card label for 'light' option, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_light_option">בהיר</string>
+    <!-- Onboarding theme selection card label for 'System auto' option, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_system_option">לפי המערכת</string>
+    <!-- Onboarding theme selection card content description for the main image. -->
+    <string name="onboarding_customize_theme_main_image_content_description">תמונת כותרת גדולה של תצוגת בחירת ערכת הנושא המציגה כלי אמן ובנאי מאוירים.</string>
+    <!-- Onboarding theme selection card content description for the theme selection image. %1$s is placeholder for either 'system', 'light' or 'dark'. -->
+    <string name="onboarding_customize_theme_content_description">תמונה של ערכת הנושא - %1$s</string>
+
+    <!-- Onboarding theme selection card label for 'Not now' button, used by Nimbus experiments. -->
+    <string name="onboarding_customize_theme_not_now_button" moz:removedIn="136" tools:ignore="UnusedResources">לא כעת</string>
 
     <!-- Search Widget -->
     <!-- Content description for searching with a widget. The first parameter is the name of the application.-->
@@ -603,8 +695,6 @@
     <string name="preferences_category_advanced">מתקדם</string>
     <!-- Preference category for privacy and security settings -->
     <string name="preferences_category_privacy_security">פרטיות ואבטחה</string>
-    <!-- Preference for advanced site permissions -->
-    <string name="preferences_site_permissions" moz:removedIn="133" tools:ignore="UnusedResources">הרשאות אתר</string>
     <!-- Preference for advanced site settings -->
     <string name="preferences_site_settings">הגדרות אתר</string>
     <!-- Preference for private browsing options -->
@@ -947,18 +1037,35 @@
     <string name="exceptions_empty_message_learn_more_link">מידע נוסף</string>
 
     <!-- Preference switch for usage and technical data collection -->
-    <string name="preference_usage_data">נתוני שימוש וטכניים</string>
+    <string name="preference_usage_data" moz:removedIn="134" tools:ignore="UnusedResources">נתוני שימוש וטכניים</string>
+    <!-- Preference switch for usage and technical data collection -->
+    <string name="preference_usage_data_1">נתונים טכניים ונתוני אינטראקציה</string>
+    <!-- Preference switch for usage and technical learn more link -->
+    <string name="preference_usage_data_learn_more" tools:ignore="UnusedResources">מידע נוסף</string>
     <!-- Preference description for usage and technical data collection -->
     <string name="preferences_usage_data_description">שיתוף נתונים של ביצועים, חומרה, שימוש והתאמות אישיות על הדפדפן שלך עם Mozilla כדי לסייע לנו בשיפור %1$s</string>
 
     <!-- Preference switch for marketing data collection -->
     <string name="preferences_marketing_data">נתוני שיווק</string>
     <!-- Preference description for marketing data collection -->
-    <string name="preferences_marketing_data_description2">משתף נתוני שימוש בסיסיים עם Adjust, ספק השיווק שלנו בסלולר</string>
+    <string name="preferences_marketing_data_description2" moz:removedIn="134" tools:ignore="UnusedResources">משתף נתוני שימוש בסיסיים עם Adjust, ספק השיווק שלנו בסלולר</string>
+    <!-- Preference description for marketing data collection. Note: The words "Firefox" and "Mozilla" should NOT be translated -->
+    <string name="preferences_marketing_data_description_3" tools:ignore="BrandUsage">שיתוף מידע על האופן שבו גילית את Firefox עם שותפי השיווק של Mozilla. זה עוזר לנו להצמיח את Firefox ולבנות אינטרנט טוב יותר</string>
+    <!-- Learn more link for marketing data preference -->
+    <string name="preferences_marketing_data_learn_more">מידע נוסף על נתוני שיווק</string>
+
+    <!-- Preference switch for daily usage ping data collection -->
+    <string name="preferences_daily_usage_ping_title">פינג שימוש יומי</string>
+    <string name="preferences_daily_usage_ping_description">זה מסייע ל־Mozilla להעריך כמה יש משתמשים פעילים.</string>
+    <string name="preferences_daily_usage_ping_learn_more">מידע נוסף על פינג שימוש יומי</string>
     <!-- Preference switch title for automatically submitting crash reports -->
-    <string name="preferences_automatically_submit_crashes_title">שליחת דיווחי קריסה באופן אוטומטי</string>
+    <string name="preferences_automatically_send_crashes_title">שליחת דיווחי קריסה באופן אוטומטי</string>
+    <string name="preferences_automatically_submit_crashes_title" moz:removedIn="136" tools:ignore="UnusedResources">שליחת דיווחי קריסה באופן אוטומטי</string>
+
     <!-- Preference switch description for automatically submitting crash reports -->
-    <string name="preferences_automatically_submit_crashes_description">משתף נתוני קריסה באופן אוטומטי בעת ההפעלה עם Mozilla לאחר קריסות</string>
+    <string name="preferences_automatically_send_crashes_description">זה מסייע לנו לאבחן ולתקן בעיות בדפדפן. דיווחים עשויים לכלול נתונים אישיים או רגישים.</string>
+    <string name="preferences_automatically_submit_crashes_description" moz:removedIn="136" tools:ignore="UnusedResources">משתף נתוני קריסה באופן אוטומטי בעת ההפעלה עם Mozilla לאחר קריסות</string>
+
     <!-- Title for studies preferences -->
     <string name="preference_experiments_2">מחקרים</string>
     <!-- Summary for studies preferences -->
@@ -1126,22 +1233,28 @@
     <string name="studies_learn_more">מידע נוסף</string>
 
     <!-- Dialog message shown after removing a study -->
-    <string name="studies_restart_app">היישום ייסגר לצורך להחלת השינויים</string>
+    <string name="studies_restart_app" moz:removedIn="135">היישום ייסגר לצורך להחלת השינויים</string>
     <!-- Dialog button to confirm the removing a study. -->
-    <string name="studies_restart_dialog_ok">אישור</string>
+    <string name="studies_restart_dialog_ok" moz:removedIn="135">אישור</string>
     <!-- Dialog button text for canceling removing a study. -->
-    <string name="studies_restart_dialog_cancel">ביטול</string>
+    <string name="studies_restart_dialog_cancel" moz:removedIn="135">ביטול</string>
 
     <!-- Toast shown after turning on/off studies preferences -->
-    <string name="studies_toast_quit_application" tools:ignore="UnusedResources">היישום ייסגר לצורך להחלת השינויים…</string>
+    <string name="studies_toast_quit_application" moz:removedIn="135" tools:ignore="UnusedResources">היישום ייסגר לצורך להחלת השינויים…</string>
 
     <!-- Sessions -->
     <!-- Title for the list of tabs -->
-    <string name="tab_header_label">לשוניות פתוחות</string>
+    <string name="tab_header_label" moz:removedIn="135" tools:ignore="UnusedResources">לשוניות פתוחות</string>
     <!-- Title for the list of tabs in the current private session -->
-    <string name="tabs_header_private_tabs_title">לשוניות פרטיות</string>
+    <string name="tabs_header_private_tabs_title" moz:removedIn="136" tools:ignore="UnusedResources">לשוניות פרטיות</string>
+    <!-- Title for the list of tabs in the current private session used by a11y services
+    The %1$s will be replaced by the number of opened private tabs -->
+    <string name="tabs_header_private_tabs_counter_title">לשוניות פרטיות פתוחות: %1$s. יש להקיש כדי להחליף לשוניות.</string>
     <!-- Title for the list of tabs in the synced tabs -->
-    <string name="tabs_header_synced_tabs_title">לשוניות מסונכרנות</string>
+    <string name="tabs_header_synced_tabs_title" moz:removedIn="136" tools:ignore="UnusedResources">לשוניות מסונכרנות</string>
+    <!-- Title for the list of tabs in the synced tabs used by a11y services
+    The %1$s will be replaced by the number of opened synced tabs -->
+    <string name="tabs_header_synced_tabs_counter_title">לשוניות מסונכרנות פתוחות: %1$s. יש להקיש כדי להחליף לשוניות.</string>
     <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
     <string name="add_tab">הוספת לשונית</string>
     <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
@@ -1244,6 +1357,34 @@
 
     <!-- WebCompat Reporter -->
 
+    <!-- WebCompat Reporter -->
+    <!-- The title of the Web Compat Reporter feature. This is displayed in the top app bar. -->
+    <string name="webcompat_reporter_screen_title">דיווח על אתר שבור</string>
+    <!-- The description of the Web Compat Reporter feature. This first parameter is the name of the application (For example: Fenix) -->
+    <string name="webcompat_reporter_description">ניתן לסייע להפוך את %1$s לטוב יותר עבור כולם. עובדי Mozilla משתמשים במידע שיישלח כדי לתקן בעיות באתרים.</string>
+    <!-- The text field label of the URL text field. This is displayed above the user-inputted URL. -->
+    <string name="webcompat_reporter_label_url">כתובת</string>
+    <!-- The error message of the URL text field when an invalid URL has been entered. -->
+    <string name="webcompat_reporter_url_error_invalid">נא להכניס כתובת חוקית</string>
+    <!-- The label/title of an optional field in the Web Compat Reporter feature for explaining a high-level reason why the site is broken. -->
+    <string name="webcompat_reporter_label_whats_broken" moz:removedIn="136" tools:ignore="UnusedResources">מה שבור או לא עובד? (לא חובה)</string>
+    <!-- The placeholder text for the dropdown where a user selects a high-level reason why the site is broken. -->
+    <string name="webcompat_reporter_choose_reason">בחירת סיבה</string>
+    <!-- The label/title of an optional field in the Web Compat Reporter feature for adding additional information. -->
+    <string name="webcompat_reporter_label_description">תיאור הבעיה (לא חובה)</string>
+    <!-- The button text for navigating away from the feature to provide more information on the broken site's bug report. -->
+    <string name="webcompat_reporter_send_more_info">שליחת מידע נוסף</string>
+    <!-- The button text for the cancel button to leave the Web Compat Reporter feature. -->
+    <string name="webcompat_reporter_cancel">ביטול</string>
+    <!-- The button text for the send button to submit the provided form data. -->
+    <string name="webcompat_reporter_send">שליחה</string>
+
+
+    <!-- Text for a snackbar to confirm the successful submission of a WebCompat report. -->
+    <string name="webcompat_reporter_success_snackbar_text">הדיווח שלך נשלח</string>
+    <!-- Button text for closing or dismissing the snackbar shown after successfully submitting a WebCompat report. -->
+    <string name="webcompat_reporter_dismiss_success_snackbar_text">סגירה</string>
+
     <!-- These reason strings are dropdown options on a WebCompat reporter form, indicating what is broken on the site. -->
     <!-- Broken site reason text for site slow or not working -->
     <string name="webcompat_reporter_reason_slow">האתר איטי או לא עובד</string>
@@ -1288,8 +1429,6 @@
     <string name="bookmark_delete_negative">ביטול</string>
     <!-- Screen title for adding a bookmarks folder -->
     <string name="bookmark_add_folder">הוספת תיקייה</string>
-    <!-- Snackbar title shown after a bookmark has been created. -->
-    <string name="bookmark_saved_snackbar" moz:removedIn="132" tools:ignore="UnusedResources">הסימנייה נשמרה!</string>
     <!-- Snackbar title that confirms a bookmark was saved into a folder. Parameter will be replaced by the name of the folder the bookmark was saved into. -->
     <string name="bookmark_saved_in_folder_snackbar">נשמר ב־״%s״</string>
     <!-- Snackbar edit button shown after a bookmark has been created. -->
@@ -1638,8 +1777,6 @@
 
     <!-- Text shown in snackbar when user closes multiple inactive tabs. %1$s will be replaced with the number of tabs closed. -->
     <string name="snackbar_num_tabs_closed">לשוניות שנסגרו: %1$s</string>
-    <!-- Text shown in snackbar when user bookmarks a list of tabs -->
-    <string name="snackbar_message_bookmarks_saved" moz:removedIn="132" tools:ignore="UnusedResources">הסימניות נשמרו!</string>
     <!-- Text shown in snackbar when user bookmarks a list of tabs. Parameter will be replaced by the name of the folder the bookmark was saved into.-->
     <string name="snackbar_message_bookmarks_saved_in">הסימניות נשמרו ב־״%s״!</string>
     <!-- Text shown in snackbar when user adds a site to shortcuts -->
@@ -2424,159 +2561,151 @@
 
     <!-- Review quality check feature-->
     <!-- Name for the review quality check feature used as title for the panel. -->
-    <string name="review_quality_check_feature_name_2">בודק הסקירות</string>
+    <string name="review_quality_check_feature_name_2" moz:removedIn="136" tools:ignore="UnusedResources">בודק הסקירות</string>
     <!-- Summary for grades A and B for review quality check adjusted grading. -->
-    <string name="review_quality_check_grade_a_b_description">סקירות אמינות</string>
+    <string name="review_quality_check_grade_a_b_description" moz:removedIn="136" tools:ignore="UnusedResources">סקירות אמינות</string>
     <!-- Summary for grade C for review quality check adjusted grading. -->
-    <string name="review_quality_check_grade_c_description">שילוב של סקירות אמינות ובלתי אמינות</string>
+    <string name="review_quality_check_grade_c_description" moz:removedIn="136" tools:ignore="UnusedResources">שילוב של סקירות אמינות ובלתי אמינות</string>
     <!-- Summary for grades D and F for review quality check adjusted grading. -->
-    <string name="review_quality_check_grade_d_f_description">סקירות בלתי אמינות</string>
+    <string name="review_quality_check_grade_d_f_description" moz:removedIn="136" tools:ignore="UnusedResources">סקירות בלתי אמינות</string>
     <!-- Text for title presenting the reliability of a product's reviews. -->
-    <string name="review_quality_check_grade_title">עד כמה הסקירות האלו אמינות?</string>
+    <string name="review_quality_check_grade_title" moz:removedIn="136" tools:ignore="UnusedResources">עד כמה הסקירות האלו אמינות?</string>
     <!-- Title for when the rating has been updated by the review checker -->
-    <string name="review_quality_check_adjusted_rating_title">דירוג מותאם</string>
+    <string name="review_quality_check_adjusted_rating_title" moz:removedIn="136" tools:ignore="UnusedResources">דירוג מותאם</string>
     <!-- Description for a product's adjusted star rating. The text presents that the product's reviews which were evaluated as unreliable were removed from the adjusted rating. -->
-    <string name="review_quality_check_adjusted_rating_description_2">מבוסס על סקירות אמינות</string>
+    <string name="review_quality_check_adjusted_rating_description_2" moz:removedIn="136" tools:ignore="UnusedResources">מבוסס על סקירות אמינות</string>
     <!-- Title for list of highlights from a product's review emphasizing a product's important traits. -->
-    <string name="review_quality_check_highlights_title">דגשים מהסקירות האחרונות</string>
+    <string name="review_quality_check_highlights_title" moz:removedIn="136" tools:ignore="UnusedResources">דגשים מהסקירות האחרונות</string>
     <!-- Title for section explaining how we analyze the reliability of a product's reviews. -->
-    <string name="review_quality_check_explanation_title">כיצד אנו קובעים את איכות הסקירות</string>
+    <string name="review_quality_check_explanation_title" moz:removedIn="136" tools:ignore="UnusedResources">כיצד אנו קובעים את איכות הסקירות</string>
     <!-- Paragraph explaining how we analyze the reliability of a product's reviews. First parameter is the Fakespot product name. In the phrase "Fakespot by Mozilla", "by" can be localized. Does not need to stay by. -->
-    <string name="review_quality_check_explanation_body_reliability">אנו משתמשים בטכנולוגיית AI של %s מבית Mozilla כדי לנתח את המהימנות של סקירות מוצרים. ניתוח זה רק יעזור לך להעריך את איכות הסקירות, לא את איכות המוצר.</string>
+    <string name="review_quality_check_explanation_body_reliability" moz:removedIn="136" tools:ignore="UnusedResources">אנו משתמשים בטכנולוגיית AI של %s מבית Mozilla כדי לנתח את המהימנות של סקירות מוצרים. ניתוח זה רק יעזור לך להעריך את איכות הסקירות, לא את איכות המוצר.</string>
     <!-- Paragraph explaining the grading system we use to classify the reliability of a product's reviews. -->
-    <string name="review_quality_check_info_review_grade_header"><![CDATA[אנו מקצים לסקירות של כל מוצר <b>ציון אות</b> מ־A עד F.]]></string>
+    <string name="review_quality_check_info_review_grade_header" moz:removedIn="136" tools:ignore="UnusedResources"><![CDATA[אנו מקצים לסקירות של כל מוצר <b>ציון אות</b> מ־A עד F.]]></string>
     <!-- Description explaining grades A and B for review quality check adjusted grading. -->
-    <string name="review_quality_check_info_grade_info_AB">סקירות אמינות. אנו מאמינים שהסקירות הן ככל הנראה מלקוחות אמיתיים שהשאירו סקירות כנות ושאינן משוחדות.</string>
+    <string name="review_quality_check_info_grade_info_AB" moz:removedIn="136" tools:ignore="UnusedResources">סקירות אמינות. אנו מאמינים שהסקירות הן ככל הנראה מלקוחות אמיתיים שהשאירו סקירות כנות ושאינן משוחדות.</string>
     <!-- Description explaining grade C for review quality check adjusted grading. -->
-    <string name="review_quality_check_info_grade_info_C">אנו מאמינים שיש שילוב של סקירות אמינות ובלתי אמינות.</string>
+    <string name="review_quality_check_info_grade_info_C" moz:removedIn="136" tools:ignore="UnusedResources">אנו מאמינים שיש שילוב של סקירות אמינות ובלתי אמינות.</string>
     <!-- Description explaining grades D and F for review quality check adjusted grading. -->
-    <string name="review_quality_check_info_grade_info_DF">סקירות בלתי אמינות. אנו מאמינים שהסקירות כנראה מזויפות או של סוקרים מוטים או משוחדים.</string>
+    <string name="review_quality_check_info_grade_info_DF" moz:removedIn="136" tools:ignore="UnusedResources">סקירות בלתי אמינות. אנו מאמינים שהסקירות כנראה מזויפות או של סוקרים מוטים או משוחדים.</string>
     <!-- Paragraph explaining how a product's adjusted grading is calculated. -->
-    <string name="review_quality_check_explanation_body_adjusted_grading"><![CDATA[<b>הדירוג המותאם</b> מבוסס רק על סקירות שאנו מאמינים שהן אמינות.]]></string>
+    <string name="review_quality_check_explanation_body_adjusted_grading" moz:removedIn="136" tools:ignore="UnusedResources"><![CDATA[<b>הדירוג המותאם</b> מבוסס רק על סקירות שאנו מאמינים שהן אמינות.]]></string>
     <!-- Paragraph explaining product review highlights. First parameter is the name of the retailer (e.g. Amazon). -->
-    <string name="review_quality_check_explanation_body_highlights"><![CDATA[<b>הדגשים</b> הם מסקירות של %s במהלך 80 הימים האחרונים, שאנו מאמינים שהן אמינות.]]></string>
+    <string name="review_quality_check_explanation_body_highlights" moz:removedIn="136" tools:ignore="UnusedResources"><![CDATA[<b>הדגשים</b> הם מסקירות של %s במהלך 80 הימים האחרונים, שאנו מאמינים שהן אמינות.]]></string>
     <!-- Text for learn more caption presenting a link with information about review quality. First parameter is for clickable text defined in review_quality_check_info_learn_more_link. -->
-    <string name="review_quality_check_info_learn_more">מידע נוסף על %s.</string>
+    <string name="review_quality_check_info_learn_more" moz:removedIn="136" tools:ignore="UnusedResources">מידע נוסף על %s.</string>
     <!-- Clickable text that links to review quality check SuMo page. First parameter is the Fakespot product name. -->
-    <string name="review_quality_check_info_learn_more_link_2">כיצד %s קובע את איכות הסקירות</string>
+    <string name="review_quality_check_info_learn_more_link_2" moz:removedIn="136" tools:ignore="UnusedResources">כיצד %s קובע את איכות הסקירות</string>
     <!-- Text for title of settings section. -->
-    <string name="review_quality_check_settings_title">הגדרות</string>
+    <string name="review_quality_check_settings_title" moz:removedIn="136" tools:ignore="UnusedResources">הגדרות</string>
     <!-- Text for label for switch preference to show recommended products from review quality check settings section. -->
-    <string name="review_quality_check_settings_recommended_products">הצגת פרסומות בבודק הסקירות</string>
+    <string name="review_quality_check_settings_recommended_products" moz:removedIn="136" tools:ignore="UnusedResources">הצגת פרסומות בבודק הסקירות</string>
     <!-- Description for switch preference to show recommended products from review quality check settings section. First parameter is for clickable text defined in review_quality_check_settings_recommended_products_learn_more.-->
-    <string name="review_quality_check_settings_recommended_products_description_2" tools:ignore="UnusedResources">מדי פעם יוצגו פרסומות עבור מוצרים רלוונטיים. אנו מפרסמים רק מוצרים עם סקירות אמינות. %s</string>
+    <string name="review_quality_check_settings_recommended_products_description_2" moz:removedIn="136" tools:ignore="UnusedResources">מדי פעם יוצגו פרסומות עבור מוצרים רלוונטיים. אנו מפרסמים רק מוצרים עם סקירות אמינות. %s</string>
     <!-- Clickable text that links to review quality check recommended products support article. -->
-    <string name="review_quality_check_settings_recommended_products_learn_more" tools:ignore="UnusedResources">מידע נוסף</string>
+    <string name="review_quality_check_settings_recommended_products_learn_more" moz:removedIn="136" tools:ignore="UnusedResources">מידע נוסף</string>
     <!-- Text for turning sidebar off button from review quality check settings section. -->
-    <string name="review_quality_check_settings_turn_off">כיבוי בודק הסקירות</string>
+    <string name="review_quality_check_settings_turn_off" moz:removedIn="136" tools:ignore="UnusedResources">כיבוי בודק הסקירות</string>
     <!-- Caption for recommended product section indicating this is an ad by Fakespot. First parameter is the Fakespot product name. -->
-    <string name="review_quality_check_ad_caption" tools:ignore="UnusedResources">פרסומת מאת %s</string>
+    <string name="review_quality_check_ad_caption" moz:removedIn="136" tools:ignore="UnusedResources">פרסומת מאת %s</string>
     <!-- Caption for review quality check panel. First parameter is for clickable text defined in review_quality_check_powered_by_link. -->
-    <string name="review_quality_check_powered_by_2">בודק הסקירות מופעל על־ידי %s</string>
+    <string name="review_quality_check_powered_by_2" moz:removedIn="136" tools:ignore="UnusedResources">בודק הסקירות מופעל על־ידי %s</string>
     <!-- Clickable text that links to Fakespot.com. First parameter is the Fakespot product name. In the phrase "Fakespot by Mozilla", "by" can be localized. Does not need to stay by. -->
-    <string name="review_quality_check_powered_by_link" tools:ignore="UnusedResources">%s מאת Moziila</string>
+    <string name="review_quality_check_powered_by_link" moz:removedIn="136" tools:ignore="UnusedResources">%s מאת Moziila</string>
 
     <!-- Text for title of warning card informing the user that the current analysis is outdated. -->
-    <string name="review_quality_check_outdated_analysis_warning_title" tools:ignore="UnusedResources">מידע חדש לבדיקה</string>
+    <string name="review_quality_check_outdated_analysis_warning_title" moz:removedIn="136" tools:ignore="UnusedResources">מידע חדש לבדיקה</string>
     <!-- Text for button from warning card informing the user that the current analysis is outdated. Clicking this should trigger the product's re-analysis. -->
-    <string name="review_quality_check_outdated_analysis_warning_action" tools:ignore="UnusedResources">ביצוע בדיקה כעת</string>
+    <string name="review_quality_check_outdated_analysis_warning_action" moz:removedIn="136" tools:ignore="UnusedResources">ביצוע בדיקה כעת</string>
     <!-- Title for warning card informing the user that the current product does not have enough reviews for a review analysis. -->
-    <string name="review_quality_check_no_reviews_warning_title">אין מספיק סקירות עדיין</string>
+    <string name="review_quality_check_no_reviews_warning_title" moz:removedIn="136" tools:ignore="UnusedResources">אין מספיק סקירות עדיין</string>
     <!-- Text for body of warning card informing the user that the current product does not have enough reviews for a review analysis. -->
-    <string name="review_quality_check_no_reviews_warning_body">כאשר למוצר זה יהיו סקירות נוספות, נוכל לבדוק את האיכות שלהן.</string>
+    <string name="review_quality_check_no_reviews_warning_body" moz:removedIn="136" tools:ignore="UnusedResources">כאשר למוצר זה יהיו סקירות נוספות, נוכל לבדוק את האיכות שלהן.</string>
     <!-- Title for warning card informing the user that the current product is currently not available. -->
-    <string name="review_quality_check_product_availability_warning_title">המוצר אינו זמין</string>
+    <string name="review_quality_check_product_availability_warning_title" moz:removedIn="136" tools:ignore="UnusedResources">המוצר אינו זמין</string>
     <!-- Text for the body of warning card informing the user that the current product is currently not available. -->
-    <string name="review_quality_check_product_availability_warning_body">אם מוצר זה חזר למלאי, נא לדווח על כך ואנו נעבוד על בדיקת הסקירות.</string>
+    <string name="review_quality_check_product_availability_warning_body" moz:removedIn="136" tools:ignore="UnusedResources">אם מוצר זה חזר למלאי, נא לדווח על כך ואנו נעבוד על בדיקת הסקירות.</string>
     <!-- Clickable text for warning card informing the user that the current product is currently not available. Clicking this should inform the server that the product is available. -->
-    <string name="review_quality_check_product_availability_warning_action_2">שליחת דיווח שמוצר זה חזר למלאי</string>
+    <string name="review_quality_check_product_availability_warning_action_2" moz:removedIn="136" tools:ignore="UnusedResources">שליחת דיווח שמוצר זה חזר למלאי</string>
     <!-- Title for warning card informing the user that the current product's analysis is still processing. The parameter is the percentage progress (0-100%) of the analysis process (e.g. 56%). -->
-    <string name="review_quality_check_analysis_in_progress_warning_title_2">בתהליך בדיקת איכות הסקירות (%s)</string>
+    <string name="review_quality_check_analysis_in_progress_warning_title_2" moz:removedIn="136" tools:ignore="UnusedResources">בתהליך בדיקת איכות הסקירות (%s)</string>
     <!-- Text for body of warning card informing the user that the current product's analysis is still processing. -->
-    <string name="review_quality_check_analysis_in_progress_warning_body">פעולה זו יכולה להימשך כ־60 שניות.</string>
+    <string name="review_quality_check_analysis_in_progress_warning_body" moz:removedIn="136" tools:ignore="UnusedResources">פעולה זו יכולה להימשך כ־60 שניות.</string>
     <!-- Title for info card displayed after the user reports a product is back in stock. -->
-    <string name="review_quality_check_analysis_requested_info_title">תודה על הדיווח!</string>
+    <string name="review_quality_check_analysis_requested_info_title" moz:removedIn="136" tools:ignore="UnusedResources">תודה על הדיווח!</string>
 
     <!-- Text for body of info card displayed after the user reports a product is back in stock. -->
-    <string name="review_quality_check_analysis_requested_info_body">אמור להיות לנו מידע על הסקירות של מוצר זה תוך 24 שעות. נא לבדוק שוב אז.</string>
+    <string name="review_quality_check_analysis_requested_info_body" moz:removedIn="136" tools:ignore="UnusedResources">אמור להיות לנו מידע על הסקירות של מוצר זה תוך 24 שעות. נא לבדוק שוב אז.</string>
     <!-- Title for info card displayed when the user review checker while on a product that Fakespot does not analyze (e.g. gift cards, music). -->
-    <string name="review_quality_check_not_analyzable_info_title">אין באפשרותנו לבדוק סקירות אלה</string>
+    <string name="review_quality_check_not_analyzable_info_title" moz:removedIn="136" tools:ignore="UnusedResources">אין באפשרותנו לבדוק סקירות אלה</string>
     <!-- Text for body of info card displayed when the user review checker while on a product that Fakespot does not analyze (e.g. gift cards, music). -->
-    <string name="review_quality_check_not_analyzable_info_body">למרבה הצער, איננו יכולים לבדוק את איכות הסקירות עבור סוגים מסויימים של מוצרים. למשל, כרטיסי מתנה והזרמת וידאו, מוזיקה ומשחקים.</string>
+    <string name="review_quality_check_not_analyzable_info_body" moz:removedIn="136" tools:ignore="UnusedResources">למרבה הצער, איננו יכולים לבדוק את איכות הסקירות עבור סוגים מסויימים של מוצרים. למשל, כרטיסי מתנה והזרמת וידאו, מוזיקה ומשחקים.</string>
     <!-- Title for info card displayed when another user reported the displayed product is back in stock. -->
-    <string name="review_quality_check_analysis_requested_other_user_info_title" tools:ignore="UnusedResources">מידע יבוא בקרוב</string>
+    <string name="review_quality_check_analysis_requested_other_user_info_title" moz:removedIn="136" tools:ignore="UnusedResources">מידע יבוא בקרוב</string>
     <!-- Text for body of info card displayed when another user reported the displayed product is back in stock. -->
-    <string name="review_quality_check_analysis_requested_other_user_info_body" tools:ignore="UnusedResources">אמור להיות לנו מידע על הסקירות של מוצר זה תוך 24 שעות. נא לבדוק שוב אז.</string>
+    <string name="review_quality_check_analysis_requested_other_user_info_body" moz:removedIn="136" tools:ignore="UnusedResources">אמור להיות לנו מידע על הסקירות של מוצר זה תוך 24 שעות. נא לבדוק שוב אז.</string>
     <!-- Title for info card displayed to the user when analysis finished updating. -->
-    <string name="review_quality_check_analysis_updated_confirmation_title" tools:ignore="UnusedResources">הניתוח עדכני</string>
+    <string name="review_quality_check_analysis_updated_confirmation_title" moz:removedIn="136" tools:ignore="UnusedResources">הניתוח עדכני</string>
     <!-- Text for the action button from info card displayed to the user when analysis finished updating. -->
-    <string name="review_quality_check_analysis_updated_confirmation_action" tools:ignore="UnusedResources">הבנתי</string>
+    <string name="review_quality_check_analysis_updated_confirmation_action" moz:removedIn="136" tools:ignore="UnusedResources">הבנתי</string>
     <!-- Title for error card displayed to the user when an error occurred. -->
-    <string name="review_quality_check_generic_error_title">אין מידע זמין כרגע</string>
+    <string name="review_quality_check_generic_error_title" moz:removedIn="136" tools:ignore="UnusedResources">אין מידע זמין כרגע</string>
     <!-- Text for body of error card displayed to the user when an error occurred. -->
-    <string name="review_quality_check_generic_error_body">אנחנו עובדים על פתרון הבעיה. נא לבדוק שוב בקרוב.</string>
+    <string name="review_quality_check_generic_error_body" moz:removedIn="136" tools:ignore="UnusedResources">אנחנו עובדים על פתרון הבעיה. נא לבדוק שוב בקרוב.</string>
     <!-- Title for error card displayed to the user when the device is disconnected from the network. -->
-    <string name="review_quality_check_no_connection_title">אין חיבור לרשת</string>
+    <string name="review_quality_check_no_connection_title" moz:removedIn="136" tools:ignore="UnusedResources">אין חיבור לרשת</string>
     <!-- Text for body of error card displayed to the user when the device is disconnected from the network. -->
-    <string name="review_quality_check_no_connection_body">נא לבדוק את החיבור שלך לרשת ולנסות לטעון מחדש את הדף.</string>
+    <string name="review_quality_check_no_connection_body" moz:removedIn="136" tools:ignore="UnusedResources">נא לבדוק את החיבור שלך לרשת ולנסות לטעון מחדש את הדף.</string>
     <!-- Title for card displayed to the user for products whose reviews were not analyzed yet. -->
-    <string name="review_quality_check_no_analysis_title">אין עדיין מידע על סקירות אלה</string>
+    <string name="review_quality_check_no_analysis_title" moz:removedIn="136" tools:ignore="UnusedResources">אין עדיין מידע על סקירות אלה</string>
     <!-- Text for the body of card displayed to the user for products whose reviews were not analyzed yet. -->
-    <string name="review_quality_check_no_analysis_body">כדי לדעת האם הסקירות של מוצר זה אמינות, יש לבדוק את איכות הסקירות. פעולה זו נמשכת כ־60 שניות.</string>
+    <string name="review_quality_check_no_analysis_body" moz:removedIn="136" tools:ignore="UnusedResources">כדי לדעת האם הסקירות של מוצר זה אמינות, יש לבדוק את איכות הסקירות. פעולה זו נמשכת כ־60 שניות.</string>
     <!-- Text for button from body of card displayed to the user for products whose reviews were not analyzed yet. Clicking this should trigger a product analysis. -->
-    <string name="review_quality_check_no_analysis_link">בדיקת איכות הסקירות</string>
+    <string name="review_quality_check_no_analysis_link" moz:removedIn="136" tools:ignore="UnusedResources">בדיקת איכות הסקירות</string>
     <!-- Headline for review quality check contextual onboarding card. -->
-    <string name="review_quality_check_contextual_onboarding_title">נסו את המדריך המהימן שלנו לסקירות מוצרים</string>
+    <string name="review_quality_check_contextual_onboarding_title" moz:removedIn="136" tools:ignore="UnusedResources">נסו את המדריך המהימן שלנו לסקירות מוצרים</string>
     <!-- Description for review quality check contextual onboarding card. The first and last two parameters are for retailer names (e.g. Amazon, Walmart). The second parameter is for the name of the application (e.g. Firefox). -->
-    <string name="review_quality_check_contextual_onboarding_description">ניתן לבדוק עד כמה ביקורות מוצר אמינות ב־%1$s לפני הקנייה. בודק הסקירות, תכונה ניסיונית מאת %2$s, מובנה ישירות בדפדפן. הוא עובד גם על %3$s ו־%4$s.</string>
+    <string name="review_quality_check_contextual_onboarding_description" moz:removedIn="136" tools:ignore="UnusedResources">ניתן לבדוק עד כמה ביקורות מוצר אמינות ב־%1$s לפני הקנייה. בודק הסקירות, תכונה ניסיונית מאת %2$s, מובנה ישירות בדפדפן. הוא עובד גם על %3$s ו־%4$s.</string>
     <!-- Description for review quality check contextual onboarding card. The first parameters is for retailer name (e.g. Amazon). The second parameter is for the name of the application (e.g. Firefox). -->
-    <string name="review_quality_check_contextual_onboarding_description_one_vendor">ניתן לבדוק עד כמה ביקורות מוצר אמינות ב־%1$s לפני הקנייה. בודק הסקירות, תכונה ניסיונית מאת %2$s, מובנה ישירות בדפדפן.</string>
+    <string name="review_quality_check_contextual_onboarding_description_one_vendor" moz:removedIn="136" tools:ignore="UnusedResources">ניתן לבדוק עד כמה ביקורות מוצר אמינות ב־%1$s לפני הקנייה. בודק הסקירות, תכונה ניסיונית מאת %2$s, מובנה ישירות בדפדפן.</string>
     <!-- Paragraph presenting review quality check feature. First parameter is the Fakespot product name. Second parameter is for clickable text defined in review_quality_check_contextual_onboarding_learn_more_link. In the phrase "Fakespot by Mozilla", "by" can be localized. Does not need to stay by. -->
-    <string name="review_quality_check_contextual_onboarding_learn_more">באמצעות הכוח של %1$s מאת Mozilla, אנו עוזרים לך להימנע מסקירות מוטות ולא אותנטיות. מודל הבינה המלאכותית שלנו משתפר תמיד כדי להגן עליך בזמן הקנייה. %2$s</string>
+    <string name="review_quality_check_contextual_onboarding_learn_more" moz:removedIn="136" tools:ignore="UnusedResources">באמצעות הכוח של %1$s מאת Mozilla, אנו עוזרים לך להימנע מסקירות מוטות ולא אותנטיות. מודל הבינה המלאכותית שלנו משתפר תמיד כדי להגן עליך בזמן הקנייה. %2$s</string>
     <!-- Clickable text from the contextual onboarding card that links to review quality check support article. -->
-    <string name="review_quality_check_contextual_onboarding_learn_more_link">מידע נוסף</string>
+    <string name="review_quality_check_contextual_onboarding_learn_more_link" moz:removedIn="136" tools:ignore="UnusedResources">מידע נוסף</string>
 
     <!-- Caption text to be displayed in review quality check contextual onboarding card above the opt-in button. First parameter is Firefox app name, third parameter is the Fakespot product name. Second & fourth are for clickable texts defined in review_quality_check_contextual_onboarding_privacy_policy_3 and review_quality_check_contextual_onboarding_terms_use. -->
-    <string name="review_quality_check_contextual_onboarding_caption_4">בחירה באפשרות ״כן, ארצה לנסות״ מהווה הסכמה ל%2$s של %1$s ול%4$s של %3$s.</string>
+    <string name="review_quality_check_contextual_onboarding_caption_4" moz:removedIn="136" tools:ignore="UnusedResources">בחירה באפשרות ״כן, ארצה לנסות״ מהווה הסכמה ל%2$s של %1$s ול%4$s של %3$s.</string>
     <!-- Clickable text from the review quality check contextual onboarding card that links to Fakespot privacy notice. -->
-    <string name="review_quality_check_contextual_onboarding_privacy_policy_3">הצהרת הפרטיות</string>
+    <string name="review_quality_check_contextual_onboarding_privacy_policy_3" moz:removedIn="136" tools:ignore="UnusedResources">הצהרת הפרטיות</string>
     <!-- Clickable text from the review quality check contextual onboarding card that links to Fakespot terms of use. -->
-    <string name="review_quality_check_contextual_onboarding_terms_use">תנאי השימוש</string>
+    <string name="review_quality_check_contextual_onboarding_terms_use" moz:removedIn="136" tools:ignore="UnusedResources">תנאי השימוש</string>
     <!-- Text for opt-in button from the review quality check contextual onboarding card. -->
-    <string name="review_quality_check_contextual_onboarding_primary_button_text">כן, ארצה לנסות</string>
+    <string name="review_quality_check_contextual_onboarding_primary_button_text" moz:removedIn="136" tools:ignore="UnusedResources">כן, ארצה לנסות</string>
     <!-- Text for opt-out button from the review quality check contextual onboarding card. -->
-    <string name="review_quality_check_contextual_onboarding_secondary_button_text">לא כעת</string>
-    <!-- Text for the first CFR presenting the review quality check feature. -->
-    <string name="review_quality_check_first_cfr_message" moz:removedIn="132" tools:ignore="UnusedResources">לגלות האם ניתן לסמוך על הסקירות של המוצר הזה - לפני הקנייה.</string>
-    <!-- Text displayed in the first CFR presenting the review quality check feature that opens the review checker when clicked. -->
-    <string name="review_quality_check_first_cfr_action" moz:removedIn="132" tools:ignore="UnusedResources">לנסות את בודק הסקירות</string>
-    <!-- Text for the second CFR presenting the review quality check feature. -->
-    <string name="review_quality_check_second_cfr_message" moz:removedIn="132" tools:ignore="UnusedResources">האם הסקירות האלו אמינות? ניתן לבדוק כעת כדי לראות דירוג מותאם.</string>
-    <!-- Text displayed in the second CFR presenting the review quality check feature that opens the review checker when clicked. -->
-    <string name="review_quality_check_second_cfr_action" moz:removedIn="132" tools:ignore="UnusedResources">פתיחת בודק הסקירות</string>
+    <string name="review_quality_check_contextual_onboarding_secondary_button_text" moz:removedIn="136" tools:ignore="UnusedResources">לא כעת</string>
     <!-- Content description (not visible, for screen readers etc.) for opening browser menu button to open review quality check bottom sheet. -->
-    <string name="review_quality_check_open_handle_content_description">פתיחת בודק הסקירות</string>
+    <string name="review_quality_check_open_handle_content_description" moz:removedIn="136" tools:ignore="UnusedResources">פתיחת בודק הסקירות</string>
     <!-- Content description (not visible, for screen readers etc.) for closing browser menu button to open review quality check bottom sheet. -->
-    <string name="review_quality_check_close_handle_content_description">סגירת בודק הסקירות</string>
+    <string name="review_quality_check_close_handle_content_description" moz:removedIn="136" tools:ignore="UnusedResources">סגירת בודק הסקירות</string>
     <!-- Content description (not visible, for screen readers etc.) for review quality check star rating. First parameter is the number of stars (1-5) representing the rating. -->
-    <string name="review_quality_check_star_rating_content_description">%1$s מתוך 5 כוכבים</string>
+    <string name="review_quality_check_star_rating_content_description" moz:removedIn="136" tools:ignore="UnusedResources">%1$s מתוך 5 כוכבים</string>
     <!-- Text for minimize button from highlights card. When clicked the highlights card should reduce its size. -->
-    <string name="review_quality_check_highlights_show_less">להציג פחות</string>
+    <string name="review_quality_check_highlights_show_less" moz:removedIn="136" tools:ignore="UnusedResources">להציג פחות</string>
     <!-- Text for maximize button from highlights card. When clicked the highlights card should expand to its full size. -->
-    <string name="review_quality_check_highlights_show_more">להציג יותר</string>
+    <string name="review_quality_check_highlights_show_more" moz:removedIn="136" tools:ignore="UnusedResources">להציג יותר</string>
     <!-- Text for highlights card quality category header. Reviews shown under this header should refer the product's quality. -->
-    <string name="review_quality_check_highlights_type_quality">איכות</string>
+    <string name="review_quality_check_highlights_type_quality" moz:removedIn="136" tools:ignore="UnusedResources">איכות</string>
     <!-- Text for highlights card price category header. Reviews shown under this header should refer the product's price. -->
-    <string name="review_quality_check_highlights_type_price">מחיר</string>
+    <string name="review_quality_check_highlights_type_price" moz:removedIn="136" tools:ignore="UnusedResources">מחיר</string>
     <!-- Text for highlights card shipping category header. Reviews shown under this header should refer the product's shipping. -->
-    <string name="review_quality_check_highlights_type_shipping">משלוח</string>
+    <string name="review_quality_check_highlights_type_shipping" moz:removedIn="136" tools:ignore="UnusedResources">משלוח</string>
     <!-- Text for highlights card packaging and appearance category header. Reviews shown under this header should refer the product's packaging and appearance. -->
-    <string name="review_quality_check_highlights_type_packaging_appearance">אריזה ומראה</string>
+    <string name="review_quality_check_highlights_type_packaging_appearance" moz:removedIn="136" tools:ignore="UnusedResources">אריזה ומראה</string>
     <!-- Text for highlights card competitiveness category header. Reviews shown under this header should refer the product's competitiveness. -->
-    <string name="review_quality_check_highlights_type_competitiveness">תחרותיות</string>
+    <string name="review_quality_check_highlights_type_competitiveness" moz:removedIn="136" tools:ignore="UnusedResources">תחרותיות</string>
 
     <!-- Text that is surrounded by quotes. The parameter is the actual text that is in quotes. An example of that text could be: Excellent craftsmanship, and that is displayed as “Excellent craftsmanship”. The text comes from a buyer's review that the feature is highlighting"   -->
-    <string name="surrounded_with_quotes">״%s״</string>
+    <string name="surrounded_with_quotes" moz:removedIn="136" tools:ignore="UnusedResources">״%s״</string>
 
     <!-- Accessibility services actions labels. These will be appended to accessibility actions like "Double tap to.." but not by or applications but by services like Talkback. -->
     <!-- Action label for elements that can be collapsed if interacting with them. Talkback will append this to say "Double tap to collapse". -->
@@ -2816,6 +2945,28 @@
     <!-- Button text on the data saving mode warning dialog used by the translations feature to allow users to cancel the action and not perform a download of the language file. -->
     <string name="download_language_file_dialog_negative_button_text">ביטול</string>
 
+    <!-- Unified Trust Panel -->
+    <!-- Title text for the protection panel banner when the site is not secure. -->
+    <string name="protection_panel_banner_not_secure_title">יש להיזהר באתר זה</string>
+    <!-- Description text for the protection panel banner when the site is not secure. -->
+    <string name="protection_panel_banner_not_secure_description">החיבור שלך אינו מאובטח.</string>
+    <!-- Title text for the protection panel banner when tracking protection is disabled. -->
+    <string name="protection_panel_banner_not_protected_title">כיבית את ההגנות</string>
+    <!-- Description text for the protection panel banner when tracking protection is disabled.
+        The first parameter is the name of the app defined in app_name (for example: Fenix) -->
+    <string name="protection_panel_banner_not_protected_description">ההגנות של %s מושבתות כרגע. אנו מציעים להפעיל מחדש את ההגנות.</string>
+    <!-- Title text for the protection panel banner when tracking protection is enabled.
+        The first parameter is the name of the app defined in app_name (for example: Fenix) -->
+    <string name="protection_panel_banner_protected_title">‏%s עומד על המשמר</string>
+    <!-- Description text for the protection panel banner when tracking protection is enabled. -->
+    <string name="protection_panel_banner_protected_description">ההגנות פעילות. אם נזהה משהו חריג, נודיע לך.</string>
+    <!-- Label text for the Enhanced Tracking Protection toggle. -->
+    <string name="protection_panel_etp_toggle_label">הגנת מעקב מתקדמת</string>
+    <!-- Description text for the Enhanced Tracking Protection toggle when tracking protection is enabled. -->
+    <string name="protection_panel_etp_toggle_enabled_description">אם משהו נראה שבור באתר הזה, ניתן לנסות לכבות את ההגנות.</string>
+    <!-- Description text for the Enhanced Tracking Protection toggle when tracking protection is disabled. -->
+    <string name="protection_panel_etp_toggle_disabled_description">ההגנות כבויות. אנו מציעים להפעיל אותן מחדש.</string>
+
     <!-- Debug drawer -->
     <!-- The user-facing title of the Debug Drawer feature. -->
     <string name="debug_drawer_title">כלים לניפוי שגיאות</string>
@@ -2929,6 +3080,10 @@
     <!-- Content description for delete button where parameter will be the username of the login -->
     <string name="debug_drawer_logins_delete_login_button_content_description">מחיקת הכניסה עם שם המשתמש %s</string>
 
+    <!-- Debug drawer addresses -->
+    <!-- The title of the Addresses feature in the Debug Drawer. -->
+    <string name="debug_drawer_addresses_title">כתובות</string>
+
     <!-- Debug drawer "contextual feature recommendation" (CFR) tools -->
     <!-- The title of the CFR Tools feature in the Debug Drawer -->
     <string name="debug_drawer_cfr_tools_title">כלי CFR</string>
@@ -2940,11 +3095,6 @@
     <string name="glean_debug_tools_title">כלי ניפוי שגיאות של Glean</string>
 
     <!-- Messages explaining how to exit fullscreen mode -->
-    <!-- Message shown to explain how to exit fullscreen mode when gesture navigation is enabled -->
-    <string name="exit_fullscreen_with_gesture" moz:removedIn="132" tools:ignore="UnusedResources">כדי לצאת ממסך מלא, יש לגרור מלמעלה ולהשתמש בתנועת אחורה</string>
-    <!-- Message shown to explain how to exit fullscreen mode when using back button navigation -->
-    <string name="exit_fullscreen_with_back_button" moz:removedIn="132" tools:ignore="UnusedResources">כדי לצאת ממסך מלא, יש לגרור מלמעלה וללחוץ על חזרה</string>
-
     <!-- Message shown to explain how to exit fullscreen mode when gesture navigation is enabled. -->
     <!-- Localisation note: this text should be as short as possible, max 68 chars -->
     <string name="exit_fullscreen_with_gesture_short">יש לגרור מלמעלה ולהשתמש בתנועת החזרה כדי לצאת</string>
@@ -2955,4 +3105,35 @@
     <!-- Beta Label Component !-->
     <!-- Text shown as a label or tag to indicate a feature or area is still undergoing active development. Note that here "Beta" should not be translated, as it is used as an icon styled element. -->
     <string name="beta_feature">BETA</string>
+
+    <!-- Root certificate expiration warnings -->
+    <!-- These strings for homepage cards and push notifications to be pushed to users running outdated versions of Firefox. We want to encourage these users to update to the latest version so their extensions and other features don't stop working when Firefox's old root certificate expires on 2025-03-14. For more information, see this SUMO article: https://support.mozilla.org/kb/root-certificate-expiration !-->
+    <!-- Homepage card button to open Google Play Store. "Update" is a verb. -->
+    <string name="certificate_warning_homepage_card_update_now_button" tools:ignore="UnusedResources">עדכון כעת</string>
+    <!-- Homepage card title about old Firefox version. "Update" is a verb. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_homepage_card_hca1_title" tools:ignore="BrandUsage,UnusedResources">עדכון דפדפן ה־Firefox שלך</string>
+    <!-- Homepage card message about old Firefox version -->
+    <string name="certificate_warning_homepage_card_hca1_message" tools:ignore="UnusedResources">יפוג תוקפו של אישור שורש, מה שיגרום לחלק מהתכונות להפסיק לעבוד ב־14 במרץ.</string>
+    <!-- Homepage card title about old Firefox version. "Update" is a verb. -->
+    <string name="certificate_warning_homepage_card_hcr1_title" tools:ignore="UnusedResources">עדכון לפני 14 במרץ</string>
+    <!-- Homepage card message about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_homepage_card_hcr1_message" tools:ignore="BrandUsage,UnusedResources">יפוג תוקפו של אישור שורש, מה שיגרום לגרסה הנוכחית של ה־Firefox שלך להפסיק לעבוד כראוי.</string>
+    <!-- Homepage card title about old Firefox version -->
+    <string name="certificate_warning_homepage_card_hcw2_title" tools:ignore="UnusedResources">נותרו פחות מ־7 ימים לעדכון</string>
+    <!-- Homepage card message about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_homepage_card_hcw2_message" tools:ignore="BrandUsage,UnusedResources">ב־14 במרץ, תוספות ויכולות אחרות של Firefox יפסיקו לעבוד מכיוון שיפוג תוקפו של אישור שורש.</string>
+    <!-- Homepage card title about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_homepage_card_hcw3_title" tools:ignore="BrandUsage,UnusedResources">הזדמנות אחרונה לשמור על ה־Firefox שלך</string>
+    <!-- Homepage card message about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_homepage_card_hcw3_message" tools:ignore="BrandUsage,UnusedResources">הגרסה הנוכחית של ה־Firefox שלך תפסיק לעבוד כראוי ב־14 במרץ מכיוון שיפוג תוקפו של אישור שורש.</string>
+    <!-- Push notification title about old Firefox version. "Update" is a noun. -->
+    <string name="certificate_warning_push_notification_update_recommended_title" tools:ignore="UnusedResources">עדכון מומלץ</string>
+    <!-- Push notification message about old Firefox version -->
+    <string name="certificate_warning_push_notification_pnr1_message" tools:ignore="UnusedResources">תוספות ותכונות מסוימות יפסיקו לעבוד ב־14 במרץ.</string>
+    <!-- Push notification title about old Firefox version. Note: The word "Firefox" should NOT be translated. -->
+    <string name="certificate_warning_push_notification_pnw2_title" tools:ignore="BrandUsage,UnusedResources">יש לך גרסה ישנה יותר של Firefox</string>
+    <!-- Push notification message about old Firefox version. "Update" is a verb. -->
+    <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">יש לעדכן לפני ה־14 במרץ כדי להמשיך להשתמש בתוספות ותכונות אחרות.</string>
+    <!-- Push notification message about old Firefox version -->
+    <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">חלק מהתכונות יפסיקו לעבוד מחר.</string>
 </resources>

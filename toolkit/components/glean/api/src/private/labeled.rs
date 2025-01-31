@@ -6,28 +6,30 @@ use inherent::inherent;
 
 use super::{
     ErrorType, LabeledBooleanMetric, LabeledCounterMetric, LabeledCustomDistributionMetric,
-    LabeledMemoryDistributionMetric, LabeledMetricData, LabeledStringMetric,
+    LabeledMemoryDistributionMetric, LabeledMetricData, LabeledQuantityMetric, LabeledStringMetric,
     LabeledTimingDistributionMetric, MetricId,
 };
 use crate::ipc::need_ipc;
+use crate::metrics::__glean_metric_maps::submetric_maps;
 use std::borrow::Cow;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 /// Sealed traits protect against downstream implementations.
 ///
 /// We wrap it in a private module that is inaccessible outside of this module.
 mod private {
     use super::{
-        need_ipc, LabeledBooleanMetric, LabeledCounterMetric, LabeledCustomDistributionMetric,
-        LabeledMemoryDistributionMetric, LabeledStringMetric, LabeledTimingDistributionMetric,
-        MetricId,
+        need_ipc, submetric_maps, LabeledBooleanMetric, LabeledCounterMetric,
+        LabeledCustomDistributionMetric, LabeledMemoryDistributionMetric, LabeledQuantityMetric,
+        LabeledStringMetric, LabeledTimingDistributionMetric, MetricId,
     };
     use crate::private::labeled_timing_distribution::LabeledTimingDistributionMetricKind;
     use crate::private::{
         BooleanMetric, CounterMetric, CustomDistributionMetric, MemoryDistributionMetric,
         TimingDistributionMetric,
     };
-    use std::sync::Arc;
+    use std::sync::{atomic::Ordering, Arc};
 
     /// The sealed trait.
     ///
@@ -37,10 +39,23 @@ mod private {
         type GleanMetric: glean::private::AllowLabeled + Clone;
         fn from_glean_metric(
             id: MetricId,
-            metric: Arc<Self::GleanMetric>,
+            metric: &glean::private::LabeledMetric<Self::GleanMetric>,
             label: &str,
             permit_unordered_ipc: bool,
-        ) -> Self;
+        ) -> (Arc<Self>, MetricId);
+    }
+
+    fn submetric_id_for(id: MetricId, label: &str) -> MetricId {
+        let label_owned = label.to_string();
+        let tuple = (id.0, label_owned);
+        let mut map = submetric_maps::LABELED_METRICS_TO_IDS
+            .write()
+            .expect("write lock of submetric ids was poisoned");
+
+        (*map.entry(tuple).or_insert_with(|| {
+            submetric_maps::NEXT_LABELED_SUBMETRIC_ID.fetch_add(1, Ordering::SeqCst)
+        }))
+        .into()
     }
 
     // `LabeledMetric<LabeledBooleanMetric>` is possible.
@@ -50,23 +65,34 @@ mod private {
         type GleanMetric = glean::private::BooleanMetric;
         fn from_glean_metric(
             id: MetricId,
-            metric: Arc<Self::GleanMetric>,
+            metric: &glean::private::LabeledMetric<Self::GleanMetric>,
             label: &str,
             permit_unordered_ipc: bool,
-        ) -> Self {
-            if need_ipc() {
-                if permit_unordered_ipc {
-                    LabeledBooleanMetric::UnorderedChild {
-                        id,
-                        label: label.to_string(),
+        ) -> (Arc<Self>, MetricId) {
+            let submetric_id = submetric_id_for(id, label);
+            let mut map = submetric_maps::BOOLEAN_MAP
+                .write()
+                .expect("write lock of BOOLEAN_MAP was poisoned");
+            let submetric = map.entry(submetric_id).or_insert_with(|| {
+                let submetric = if need_ipc() {
+                    if permit_unordered_ipc {
+                        LabeledBooleanMetric::UnorderedChild {
+                            id,
+                            label: label.to_string(),
+                        }
+                    } else {
+                        // TODO: Instrument this error.
+                        LabeledBooleanMetric::Child
                     }
                 } else {
-                    // TODO: Instrument this error.
-                    LabeledBooleanMetric::Child
-                }
-            } else {
-                LabeledBooleanMetric::Parent(BooleanMetric::Parent { id, inner: metric })
-            }
+                    LabeledBooleanMetric::Parent(BooleanMetric::Parent {
+                        id,
+                        inner: metric.get(label),
+                    })
+                };
+                Arc::new(submetric)
+            });
+            (Arc::clone(submetric), submetric_id)
         }
     }
 
@@ -77,16 +103,27 @@ mod private {
         type GleanMetric = glean::private::StringMetric;
         fn from_glean_metric(
             id: MetricId,
-            metric: Arc<Self::GleanMetric>,
-            _label: &str,
+            metric: &glean::private::LabeledMetric<Self::GleanMetric>,
+            label: &str,
             _permit_unordered_ipc: bool,
-        ) -> Self {
-            if need_ipc() {
-                // TODO: Instrument this error.
-                LabeledStringMetric::Child(crate::private::string::StringMetricIpc)
-            } else {
-                LabeledStringMetric::Parent { id, inner: metric }
-            }
+        ) -> (Arc<Self>, MetricId) {
+            let submetric_id = submetric_id_for(id, label);
+            let mut map = submetric_maps::STRING_MAP
+                .write()
+                .expect("write lock of STRING_MAP was poisoned");
+            let submetric = map.entry(submetric_id).or_insert_with(|| {
+                let submetric = if need_ipc() {
+                    // TODO: Instrument this error.
+                    LabeledStringMetric::Child(crate::private::string::StringMetricIpc)
+                } else {
+                    LabeledStringMetric::Parent {
+                        id,
+                        inner: metric.get(label),
+                    }
+                };
+                Arc::new(submetric)
+            });
+            (Arc::clone(submetric), submetric_id)
         }
     }
 
@@ -97,18 +134,29 @@ mod private {
         type GleanMetric = glean::private::CounterMetric;
         fn from_glean_metric(
             id: MetricId,
-            metric: Arc<Self::GleanMetric>,
+            metric: &glean::private::LabeledMetric<Self::GleanMetric>,
             label: &str,
             _permit_unordered_ipc: bool,
-        ) -> Self {
-            if need_ipc() {
-                LabeledCounterMetric::Child {
-                    id,
-                    label: label.to_string(),
-                }
-            } else {
-                LabeledCounterMetric::Parent(CounterMetric::Parent { id, inner: metric })
-            }
+        ) -> (Arc<Self>, MetricId) {
+            let submetric_id = submetric_id_for(id, label);
+            let mut map = submetric_maps::COUNTER_MAP
+                .write()
+                .expect("write lock of COUNTER_MAP was poisoned");
+            let submetric = map.entry(submetric_id).or_insert_with(|| {
+                let submetric = if need_ipc() {
+                    LabeledCounterMetric::Child {
+                        id,
+                        label: label.to_string(),
+                    }
+                } else {
+                    LabeledCounterMetric::Parent(CounterMetric::Parent {
+                        id,
+                        inner: metric.get(label),
+                    })
+                };
+                Arc::new(submetric)
+            });
+            (Arc::clone(submetric), submetric_id)
         }
     }
 
@@ -119,21 +167,29 @@ mod private {
         type GleanMetric = glean::private::CustomDistributionMetric;
         fn from_glean_metric(
             id: MetricId,
-            metric: Arc<Self::GleanMetric>,
+            metric: &glean::private::LabeledMetric<Self::GleanMetric>,
             label: &str,
             _permit_unordered_ipc: bool,
-        ) -> Self {
-            if need_ipc() {
-                LabeledCustomDistributionMetric::Child {
-                    id,
-                    label: label.to_string(),
-                }
-            } else {
-                LabeledCustomDistributionMetric::Parent(CustomDistributionMetric::Parent {
-                    id,
-                    inner: metric,
-                })
-            }
+        ) -> (Arc<Self>, MetricId) {
+            let submetric_id = submetric_id_for(id, label);
+            let mut map = submetric_maps::CUSTOM_DISTRIBUTION_MAP
+                .write()
+                .expect("write lock of CUSTOM_DISTRIBUTION_MAP was poisoned");
+            let submetric = map.entry(submetric_id).or_insert_with(|| {
+                let submetric = if need_ipc() {
+                    LabeledCustomDistributionMetric::Child {
+                        id,
+                        label: label.to_string(),
+                    }
+                } else {
+                    LabeledCustomDistributionMetric::Parent(CustomDistributionMetric::Parent {
+                        id,
+                        inner: metric.get(label),
+                    })
+                };
+                Arc::new(submetric)
+            });
+            (Arc::clone(submetric), submetric_id)
         }
     }
 
@@ -144,21 +200,29 @@ mod private {
         type GleanMetric = glean::private::MemoryDistributionMetric;
         fn from_glean_metric(
             id: MetricId,
-            metric: Arc<Self::GleanMetric>,
+            metric: &glean::private::LabeledMetric<Self::GleanMetric>,
             label: &str,
             _permit_unordered_ipc: bool,
-        ) -> Self {
-            if need_ipc() {
-                LabeledMemoryDistributionMetric::Child {
-                    id,
-                    label: label.to_string(),
-                }
-            } else {
-                LabeledMemoryDistributionMetric::Parent(MemoryDistributionMetric::Parent {
-                    id,
-                    inner: metric,
-                })
-            }
+        ) -> (Arc<Self>, MetricId) {
+            let submetric_id = submetric_id_for(id, label);
+            let mut map = submetric_maps::MEMORY_DISTRIBUTION_MAP
+                .write()
+                .expect("write lock of MEMORY_DISTRIBUTION_MAP was poisoned");
+            let submetric = map.entry(submetric_id).or_insert_with(|| {
+                let submetric = if need_ipc() {
+                    LabeledMemoryDistributionMetric::Child {
+                        id,
+                        label: label.to_string(),
+                    }
+                } else {
+                    LabeledMemoryDistributionMetric::Parent(MemoryDistributionMetric::Parent {
+                        id,
+                        inner: metric.get(label),
+                    })
+                };
+                Arc::new(submetric)
+            });
+            (Arc::clone(submetric), submetric_id)
         }
     }
 
@@ -169,25 +233,67 @@ mod private {
         type GleanMetric = glean::private::TimingDistributionMetric;
         fn from_glean_metric(
             id: MetricId,
-            metric: Arc<Self::GleanMetric>,
+            metric: &glean::private::LabeledMetric<Self::GleanMetric>,
             label: &str,
             _permit_unordered_ipc: bool,
-        ) -> Self {
-            if need_ipc() {
-                LabeledTimingDistributionMetric {
-                    inner: Arc::new(TimingDistributionMetric::new_child(id)),
-                    id,
-                    label: label.to_string(),
-                    kind: LabeledTimingDistributionMetricKind::Child,
-                }
-            } else {
-                LabeledTimingDistributionMetric {
-                    inner: Arc::new(TimingDistributionMetric::Parent { id, inner: metric }),
-                    id,
-                    label: label.to_string(),
-                    kind: LabeledTimingDistributionMetricKind::Parent,
-                }
-            }
+        ) -> (Arc<Self>, MetricId) {
+            let submetric_id = submetric_id_for(id, label);
+            let mut map = submetric_maps::TIMING_DISTRIBUTION_MAP
+                .write()
+                .expect("write lock of TIMING_DISTRIBUTION_MAP was poisoned");
+            let submetric = map.entry(submetric_id).or_insert_with(|| {
+                let submetric = if need_ipc() {
+                    LabeledTimingDistributionMetric {
+                        inner: Arc::new(TimingDistributionMetric::new_child(id)),
+                        id: id,
+                        label: label.to_string(),
+                        kind: LabeledTimingDistributionMetricKind::Child,
+                    }
+                } else {
+                    LabeledTimingDistributionMetric {
+                        inner: Arc::new(TimingDistributionMetric::Parent {
+                            id,
+                            inner: metric.get(label),
+                        }),
+                        id,
+                        label: label.to_string(),
+                        kind: LabeledTimingDistributionMetricKind::Parent,
+                    }
+                };
+                Arc::new(submetric)
+            });
+            (Arc::clone(submetric), submetric_id)
+        }
+    }
+
+    // `LabeledMetric<LabeledQuantityMetric>` is possible.
+    //
+    // See [Labeled Quantities](https://mozilla.github.io/glean/book/user/metrics/labeled_quantities.html).
+    impl Sealed for LabeledQuantityMetric {
+        type GleanMetric = glean::private::QuantityMetric;
+        fn from_glean_metric(
+            id: MetricId,
+            metric: &glean::private::LabeledMetric<Self::GleanMetric>,
+            label: &str,
+            _permit_unordered_ipc: bool,
+        ) -> (Arc<Self>, MetricId) {
+            let submetric_id = submetric_id_for(id, label);
+            let mut map = submetric_maps::QUANTITY_MAP
+                .write()
+                .expect("write lock of QUANTITY_MAP was poisoned");
+            let submetric = map.entry(submetric_id).or_insert_with(|| {
+                let submetric = if need_ipc() {
+                    // TODO: Instrument this error.
+                    LabeledQuantityMetric::Child(crate::private::quantity::QuantityMetricIpc)
+                } else {
+                    LabeledQuantityMetric::Parent {
+                        id,
+                        inner: metric.get(label),
+                    }
+                };
+                Arc::new(submetric)
+            });
+            (Arc::clone(submetric), submetric_id)
         }
     }
 }
@@ -247,7 +353,7 @@ pub struct LabeledMetric<T: AllowLabeled, E> {
 
 impl<T, E> LabeledMetric<T, E>
 where
-    T: AllowLabeled,
+    T: AllowLabeled + Clone,
 {
     /// Create a new labeled metric from the given metric instance and optional list of labels.
     ///
@@ -279,10 +385,16 @@ where
             permit_unordered_ipc: true,
         }
     }
+
+    pub(crate) fn get_submetric_id(&self, label: &str) -> u32 {
+        T::from_glean_metric(self.id, &self.core, label, self.permit_unordered_ipc)
+            .1
+             .0
+    }
 }
 
 #[inherent]
-impl<U, E> glean::traits::Labeled<U> for LabeledMetric<U, E>
+impl<U, E> glean::traits::Labeled<Arc<U>> for LabeledMetric<U, E>
 where
     U: AllowLabeled + Clone,
 {
@@ -297,9 +409,8 @@ where
     ///
     /// Labels must be `snake_case` and less than 30 characters.
     /// If an invalid label is used, the metric will be recorded in the special `OTHER_LABEL` label.
-    pub fn get(&self, label: &str) -> U {
-        let metric = self.core.get(label);
-        U::from_glean_metric(self.id, metric, label, self.permit_unordered_ipc)
+    pub fn get(&self, label: &str) -> Arc<U> {
+        U::from_glean_metric(self.id, &self.core, label, self.permit_unordered_ipc).0
     }
 
     /// **Exported for test purposes.**
@@ -342,7 +453,7 @@ mod test {
                     cmd: CommonMetricData {
                         name: "global".into(),
                         category: "metric".into(),
-                        send_in_pings: vec!["ping".into()],
+                        send_in_pings: vec!["test-ping".into()],
                         disabled: false,
                         ..Default::default()
                     },
@@ -358,14 +469,17 @@ mod test {
         GLOBAL_METRIC.get("a_value").set(true);
         assert_eq!(
             true,
-            GLOBAL_METRIC.get("a_value").test_get_value("ping").unwrap()
+            GLOBAL_METRIC
+                .get("a_value")
+                .test_get_value("test-ping")
+                .unwrap()
         );
     }
 
     #[test]
     fn sets_labeled_bool_metrics() {
         let _lock = lock_test();
-        let store_names: Vec<String> = vec!["store1".into()];
+        let store_names: Vec<String> = vec!["test-ping".into()];
 
         let metric: LabeledMetric<LabeledBooleanMetric, DynamicLabel> = LabeledMetric::new(
             0.into(),
@@ -383,14 +497,14 @@ mod test {
 
         metric.get("upload").set(true);
 
-        assert!(metric.get("upload").test_get_value("store1").unwrap());
-        assert_eq!(None, metric.get("download").test_get_value("store1"));
+        assert!(metric.get("upload").test_get_value("test-ping").unwrap());
+        assert_eq!(None, metric.get("download").test_get_value("test-ping"));
     }
 
     #[test]
     fn sets_labeled_string_metrics() {
         let _lock = lock_test();
-        let store_names: Vec<String> = vec!["store1".into()];
+        let store_names: Vec<String> = vec!["test-ping".into()];
 
         let metric: LabeledMetric<LabeledStringMetric, DynamicLabel> = LabeledMetric::new(
             0.into(),
@@ -410,15 +524,15 @@ mod test {
 
         assert_eq!(
             "Glean",
-            metric.get("upload").test_get_value("store1").unwrap()
+            metric.get("upload").test_get_value("test-ping").unwrap()
         );
-        assert_eq!(None, metric.get("download").test_get_value("store1"));
+        assert_eq!(None, metric.get("download").test_get_value("test-ping"));
     }
 
     #[test]
     fn sets_labeled_counter_metrics() {
         let _lock = lock_test();
-        let store_names: Vec<String> = vec!["store1".into()];
+        let store_names: Vec<String> = vec!["test-ping".into()];
 
         let metric: LabeledMetric<LabeledCounterMetric, DynamicLabel> = LabeledMetric::new(
             0.into(),
@@ -436,14 +550,17 @@ mod test {
 
         metric.get("upload").add(10);
 
-        assert_eq!(10, metric.get("upload").test_get_value("store1").unwrap());
-        assert_eq!(None, metric.get("download").test_get_value("store1"));
+        assert_eq!(
+            10,
+            metric.get("upload").test_get_value("test-ping").unwrap()
+        );
+        assert_eq!(None, metric.get("download").test_get_value("test-ping"));
     }
 
     #[test]
     fn records_errors() {
         let _lock = lock_test();
-        let store_names: Vec<String> = vec!["store1".into()];
+        let store_names: Vec<String> = vec!["test-ping".into()];
 
         let metric: LabeledMetric<LabeledBooleanMetric, DynamicLabel> = LabeledMetric::new(
             0.into(),
@@ -470,7 +587,7 @@ mod test {
     #[test]
     fn predefined_labels() {
         let _lock = lock_test();
-        let store_names: Vec<String> = vec!["store1".into()];
+        let store_names: Vec<String> = vec!["test-ping".into()];
 
         #[allow(dead_code)]
         enum MetricLabels {
@@ -495,15 +612,18 @@ mod test {
         metric.get("label2").set(false);
         metric.get("not_a_label").set(true);
 
-        assert_eq!(true, metric.get("label1").test_get_value("store1").unwrap());
+        assert_eq!(
+            true,
+            metric.get("label1").test_get_value("test-ping").unwrap()
+        );
         assert_eq!(
             false,
-            metric.get("label2").test_get_value("store1").unwrap()
+            metric.get("label2").test_get_value("test-ping").unwrap()
         );
         // The label not in the predefined set is recorded to the `other` bucket.
         assert_eq!(
             true,
-            metric.get("__other__").test_get_value("store1").unwrap()
+            metric.get("__other__").test_get_value("test-ping").unwrap()
         );
 
         assert_eq!(

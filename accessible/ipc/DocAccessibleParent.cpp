@@ -78,11 +78,10 @@ void DocAccessibleParent::SetBrowsingContext(
   mBrowsingContext = aBrowsingContext;
 }
 
-mozilla::ipc::IPCResult DocAccessibleParent::RecvShowEvent(
+mozilla::ipc::IPCResult DocAccessibleParent::ProcessShowEvent(
     nsTArray<AccessibleData>&& aNewTree, const bool& aEventSuppressed,
     const bool& aComplete, const bool& aFromUser) {
   ACQUIRE_ANDROID_LOCK
-  if (mShutdown) return IPC_OK();
 
   MOZ_ASSERT(CheckDocTree());
 
@@ -290,10 +289,9 @@ void DocAccessibleParent::ShutdownOrPrepareForMove(RemoteAccessible* aAcc) {
   mMovingIDs.EnsureRemoved(id);
 }
 
-mozilla::ipc::IPCResult DocAccessibleParent::RecvHideEvent(
+mozilla::ipc::IPCResult DocAccessibleParent::ProcessHideEvent(
     const uint64_t& aRootID, const bool& aFromUser) {
   ACQUIRE_ANDROID_LOCK
-  if (mShutdown) return IPC_OK();
 
   MOZ_ASSERT(CheckDocTree());
 
@@ -486,13 +484,10 @@ mozilla::ipc::IPCResult DocAccessibleParent::RecvCaretMoveEvent(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult DocAccessibleParent::RecvTextChangeEvent(
+mozilla::ipc::IPCResult DocAccessibleParent::ProcessTextChangeEvent(
     const uint64_t& aID, const nsAString& aStr, const int32_t& aStart,
     const uint32_t& aLen, const bool& aIsInsert, const bool& aFromUser) {
   ACQUIRE_ANDROID_LOCK
-  if (mShutdown) {
-    return IPC_OK();
-  }
 
   RemoteAccessible* target = GetAccessible(aID);
   if (!target) {
@@ -514,6 +509,59 @@ mozilla::ipc::IPCResult DocAccessibleParent::RecvTextChangeEvent(
   RefPtr<xpcAccTextChangeEvent> event = new xpcAccTextChangeEvent(
       type, xpcAcc, doc, node, aFromUser, aStart, aLen, aIsInsert, aStr);
   nsCoreUtils::DispatchAccEvent(std::move(event));
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult DocAccessibleParent::RecvMutationEvents(
+    nsTArray<MutationEventData>&& aData) {
+  // We do not use ACQUIRE_ANDROID_LOCK here since we call functions that do
+  // that for us. The lock is not re-entrant.
+  mozilla::ipc::IPCResult result = IPC_OK();
+  if (mShutdown) {
+    return result;
+  }
+  for (MutationEventData& data : aData) {
+    switch (data.type()) {
+      case MutationEventData::Type::TCacheEventData: {
+        CacheEventData& cacheEventData = data;
+        result = RecvCache(cacheEventData.UpdateType(),
+                           std::move(cacheEventData.aData()));
+        break;
+      }
+      case MutationEventData::Type::TReorderEventData: {
+        ReorderEventData& reorderEventData = data;
+        result = RecvEvent(reorderEventData.ID(), reorderEventData.Type());
+        break;
+      }
+      case MutationEventData::Type::THideEventData: {
+        HideEventData& hideEventData = data;
+        result = ProcessHideEvent(hideEventData.ID(),
+                                  hideEventData.IsFromUserInput());
+        break;
+      }
+      case MutationEventData::Type::TShowEventData: {
+        ShowEventData& showEventData = data;
+        result = ProcessShowEvent(
+            std::move(showEventData.NewTree()), showEventData.EventSuppressed(),
+            showEventData.Complete(), showEventData.FromUser());
+        break;
+      }
+      case MutationEventData::Type::TTextChangeEventData: {
+        TextChangeEventData& textChangeEventData = data;
+        result = ProcessTextChangeEvent(
+            textChangeEventData.ID(), textChangeEventData.Str(),
+            textChangeEventData.Start(), textChangeEventData.Len(),
+            textChangeEventData.IsInsert(), textChangeEventData.FromUser());
+        break;
+      }
+      default:
+        break;
+    }
+    if (!result) {
+      return result;
+    }
+  }
 
   return IPC_OK();
 }
@@ -795,7 +843,7 @@ ipc::IPCResult DocAccessibleParent::AddChildDoc(DocAccessibleParent* aChildDoc,
     // This diagnostic assert and the one down below expect a well-behaved
     // child process. In IPC fuzzing, we directly fuzz parameters of each
     // method over IPDL and the asserts are not valid under these conditions.
-    MOZ_DIAGNOSTIC_ASSERT(false, "Binding to nonexistent proxy!");
+    MOZ_DIAGNOSTIC_CRASH("Binding to nonexistent proxy!");
 #endif
     return IPC_FAIL(this, "binding to nonexistant proxy!");
   }
@@ -809,8 +857,7 @@ ipc::IPCResult DocAccessibleParent::AddChildDoc(DocAccessibleParent* aChildDoc,
   if (!outerDoc->IsOuterDoc() || outerDoc->ChildCount() > 1 ||
       (outerDoc->ChildCount() == 1 && !outerDoc->RemoteChildAt(0)->IsDoc())) {
 #ifndef FUZZING_SNAPSHOT
-    MOZ_DIAGNOSTIC_ASSERT(false,
-                          "Binding to parent that isn't a valid OuterDoc!");
+    MOZ_DIAGNOSTIC_CRASH("Binding to parent that isn't a valid OuterDoc!");
 #endif
     return IPC_FAIL(this, "Binding to parent that isn't a valid OuterDoc!");
   }

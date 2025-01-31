@@ -36,25 +36,30 @@ let patterns: string[];
 
 ## Available trigger actions
 
-* [openArticleURL](#openarticleurl)
-* [openBookmarkedURL](#openbookmarkedurl)
-* [frequentVisits](#frequentvisits)
-* [openURL](#openurl)
-* [newSavedLogin](#newsavedlogin)
-* [formAutofill](#formautofill)
-* [contentBlocking](#contentblocking)
-* [defaultBrowserCheck](#defaultbrowsercheck)
-* [deeplinkedToWindowsSettingsUI](#deeplinkedtowindowssettingsui)
-* [captivePortalLogin](#captiveportallogin)
-* [preferenceObserver](#preferenceobserver)
-* [featureCalloutCheck](#featurecalloutcheck)
-* [nthTabClosed](#nthtabclosed)
-* [activityAfterIdle](#activityafteridle)
-* [cookieBannerDetected](#cookiebannerdetected)
-* [cookieBannerHandled](#cookiebannerhandled)
-* [messagesLoaded](#messagesloaded)
-* [pageActionInUrlbar](#pageactioninurlbar)
-* [onSearch](#onsearch)
+- [`openArticleURL`](#openarticleurl)
+- [`openBookmarkedURL`](#openbookmarkedurl)
+- [`frequentVisits`](#frequentvisits)
+- [`openURL`](#openurl)
+- [`newSavedLogin`](#newsavedlogin)
+- [`formAutofill`](#formautofill)
+- [`contentBlocking`](#contentblocking)
+- [`defaultBrowserCheck`](#defaultbrowsercheck)
+- [`deeplinkedToWindowsSettingsUI`](#deeplinkedtowindowssettingsui)
+- [`captivePortalLogin`](#captiveportallogin)
+- [`preferenceObserver`](#preferenceobserver)
+- [`featureCalloutCheck`](#featurecalloutcheck)
+- [`pdfJsFeatureCalloutCheck`](#pdfjsfeaturecalloutcheck)
+- [`newtabFeatureCalloutCheck`](#newtabfeaturecalloutcheck)
+- [`nthTabClosed`](#nthtabclosed)
+- [`nthTabOpened`](#nthtabopened)
+- [`activityAfterIdle`](#activityafteridle)
+- [`cookieBannerDetected`](#cookiebannerdetected)
+- [`cookieBannerHandled`](#cookiebannerhandled)
+- [`messagesLoaded`](#messagesloaded)
+- [`pageActionInUrlbar`](#pageactioninurlbar)
+- [`onSearch`](#onsearch)
+- [`sidebarToolOpened`](#sidebartoolopened)
+- [`elementClicked`](#elementclicked)
 
 ### `openArticleURL`
 
@@ -211,6 +216,43 @@ Happens when the user closes n or more tabs in a session
   targeting: "tabsClosedCount >= 2"
 }
 ```
+```js
+// The trigger also tracks the number of tabs currently open,
+// and the currentTabsOpen context variable can be used in targeting
+// to ensure a minimum number of tabs are open.
+// Here, the message will trigger on the next tab closed
+// after 4 tabs are opened (and remain open).
+{
+  trigger: { id: "nthTabClosed" },
+  targeting: "currentTabsOpen >= 4"
+}
+```
+
+### `nthTabOpened`
+
+Happens when the user opens n or more tabs in a session
+
+```js
+// Register a message with the following trigger and
+// include the tabsOpenedCount context variable in the targeting.
+// Here, the message triggers once two or more tabs are opened,
+// even if the tabs were closed in between.
+{
+  trigger: { id: "nthTabOpened" },
+  targeting: "tabsOpenedCount >= 2"
+}
+```
+```js
+// The trigger also tracks the number of tabs currently open,
+// and the currentTabsOpen context variable can be used in targeting
+// to ensure a minimum number of tabs are open.
+// Here, the message will trigger on the next tab opened
+// while 4 tabs remain open in the browser.
+{
+  trigger: { id: "nthTabOpened" },
+  targeting: "currentTabsOpen >= 4"
+}
+```
 
 ### `activityAfterIdle`
 
@@ -281,6 +323,37 @@ The `isOneOff` boolean context variable is available in targeting, and will be t
 ```js
 {
   trigger: { id: "onSearch" },
-  targeting: "isSuggestion && searchSource === 'urlbar-handoff' && isOneOff"
+  targeting: "isSuggestion && searchSource == 'urlbar-handoff' && isOneOff"
+}
+```
+
+### `sidebarToolOpened`
+
+Happens when the user opens a tool or extension panel in the sidebar
+
+The `view` string context variable is available in targeting, and will correspond with which sidebar tool/extension has been opened (ex: "viewHistorySidebar", "viewBookmarksSidebar", etc).
+
+The `clickCounts` object context variable is also available in targeting, and information about how many time a specific tool or extensions has been opened. The `SIDEBAR_TOOL_SURVEY` callout will be targeted to show if any tool/extension (excluding GenAI chatbot) has been clicked 5 times per-window and per-session. The `SIDEBAR_GENAI_SURVEY` callout will be targeted to show if the GenAI chatbot panel has been opened 2 times per-window and per-session.
+
+```js
+{
+  trigger: { id: "sidebarToolOpened" },
+  targeting: `'sidebar.position_start'|preferenceValue && view != 'viewGenaiChatSidebar' && clickCounts.totalToolsMinusGenai == 5 && !'messaging-system-action.sidebar-tools-microsurvey-complete-or-dismissed'|preferenceValue`
+}
+```
+
+### `elementClicked`
+
+Happens when an element in the browser chrome is clicked. The trigger will only fire if the element that is clicked has an ID that is within the trigger's params array.
+
+The `elementId` string context variable is also available in targeting, and will correspond to the ID of the element that was clicked.
+
+```js
+{
+  trigger: {
+    id: "elementClicked",
+    params: ["element1-id", "element2-id"]
+  },
+  targeting: "elementId == 'element1-id'"
 }
 ```

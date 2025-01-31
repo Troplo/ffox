@@ -277,7 +277,7 @@ class Thread {
 static NS_tchar gPatchDirPath[MAXPATHLEN];
 static NS_tchar gInstallDirPath[MAXPATHLEN];
 static NS_tchar gWorkingDirPath[MAXPATHLEN];
-static ArchiveReader gArchiveReader;
+MOZ_RUNINIT static ArchiveReader gArchiveReader;
 static bool gSucceeded = false;
 static bool sStagedUpdate = false;
 static bool sReplaceRequest = false;
@@ -289,7 +289,7 @@ static bool gIsElevated = false;
 
 // This string contains the MAR channel IDs that are later extracted by one of
 // the `ReadMARChannelIDsFrom` variants.
-static MARChannelStringTable gMARStrings;
+MOZ_RUNINIT static MARChannelStringTable gMARStrings;
 
 // Normally, we run updates as a result of user action (the user started Firefox
 // or clicked a "Restart to Update" button). But there are some cases when
@@ -3705,9 +3705,9 @@ int NS_main(int argc, NS_tchar** argv) {
 
           // If the update couldn't be started, then set useService to false so
           // we do the update the old way.
-          DWORD ret =
+          DWORD launchResult =
               LaunchServiceSoftwareUpdateCommand(serviceArgc, (LPCWSTR*)argv);
-          useService = (ret == ERROR_SUCCESS);
+          useService = (launchResult == ERROR_SUCCESS);
           // If the command was launched then wait for the service to be done.
           if (useService) {
             LOG(("Launched service successfully"));
@@ -3772,7 +3772,8 @@ int NS_main(int argc, NS_tchar** argv) {
               }
             }
           } else {
-            LOG(("Launching service failed. useService=false"));
+            LOG(("Launching service failed. useService=false, launchResult=%lu",
+                 launchResult));
             lastFallbackError = FALLBACKKEY_LAUNCH_ERROR;
           }
         }

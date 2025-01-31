@@ -14,14 +14,17 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <utility>
 
-#include "absl/types/optional.h"
+#include "api/environment/environment.h"
 #include "api/neteq/neteq.h"
 #include "api/neteq/neteq_controller.h"
+#include "modules/audio_coding/neteq/buffer_level_filter.h"
+#include "modules/audio_coding/neteq/delay_manager.h"
 #include "modules/audio_coding/neteq/packet_arrival_history.h"
 #include "modules/audio_coding/neteq/packet_buffer.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
 
 namespace webrtc {
@@ -40,8 +43,6 @@ std::unique_ptr<DelayManager> CreateDelayManager(
     const Environment& env,
     const NetEqController::Config& neteq_config) {
   DelayManager::Config config(env.field_trials());
-  config.max_packets_in_buffer = neteq_config.max_packets_in_buffer;
-  config.base_minimum_delay_ms = neteq_config.base_min_delay_ms;
   config.Log();
   return std::make_unique<DelayManager>(config, neteq_config.tick_timer);
 }
@@ -76,6 +77,8 @@ DecisionLogic::DecisionLogic(
     std::unique_ptr<BufferLevelFilter> buffer_level_filter,
     std::unique_ptr<PacketArrivalHistory> packet_arrival_history)
     : delay_manager_(std::move(delay_manager)),
+      delay_constraints_(config.max_packets_in_buffer,
+                         config.base_min_delay_ms),
       buffer_level_filter_(std::move(buffer_level_filter)),
       packet_arrival_history_(
           packet_arrival_history
@@ -160,35 +163,35 @@ NetEq::Operation DecisionLogic::GetDecision(const NetEqStatus& status,
 }
 
 int DecisionLogic::TargetLevelMs() const {
-  return delay_manager_->TargetDelayMs();
+  return delay_constraints_.Clamp(UnlimitedTargetLevelMs());
 }
 
 int DecisionLogic::UnlimitedTargetLevelMs() const {
-  return delay_manager_->UnlimitedTargetLevelMs();
+  return delay_manager_->TargetDelayMs();
 }
 
 int DecisionLogic::GetFilteredBufferLevel() const {
   return buffer_level_filter_->filtered_current_level();
 }
 
-absl::optional<int> DecisionLogic::PacketArrived(
-    int fs_hz,
-    bool should_update_stats,
-    const PacketArrivedInfo& info) {
+std::optional<int> DecisionLogic::PacketArrived(int fs_hz,
+                                                bool should_update_stats,
+                                                const PacketArrivedInfo& info) {
   buffer_flush_ = buffer_flush_ || info.buffer_flush;
   if (!should_update_stats || info.is_cng_or_dtmf) {
-    return absl::nullopt;
+    return std::nullopt;
   }
   if (info.packet_length_samples > 0 && fs_hz > 0 &&
       info.packet_length_samples != packet_length_samples_) {
     packet_length_samples_ = info.packet_length_samples;
-    delay_manager_->SetPacketAudioLength(packet_length_samples_ * 1000 / fs_hz);
+    delay_constraints_.SetPacketAudioLength(packet_length_samples_ * 1000 /
+                                            fs_hz);
   }
   bool inserted = packet_arrival_history_->Insert(info.main_timestamp,
                                                   info.packet_length_samples);
   if (!inserted || packet_arrival_history_->size() < 2) {
     // No meaningful delay estimate unless at least 2 packets have arrived.
-    return absl::nullopt;
+    return std::nullopt;
   }
   int arrival_delay_ms =
       packet_arrival_history_->GetDelayMs(info.main_timestamp);

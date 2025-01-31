@@ -77,6 +77,16 @@ inline void js::jit::AtomicOperations::fenceSeqCst() {
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
 }
 
+namespace js {
+namespace jit {
+
+inline void AtomicPause() { asm volatile("sync" ::: "memory"); }
+
+}  // namespace jit
+}  // namespace js
+
+inline void js::jit::AtomicOperations::pause() { AtomicPause(); }
+
 template <typename T>
 inline T js::jit::AtomicOperations::loadSeqCst(T* addr) {
   static_assert(sizeof(T) <= sizeof(void*),
@@ -385,7 +395,7 @@ template <>
 inline uint8_clamped js::jit::AtomicOperations::loadSafeWhenRacy(
     uint8_clamped* addr) {
   uint8_t v;
-  __atomic_load(&addr->val, &v, __ATOMIC_RELAXED);
+  __atomic_load((uint8_t*)addr, &v, __ATOMIC_RELAXED);
   return uint8_clamped(v);
 }
 
@@ -431,7 +441,7 @@ inline void js::jit::AtomicOperations::storeSafeWhenRacy(uint64_t* addr,
 template <>
 inline void js::jit::AtomicOperations::storeSafeWhenRacy(uint8_clamped* addr,
                                                          uint8_clamped val) {
-  __atomic_store(&addr->val, &val.val, __ATOMIC_RELAXED);
+  __atomic_store((uint8_t*)addr, (uint8_t*)&val, __ATOMIC_RELAXED);
 }
 
 template <>

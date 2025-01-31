@@ -5,6 +5,8 @@
 
 #include "ExternalTexture.h"
 
+#include "mozilla/webgpu/WebGPUParent.h"
+
 #ifdef XP_WIN
 #  include "mozilla/webgpu/ExternalTextureD3D11.h"
 #endif
@@ -13,20 +15,30 @@
 #  include "mozilla/webgpu/ExternalTextureDMABuf.h"
 #endif
 
+#ifdef XP_MACOSX
+#  include "mozilla/webgpu/ExternalTextureMacIOSurface.h"
+#endif
+
 namespace mozilla::webgpu {
 
 // static
 UniquePtr<ExternalTexture> ExternalTexture::Create(
-    const ffi::WGPUGlobal* aContext, const ffi::WGPUDeviceId aDeviceId,
+    WebGPUParent* aParent, const ffi::WGPUDeviceId aDeviceId,
     const uint32_t aWidth, const uint32_t aHeight,
     const struct ffi::WGPUTextureFormat aFormat,
     const ffi::WGPUTextureUsages aUsage) {
+  MOZ_ASSERT(aParent);
+
   UniquePtr<ExternalTexture> texture;
 #ifdef XP_WIN
   texture = ExternalTextureD3D11::Create(aWidth, aHeight, aFormat, aUsage);
 #elif defined(MOZ_WIDGET_GTK)
-  texture = ExternalTextureDMABuf::Create(aContext, aDeviceId, aWidth, aHeight,
+  auto* context = aParent->GetContext();
+  texture = ExternalTextureDMABuf::Create(context, aDeviceId, aWidth, aHeight,
                                           aFormat, aUsage);
+#elif defined(XP_MACOSX)
+  texture = ExternalTextureMacIOSurface::Create(aParent, aDeviceId, aWidth,
+                                                aHeight, aFormat, aUsage);
 #endif
   return texture;
 }

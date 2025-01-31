@@ -153,6 +153,7 @@ enum DeviceAction<'a> {
         wgc::command::RenderBundleDescriptor<'a>,
     ),
     CreateRenderBundleError(id::RenderBundleId, wgc::Label<'a>),
+    CreateQuerySet(id::QuerySetId, wgc::resource::QuerySetDescriptor<'a>),
     CreateCommandEncoder(
         id::CommandEncoderId,
         wgt::CommandEncoderDescriptor<wgc::Label<'a>>,
@@ -170,8 +171,8 @@ enum QueueWriteAction {
         offset: wgt::BufferAddress,
     },
     Texture {
-        dst: wgt::ImageCopyTexture<id::TextureId>,
-        layout: wgt::ImageDataLayout,
+        dst: wgt::TexelCopyTextureInfo<id::TextureId>,
+        layout: wgt::TexelCopyBufferLayout,
         size: wgt::Extent3d,
     },
 }
@@ -210,15 +211,15 @@ impl DropAction {
 }
 
 #[repr(C)]
-pub struct ImageDataLayout<'a> {
+pub struct TexelCopyBufferLayout<'a> {
     pub offset: wgt::BufferAddress,
     pub bytes_per_row: Option<&'a u32>,
     pub rows_per_image: Option<&'a u32>,
 }
 
-impl<'a> ImageDataLayout<'a> {
-    fn into_wgt(&self) -> wgt::ImageDataLayout {
-        wgt::ImageDataLayout {
+impl<'a> TexelCopyBufferLayout<'a> {
+    fn into_wgt(&self) -> wgt::TexelCopyBufferLayout {
+        wgt::TexelCopyBufferLayout {
             offset: self.offset,
             bytes_per_row: self.bytes_per_row.map(|bpr| *bpr),
             rows_per_image: self.rows_per_image.map(|rpi| *rpi),

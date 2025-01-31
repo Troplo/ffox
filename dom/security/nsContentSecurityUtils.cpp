@@ -367,7 +367,7 @@ FilenameTypeAndDetails nsContentSecurityUtils::FilenameToFilenameType(
                            ? kMozillaExtensionFile
                            : kOtherExtensionFile;
       const auto& extensionNameAndPath =
-          Substring(regexResults[0], ArrayLength("extensions/") - 1);
+          Substring(regexResults[0], std::size("extensions/") - 1);
       return FilenameTypeAndDetails(
           type, Some(OptimizeFileName(extensionNameAndPath)));
     }
@@ -1487,17 +1487,6 @@ bool nsContentSecurityUtils::ValidateScriptFilename(JSContext* cx,
               ("Allowing a javascript load of %s because the web extension "
                "it is associated with is privileged.",
                aFilename));
-      return true;
-    }
-  }
-
-  auto kAllowedFilenamesExact = {
-      // Allow through the injection provided by about:sync addon
-      "data:,new function() {\n  const { AboutSyncRedirector } = ChromeUtils.import(\"chrome://aboutsync/content/AboutSyncRedirector.js\");\n  AboutSyncRedirector.register();\n}"_ns,
-  };
-
-  for (auto allowedFilename : kAllowedFilenamesExact) {
-    if (filename == allowedFilename) {
       return true;
     }
   }

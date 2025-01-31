@@ -51,14 +51,14 @@ use core::time::Duration;
 use crate::pattern::PatternKind;
 use crate::render_api::{DebugCommand, ApiMsg, MemoryReport};
 use crate::batch::{AlphaBatchContainer, BatchKind, BatchFeatures, BatchTextures, BrushBatchKind, ClipBatchList};
-use crate::batch::{ClipMaskInstanceList};
+use crate::batch::ClipMaskInstanceList;
 #[cfg(any(feature = "capture", feature = "replay"))]
 use crate::capture::{CaptureConfig, ExternalCaptureImage, PlainExternalImage};
-use crate::composite::{CompositeState, CompositeTileSurface, ResolvedExternalSurface, CompositorSurfaceTransform};
+use crate::composite::{CompositeState, CompositeTileSurface, CompositorInputLayer, CompositorSurfaceTransform, ResolvedExternalSurface};
 use crate::composite::{CompositorKind, Compositor, NativeTileId, CompositeFeatures, CompositeSurfaceFormat, ResolvedExternalSurfaceColorData};
 use crate::composite::{CompositorConfig, NativeSurfaceOperationDetails, NativeSurfaceId, NativeSurfaceOperation};
-use crate::composite::{TileKind};
-use crate::debug_colors;
+use crate::composite::TileKind;
+use crate::{debug_colors, CompositorInputConfig, CompositorSurfaceUsage};
 use crate::device::{DepthFunction, Device, DrawTarget, ExternalTexture, GpuFrameId, UploadPBOPool};
 use crate::device::{ReadTarget, ShaderError, Texture, TextureFilter, TextureFlags, TextureSlot, Texel};
 use crate::device::query::{GpuSampler, GpuTimer};
@@ -82,8 +82,8 @@ use crate::prim_store::DeferredResolve;
 use crate::profiler::{self, GpuProfileTag, TransactionProfile};
 use crate::profiler::{Profiler, add_event_marker, add_text_marker, thread_is_being_profiled};
 use crate::device::query::GpuProfiler;
-use crate::render_target::{ResolveOp};
-use crate::render_task_graph::{RenderTaskGraph};
+use crate::render_target::ResolveOp;
+use crate::render_task_graph::RenderTaskGraph;
 use crate::render_task::{RenderTask, RenderTaskKind, ReadbackTask};
 use crate::screen_capture::AsyncScreenshotGrabber;
 use crate::render_target::{RenderTarget, PictureCacheTarget, PictureCacheTargetKind};
@@ -264,6 +264,15 @@ const GPU_TAG_COMPOSITE: GpuProfileTag = GpuProfileTag {
     label: "Composite",
     color: debug_colors::TOMATO,
 };
+
+#[derive(Debug)]
+// Defines the content that we will draw to a given swapchain / layer, calculated
+// after occlusion culling.
+struct SwapChainLayer {
+    opaque_items: Vec<occlusion::Item<usize>>,
+    alpha_items: Vec<occlusion::Item<usize>>,
+    clear_tiles: Vec<occlusion::Item<usize>>,
+}
 
 /// The clear color used for the texture cache when the debug display is enabled.
 /// We use a shade of blue so that we can still identify completely blue items in
@@ -863,7 +872,6 @@ pub struct Renderer {
 
     /// The compositing config, affecting how WR composites into the final scene.
     compositor_config: CompositorConfig,
-
     current_compositor_kind: CompositorKind,
 
     /// Maintains a set of allocated native composite surfaces. This allows any
@@ -1697,7 +1705,7 @@ impl Renderer {
             //           with the (non-compositor) surface y-flip options.
             let surface_origin_is_top_left = match self.current_compositor_kind {
                 CompositorKind::Native { .. } => true,
-                CompositorKind::Draw { .. } => self.device.surface_origin_is_top_left(),
+                CompositorKind::Draw { .. } | CompositorKind::Layer { .. } => self.device.surface_origin_is_top_left(),
             };
             // If there is a debug overlay, render it. Otherwise, just clear
             // the debug renderer.
@@ -3117,7 +3125,7 @@ impl Renderer {
     }
 
     /// Draw a list of tiles to the framebuffer
-    fn draw_tile_list<'a, I: Iterator<Item = &'a occlusion::Item>>(
+    fn draw_tile_list<'a, I: Iterator<Item = &'a occlusion::Item<usize>>>(
         &mut self,
         tiles_iter: I,
         composite_state: &CompositeState,
@@ -3327,21 +3335,19 @@ impl Renderer {
         }
     }
 
-    /// Composite picture cache tiles into the framebuffer. This is currently
-    /// the only way that picture cache tiles get drawn. In future, the tiles
-    /// will often be handed to the OS compositor, and this method will be
-    /// rarely used.
-    fn composite_simple(
+    // Composite tiles in a swapchain. When using LayerCompositor, we may
+    // split the compositing in to multiple swapchains.
+    fn composite_pass(
         &mut self,
         composite_state: &CompositeState,
         draw_target: DrawTarget,
+        clear_color: ColorF,
         projection: &default::Transform3D<f32>,
         results: &mut RenderResults,
         partial_present_mode: Option<PartialPresentMode>,
+        occlusion: &occlusion::FrontToBackBuilder<usize>,
+        layer: &SwapChainLayer,
     ) {
-        let _gm = self.gpu_profiler.start_marker("framebuffer");
-        let _timer = self.gpu_profiler.start_timer(GPU_TAG_COMPOSITE);
-
         self.device.bind_draw_target(draw_target);
         self.device.disable_depth_write();
         self.device.disable_depth();
@@ -3357,10 +3363,103 @@ impl Renderer {
             }
         }
 
-        let cap = composite_state.tiles.len();
+        // Clear the framebuffer
+        let clear_color = Some(clear_color.to_array());
 
+        match partial_present_mode {
+            Some(PartialPresentMode::Single { dirty_rect }) => {
+                // There is no need to clear if the dirty rect is occluded. Additionally,
+                // on Mali-G77 we have observed artefacts when calling glClear (even with
+                // the empty scissor rect set) after calling eglSetDamageRegion with an
+                // empty damage region. So avoid clearing in that case. See bug 1709548.
+                if !dirty_rect.is_empty() && occlusion.test(&dirty_rect) {
+                    // We have a single dirty rect, so clear only that
+                    self.device.clear_target(clear_color,
+                                             None,
+                                             Some(draw_target.to_framebuffer_rect(dirty_rect.to_i32())));
+                }
+            }
+            None => {
+                // Partial present is disabled, so clear the entire framebuffer
+                self.device.clear_target(clear_color,
+                                         None,
+                                         None);
+            }
+        }
+
+        // Draw opaque tiles
+        if !layer.opaque_items.is_empty() {
+            let opaque_sampler = self.gpu_profiler.start_sampler(GPU_SAMPLER_TAG_OPAQUE);
+            self.set_blend(false, FramebufferKind::Main);
+            self.draw_tile_list(
+                layer.opaque_items.iter(),
+                &composite_state,
+                &composite_state.external_surfaces,
+                projection,
+                &mut results.stats,
+            );
+            self.gpu_profiler.finish_sampler(opaque_sampler);
+        }
+
+        // Draw clear tiles
+        if !layer.clear_tiles.is_empty() {
+            let transparent_sampler = self.gpu_profiler.start_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
+            self.set_blend(true, FramebufferKind::Main);
+            self.device.set_blend_mode_premultiplied_dest_out();
+            self.draw_tile_list(
+                layer.clear_tiles.iter(),
+                &composite_state,
+                &composite_state.external_surfaces,
+                projection,
+                &mut results.stats,
+            );
+            self.gpu_profiler.finish_sampler(transparent_sampler);
+        }
+
+        // Draw alpha tiles
+        if !layer.alpha_items.is_empty() {
+            let transparent_sampler = self.gpu_profiler.start_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
+            self.set_blend(true, FramebufferKind::Main);
+            self.set_blend_mode_premultiplied_alpha(FramebufferKind::Main);
+            self.draw_tile_list(
+                layer.alpha_items.iter(),
+                &composite_state,
+                &composite_state.external_surfaces,
+                projection,
+                &mut results.stats,
+            );
+            self.gpu_profiler.finish_sampler(transparent_sampler);
+        }
+    }
+
+    /// Composite picture cache tiles into the framebuffer. This is currently
+    /// the only way that picture cache tiles get drawn. In future, the tiles
+    /// will often be handed to the OS compositor, and this method will be
+    /// rarely used.
+    fn composite_simple(
+        &mut self,
+        composite_state: &CompositeState,
+        fb_draw_target: DrawTarget,
+        projection: &default::Transform3D<f32>,
+        results: &mut RenderResults,
+        partial_present_mode: Option<PartialPresentMode>,
+        device_size: DeviceIntSize,
+    ) {
+        let _gm = self.gpu_profiler.start_marker("framebuffer");
+        let _timer = self.gpu_profiler.start_timer(GPU_TAG_COMPOSITE);
+
+        let mut input_layers: Vec<CompositorInputLayer> = Vec::new();
+        let mut swapchain_layers = Vec::new();
+        let cap = composite_state.tiles.len();
         let mut occlusion = occlusion::FrontToBackBuilder::with_capacity(cap, cap);
         let mut clear_tiles = Vec::new();
+
+        // We are only interested in tiles backed with actual cached pixels so we don't
+        // count clear tiles here.
+        let num_tiles = composite_state.tiles
+            .iter()
+            .filter(|tile| tile.kind != TileKind::Clear).count();
+        self.profile.set(profiler::PICTURE_TILES, num_tiles);
 
         for (idx, tile) in composite_state.tiles.iter().enumerate() {
             // Clear tiles overwrite whatever is under them, so they are treated as opaque.
@@ -3391,89 +3490,373 @@ impl Renderer {
                 continue;
             }
 
-            if tile.kind == TileKind::Clear {
-                // Clear tiles are specific to how we render the window buttons on
-                // Windows 8. They clobber what's under them so they can be treated as opaque,
-                // but require a different blend state so they will be rendered after the opaque
-                // tiles and before transparent ones.
-                clear_tiles.push(occlusion::Item { rectangle: rect, key: idx });
-                continue;
-            }
-
-            occlusion.add(&rect, is_opaque, idx);
-        }
-
-        // Clear the framebuffer
-        let clear_color = Some(self.clear_color.to_array());
-
-        match partial_present_mode {
-            Some(PartialPresentMode::Single { dirty_rect }) => {
-                // There is no need to clear if the dirty rect is occluded. Additionally,
-                // on Mali-G77 we have observed artefacts when calling glClear (even with
-                // the empty scissor rect set) after calling eglSetDamageRegion with an
-                // empty damage region. So avoid clearing in that case. See bug 1709548.
-                if !dirty_rect.is_empty() && occlusion.test(&dirty_rect) {
-                    // We have a single dirty rect, so clear only that
-                    self.device.clear_target(clear_color,
-                                             None,
-                                             Some(draw_target.to_framebuffer_rect(dirty_rect.to_i32())));
+            // For normal tiles, add to occlusion tracker. For clear tiles, add directly
+            // to the swapchain tile list
+            match tile.kind {
+                TileKind::Opaque | TileKind::Alpha => {
+                    // Store (index of tile, index of layer) so we can segment them below 
+                    occlusion.add(&rect, is_opaque, idx); // (idx, input_layers.len() - 1));
+                }
+                TileKind::Clear => {
+                    // Clear tiles are specific to how we render the window buttons on
+                    // Windows 8. They clobber what's under them so they can be treated as opaque,
+                    // but require a different blend state so they will be rendered after the opaque
+                    // tiles and before transparent ones.
+                    clear_tiles.push(occlusion::Item { rectangle: rect, key: idx });
                 }
             }
-            None => {
-                // Partial present is disabled, so clear the entire framebuffer
-                self.device.clear_target(clear_color,
-                                         None,
-                                         None);
+        }
+
+        assert_eq!(swapchain_layers.len(), input_layers.len());
+
+        for item in occlusion.opaque_items().iter().chain(occlusion.alpha_items().iter().rev()) {
+            let tile = &composite_state.tiles[item.key];
+            // Clear tiles overwrite whatever is under them, so they are treated as opaque.
+            let is_opaque = tile.kind != TileKind::Alpha;
+
+            // Determine if the tile is an external surface or content
+            let usage = match tile.surface {
+                CompositeTileSurface::Texture { .. } |
+                CompositeTileSurface::Color { .. } |
+                CompositeTileSurface::Clear => {
+                    CompositorSurfaceUsage::Content
+                }
+                CompositeTileSurface::ExternalSurface { external_surface_index } => {
+                    match self.current_compositor_kind {
+                        CompositorKind::Native { .. } | CompositorKind::Draw { .. } => {
+                            CompositorSurfaceUsage::Content
+                        }
+                        CompositorKind::Layer { .. } => {
+                            let surface = &composite_state.external_surfaces[external_surface_index.0];
+
+                            // TODO(gwc): For now, we only select a hardware overlay swapchain if we
+                            // have an external image, but it may make sense to do for compositor
+                            // surfaces without in future.
+                            match surface.external_image_id {
+                                Some(external_image_id) => {
+                                    let image_key = match surface.color_data {
+                                        ResolvedExternalSurfaceColorData::Rgb { image_dependency, .. } => image_dependency.key,
+                                        ResolvedExternalSurfaceColorData::Yuv { image_dependencies, .. } => image_dependencies[0].key,
+                                    };
+
+                                    CompositorSurfaceUsage::External {
+                                        image_key,
+                                        external_image_id,
+                                        transform_index: tile.transform_index,
+                                    }
+                                }
+                                None => {
+                                    CompositorSurfaceUsage::Content
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+
+            // Determine whether we need a new layer, and if so, what kind
+            let new_layer_kind = match input_layers.last() {
+                Some(curr_layer) => {
+                    match (curr_layer.usage, usage) {
+                        // Content -> content, composite in to same layer
+                        (CompositorSurfaceUsage::Content, CompositorSurfaceUsage::Content) => None,
+                        (CompositorSurfaceUsage::External { .. }, CompositorSurfaceUsage::Content) => Some(usage),
+
+                        // Switch of layer type, or video -> video, need new swapchain
+                        (CompositorSurfaceUsage::Content, CompositorSurfaceUsage::External { .. }) |
+                        (CompositorSurfaceUsage::External { .. }, CompositorSurfaceUsage::External { .. }) => {
+                            // Only create a new layer if we're using LayerCompositor
+                            match self.compositor_config {
+                                CompositorConfig::Draw { .. } | CompositorConfig::Native { .. } => None,
+                                CompositorConfig::Layer { .. } => {
+                                    Some(usage)
+                                }
+                            }
+                        }
+                    }
+                }
+                None => {
+                    // No layers yet, so we need a new one
+                    Some(usage)
+                }
+            };
+
+            if let Some(new_layer_kind) = new_layer_kind {
+                let (rect, is_opaque) = match usage {
+                    CompositorSurfaceUsage::Content => {
+                        (device_size.into(), input_layers.is_empty())
+                    }
+                    CompositorSurfaceUsage::External { .. } => {
+                        let rect = composite_state.get_device_rect(
+                            &tile.local_rect,
+                            tile.transform_index
+                        );
+
+                        (rect.to_i32(), is_opaque)
+                    }
+                };
+
+                input_layers.push(CompositorInputLayer {
+                    usage: new_layer_kind,
+                    is_opaque,
+                    rect,
+                });
+
+                swapchain_layers.push(SwapChainLayer {
+                    opaque_items: Vec::new(),
+                    alpha_items: Vec::new(),
+                    clear_tiles: Vec::new(),
+                })
+            }
+
+            let item = occlusion::Item {
+                rectangle: item.rectangle,
+                key: item.key,
+            };
+
+            let layer = swapchain_layers.last_mut().unwrap();
+            if is_opaque {
+                layer.opaque_items.push(item);
+            } else {
+                layer.alpha_items.push(item);
             }
         }
 
-        // We are only interested in tiles backed with actual cached pixels so we don't
-        // count clear tiles here.
-        let num_tiles = composite_state.tiles
-            .iter()
-            .filter(|tile| tile.kind != TileKind::Clear).count();
-        self.profile.set(profiler::PICTURE_TILES, num_tiles);
+        // If no tiles were present, add an empty layer to force
+        // a composite that clears the screen, to match existing
+        // semantics.
+        if input_layers.is_empty() {
+            input_layers.push(CompositorInputLayer {
+                usage: CompositorSurfaceUsage::Content,
+                is_opaque: true,
+                rect: device_size.into(),
+            });
 
-        if !occlusion.opaque_items().is_empty() {
-            let opaque_sampler = self.gpu_profiler.start_sampler(GPU_SAMPLER_TAG_OPAQUE);
-            self.set_blend(false, FramebufferKind::Main);
-            self.draw_tile_list(
-                occlusion.opaque_items().iter(),
-                &composite_state,
-                &composite_state.external_surfaces,
-                projection,
-                &mut results.stats,
-            );
-            self.gpu_profiler.finish_sampler(opaque_sampler);
+            swapchain_layers.push(SwapChainLayer {
+                opaque_items: Vec::new(),
+                alpha_items: Vec::new(),
+                clear_tiles: Vec::new(),
+            })
         }
 
-        if !clear_tiles.is_empty() {
-            let transparent_sampler = self.gpu_profiler.start_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
-            self.set_blend(true, FramebufferKind::Main);
-            self.device.set_blend_mode_premultiplied_dest_out();
-            self.draw_tile_list(
-                clear_tiles.iter(),
-                &composite_state,
-                &composite_state.external_surfaces,
-                projection,
-                &mut results.stats,
-            );
-            self.gpu_profiler.finish_sampler(transparent_sampler);
+        // Start compositing if using OS compositor
+        if let Some(ref mut compositor) = self.compositor_config.layer_compositor() {
+            let input = CompositorInputConfig {
+                layers: &input_layers,
+            };
+            compositor.begin_frame(&input);
         }
 
-        // Draw alpha tiles
-        if !occlusion.alpha_items().is_empty() {
-            let transparent_sampler = self.gpu_profiler.start_sampler(GPU_SAMPLER_TAG_TRANSPARENT);
-            self.set_blend(true, FramebufferKind::Main);
-            self.set_blend_mode_premultiplied_alpha(FramebufferKind::Main);
-            self.draw_tile_list(
-                occlusion.alpha_items().iter().rev(),
-                &composite_state,
-                &composite_state.external_surfaces,
+        for (layer_index, (layer, swapchain_layer)) in input_layers.iter().zip(swapchain_layers.iter()).enumerate() {
+            self.device.reset_state();
+
+            // Skip compositing external images
+            match layer.usage {
+                CompositorSurfaceUsage::Content => {}
+                CompositorSurfaceUsage::External { .. } => {
+                    continue;
+                }
+            }
+
+            let clear_color = if layer_index == 0 {
+                self.clear_color
+            } else {
+                ColorF::TRANSPARENT
+            };
+
+            let draw_target = match self.compositor_config {
+                CompositorConfig::Layer { ref mut compositor } => {
+                    compositor.bind_layer(layer_index);
+
+                    DrawTarget::NativeSurface {
+                        offset: -layer.rect.min,
+                        external_fbo_id: 0,
+                        dimensions: fb_draw_target.dimensions(),
+                    }
+                }
+                // Native can be hit when switching compositors (disable when using Layer)
+                CompositorConfig::Draw { .. } | CompositorConfig::Native { .. } => {
+                    fb_draw_target
+                }
+            };
+
+            // TODO(gwc): When supporting external attached swapchains, need to skip the composite pass here
+
+            // Draw each compositing pass in to a swap chain
+            self.composite_pass(
+                composite_state,
+                draw_target,
+                clear_color,
                 projection,
-                &mut results.stats,
+                results,
+                partial_present_mode,
+                &occlusion,
+                swapchain_layer,
             );
-            self.gpu_profiler.finish_sampler(transparent_sampler);
+
+            if let Some(ref mut compositor) = self.compositor_config.layer_compositor() {
+                compositor.present_layer(layer_index);
+            }
+        }
+
+        // End frame notify for experimental compositor
+        if let Some(ref mut compositor) = self.compositor_config.layer_compositor() {
+            for (layer_index, layer) in input_layers.iter().enumerate() {
+                // External surfaces need transform applied, but content
+                // surfaces are always at identity
+                let transform = match layer.usage {
+                    CompositorSurfaceUsage::Content => CompositorSurfaceTransform::identity(),
+                    CompositorSurfaceUsage::External { transform_index, .. } => composite_state.get_compositor_transform(transform_index),
+                };
+
+                compositor.add_surface(
+                    layer_index,
+                    transform,
+                    layer.rect,
+                    ImageRendering::Auto,
+                );
+            }
+
+            compositor.end_frame();
+        }
+    }
+
+    fn clear_render_target(
+        &mut self,
+        target: &RenderTarget,
+        draw_target: DrawTarget,
+        framebuffer_kind: FramebufferKind,
+        projection: &default::Transform3D<f32>,
+        stats: &mut RendererStats,
+    ) {
+        let needs_depth = target.needs_depth();
+
+        let clear_depth = if needs_depth {
+            Some(1.0)
+        } else {
+            None
+        };
+
+        let _timer = self.gpu_profiler.start_timer(GPU_TAG_SETUP_TARGET);
+
+        self.device.disable_depth();
+        self.set_blend(false, framebuffer_kind);
+
+        let is_alpha = target.target_kind == RenderTargetKind::Alpha;
+        let require_precise_clear = target.cached;
+
+        // On some Mali-T devices we have observed crashes in subsequent draw calls
+        // immediately after clearing the alpha render target regions with glClear().
+        // Using the shader to clear the regions avoids the crash. See bug 1638593.
+        let clear_with_quads = (target.cached && self.clear_caches_with_quads)
+            || (is_alpha && self.clear_alpha_targets_with_quads);
+
+        let favor_partial_updates = self.device.get_capabilities().supports_render_target_partial_update
+            && self.enable_clear_scissor;
+
+        // On some Adreno 4xx devices we have seen render tasks to alpha targets have no
+        // effect unless the target is fully cleared prior to rendering. See bug 1714227.
+        let full_clears_on_adreno = is_alpha && self.device.get_capabilities().requires_alpha_target_full_clear;
+        let require_full_clear = !require_precise_clear
+            && (full_clears_on_adreno || !favor_partial_updates);
+
+        let clear_color = target
+            .clear_color
+            .map(|color| color.to_array());
+
+        let mut cleared_depth = false;
+        if clear_with_quads {
+            // Will be handled last. Only specific rects will be cleared.
+        } else if require_precise_clear {
+            // Only clear specific rects
+            for (rect, color) in &target.clears {
+                self.device.clear_target(
+                    Some(color.to_array()),
+                    None,
+                    Some(draw_target.to_framebuffer_rect(*rect)),
+                );
+            }
+        } else {
+            // At this point we know we don't require precise clears for correctness.
+            // We may still attempt to restruct the clear rect as an optimization on
+            // some configurations.
+            let clear_rect = if require_full_clear {
+                None
+            } else {
+                match draw_target {
+                    DrawTarget::Default { rect, total_size, .. } => {
+                        if rect.min == FramebufferIntPoint::zero() && rect.size() == total_size {
+                            // Whole screen is covered, no need for scissor
+                            None
+                        } else {
+                            Some(rect)
+                        }
+                    }
+                    DrawTarget::Texture { .. } => {
+                        // TODO(gw): Applying a scissor rect and minimal clear here
+                        // is a very large performance win on the Intel and nVidia
+                        // GPUs that I have tested with. It's possible it may be a
+                        // performance penalty on other GPU types - we should test this
+                        // and consider different code paths.
+                        //
+                        // Note: The above measurements were taken when render
+                        // target slices were minimum 2048x2048. Now that we size
+                        // them adaptively, this may be less of a win (except perhaps
+                        // on a mostly-unused last slice of a large texture array).
+                        target.used_rect.map(|rect| draw_target.to_framebuffer_rect(rect))
+                    }
+                    // Full clear.
+                    _ => None,
+                }
+            };
+
+            self.device.clear_target(
+                clear_color,
+                clear_depth,
+                clear_rect,
+            );
+            cleared_depth = true;
+        }
+
+        // Make sure to clear the depth buffer if it is used.
+        if needs_depth && !cleared_depth {
+            // TODO: We could also clear the depth buffer via ps_clear. This
+            // is done by picture cache targets in some cases.
+            self.device.clear_target(None, clear_depth, None);
+        }
+
+        // Finally, if we decided to clear with quads or if we need to clear
+        // some areas with specific colors that don't match the global clear
+        // color, clear more areas using a draw call.
+
+        let mut clear_instances = Vec::with_capacity(target.clears.len());
+        for (rect, color) in &target.clears {
+            if clear_with_quads || (!require_precise_clear && target.clear_color != Some(*color)) {
+                let rect = rect.to_f32();
+                clear_instances.push(ClearInstance {
+                    rect: [
+                        rect.min.x, rect.min.y,
+                        rect.max.x, rect.max.y,
+                    ],
+                    color: color.to_array(),
+                })
+            }
+        }
+
+        if !clear_instances.is_empty() {
+            self.shaders.borrow_mut().ps_clear.bind(
+                &mut self.device,
+                &projection,
+                None,
+                &mut self.renderer_errors,
+                &mut self.profile,
+            );
+            self.draw_instanced_batch(
+                &clear_instances,
+                VertexArrayKind::Clear,
+                &BatchTextures::empty(),
+                stats,
+            );
         }
     }
 
@@ -3498,12 +3881,6 @@ impl Renderer {
             texture,
             needs_depth,
         );
-
-        let clear_depth = if needs_depth {
-            Some(1.0)
-        } else {
-            None
-        };
 
         let projection = Transform3D::ortho(
             0.0,
@@ -3539,194 +3916,37 @@ impl Renderer {
             FramebufferKind::Other
         };
 
-        {
-            let _timer = self.gpu_profiler.start_timer(GPU_TAG_SETUP_TARGET);
-            self.device.bind_draw_target(draw_target);
+        self.device.bind_draw_target(draw_target);
 
-            if self.device.get_capabilities().supports_qcom_tiled_rendering {
-                let preserve_mask = match target.clear_color {
-                    Some(_) => 0,
-                    None => gl::COLOR_BUFFER_BIT0_QCOM,
-                };
-                if let Some(used_rect) = target.used_rect {
-                    self.device.gl().start_tiling_qcom(
-                        used_rect.min.x.max(0) as _,
-                        used_rect.min.y.max(0) as _,
-                        used_rect.width() as _,
-                        used_rect.height() as _,
-                        preserve_mask,
-                    );
-                }
-            }
-
-            self.device.disable_depth();
-            self.set_blend(false, framebuffer_kind);
-
-            if needs_depth {
-                self.device.enable_depth_write();
-            } else {
-                self.device.disable_depth_write();
-            }
-
-            let zero_color = [0.0, 0.0, 0.0, 0.0];
-            let one_color = [1.0, 1.0, 1.0, 1.0];
-
-            // On some Adreno 4xx devices we have seen render tasks to alpha targets have no
-            // effect unless the target is fully cleared prior to rendering. See bug 1714227.
-            if target.target_kind == RenderTargetKind::Alpha
-                && !target.cached
-                && self.device.get_capabilities().requires_alpha_target_full_clear {
-
-                self.device.clear_target(
-                    Some(zero_color),
-                    clear_depth,
-                    None,
-                );
-            } else if target.cached && needs_depth {
-                // Make sure to clear the depth buffer if it used in a cached target.
-                self.device.clear_target(None, clear_depth, None);
-            }
-
-            // On some Mali-T devices we have observed crashes in subsequent draw calls
-            // immediately after clearing the alpha render target regions with glClear().
-            // Using the shader to clear the regions avoids the crash. See bug 1638593.
-            let clear_with_quads = (target.cached && self.clear_caches_with_quads)
-                || (target.target_kind == RenderTargetKind::Alpha && self.clear_alpha_targets_with_quads);
-
-            let has_clear_instances = !(target.zero_clears.is_empty() && target.one_clears.is_empty() && target.clears.is_empty());
-
-            if has_clear_instances {
-                if clear_with_quads {
-                    let zeroes = target.zero_clears
-                        .iter()
-                        .map(|task_id| {
-                            let rect = render_tasks[*task_id].get_target_rect().to_f32();
-                            ClearInstance {
-                                rect: [
-                                    rect.min.x, rect.min.y,
-                                    rect.max.x, rect.max.y,
-                                ],
-                                color: zero_color,
-                            }
-                        });
-
-                    let ones = target.one_clears
-                        .iter()
-                        .map(|task_id| {
-                            let rect = render_tasks[*task_id].get_target_rect().to_f32();
-                            ClearInstance {
-                                rect: [
-                                    rect.min.x, rect.min.y,
-                                    rect.max.x, rect.max.y,
-                                ],
-                                color: one_color,
-                            }
-                        });
-
-                    let other_zeroes = target.clears
-                        .iter()
-                        .map(|r| ClearInstance {
-                            rect: [
-                                r.min.x as f32, r.min.y as f32,
-                                r.max.x as f32, r.max.y as f32,
-                            ],
-                            color: zero_color,
-                        })
-                        .collect::<Vec<_>>();
-
-                    let instances = zeroes.chain(ones).chain(other_zeroes).collect::<Vec<_>>();
-                    self.shaders.borrow_mut().ps_clear.bind(
-                        &mut self.device,
-                        &projection,
-                        None,
-                        &mut self.renderer_errors,
-                        &mut self.profile,
-                    );
-                    self.draw_instanced_batch(
-                        &instances,
-                        VertexArrayKind::Clear,
-                        &BatchTextures::empty(),
-                        stats,
-                    );
-                } else {
-                    // TODO(gw): Applying a scissor rect and minimal clear here
-                    // is a very large performance win on the Intel and nVidia
-                    // GPUs that I have tested with. It's possible it may be a
-                    // performance penalty on other GPU types - we should test this
-                    // and consider different code paths.
-                    for &task_id in &target.zero_clears {
-                        let rect = render_tasks[task_id].get_target_rect();
-                        self.device.clear_target(
-                            Some(zero_color),
-                            clear_depth,
-                            Some(draw_target.to_framebuffer_rect(rect)),
-                        );
-                    }
-
-                    for &task_id in &target.one_clears {
-                        let rect = render_tasks[task_id].get_target_rect();
-                        self.device.clear_target(
-                            Some(one_color),
-                            clear_depth,
-                            Some(draw_target.to_framebuffer_rect(rect)),
-                        );
-                    }
-
-                    for rect in &target.clears {
-                        self.device.clear_target(
-                            Some(zero_color),
-                            clear_depth,
-                            Some(draw_target.to_framebuffer_rect(*rect)),
-                        );
-                    }
-                }
-            } else if !target.cached && target.target_kind == RenderTargetKind::Color {
-                // TODO: There is an implicit assumption that non-cached color targets
-                // need to be cleared, unless they have clear instances.
-                // This is error-prone, and will probably mesh poorly with pictures
-                // soon being optionally cached. We should instead have the code that
-                // builds the target specify whether this single-clear code path is needed.
-
-                let clear_color = target
-                    .clear_color
-                    .map(|color| color.to_array());
-
-                let clear_rect = match draw_target {
-                    DrawTarget::NativeSurface { .. } => {
-                        unreachable!("bug: native compositor surface in child target");
-                    }
-                    DrawTarget::Default { rect, total_size, .. } if rect.min == FramebufferIntPoint::zero() && rect.size() == total_size => {
-                        // whole screen is covered, no need for scissor
-                        None
-                    }
-                    DrawTarget::Default { rect, .. } => {
-                        Some(rect)
-                    }
-                    DrawTarget::Texture { .. } if self.enable_clear_scissor => {
-                        // TODO(gw): Applying a scissor rect and minimal clear here
-                        // is a very large performance win on the Intel and nVidia
-                        // GPUs that I have tested with. It's possible it may be a
-                        // performance penalty on other GPU types - we should test this
-                        // and consider different code paths.
-                        //
-                        // Note: The above measurements were taken when render
-                        // target slices were minimum 2048x2048. Now that we size
-                        // them adaptively, this may be less of a win (except perhaps
-                        // on a mostly-unused last slice of a large texture array).
-                        target.used_rect.map(|rect| draw_target.to_framebuffer_rect(rect))
-                    }
-                    DrawTarget::Texture { .. } | DrawTarget::External { .. } => {
-                        None
-                    }
-                };
-
-                self.device.clear_target(
-                    clear_color,
-                    clear_depth,
-                    clear_rect,
+        if self.device.get_capabilities().supports_qcom_tiled_rendering {
+            let preserve_mask = match target.clear_color {
+                Some(_) => 0,
+                None => gl::COLOR_BUFFER_BIT0_QCOM,
+            };
+            if let Some(used_rect) = target.used_rect {
+                self.device.gl().start_tiling_qcom(
+                    used_rect.min.x.max(0) as _,
+                    used_rect.min.y.max(0) as _,
+                    used_rect.width() as _,
+                    used_rect.height() as _,
+                    preserve_mask,
                 );
             }
         }
+
+        if needs_depth {
+            self.device.enable_depth_write();
+        } else {
+            self.device.disable_depth_write();
+        }
+
+        self.clear_render_target(
+            target,
+            draw_target,
+            framebuffer_kind,
+            &projection,
+            stats,
+        );
 
         if needs_depth {
             self.device.disable_depth_write();
@@ -4241,6 +4461,9 @@ impl Renderer {
             CompositorKind::Draw { draw_previous_partial_present_regions, max_partial_present_rects } => {
                 (max_partial_present_rects, draw_previous_partial_present_regions)
             }
+            CompositorKind::Layer { .. } => {
+                (0, false)
+            }
         };
 
         if max_partial_present_rects > 0 {
@@ -4395,7 +4618,7 @@ impl Renderer {
                     }
                 }
             }
-            CompositorConfig::Draw { .. } => {
+            CompositorConfig::Draw { .. } | CompositorConfig::Layer { .. } => {
                 // Ensure nothing is added in simple composite mode, since otherwise
                 // memory will leak as this doesn't get drained
                 debug_assert!(self.pending_native_surface_updates.is_empty());
@@ -4602,7 +4825,7 @@ impl Renderer {
                                         picture_target.valid_rect,
                                     )
                                 }
-                                CompositorKind::Draw { .. } => {
+                                CompositorKind::Draw { .. } | CompositorKind::Layer { .. } => {
                                     unreachable!();
                                 }
                             };
@@ -4639,7 +4862,7 @@ impl Renderer {
                                 let compositor = self.compositor_config.compositor().unwrap();
                                 compositor.unbind(&mut self.device);
                             }
-                            CompositorKind::Draw { .. } => {
+                            CompositorKind::Draw { .. } | CompositorKind::Layer { .. } => {
                                 unreachable!();
                             }
                         }
@@ -4759,13 +4982,14 @@ impl Renderer {
                         results,
                     );
                 }
-                CompositorKind::Draw { .. } => {
+                CompositorKind::Draw { .. } | CompositorKind::Layer { .. } => {
                     self.composite_simple(
                         &frame.composite_state,
                         draw_target,
                         &projection,
                         results,
                         present_mode,
+                        device_size,
                     );
                 }
             }

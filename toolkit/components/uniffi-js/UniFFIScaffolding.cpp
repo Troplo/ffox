@@ -8,8 +8,10 @@
 #include "nsError.h"
 #include "nsString.h"
 #include "nsPrintfCString.h"
+#include "mozilla/Logging.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/UniquePtr.h"
+#include "mozilla/dom/Promise.h"
 #include "mozilla/dom/UniFFICall.h"
 #include "mozilla/dom/UniFFICallbacks.h"
 #include "mozilla/dom/UniFFIScaffolding.h"
@@ -28,11 +30,14 @@ using mozilla::dom::UniFFICallbackHandler;
 using mozilla::dom::UniFFIPointer;
 using mozilla::dom::UniFFIScaffoldingCallResult;
 using mozilla::dom::UniFFIScaffoldingValue;
-using mozilla::uniffi::UniffiHandlerBase;
+using mozilla::uniffi::UniffiAsyncCallHandler;
+using mozilla::uniffi::UniffiSyncCallHandler;
 
 namespace mozilla::uniffi {
+mozilla::LazyLogModule gUniffiLogger("uniffi");
 // Implemented in UniFFIGeneratedScaffolding.cpp
-UniquePtr<UniffiHandlerBase> GetHandler(uint64_t aId);
+UniquePtr<UniffiSyncCallHandler> GetSyncCallHandler(uint64_t aId);
+UniquePtr<UniffiAsyncCallHandler> GetAsyncCallHandler(uint64_t aId);
 Maybe<already_AddRefed<UniFFIPointer>> ReadPointer(
     const GlobalObject& aGlobal, uint64_t aId, const ArrayBuffer& aArrayBuff,
     long aPosition, ErrorResult& aError);
@@ -45,12 +50,28 @@ namespace mozilla::dom {
 
 // Implement the interface using the generated functions
 
+void UniFFIScaffolding::CallSync(
+    const GlobalObject& aGlobal, uint64_t aId,
+    const Sequence<UniFFIScaffoldingValue>& aArgs,
+    RootedDictionary<UniFFIScaffoldingCallResult>& aReturnValue,
+    ErrorResult& aError) {
+  if (UniquePtr<UniffiSyncCallHandler> handler =
+          uniffi::GetSyncCallHandler(aId)) {
+    return UniffiSyncCallHandler::CallSync(std::move(handler), aGlobal, aArgs,
+                                           aReturnValue, aError);
+  }
+
+  aError.ThrowUnknownError(
+      nsPrintfCString("Unknown function id: %" PRIu64, aId));
+}
+
 already_AddRefed<Promise> UniFFIScaffolding::CallAsync(
     const GlobalObject& aGlobal, uint64_t aId,
     const Sequence<UniFFIScaffoldingValue>& aArgs, ErrorResult& aError) {
-  if (UniquePtr<UniffiHandlerBase> handler = uniffi::GetHandler(aId)) {
-    return UniffiHandlerBase::CallAsync(std::move(handler), aGlobal, aArgs,
-                                        aError);
+  if (UniquePtr<UniffiAsyncCallHandler> handler =
+          uniffi::GetAsyncCallHandler(aId)) {
+    return UniffiAsyncCallHandler::CallAsync(std::move(handler), aGlobal, aArgs,
+                                             aError);
   }
 
   aError.ThrowUnknownError(
@@ -58,18 +79,18 @@ already_AddRefed<Promise> UniFFIScaffolding::CallAsync(
   return nullptr;
 }
 
-void UniFFIScaffolding::CallSync(
+already_AddRefed<Promise> UniFFIScaffolding::CallAsyncWrapper(
     const GlobalObject& aGlobal, uint64_t aId,
-    const Sequence<UniFFIScaffoldingValue>& aArgs,
-    RootedDictionary<UniFFIScaffoldingCallResult>& aReturnValue,
-    ErrorResult& aError) {
-  if (UniquePtr<UniffiHandlerBase> handler = uniffi::GetHandler(aId)) {
-    return UniffiHandlerBase::CallSync(std::move(handler), aGlobal, aArgs,
-                                       aReturnValue, aError);
+    const Sequence<UniFFIScaffoldingValue>& aArgs, ErrorResult& aError) {
+  if (UniquePtr<UniffiSyncCallHandler> handler =
+          uniffi::GetSyncCallHandler(aId)) {
+    return UniffiSyncCallHandler::CallAsyncWrapper(std::move(handler), aGlobal,
+                                                   aArgs, aError);
   }
 
   aError.ThrowUnknownError(
       nsPrintfCString("Unknown function id: %" PRIu64, aId));
+  return nullptr;
 }
 
 already_AddRefed<UniFFIPointer> UniFFIScaffolding::ReadPointer(

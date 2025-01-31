@@ -21,6 +21,10 @@ export class DSLinkMenu extends React.PureComponent {
           ? ["CheckDeleteFromPocket"]
           : ["CheckSavedToPocket"];
       }
+      // Override pocketMenuOptions to add Save to Pocket btn link to all section cards
+      if (this.props.isSectionsCard) {
+        pocketMenuOptions = ["CheckSavedToPocket"];
+      }
       TOP_STORIES_CONTEXT_MENU_OPTIONS = [
         "CheckBookmark",
         "CheckArchiveFromPocket",
@@ -64,11 +68,19 @@ export class DSLinkMenu extends React.PureComponent {
               flight_id: this.props.flightId,
               tile_id: this.props.tile_id,
               recommendation_id: this.props.recommendation_id,
+              corpus_item_id: this.props.corpus_item_id,
               scheduled_corpus_item_id: this.props.scheduled_corpus_item_id,
               recommended_at: this.props.recommended_at,
               received_rank: this.props.received_rank,
               is_list_card: this.props.is_list_card,
               ...(this.props.format ? { format: this.props.format } : {}),
+              ...(this.props.section
+                ? {
+                    section: this.props.section,
+                    section_position: this.props.section_position,
+                    is_secton_followed: this.props.is_secton_followed,
+                  }
+                : {}),
             }}
           />
         </ContextMenuButton>

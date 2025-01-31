@@ -26,7 +26,6 @@
 #include "nsIScriptLoaderObserver.h"
 #include "nsURIHashKey.h"
 #include "mozilla/CORSMode.h"
-#include "mozilla/dom/JSExecutionContext.h"  // JSExecutionContext
 #include "ModuleLoader.h"
 #include "mozilla/MaybeOneOf.h"
 #include "mozilla/MozPromise.h"
@@ -638,21 +637,32 @@ class ScriptLoader final : public JS::loader::ScriptLoaderInterface {
   //   * text source
   //   * encoded bytecode
   //   * cached stencil
-  nsresult InstantiateClassicScriptFromAny(JSContext* aCx,
-                                           JSExecutionContext& aExec,
-                                           ScriptLoadRequest* aRequest);
+  void InstantiateClassicScriptFromAny(
+      JSContext* aCx, JS::CompileOptions& aCompileOptions,
+      ScriptLoadRequest* aRequest, JS::MutableHandle<JSScript*> aScript,
+      JS::Handle<JS::Value> aDebuggerPrivateValue,
+      JS::Handle<JSScript*> aDebuggerIntroductionScript, ErrorResult& aRv);
 
   // Instantiate classic script from one of the following data:
   //   * text source
   //   * encoded bytecode
-  nsresult InstantiateClassicScriptFromMaybeEncodedSource(
-      JSContext* aCx, JSExecutionContext& aExec, ScriptLoadRequest* aRequest);
+  //
+  // aStencilOut is set to the compiled stencil.
+  void InstantiateClassicScriptFromMaybeEncodedSource(
+      JSContext* aCx, JS::CompileOptions& aCompileOptions,
+      ScriptLoadRequest* aRequest, JS::MutableHandle<JSScript*> aScript,
+      RefPtr<JS::Stencil>& aStencilOut,
+      JS::Handle<JS::Value> aDebuggerPrivateValue,
+      JS::Handle<JSScript*> aDebuggerIntroductionScript, ErrorResult& aRv);
 
   // Instantiate classic script from the following data:
   //   * cached stencil
-  nsresult InstantiateClassicScriptFromCachedStencil(
-      JSContext* aCx, JSExecutionContext& aExec, ScriptLoadRequest* aRequest,
-      JS::Stencil* aStencil);
+  void InstantiateClassicScriptFromCachedStencil(
+      JSContext* aCx, JS::CompileOptions& aCompileOptions,
+      ScriptLoadRequest* aRequest, JS::Stencil* aStencil,
+      JS::MutableHandle<JSScript*> aScript,
+      JS::Handle<JS::Value> aDebuggerPrivateValue,
+      JS::Handle<JSScript*> aDebuggerIntroductionScript, ErrorResult& aRv);
 
   static nsCString& BytecodeMimeTypeFor(ScriptLoadRequest* aRequest);
 

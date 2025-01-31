@@ -582,7 +582,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
         symbols_url = None
         self.info("finding symbols_url based upon self.installer_url")
         if self.installer_url:
-            for ext in [".zip", ".dmg", ".tar.bz2"]:
+            for ext in [".zip", ".dmg", ".tar.bz2", ".tar.xz"]:
                 if ext in self.installer_url:
                     symbols_url = self.installer_url.replace(
                         ext, ".crashreporter-symbols.zip"
@@ -1143,18 +1143,22 @@ class DesktopUnittest(TestingMixin, MercurialScript, MozbaseMixin, CodeCoverageM
                 try:
                     for nc in psutil.net_connections():
                         f.write("  %s\n" % str(nc))
-                except Exception:
-                    f.write("Exception getting network info: %s\n" % sys.exc_info()[0])
+                except Exception as e:
+                    f.write("Exception getting network info: %s\n" % e)
                 f.write("\nProcesses:\n")
                 try:
                     for p in psutil.process_iter():
                         ctime = str(datetime.fromtimestamp(p.create_time()))
+                        try:
+                            cmdline = p.cmdline()
+                        except psutil.NoSuchProcess:
+                            cmdline = ""
                         f.write(
-                            "  PID %d %s %s created at %s\n"
-                            % (p.pid, p.name(), str(p.cmdline()), ctime)
+                            "  PID %d %s %s created at %s [%s]\n"
+                            % (p.pid, p.name(), cmdline, ctime, p.status())
                         )
-                except Exception:
-                    f.write("Exception getting process info: %s\n" % sys.exc_info()[0])
+                except Exception as e:
+                    f.write("Exception getting process info: %s\n" % e)
         except Exception:
             # psutil throws a variety of intermittent exceptions
             self.info("Unable to complete system-info.log: %s" % sys.exc_info()[0])

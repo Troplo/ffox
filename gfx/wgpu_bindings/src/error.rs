@@ -162,8 +162,8 @@ mod foreign {
             CreateComputePipelineError, CreateRenderPipelineError, CreateShaderModuleError,
         },
         resource::{
-            BufferAccessError, CreateBufferError, CreateSamplerError, CreateTextureError,
-            CreateTextureViewError, DestroyError,
+            BufferAccessError, CreateBufferError, CreateQuerySetError, CreateSamplerError,
+            CreateTextureError, CreateTextureViewError, DestroyError,
         },
     };
 
@@ -184,7 +184,6 @@ mod foreign {
         fn error_type(&self) -> ErrorBufferType {
             match self {
                 RequestDeviceError::Device(e) => e.error_type(),
-                RequestDeviceError::NoGraphicsQueue => ErrorBufferType::Internal,
 
                 RequestDeviceError::UnsupportedFeature(_)
                 | RequestDeviceError::LimitsExceeded(_) => ErrorBufferType::Validation,
@@ -274,7 +273,6 @@ mod foreign {
                 | CreateSamplerError::InvalidLodMaxClamp { .. }
                 | CreateSamplerError::InvalidAnisotropy(_)
                 | CreateSamplerError::InvalidFilterModeWithAnisotropy { .. }
-                | CreateSamplerError::TooManyObjects
                 | CreateSamplerError::MissingFeatures(_) => ErrorBufferType::Validation,
 
                 // N.B: forced non-exhaustiveness
@@ -453,8 +451,6 @@ mod foreign {
     impl HasErrorBufferType for CreateTextureViewError {
         fn error_type(&self) -> ErrorBufferType {
             match self {
-                CreateTextureViewError::OutOfMemory => ErrorBufferType::OutOfMemory,
-
                 CreateTextureViewError::InvalidTextureViewDimension { .. }
                 | CreateTextureViewError::InvalidResource(_)
                 | CreateTextureViewError::InvalidMultisampledTextureViewDimension(_)
@@ -496,12 +492,11 @@ mod foreign {
                 TransferError::MemoryInitFailure(e) => e.error_type(),
 
                 TransferError::SameSourceDestinationBuffer
-                | TransferError::MissingRenderAttachmentUsageFlag(_)
                 | TransferError::BufferOverrun { .. }
                 | TransferError::TextureOverrun { .. }
                 | TransferError::InvalidTextureAspect { .. }
                 | TransferError::InvalidTextureMipLevel { .. }
-                | TransferError::InvalidDimensionExternal(_)
+                | TransferError::InvalidDimensionExternal
                 | TransferError::UnalignedBufferOffset(_)
                 | TransferError::UnalignedCopySize(_)
                 | TransferError::UnalignedCopyWidth
@@ -512,7 +507,6 @@ mod foreign {
                 | TransferError::UnspecifiedBytesPerRow
                 | TransferError::UnspecifiedRowsPerImage
                 | TransferError::InvalidBytesPerRow
-                | TransferError::InvalidCopySize
                 | TransferError::InvalidRowsPerImage
                 | TransferError::CopySrcMissingAspects
                 | TransferError::CopyDstMissingAspects
@@ -607,11 +601,8 @@ mod foreign {
                 QueueSubmitError::Queue(e) => e.error_type(),
                 QueueSubmitError::Unmap(e) => e.error_type(),
 
-                QueueSubmitError::StuckGpu => ErrorBufferType::Internal, // TODO: validate
                 QueueSubmitError::DestroyedResource(_)
                 | QueueSubmitError::BufferStillMapped(_)
-                | QueueSubmitError::SurfaceOutputDropped
-                | QueueSubmitError::SurfaceUnconfigured
                 | QueueSubmitError::InvalidResource(_) => ErrorBufferType::Validation,
 
                 // N.B: forced non-exhaustiveness
@@ -654,6 +645,19 @@ mod foreign {
     impl HasErrorBufferType for DestroyError {
         fn error_type(&self) -> ErrorBufferType {
             ErrorBufferType::Validation
+        }
+    }
+
+    impl HasErrorBufferType for CreateQuerySetError {
+        fn error_type(&self) -> ErrorBufferType {
+            match self {
+                CreateQuerySetError::Device(e) => e.error_type(),
+                CreateQuerySetError::ZeroCount
+                | CreateQuerySetError::TooManyQueries { .. }
+                | CreateQuerySetError::MissingFeatures(..) => ErrorBufferType::Validation,
+                // N.B: forced non-exhaustiveness
+                _ => ErrorBufferType::Validation,
+            }
         }
     }
 }

@@ -37,6 +37,7 @@ include protocol PCameras;
 include protocol PLockManager;
 include protocol PMIDIManager;
 include protocol PMIDIPort;
+include protocol PMLSTransaction;
 include protocol PQuota;
 include protocol PServiceWorker;
 include protocol PServiceWorkerContainer;
@@ -48,6 +49,7 @@ include protocol PVsync;
 include protocol PRemoteDecoderManager;
 include protocol PWebTransport;
 include protocol PFetch;
+include protocol PNotification;
 
 include ClientIPCTypes;
 include DOMTypes;
@@ -186,6 +188,21 @@ parent:
       Endpoint<PWebTransportParent> aParentEndpoint)
       returns(nsresult rv, uint8_t aReliability); // Actually WebTransportReliabityMode enum
 
+
+  // XXX(krosylight): This should ultimately use nsID instead of scope, see bug 1881812.
+  /**
+   * Finish the setup of a new PNotification top level protocol.
+   */
+  async CreateNotificationParent(
+    Endpoint<PNotificationParent> aParentEndpoint,
+    nsIPrincipal aPrincipal,
+    nsIPrincipal aEffectiveStoragePrincipal,
+    bool aIsSecureContext,
+    nsString aId,
+    nsString aScope,
+    IPCNotificationOptions aOptions
+  ) returns (bool rv);
+
   async PVsync();
 
   async PCameras();
@@ -247,6 +264,8 @@ parent:
   async CreateMIDIPort(Endpoint<PMIDIPortParent> aEndpoint,
                        MIDIPortInfo portInfo, bool sysexEnabled);
   async HasMIDIDevice() returns (bool hasDevice);
+
+  async CreateMLSTransaction(Endpoint<PMLSTransactionParent> aEndpoint, nsIPrincipal aPrincipal);
 
   // This method is used to propagate storage activities from the child actor
   // to the parent actor. See StorageActivityService.

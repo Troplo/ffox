@@ -352,6 +352,8 @@ CSPDirective CSP_ContentTypeToDirective(nsContentPolicyType aType) {
     case nsIContentPolicy::TYPE_INTERNAL_FETCH_PRELOAD:
     case nsIContentPolicy::TYPE_WEB_IDENTITY:
     case nsIContentPolicy::TYPE_WEB_TRANSPORT:
+    case nsIContentPolicy::TYPE_JSON:
+    case nsIContentPolicy::TYPE_INTERNAL_JSON_PRELOAD:
       return nsIContentSecurityPolicy::CONNECT_SRC_DIRECTIVE;
 
     case nsIContentPolicy::TYPE_OBJECT:
@@ -1844,6 +1846,9 @@ void nsCSPPolicy::toDomCSPStruct(mozilla::dom::CSP& outCSP) const {
 }
 
 bool nsCSPPolicy::hasDirective(CSPDirective aDir) const {
+  if (aDir == nsIContentSecurityPolicy::REQUIRE_TRUSTED_TYPES_FOR_DIRECTIVE) {
+    return mHasRequireTrustedTypesForDirective;
+  }
   for (uint32_t i = 0; i < mDirectives.Length(); i++) {
     if (mDirectives[i]->equals(aDir)) {
       return true;
@@ -1878,6 +1883,10 @@ bool nsCSPPolicy::ShouldCreateViolationForNewTrustedTypesPolicy(
 
 bool nsCSPPolicy::AreTrustedTypesForSinkGroupRequired(
     const nsAString& aSinkGroup) const {
+  if (!hasDirective(
+          nsIContentSecurityPolicy::REQUIRE_TRUSTED_TYPES_FOR_DIRECTIVE)) {
+    return false;
+  }
   for (const auto* directive : mDirectives) {
     if (directive->equals(
             nsIContentSecurityPolicy::REQUIRE_TRUSTED_TYPES_FOR_DIRECTIVE)) {

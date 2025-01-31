@@ -85,8 +85,6 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin, VCSMixin, BaseScript):
                 "ignore_locales": ["en-US"],
                 "locales_dir": "browser/locales",
                 "log_name": "single_locale",
-                "hg_l10n_base": "https://hg.mozilla.org/l10n-central",
-                # If set, takes precedence over `hg_l10n_base`
                 "git_repository": "https://github.com/mozilla-l10n/firefox-l10n",
             },
         }
@@ -202,16 +200,19 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin, VCSMixin, BaseScript):
         self._run_tooltool()
         self._copy_mozconfig()
         self._mach_configure()
-        self._run_make_in_config_dir()
+        self._make_export()
         self.make_wget_en_US()
         self.make_unpack_en_US()
 
-    def _run_make_in_config_dir(self):
-        """this step creates nsinstall, needed my make_wget_en_US()"""
+    def _make_export(self):
+        """this step creates nsinstall, needed my make_wget_en_US() on Windows hosts
+        and creates buildid.h, used by NSIS installer for Windows UBR telemetry
+        """
         dirs = self.query_abs_dirs()
         config_dir = os.path.join(dirs["abs_obj_dir"], "config")
         env = self.query_bootstrap_env()
-        return self._make(target=["export"], cwd=config_dir, env=env)
+        self._make(target=["export"], cwd=config_dir, env=env)
+        return self._make(target=["buildid.h"], cwd=dirs["abs_obj_dir"], env=env)
 
     def _copy_mozconfig(self):
         """copies the mozconfig file into abs_src_dir/.mozconfig
@@ -334,6 +335,7 @@ class DesktopSingleLocale(LocalesMixin, AutomationMixin, VCSMixin, BaseScript):
             )
             targets_exts = [
                 "tar.bz2",
+                "tar.xz",
                 "dmg",
                 "langpack.xpi",
                 "checksums",

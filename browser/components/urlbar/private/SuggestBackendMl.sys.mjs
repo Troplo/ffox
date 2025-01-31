@@ -2,12 +2,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { BaseFeature } from "resource:///modules/urlbar/private/BaseFeature.sys.mjs";
+import { SuggestBackend } from "resource:///modules/urlbar/private/SuggestFeature.sys.mjs";
 
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   MLSuggest: "resource:///modules/urlbar/private/MLSuggest.sys.mjs",
+  QuickSuggest: "resource:///modules/QuickSuggest.sys.mjs",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
 });
 
@@ -16,7 +17,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
  * same time. Features can support both backends and decide which one to use per
  * query.
  */
-export class SuggestBackendMl extends BaseFeature {
+export class SuggestBackendMl extends SuggestBackend {
   get shouldEnable() {
     return (
       lazy.UrlbarPrefs.get("quickSuggestMlEnabled") &&
@@ -45,21 +46,48 @@ export class SuggestBackendMl extends BaseFeature {
    *
    * @param {string} searchString
    *   The search string.
+   * @param {object} options
+   *   Options object.
+   * @param {UrlbarQueryContext} options.queryContext
+   *   The query context.
    * @returns {Array}
    *   An array of matching suggestions. `MLSuggest` returns at most one
    *   suggestion.
    */
-  async query(searchString) {
-    this.logger.debug("Handling query: " + JSON.stringify(searchString));
+  async query(searchString, { queryContext }) {
+    // `MLSuggest` requires the query to be trimmed and lowercase, which
+    // the original `searchString` isn't necessarily.
+    searchString = queryContext.trimmedLowerCaseSearchString;
+
+    this.logger.debug("Handling query", { searchString });
+
+    // Don't waste time calling into `MLSuggest` if no ML intents are enabled.
+    if (
+      lazy.QuickSuggest.mlFeatures
+        .values()
+        .every(f => !f.isEnabled || !f.isMlIntentEnabled)
+    ) {
+      this.logger.debug("No ML intents enabled, ignoring query");
+      return [];
+    }
 
     let suggestion = await lazy.MLSuggest.makeSuggestions(searchString);
-    this.logger.debug("Got suggestion: " + JSON.stringify(suggestion, null, 2));
+    this.logger.debug("Got suggestion", suggestion);
 
-    if (suggestion) {
+    if (suggestion?.intent) {
+      // `MLSuggest` doesn't have a way to return only enabled intents, so it
+      // can return disabled ones and even ones we don't recognize. Discard the
+      // suggestion in those cases.
+      let feature = lazy.QuickSuggest.getFeatureByMlIntent(suggestion.intent);
+      if (!feature?.isEnabled || !feature?.isMlIntentEnabled) {
+        this.logger.debug("No ML feature for suggestion, ignoring query");
+        return [];
+      }
       suggestion.source = "ml";
       suggestion.provider = suggestion.intent;
       return [suggestion];
     }
+
     return [];
   }
 }

@@ -39,6 +39,8 @@ skip-if = [
 
 ["browser_hiddenwindow_existence.js"]
 
+["browser_opaque_region.js"]
+
 ["browser_panel_vsync.js"]
 support-files = ["!/browser/components/downloads/test/browser/head.js"]
 
@@ -85,6 +87,7 @@ skip-if = [
   "os == 'mac' && os_version == '11.20' && arch == 'aarch64'", # Bug 1594274
   "os == 'mac' && os_version == '10.15' && processor == 'x86_64'", # Bug 1705492
   "os == 'linux' && os_version == '18.04' && processor == 'x86_64' && opt", # Bug 1705492
+  "os == 'mac' && os_version == '14.70' && processor == 'x86_64' && opt", # Bug 1870476
 ]
 
 ["browser_tabopen_squeeze.js"]

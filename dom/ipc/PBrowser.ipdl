@@ -48,9 +48,8 @@ using mozilla::gfx::Matrix4x4 from "mozilla/gfx/Matrix.h";
 using mozilla::gfx::SurfaceFormat from "mozilla/gfx/Types.h";
 using mozilla::LayoutDeviceIntPoint from "Units.h";
 using mozilla::LayoutDevicePoint from "Units.h";
+using mozilla::LayoutDeviceIntMargin from "Units.h";
 using mozilla::ScreenIntCoord from "Units.h";
-using mozilla::ScreenIntMargin from "Units.h";
-using mozilla::ScreenIntPoint from "Units.h";
 using mozilla::ScreenRect from "Units.h";
 using struct mozilla::layers::ScrollableLayerGuid from "mozilla/layers/ScrollableLayerGuid.h";
 using struct mozilla::layers::ZoomConstraints from "mozilla/layers/ZoomConstraints.h";
@@ -414,7 +413,9 @@ parent:
      * Create an asynchronous color picker on the parent side,
      * but don't open it yet.
      */
-    async PColorPicker(nsString title, nsString initialColor, nsString[] defaultColors);
+    async PColorPicker(MaybeDiscardedBrowsingContext aBrowsingContext,
+                       nsString title, nsString initialColor,
+                       nsString[] defaultColors);
 
     async PFilePicker(nsString aTitle, Mode aMode, MaybeDiscardedBrowsingContext aBrowsingContext);
 
@@ -528,6 +529,7 @@ parent:
     async OnLocationChange(WebProgressData aWebProgressData,
                            RequestData aRequestData, nullable nsIURI aLocation,
                            uint32_t aFlags, bool aCanGoBack,
+                           bool aCanGoBackIgnoringUserInteraction,
                            bool aCanGoForward,
                            WebProgressLocationChangeData? aLocationChangeData);
 
@@ -936,7 +938,7 @@ child:
      * Tell the child that the safe area of widget has changed.
      *
      */
-    async SafeAreaInsetsChanged(ScreenIntMargin aSafeAreaInsets);
+    async SafeAreaInsetsChanged(LayoutDeviceIntMargin aSafeAreaInsets);
 
     /**
      * Tell the browser that its frame loader has been swapped

@@ -35,7 +35,8 @@ typedef void* EGLSyncKHR;
 namespace mozilla {
 namespace gfx {
 class DataSourceSurface;
-}
+class FileHandleWrapper;
+}  // namespace gfx
 namespace layers {
 class MemoryOrShmem;
 class SurfaceDescriptor;
@@ -76,10 +77,14 @@ class DMABufSurface {
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(DMABufSurface)
 
   enum SurfaceType {
-    SURFACE_RGBA,
-    SURFACE_NV12,
-    SURFACE_YUV420,
+    SURFACE_RGBA = 0,
+    SURFACE_NV12 = 1,
+    SURFACE_YUV420 = 2,
   };
+
+#ifdef MOZ_LOGGING
+  constexpr static const char* sSurfaceTypeNames[] = {"RGBA", "NV12", "YUV420"};
+#endif
 
   // Import surface from SurfaceDescriptor. This is usually
   // used to copy surface from another process over IPC.
@@ -104,6 +109,10 @@ class DMABufSurface {
   virtual EGLImageKHR GetEGLImage(int aPlane = 0) = 0;
 
   SurfaceType GetSurfaceType() { return mSurfaceType; };
+  const char* GetSurfaceTypeName() {
+    return sSurfaceTypeNames[static_cast<int>(mSurfaceType)];
+  };
+  int32_t GetFOURCCFormat();
   virtual int GetTextureCount() = 0;
 
   bool IsMapped(int aPlane = 0) { return (mMappedRegion[aPlane] != nullptr); };
@@ -133,6 +142,8 @@ class DMABufSurface {
   void FenceSet();
   void FenceWait();
   void FenceDelete();
+
+  void MaybeSemaphoreWait(GLuint aGlTexture);
 
   // Set and get a global surface UID. The UID is shared across process
   // and it's used to track surface lifetime in various parts of rendering
@@ -170,6 +181,12 @@ class DMABufSurface {
   virtual void DumpToFile(const char* pFile) {};
 #endif
 
+#ifdef MOZ_WAYLAND
+  virtual bool CreateWlBuffer() = 0;
+  void ReleaseWlBuffer();
+  wl_buffer* GetWlBuffer() { return mWlBuffer; };
+#endif
+
   DMABufSurface(SurfaceType aSurfaceType);
 
  protected:
@@ -204,7 +221,7 @@ class DMABufSurface {
   uint64_t mBufferModifiers[DMABUF_BUFFER_PLANES];
 
   int mBufferPlaneCount;
-  int mDmabufFds[DMABUF_BUFFER_PLANES];
+  RefPtr<mozilla::gfx::FileHandleWrapper> mDmabufFds[DMABUF_BUFFER_PLANES];
   int32_t mDrmFormats[DMABUF_BUFFER_PLANES];
   int32_t mStrides[DMABUF_BUFFER_PLANES];
   int32_t mOffsets[DMABUF_BUFFER_PLANES];
@@ -214,13 +231,18 @@ class DMABufSurface {
   void* mMappedRegionData[DMABUF_BUFFER_PLANES];
   uint32_t mMappedRegionStride[DMABUF_BUFFER_PLANES];
 
-  int mSyncFd;
+  RefPtr<mozilla::gfx::FileHandleWrapper> mSyncFd;
   EGLSyncKHR mSync;
+  RefPtr<mozilla::gfx::FileHandleWrapper> mSemaphoreFd;
   RefPtr<mozilla::gl::GLContext> mGL;
 
   int mGlobalRefCountFd;
   uint32_t mUID;
   mozilla::Mutex mSurfaceLock MOZ_UNANNOTATED;
+
+#ifdef MOZ_WAYLAND
+  wl_buffer* mWlBuffer = nullptr;
+#endif
 
   mozilla::gfx::ColorRange mColorRange = mozilla::gfx::ColorRange::LIMITED;
 };
@@ -235,7 +257,7 @@ class DMABufSurfaceRGBA final : public DMABufSurface {
       int aWidth, int aHeight);
 
   static already_AddRefed<DMABufSurface> CreateDMABufSurface(
-      mozilla::UniqueFileHandle&& aFd,
+      RefPtr<mozilla::gfx::FileHandleWrapper>&& aFd,
       const mozilla::webgpu::ffi::WGPUDMABufInfo& aDMABufInfo, int aWidth,
       int aHeight);
 
@@ -273,9 +295,7 @@ class DMABufSurfaceRGBA final : public DMABufSurface {
   EGLImageKHR GetEGLImage(int aPlane = 0) override { return mEGLImage; };
 
 #ifdef MOZ_WAYLAND
-  bool CreateWlBuffer();
-  void ReleaseWlBuffer();
-  wl_buffer* GetWlBuffer() { return mWlBuffer; };
+  bool CreateWlBuffer() override;
 #endif
 
   int GetTextureCount() override { return 1; };
@@ -295,7 +315,7 @@ class DMABufSurfaceRGBA final : public DMABufSurface {
   bool Create(const mozilla::layers::SurfaceDescriptor& aDesc) override;
   bool Create(mozilla::gl::GLContext* aGLContext, const EGLImageKHR aEGLImage,
               int aWidth, int aHeight);
-  bool Create(mozilla::UniqueFileHandle&& aFd,
+  bool Create(RefPtr<mozilla::gfx::FileHandleWrapper>&& aFd,
               const mozilla::webgpu::ffi::WGPUDMABufInfo& aDMABufInfo,
               int aWidth, int aHeight);
 
@@ -316,9 +336,6 @@ class DMABufSurfaceRGBA final : public DMABufSurface {
   EGLImageKHR mEGLImage;
   GLuint mTexture;
   uint32_t mGbmBufferFlags;
-#ifdef MOZ_WAYLAND
-  wl_buffer* mWlBuffer = nullptr;
-#endif
 };
 
 class DMABufSurfaceYUV final : public DMABufSurface {
@@ -369,6 +386,13 @@ class DMABufSurfaceYUV final : public DMABufSurface {
   mozilla::gfx::YUVColorSpace GetYUVColorSpace() override {
     return mColorSpace;
   }
+  void SetColorPrimaries(mozilla::gfx::ColorSpace2 aColorPrimaries) {
+    mColorPrimaries = aColorPrimaries;
+  }
+  void SetTransferFunction(mozilla::gfx::TransferFunction aTransferFunction) {
+    mTransferFunction = aTransferFunction;
+  }
+  bool IsHDRSurface() { return true; };
 
   DMABufSurfaceYUV();
 
@@ -376,6 +400,10 @@ class DMABufSurfaceYUV final : public DMABufSurface {
   bool UpdateYUVData(const VADRMPRIMESurfaceDescriptor& aDesc, int aWidth,
                      int aHeight, bool aCopy);
   bool VerifyTextureCreation();
+
+#ifdef MOZ_WAYLAND
+  bool CreateWlBuffer() override;
+#endif
 
  private:
   DMABufSurfaceYUV(const DMABufSurfaceYUV&) = delete;
@@ -422,6 +450,10 @@ class DMABufSurfaceYUV final : public DMABufSurface {
   GLuint mTexture[DMABUF_BUFFER_PLANES];
   mozilla::gfx::YUVColorSpace mColorSpace =
       mozilla::gfx::YUVColorSpace::Default;
+  mozilla::gfx::ColorSpace2 mColorPrimaries =
+      mozilla::gfx::ColorSpace2::UNKNOWN;
+  mozilla::gfx::TransferFunction mTransferFunction =
+      mozilla::gfx::TransferFunction::Default;
 };
 
 #endif

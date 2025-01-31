@@ -52,6 +52,7 @@ import org.hamcrest.Matchers
 import org.junit.Assert.assertTrue
 import org.mozilla.fenix.R
 import org.mozilla.fenix.helpers.Constants.LISTS_MAXSWIPES
+import org.mozilla.fenix.helpers.Constants.RETRY_COUNT
 import org.mozilla.fenix.helpers.Constants.TAG
 import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
 import org.mozilla.fenix.helpers.HomeActivityComposeTestRule
@@ -63,7 +64,6 @@ import org.mozilla.fenix.helpers.MatcherHelper.itemWithClassNameAndIndex
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithDescription
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithIndex
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResId
-import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdAndDescription
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdAndIndex
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdAndText
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdContainingText
@@ -410,6 +410,10 @@ class HomeScreenRobot {
             waitingTime,
         )
         mDevice.waitNotNull(
+            findObject(By.text("Edit")),
+            waitingTime,
+        )
+        mDevice.waitNotNull(
             findObject(By.text("Remove")),
             waitingTime,
         )
@@ -609,18 +613,25 @@ class HomeScreenRobot {
         return publisher
     }
 
-    fun verifyToolbarPosition(defaultPosition: Boolean) {
-        Log.i(TAG, "verifyToolbarPosition: Trying to verify toolbar is set to top: $defaultPosition")
+    fun verifyAddressBarPosition(bottomPosition: Boolean) {
+        Log.i(TAG, "verifyAddressBarPosition: Trying to verify toolbar is set to top: $bottomPosition")
         onView(withId(R.id.toolbarLayout))
             .check(
-                if (defaultPosition) {
+                if (bottomPosition) {
                     isPartiallyBelow(withId(R.id.sessionControlRecyclerView))
                 } else {
                     isCompletelyAbove(withId(R.id.homeAppBar))
                 },
             )
-        Log.i(TAG, "verifyToolbarPosition: Verified toolbar position is set to top: $defaultPosition")
+        Log.i(TAG, "verifyAddressBarPosition: Verified toolbar position is set to top: $bottomPosition")
     }
+
+    fun verifyNavigationToolbarIsSetToTheBottomOfTheHomeScreen() {
+        Log.i(TAG, "verifyAddressBarPosition: Trying to verify that the navigation toolbar is set to bottom")
+        onView(withId(R.id.toolbar_navbar_container)).check(isPartiallyBelow(withId(R.id.sessionControlRecyclerView)))
+        Log.i(TAG, "verifyAddressBarPosition: Verified that the navigation toolbar is set to bottom")
+    }
+
     fun verifyNimbusMessageCard(title: String, text: String, action: String) {
         val textView = UiSelector()
             .className(ComposeView::class.java)
@@ -657,6 +668,38 @@ class HomeScreenRobot {
     }
 
     class Transition {
+
+        fun openTabDrawerFromRedesignedToolbar(composeTestRule: HomeActivityComposeTestRule, interact: TabDrawerRobot.() -> Unit): TabDrawerRobot.Transition {
+            for (i in 1..RETRY_COUNT) {
+                try {
+                    Log.i(TAG, "openTabDrawerFromRedesignedToolbar: Started try #$i")
+                    assertUIObjectExists(tabsCounterFromRedesignedToolbar())
+                    Log.i(TAG, "openTabDrawerFromRedesignedToolbar: Trying to click the tab counter button")
+                    tabsCounter().click()
+                    Log.i(TAG, "openTabDrawerFromRedesignedToolbar: Clicked the tab counter button")
+                    Log.i(TAG, "openTabDrawerFromRedesignedToolbar: Trying to verify the tabs tray exists")
+                    composeTestRule.onNodeWithTag(TabsTrayTestTag.tabsTray).assertExists()
+                    Log.i(TAG, "openTabDrawer: Verified the tabs tray exists")
+
+                    break
+                } catch (e: AssertionError) {
+                    Log.i(TAG, "openTabDrawerFromRedesignedToolbar: AssertionError caught, executing fallback methods")
+                    if (i == RETRY_COUNT) {
+                        throw e
+                    } else {
+                        Log.i(TAG, "openTabDrawerFromRedesignedToolbar: Waiting for device to be idle")
+                        mDevice.waitForIdle()
+                        Log.i(TAG, "openTabDrawerFromRedesignedToolbar: Waited for device to be idle")
+                    }
+                }
+            }
+            Log.i(TAG, "openTabDrawerFromRedesignedToolbar: Trying to verify the tabs tray new tab FAB button exists")
+            composeTestRule.onNodeWithTag(TabsTrayTestTag.fab).assertExists()
+            Log.i(TAG, "openTabDrawerFromRedesignedToolbar: Verified the tabs tray new tab FAB button exists")
+
+            TabDrawerRobot(composeTestRule).interact()
+            return TabDrawerRobot.Transition(composeTestRule)
+        }
 
         fun openTabDrawer(composeTestRule: HomeActivityComposeTestRule, interact: TabDrawerRobot.() -> Unit): TabDrawerRobot.Transition {
             Log.i(TAG, "openTabDrawer: Waiting for device to be idle for $waitingTime ms")
@@ -695,6 +738,15 @@ class HomeScreenRobot {
 
             ThreeDotMenuMainRobot().interact()
             return ThreeDotMenuMainRobot.Transition()
+        }
+
+        fun openThreeDotMenuFromRedesignedToolbar(interact: RedesignedMainMenuRobot.() -> Unit): RedesignedMainMenuRobot.Transition {
+            Log.i(TAG, "openThreeDotMenuFromRedesignedToolbar: Trying to click main menu button")
+            itemWithDescription(getStringResource(R.string.content_description_menu)).click()
+            Log.i(TAG, "openThreeDotMenuFromRedesignedToolbar: Clicked main menu button")
+
+            RedesignedMainMenuRobot().interact()
+            return RedesignedMainMenuRobot.Transition()
         }
 
         fun openSearch(interact: SearchRobot.() -> Unit): SearchRobot.Transition {
@@ -1088,7 +1140,10 @@ private fun threeDotButton() = onView(allOf(withId(R.id.menuButton)))
 
 private fun saveTabsToCollectionButton() = onView(withId(R.id.add_tabs_to_collections_button))
 
-private fun tabsCounter() = onView(withId(R.id.tab_button))
+private fun tabsCounterFromRedesignedToolbar() = itemWithResId("$packageName:id/counter_box")
+
+private fun tabsCounter() =
+    mDevice.findObject(By.res("$packageName:id/counter_root"))
 
 private fun sponsoredShortcut(sponsoredShortcutTitle: String) =
     onView(
@@ -1107,10 +1162,7 @@ private fun privateBrowsingButton() =
     itemWithResId("$packageName:id/privateBrowsingButton")
 
 private fun isPrivateModeEnabled(): Boolean =
-    itemWithResIdAndDescription(
-        "$packageName:id/privateBrowsingButton",
-        "Disable private browsing",
-    ).exists()
+    itemWithResId("$packageName:id/privateBrowsingButton").isChecked
 
 private fun homepageWordmark() =
     itemWithResId("$packageName:id/wordmark")

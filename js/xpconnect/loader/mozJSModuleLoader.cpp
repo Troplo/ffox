@@ -7,9 +7,9 @@
 #include "ScriptLoadRequest.h"
 #include "mozilla/Assertions.h"  // MOZ_ASSERT, MOZ_ASSERT_IF
 #include "mozilla/Attributes.h"
-#include "mozilla/ArrayUtils.h"  // mozilla::ArrayLength
-#include "mozilla/RefPtr.h"      // RefPtr, mozilla::StaticRefPtr
-#include "mozilla/Utf8.h"        // mozilla::Utf8Unit
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/RefPtr.h"  // RefPtr, mozilla::StaticRefPtr
+#include "mozilla/Utf8.h"    // mozilla::Utf8Unit
 
 #include <cstdarg>
 
@@ -113,14 +113,13 @@ static LazyLogModule gJSCLLog("JSModuleLoader");
   "%s - Symbol '%s' accessed before initialization. Cyclic import?"
 
 static constexpr char JSM_Suffix[] = ".jsm";
-static constexpr size_t JSM_SuffixLength = mozilla::ArrayLength(JSM_Suffix) - 1;
+static constexpr size_t JSM_SuffixLength = std::size(JSM_Suffix) - 1;
 static constexpr char JSM_JS_Suffix[] = ".jsm.js";
-static constexpr size_t JSM_JS_SuffixLength =
-    mozilla::ArrayLength(JSM_JS_Suffix) - 1;
+static constexpr size_t JSM_JS_SuffixLength = std::size(JSM_JS_Suffix) - 1;
 static constexpr char JS_Suffix[] = ".js";
-static constexpr size_t JS_SuffixLength = mozilla::ArrayLength(JS_Suffix) - 1;
+static constexpr size_t JS_SuffixLength = std::size(JS_Suffix) - 1;
 static constexpr char MJS_Suffix[] = ".sys.mjs";
-static constexpr size_t MJS_SuffixLength = mozilla::ArrayLength(MJS_Suffix) - 1;
+static constexpr size_t MJS_SuffixLength = std::size(MJS_Suffix) - 1;
 
 static bool IsJSM(const nsACString& aLocation) {
   if (aLocation.Length() < JSM_SuffixLength) {
@@ -205,7 +204,7 @@ static bool Dump(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   MOZ_LOG(nsContentUtils::DOMDumpLog(), mozilla::LogLevel::Debug,
-          ("[Backstage.Dump] %s", utf8str.get()));
+          ("[SystemGlobal.Dump] %s", utf8str.get()));
 #ifdef ANDROID
   __android_log_print(ANDROID_LOG_INFO, "Gecko", "%s", utf8str.get());
 #endif
@@ -636,7 +635,7 @@ mozJSModuleLoader::CollectReports(nsIHandleReportCallback* aHandleReport,
 void mozJSModuleLoader::CreateLoaderGlobal(JSContext* aCx,
                                            const nsACString& aLocation,
                                            MutableHandleObject aGlobal) {
-  auto backstagePass = MakeRefPtr<BackstagePass>();
+  auto systemGlobal = MakeRefPtr<SystemGlobal>();
   RealmOptions options;
   auto& creationOptions = options.creationOptions();
 
@@ -656,7 +655,7 @@ void mozJSModuleLoader::CreateLoaderGlobal(JSContext* aCx,
   mIsInitializingLoaderGlobal = true;
 #endif
   nsresult rv = xpc::InitClassesWithNewWrappedGlobal(
-      aCx, static_cast<nsIGlobalObject*>(backstagePass),
+      aCx, static_cast<nsIGlobalObject*>(systemGlobal),
       nsContentUtils::GetSystemPrincipal(), xpc::DONT_FIRE_ONNEWGLOBALHOOK,
       options, &global);
 #ifdef DEBUG
@@ -666,7 +665,7 @@ void mozJSModuleLoader::CreateLoaderGlobal(JSContext* aCx,
 
   NS_ENSURE_TRUE_VOID(global);
 
-  backstagePass->SetGlobalObject(global);
+  systemGlobal->SetGlobalObject(global);
 
   JSAutoRealm ar(aCx, global);
   if (!JS_DefineFunctions(aCx, global, gGlobalFun)) {
@@ -687,8 +686,8 @@ void mozJSModuleLoader::CreateLoaderGlobal(JSContext* aCx,
 
   MOZ_ASSERT(!mModuleLoader);
   RefPtr<SyncScriptLoader> scriptLoader = new SyncScriptLoader;
-  mModuleLoader = new SyncModuleLoader(scriptLoader, backstagePass);
-  backstagePass->InitModuleLoader(mModuleLoader);
+  mModuleLoader = new SyncModuleLoader(scriptLoader, systemGlobal);
+  systemGlobal->InitModuleLoader(mModuleLoader);
 
   aGlobal.set(global);
 }

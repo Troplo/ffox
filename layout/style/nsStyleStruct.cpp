@@ -51,7 +51,8 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-static const nscoord kMediumBorderWidth = nsPresContext::CSSPixelsToAppUnits(3);
+MOZ_RUNINIT static const nscoord kMediumBorderWidth =
+    nsPresContext::CSSPixelsToAppUnits(3);
 
 // We set the size limit of style structs to 504 bytes so that when they
 // are allocated by Servo side with Arc, the total size doesn't exceed
@@ -115,13 +116,11 @@ void StyleComputedUrl::ResolveImage(Document& aDocument,
                                     const StyleComputedUrl* aOldImage) {
   MOZ_DIAGNOSTIC_ASSERT(NS_IsMainThread());
 
-  StyleLoadData& data = LoadData();
+  StyleLoadData& data = MutLoadData();
 
   MOZ_ASSERT(!(data.flags & StyleLoadDataFlags::TRIED_TO_RESOLVE_IMAGE));
 
   data.flags |= StyleLoadDataFlags::TRIED_TO_RESOLVE_IMAGE;
-
-  MOZ_ASSERT(NS_IsMainThread());
 
   // TODO(emilio, bug 1440442): This is a hackaround to avoid flickering due the
   // lack of non-http image caching in imagelib (bug 1406134), which causes
@@ -309,7 +308,7 @@ static StyleRect<T> StyleRectWithAllSides(const T& aSide) {
   return {aSide, aSide, aSide, aSide};
 }
 
-const StyleMargin nsStyleMargin::kZeroMargin =
+MOZ_RUNINIT const StyleMargin nsStyleMargin::kZeroMargin =
     StyleMargin::LengthPercentage(StyleLengthPercentage::Zero());
 
 nsStyleMargin::nsStyleMargin()
@@ -1357,9 +1356,10 @@ StyleJustifySelf nsStylePosition::UsedJustifySelf(
   return {StyleAlignFlags::NORMAL};
 }
 
-const StyleInset nsStylePosition::kAutoInset = StyleInset::Auto();
-const StyleSize nsStylePosition::kAutoSize = StyleSize::Auto();
-const StyleMaxSize nsStylePosition::kNoneMaxSize = StyleMaxSize::None();
+MOZ_RUNINIT const StyleInset nsStylePosition::kAutoInset = StyleInset::Auto();
+MOZ_RUNINIT const StyleSize nsStylePosition::kAutoSize = StyleSize::Auto();
+MOZ_RUNINIT const StyleMaxSize nsStylePosition::kNoneMaxSize =
+    StyleMaxSize::None();
 
 // --------------------
 // nsStyleTable
@@ -3004,7 +3004,6 @@ nsStyleUI::nsStyleUI()
     : mInert(StyleInert::None),
       mMozTheme(StyleMozTheme::Auto),
       mUserInput(StyleUserInput::Auto),
-      mUserModify(StyleUserModify::ReadOnly),
       mUserFocus(StyleUserFocus::Normal),
       mPointerEvents(StylePointerEvents::Auto),
       mCursor{{}, StyleCursorKind::Auto},
@@ -3019,7 +3018,6 @@ nsStyleUI::nsStyleUI(const nsStyleUI& aSource)
     : mInert(aSource.mInert),
       mMozTheme(aSource.mMozTheme),
       mUserInput(aSource.mUserInput),
-      mUserModify(aSource.mUserModify),
       mUserFocus(aSource.mUserFocus),
       mPointerEvents(aSource.mPointerEvents),
       mCursor(aSource.mCursor),
@@ -3065,10 +3063,6 @@ nsChangeHint nsStyleUI::CalcDifference(const nsStyleUI& aNewData) const {
     hint |= kPointerEventsHint;
   }
 
-  if (mUserModify != aNewData.mUserModify) {
-    hint |= NS_STYLE_HINT_VISUAL;
-  }
-
   if (mInert != aNewData.mInert) {
     // inert affects pointer-events, user-modify, user-select, user-focus and
     // -moz-user-input, do the union of all them (minus
@@ -3105,9 +3099,6 @@ nsStyleUIReset::nsStyleUIReset()
       mWindowShadow(StyleWindowShadow::Auto),
       mWindowOpacity(1.0),
       mMozWindowInputRegionMargin(StyleLength::Zero()),
-      mWindowTransformOrigin{LengthPercentage::FromPercentage(0.5),
-                             LengthPercentage::FromPercentage(0.5),
-                             {0.}},
       mTransitions(
           nsStyleAutoArray<StyleTransition>::WITH_SINGLE_INITIAL_ELEMENT),
       mTransitionTimingFunctionCount(1),
@@ -3151,7 +3142,6 @@ nsStyleUIReset::nsStyleUIReset(const nsStyleUIReset& aSource)
       mWindowOpacity(aSource.mWindowOpacity),
       mMozWindowInputRegionMargin(aSource.mMozWindowInputRegionMargin),
       mMozWindowTransform(aSource.mMozWindowTransform),
-      mWindowTransformOrigin(aSource.mWindowTransformOrigin),
       mTransitions(aSource.mTransitions.Clone()),
       mTransitionTimingFunctionCount(aSource.mTransitionTimingFunctionCount),
       mTransitionDurationCount(aSource.mTransitionDurationCount),
@@ -3504,6 +3494,14 @@ void StyleCalcNode::ScaleLengthsBy(float aScale) {
     case Tag::Sign: {
       const auto& sign = AsSign();
       ScaleNode(*sign);
+      break;
+    }
+    case Tag::Anchor: {
+      MOZ_ASSERT_UNREACHABLE("Unresolved anchor() function");
+      break;
+    }
+    case Tag::AnchorSize: {
+      MOZ_ASSERT_UNREACHABLE("Unresolved anchor-size() function");
       break;
     }
   }

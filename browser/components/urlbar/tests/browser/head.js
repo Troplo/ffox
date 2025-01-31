@@ -384,3 +384,19 @@ async function searchWithTab(
 
   return { tab, expectedSearchUrl };
 }
+
+async function focusSwitcher(win = window) {
+  await UrlbarTestUtils.promiseAutocompleteResultPopup({
+    window: win,
+    waitForFocus: true,
+    value: "",
+    fireInputEvent: true,
+  });
+  Assert.ok(win.gURLBar.hasAttribute("focused"));
+
+  EventUtils.synthesizeKey("KEY_Tab", { shiftKey: true }, win);
+  let switcher = win.document.getElementById("urlbar-searchmode-switcher");
+  await BrowserTestUtils.waitForCondition(
+    () => win.document.activeElement == switcher
+  );
+}

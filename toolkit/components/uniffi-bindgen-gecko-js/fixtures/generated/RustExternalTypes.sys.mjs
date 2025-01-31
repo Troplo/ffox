@@ -376,10 +376,22 @@ import {
 // Export the FFIConverter object to make external types work.
 export { FfiConverterTypePoint, Point };
 
+import {
+  FfiConverterTypeSprite,
+  Sprite,
+} from "resource://gre/modules/RustSprites.sys.mjs";
+
+// Export the FFIConverter object to make external types work.
+export { FfiConverterTypeSprite, Sprite };
 
 
 
 
+
+/**
+ * gradient
+ * @returns {number}
+ */
 export function gradient(value) {
 
         const liftResult = (result) => FfiConverterF64.lift(result);
@@ -393,8 +405,8 @@ export function gradient(value) {
                 }
                 throw e;
             }
-            return UniFFIScaffolding.callAsync(
-                61, // external_types:uniffi_uniffi_fixture_external_types_fn_func_gradient
+            return UniFFIScaffolding.callAsyncWrapper(
+                96, // external_types:uniffi_uniffi_fixture_external_types_fn_func_gradient
                 FfiConverterOptionalTypeLine.lower(value),
             )
         }
@@ -405,6 +417,10 @@ export function gradient(value) {
         }
 }
 
+/**
+ * intersection
+ * @returns {?Point}
+ */
 export function intersection(ln1,ln2) {
 
         const liftResult = (result) => FfiConverterOptionalTypePoint.lift(result);
@@ -426,10 +442,38 @@ export function intersection(ln1,ln2) {
                 }
                 throw e;
             }
-            return UniFFIScaffolding.callAsync(
-                62, // external_types:uniffi_uniffi_fixture_external_types_fn_func_intersection
+            return UniFFIScaffolding.callAsyncWrapper(
+                97, // external_types:uniffi_uniffi_fixture_external_types_fn_func_intersection
                 FfiConverterTypeLine.lower(ln1),
                 FfiConverterTypeLine.lower(ln2),
+            )
+        }
+        try {
+            return functionCall().then((result) => handleRustResult(result, liftResult, liftError));
+        }  catch (error) {
+            return Promise.reject(error)
+        }
+}
+
+/**
+ * moveSpriteToOrigin
+ */
+export function moveSpriteToOrigin(sprite) {
+
+        const liftResult = (result) => undefined;
+        const liftError = null;
+        const functionCall = () => {
+            try {
+                FfiConverterTypeSprite.checkType(sprite)
+            } catch (e) {
+                if (e instanceof UniFFITypeError) {
+                    e.addItemDescriptionPart("sprite");
+                }
+                throw e;
+            }
+            return UniFFIScaffolding.callAsyncWrapper(
+                98, // external_types:uniffi_uniffi_fixture_external_types_fn_func_move_sprite_to_origin
+                FfiConverterTypeSprite.lower(sprite),
             )
         }
         try {

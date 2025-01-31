@@ -9,6 +9,7 @@ kind-dependencies:
     - build
     - build-apk
     - signing-apk
+    - fetch
 
 transforms:
     - gecko_taskgraph.transforms.perftest:transforms
@@ -48,3 +49,5 @@ task-defaults:
         run-as-root: true
         using: run-task
         checkout: false
+    tags:
+        test-type: mozperftest

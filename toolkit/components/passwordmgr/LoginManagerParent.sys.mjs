@@ -170,9 +170,8 @@ async function getImportableLogins(formOrigin) {
     lazy.LoginHelper.showAutoCompleteImport;
   return state
     ? {
-        browsers: await lazy.ChromeMigrationUtils.getImportableLogins(
-          formOrigin
-        ),
+        browsers:
+          await lazy.ChromeMigrationUtils.getImportableLogins(formOrigin),
         state,
       }
     : null;
@@ -791,7 +790,7 @@ export class LoginManagerParent extends JSWindowActorParent {
     if (!hasBeenTypePassword) {
       autocompleteItems.push(
         ...(await lazy.FirefoxRelay.autocompleteItemsAsync({
-          formOrigin,
+          origin: formOrigin,
           scenarioName,
           hasInput: !!searchStringLower.length,
         }))

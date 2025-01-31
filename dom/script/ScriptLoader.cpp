@@ -21,7 +21,7 @@
 #include "js/CompilationAndEvaluation.h"
 #include "js/CompileOptions.h"  // JS::CompileOptions, JS::OwningCompileOptions, JS::DecodeOptions, JS::OwningDecodeOptions, JS::DelazificationOption
 #include "js/ContextOptions.h"  // JS::ContextOptionsRef
-#include "js/experimental/JSStencil.h"  // JS::Stencil, JS::InstantiationStorage
+#include "js/experimental/JSStencil.h"  // JS::Stencil, JS::InstantiationStorage, JS::StartCollectingDelazifications, JS::FinishCollectingDelazifications, JS::AbortCollectingDelazifications
 #include "js/experimental/CompileScript.h"  // JS::FrontendContext, JS::NewFrontendContext, JS::DestroyFrontendContext, JS::SetNativeStackQuota, JS::ThreadStackQuotaForSize, JS::CompilationStorage, JS::CompileGlobalScriptToStencil, JS::CompileModuleScriptToStencil, JS::DecodeStencil, JS::PrepareForInstantiate
 #include "js/loader/ScriptLoadRequest.h"
 #include "ScriptCompression.h"
@@ -41,8 +41,8 @@
 #include "mozilla/dom/AutoEntryScript.h"
 #include "mozilla/dom/DocGroup.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/JSExecutionContext.h"
-#include "mozilla/dom/ScriptDecoding.h"  // mozilla::dom::ScriptDecoding
+#include "mozilla/dom/JSExecutionUtils.h"  // mozilla::dom::Compile, mozilla::dom::InstantiateStencil, mozilla::dom::EvaluationExceptionToNSResult
+#include "mozilla/dom/ScriptDecoding.h"    // mozilla::dom::ScriptDecoding
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/SRILogHelper.h"
 #include "mozilla/dom/WindowContext.h"
@@ -437,13 +437,24 @@ static bool IsScriptEventHandler(ScriptKind kind, nsIContent* aScriptElement) {
 nsContentPolicyType ScriptLoadRequestToContentPolicyType(
     ScriptLoadRequest* aRequest) {
   if (aRequest->GetScriptLoadContext()->IsPreload()) {
-    return aRequest->IsModuleRequest()
-               ? nsIContentPolicy::TYPE_INTERNAL_MODULE_PRELOAD
-               : nsIContentPolicy::TYPE_INTERNAL_SCRIPT_PRELOAD;
+    if (aRequest->IsModuleRequest()) {
+      return aRequest->AsModuleRequest()->mModuleType ==
+                     JS::ModuleType::JavaScript
+                 ? nsIContentPolicy::TYPE_INTERNAL_MODULE_PRELOAD
+                 : nsIContentPolicy::TYPE_INTERNAL_JSON_PRELOAD;
+    }
+
+    return nsIContentPolicy::TYPE_INTERNAL_SCRIPT_PRELOAD;
   }
 
-  return aRequest->IsModuleRequest() ? nsIContentPolicy::TYPE_INTERNAL_MODULE
-                                     : nsIContentPolicy::TYPE_INTERNAL_SCRIPT;
+  if (aRequest->IsModuleRequest()) {
+    return aRequest->AsModuleRequest()->mModuleType ==
+                   JS::ModuleType::JavaScript
+               ? nsIContentPolicy::TYPE_INTERNAL_MODULE
+               : nsIContentPolicy::TYPE_JSON;
+  }
+
+  return nsIContentPolicy::TYPE_INTERNAL_SCRIPT;
 }
 
 nsresult ScriptLoader::CheckContentPolicy(Document* aDocument,
@@ -2637,20 +2648,22 @@ class MOZ_RAII AutoSetProcessingScriptTag {
   ~AutoSetProcessingScriptTag() { mContext->SetProcessingScriptTag(mOldTag); }
 };
 
-static nsresult ExecuteCompiledScript(JSContext* aCx, JSExecutionContext& aExec,
-                                      ClassicScript* aLoaderScript) {
-  JS::Rooted<JSScript*> script(aCx, aExec.GetScript());
-  if (!script) {
+static void ExecuteCompiledScript(JSContext* aCx, ClassicScript* aLoaderScript,
+                                  JS::Handle<JSScript*> aScript,
+                                  ErrorResult& aRv) {
+  if (!aScript) {
     // Compilation succeeds without producing a script if scripting is
     // disabled for the global.
-    return NS_OK;
+    return;
   }
 
-  if (JS::GetScriptPrivate(script).isUndefined()) {
-    aLoaderScript->AssociateWithScript(script);
+  if (JS::GetScriptPrivate(aScript).isUndefined()) {
+    aLoaderScript->AssociateWithScript(aScript);
   }
 
-  return aExec.ExecScript();
+  if (!JS_ExecuteScript(aCx, aScript)) {
+    aRv.NoteJSContextException(aCx);
+  }
 }
 
 nsresult ScriptLoader::EvaluateScriptElement(ScriptLoadRequest* aRequest) {
@@ -2720,35 +2733,119 @@ nsresult ScriptLoader::EvaluateScriptElement(ScriptLoadRequest* aRequest) {
   return EvaluateScript(globalObject, aRequest);
 }
 
-nsresult ScriptLoader::InstantiateClassicScriptFromMaybeEncodedSource(
-    JSContext* aCx, JSExecutionContext& aExec, ScriptLoadRequest* aRequest) {
+// Decode a script contained in a buffer.
+static void Decode(JSContext* aCx, JS::CompileOptions& aCompileOptions,
+                   const JS::TranscodeRange& aBytecodeBuf,
+                   RefPtr<JS::Stencil>& aStencil, ErrorResult& aRv) {
+  JS::DecodeOptions decodeOptions(aCompileOptions);
+  decodeOptions.borrowBuffer = true;
+
+  MOZ_ASSERT(aCompileOptions.noScriptRval);
+  JS::TranscodeResult tr = JS::DecodeStencil(aCx, decodeOptions, aBytecodeBuf,
+                                             getter_AddRefs(aStencil));
+  // These errors are external parameters which should be handled before the
+  // decoding phase, and which are the only reasons why you might want to
+  // fallback on decoding failures.
+  MOZ_ASSERT(tr != JS::TranscodeResult::Failure_BadBuildId);
+  if (tr != JS::TranscodeResult::Ok) {
+    aRv = NS_ERROR_DOM_JS_DECODING_ERROR;
+    return;
+  }
+}
+
+// Instantiate (on main-thread) a JS::Stencil generated by off-thread or
+// main-thread parsing or decoding.
+static void InstantiateStencil(
+    JSContext* aCx, JS::CompileOptions& aCompileOptions, JS::Stencil* aStencil,
+    JS::MutableHandle<JSScript*> aScript,
+    bool& aCollectingDelazificationsAlreadyStarted,
+    JS::Handle<JS::Value> aDebuggerPrivateValue,
+    JS::Handle<JSScript*> aDebuggerIntroductionScript, ErrorResult& aRv,
+    bool aEncodeBytecode = false,
+    JS::InstantiationStorage* aStorage = nullptr) {
+  JS::InstantiateOptions instantiateOptions(aCompileOptions);
+  JS::Rooted<JSScript*> script(
+      aCx, JS::InstantiateGlobalStencil(aCx, instantiateOptions, aStencil,
+                                        aStorage));
+  if (!script) {
+    aRv.NoteJSContextException(aCx);
+    return;
+  }
+
+  if (aEncodeBytecode) {
+    if (!JS::StartCollectingDelazifications(
+            aCx, script, aStencil, aCollectingDelazificationsAlreadyStarted)) {
+      aRv.NoteJSContextException(aCx);
+      return;
+    }
+  }
+
+  aScript.set(script);
+
+  if (instantiateOptions.deferDebugMetadata) {
+    if (!JS::UpdateDebugMetadata(aCx, aScript, instantiateOptions,
+                                 aDebuggerPrivateValue, nullptr,
+                                 aDebuggerIntroductionScript, nullptr)) {
+      aRv = NS_ERROR_OUT_OF_MEMORY;
+    }
+  }
+}
+
+void ScriptLoader::InstantiateClassicScriptFromMaybeEncodedSource(
+    JSContext* aCx, JS::CompileOptions& aCompileOptions,
+    ScriptLoadRequest* aRequest, JS::MutableHandle<JSScript*> aScript,
+    RefPtr<JS::Stencil>& aStencilOut,
+    JS::Handle<JS::Value> aDebuggerPrivateValue,
+    JS::Handle<JSScript*> aDebuggerIntroductionScript, ErrorResult& aRv) {
   nsAutoCString profilerLabelString;
   aRequest->GetScriptLoadContext()->GetProfilerLabel(profilerLabelString);
 
-  nsresult rv;
   if (aRequest->IsBytecode()) {
     if (aRequest->GetScriptLoadContext()->mCompileOrDecodeTask) {
       LOG(("ScriptLoadRequest (%p): Decode Bytecode & instantiate and Execute",
            aRequest));
-      rv = aExec.JoinOffThread(aRequest->GetScriptLoadContext());
+      RefPtr<JS::Stencil> stencil;
+      JS::InstantiationStorage storage;
+      MOZ_ASSERT(aCompileOptions.noScriptRval);
+      stencil =
+          aRequest->GetScriptLoadContext()->StealOffThreadResult(aCx, &storage);
+      if (!stencil) {
+        aRv.NoteJSContextException(aCx);
+        return;
+      }
+      aStencilOut = stencil.get();
+
+      bool unused;
+      InstantiateStencil(aCx, aCompileOptions, stencil, aScript, unused,
+                         aDebuggerPrivateValue, aDebuggerIntroductionScript,
+                         aRv, false, &storage);
     } else {
       LOG(("ScriptLoadRequest (%p): Decode Bytecode and Execute", aRequest));
       AUTO_PROFILER_MARKER_TEXT("BytecodeDecodeMainThread", JS,
                                 MarkerInnerWindowIdFromJSContext(aCx),
                                 profilerLabelString);
 
-      rv = aExec.Decode(aRequest->Bytecode());
+      RefPtr<JS::Stencil> stencil;
+      Decode(aCx, aCompileOptions, aRequest->Bytecode(), stencil, aRv);
+      aStencilOut = stencil.get();
+
+      if (stencil) {
+        bool unused;
+        InstantiateStencil(aCx, aCompileOptions, stencil, aScript, unused,
+                           aDebuggerPrivateValue, aDebuggerIntroductionScript,
+                           aRv);
+      }
     }
 
     // We do not expect to be saving anything when we already have some
     // bytecode.
     MOZ_ASSERT(!aRequest->mCacheInfo);
-    return rv;
+    return;
   }
 
   MOZ_ASSERT(aRequest->IsSource());
   CalculateBytecodeCacheFlag(aRequest);
-  aExec.SetEncodeBytecode(aRequest->PassedConditionForBytecodeEncoding());
+  bool encodeBytecode = aRequest->PassedConditionForBytecodeEncoding();
 
   if (aRequest->GetScriptLoadContext()->mCompileOrDecodeTask) {
     // Off-main-thread parsing.
@@ -2757,55 +2854,87 @@ nsresult ScriptLoader::InstantiateClassicScriptFromMaybeEncodedSource(
          "Execute",
          aRequest));
     MOZ_ASSERT(aRequest->IsTextSource());
-    rv = aExec.JoinOffThread(aRequest->GetScriptLoadContext());
+    RefPtr<JS::Stencil> stencil;
+    JS::InstantiationStorage storage;
+    MOZ_ASSERT(aCompileOptions.noScriptRval);
+    stencil =
+        aRequest->GetScriptLoadContext()->StealOffThreadResult(aCx, &storage);
+    if (!stencil) {
+      aRv.NoteJSContextException(aCx);
+      return;
+    }
+    aStencilOut = stencil.get();
+
+    bool unused;
+    InstantiateStencil(aCx, aCompileOptions, stencil, aScript, unused,
+                       aDebuggerPrivateValue, aDebuggerIntroductionScript, aRv,
+                       encodeBytecode, &storage);
   } else {
     // Main thread parsing (inline and small scripts)
     LOG(("ScriptLoadRequest (%p): Compile And Exec", aRequest));
     MOZ_ASSERT(aRequest->IsTextSource());
     MaybeSourceText maybeSource;
-    rv = aRequest->GetScriptSource(aCx, &maybeSource,
-                                   aRequest->mLoadContext.get());
-    if (NS_SUCCEEDED(rv)) {
+    aRv = aRequest->GetScriptSource(aCx, &maybeSource,
+                                    aRequest->mLoadContext.get());
+    if (!aRv.Failed()) {
       AUTO_PROFILER_MARKER_TEXT("ScriptCompileMainThread", JS,
                                 MarkerInnerWindowIdFromJSContext(aCx),
                                 profilerLabelString);
 
-      auto compile = [&](auto& source) { return aExec.Compile(source); };
+      RefPtr<JS::Stencil> stencil;
+      ErrorResult erv;
+      auto compile = [&](auto& source) {
+        stencil = CompileGlobalScriptToStencil(aCx, aCompileOptions, source);
+        if (!stencil) {
+          erv.NoteJSContextException(aCx);
+        }
+      };
 
       MOZ_ASSERT(!maybeSource.empty());
       TimeStamp startTime = TimeStamp::Now();
-      rv = maybeSource.mapNonEmpty(compile);
+      maybeSource.mapNonEmpty(compile);
+      aStencilOut = stencil.get();
+
+      if (stencil) {
+        bool unused;
+        InstantiateStencil(aCx, aCompileOptions, stencil, aScript, unused,
+                           aDebuggerPrivateValue, aDebuggerIntroductionScript,
+                           erv, encodeBytecode);
+      }
+
       mMainThreadParseTime += TimeStamp::Now() - startTime;
+      aRv = std::move(erv);
     }
   }
-  return rv;
 }
 
-nsresult ScriptLoader::InstantiateClassicScriptFromCachedStencil(
-    JSContext* aCx, JSExecutionContext& aExec, ScriptLoadRequest* aRequest,
-    JS::Stencil* aStencil) {
-  RefPtr<JS::Stencil> stencil = JS::DuplicateStencil(aCx, aStencil);
-  if (!stencil) {
-    return NS_ERROR_FAILURE;
-  }
-
-  aExec.SetEncodeBytecode(true);
-
-  bool incrementalEncodingAlreadyStarted = false;
-  nsresult rv = aExec.InstantiateStencil(std::move(stencil),
-                                         incrementalEncodingAlreadyStarted);
-  if (incrementalEncodingAlreadyStarted) {
+void ScriptLoader::InstantiateClassicScriptFromCachedStencil(
+    JSContext* aCx, JS::CompileOptions& aCompileOptions,
+    ScriptLoadRequest* aRequest, JS::Stencil* aStencil,
+    JS::MutableHandle<JSScript*> aScript,
+    JS::Handle<JS::Value> aDebuggerPrivateValue,
+    JS::Handle<JSScript*> aDebuggerIntroductionScript, ErrorResult& aRv) {
+  bool collectingDelazificationsAlreadyStarted = false;
+  InstantiateStencil(aCx, aCompileOptions, aStencil, aScript,
+                     collectingDelazificationsAlreadyStarted,
+                     aDebuggerPrivateValue, aDebuggerIntroductionScript, aRv,
+                     /* aEncodeBytecode */ true);
+  if (collectingDelazificationsAlreadyStarted) {
     aRequest->MarkSkippedBytecodeEncoding();
   }
-  return rv;
 }
 
-nsresult ScriptLoader::InstantiateClassicScriptFromAny(
-    JSContext* aCx, JSExecutionContext& aExec, ScriptLoadRequest* aRequest) {
+void ScriptLoader::InstantiateClassicScriptFromAny(
+    JSContext* aCx, JS::CompileOptions& aCompileOptions,
+    ScriptLoadRequest* aRequest, JS::MutableHandle<JSScript*> aScript,
+    JS::Handle<JS::Value> aDebuggerPrivateValue,
+    JS::Handle<JSScript*> aDebuggerIntroductionScript, ErrorResult& aRv) {
   if (aRequest->IsStencil()) {
     RefPtr<JS::Stencil> stencil = aRequest->GetStencil();
-    return InstantiateClassicScriptFromCachedStencil(aCx, aExec, aRequest,
-                                                     stencil);
+    InstantiateClassicScriptFromCachedStencil(
+        aCx, aCompileOptions, aRequest, stencil, aScript, aDebuggerPrivateValue,
+        aDebuggerIntroductionScript, aRv);
+    return;
   }
 
   bool createCache = false;
@@ -2819,25 +2948,21 @@ nsresult ScriptLoader::InstantiateClassicScriptFromAny(
       // NOTE: Avoid creating cache regardless of CSP.
       createCache = false;
     }
-
-    if (createCache) {
-      aExec.SetKeepStencil();
-    }
   }
 
-  nsresult rv =
-      InstantiateClassicScriptFromMaybeEncodedSource(aCx, aExec, aRequest);
-  // NOTE: rv can be NS_SUCCESS_DOM_SCRIPT_EVALUATION_THREW.
-  if (rv == NS_OK) {
+  RefPtr<JS::Stencil> stencil;
+  InstantiateClassicScriptFromMaybeEncodedSource(
+      aCx, aCompileOptions, aRequest, aScript, stencil, aDebuggerPrivateValue,
+      aDebuggerIntroductionScript, aRv);
+  if (!aRv.Failed()) {
     if (createCache) {
       MOZ_ASSERT(mCache);
-      aRequest->SetStencil(aExec.StealStencil());
+      MOZ_ASSERT(stencil);
+      aRequest->SetStencil(stencil.forget());
       auto loadData = MakeRefPtr<ScriptLoadData>(this, aRequest);
       mCache->Insert(*loadData);
     }
   }
-
-  return rv;
 }
 
 /* static */
@@ -2998,20 +3123,19 @@ nsresult ScriptLoader::EvaluateScript(nsIGlobalObject* aGlobalObject,
 
   TRACE_FOR_TEST(aRequest, "scriptloader_execute");
   JS::Rooted<JSObject*> global(cx, aGlobalObject->GetGlobalJSObject());
-  JSExecutionContext exec(cx, global, options, classicScriptValue,
-                          introductionScript);
-
-  rv = InstantiateClassicScriptFromAny(cx, exec, aRequest);
-
-  if (NS_FAILED(rv)) {
-    return rv;
+  if (MOZ_UNLIKELY(!xpc::Scriptability::Get(global).Allowed())) {
+    return NS_OK;
   }
+  ErrorResult erv;
+  mozilla::AutoProfilerLabel autoProfilerLabel("JSExecutionContext",
+                                               /* dynamicStr */ nullptr,
+                                               JS::ProfilingCategoryPair::JS);
+  JSAutoRealm autoRealm(cx, global);
+  JS::Rooted<JSScript*> script(cx);
+  InstantiateClassicScriptFromAny(cx, options, aRequest, &script,
+                                  classicScriptValue, introductionScript, erv);
 
-  // TODO (yulia): rewrite this section. rv can be a failing pattern other than
-  // NS_OK which will pass the NS_FAILED check above. If we call exec.GetScript
-  // in that case, it will crash.
-  if (rv == NS_OK) {
-    JS::Rooted<JSScript*> script(cx, exec.GetScript());
+  if (!erv.Failed()) {
     MaybePrepareForBytecodeEncodingBeforeExecute(aRequest, script);
 
     {
@@ -3020,8 +3144,14 @@ nsresult ScriptLoader::EvaluateScript(nsIGlobalObject* aGlobalObject,
                                 MarkerInnerWindowIdFromJSContext(cx),
                                 profilerLabelString);
 
-      rv = ExecuteCompiledScript(cx, exec, classicScript);
+      MOZ_ASSERT(options.noScriptRval);
+      ExecuteCompiledScript(cx, classicScript, script, erv);
     }
+  }
+  rv = EvaluationExceptionToNSResult(erv);
+
+  if (NS_FAILED(rv)) {
+    return rv;
   }
 
   // This must be called also for compilation failure case, in order to
@@ -3167,14 +3297,14 @@ void ScriptLoader::EncodeRequestBytecode(JSContext* aCx,
     aRequest->mScriptForBytecodeEncoding = nullptr;
     ModuleScript* moduleScript = aRequest->AsModuleRequest()->mModuleScript;
     JS::Rooted<JSObject*> module(aCx, moduleScript->ModuleRecord());
-    result =
-        JS::FinishIncrementalEncoding(aCx, module, aRequest->SRIAndBytecode());
+    result = JS::FinishCollectingDelazifications(aCx, module,
+                                                 aRequest->SRIAndBytecode());
   } else if (mCache) {
     RefPtr<JS::Stencil> stencil;
     JS::Rooted<JSScript*> script(aCx, aRequest->mScriptForBytecodeEncoding);
     aRequest->mScriptForBytecodeEncoding = nullptr;
-    result =
-        JS::FinishIncrementalEncoding(aCx, script, getter_AddRefs(stencil));
+    result = JS::FinishCollectingDelazifications(aCx, script,
+                                                 getter_AddRefs(stencil));
     if (result) {
       aRequest->SetStencil(stencil.forget());
       bytecodeFailed.release();
@@ -3183,8 +3313,8 @@ void ScriptLoader::EncodeRequestBytecode(JSContext* aCx,
     // TODO: Bytecode encoding for script, at different timing.
   } else {
     JS::Rooted<JSScript*> script(aCx, aRequest->mScriptForBytecodeEncoding);
-    result =
-        JS::FinishIncrementalEncoding(aCx, script, aRequest->SRIAndBytecode());
+    result = JS::FinishCollectingDelazifications(aCx, script,
+                                                 aRequest->SRIAndBytecode());
     aRequest->mScriptForBytecodeEncoding = nullptr;
   }
   if (!result) {
@@ -3281,12 +3411,12 @@ void ScriptLoader::GiveUpBytecodeEncoding() {
       if (request->IsModuleRequest()) {
         ModuleScript* moduleScript = request->AsModuleRequest()->mModuleScript;
         JS::Rooted<JSObject*> module(aes->cx(), moduleScript->ModuleRecord());
-        JS::AbortIncrementalEncoding(module);
+        JS::AbortCollectingDelazifications(module);
       } else {
         JS::Rooted<JSScript*> script(aes->cx(),
                                      request->mScriptForBytecodeEncoding);
         request->mScriptForBytecodeEncoding = nullptr;
-        JS::AbortIncrementalEncoding(script);
+        JS::AbortCollectingDelazifications(script);
       }
     }
 

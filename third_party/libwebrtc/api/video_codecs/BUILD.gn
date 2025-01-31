@@ -34,8 +34,8 @@ rtc_source_set("scalability_mode_helper") {
   deps = [
     ":scalability_mode",
     "../../modules/video_coding/svc:scalability_mode_util",
+    "../../rtc_base/system:rtc_export",
     "//third_party/abseil-cpp/absl/strings:string_view",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
@@ -104,17 +104,13 @@ rtc_library("video_codecs_api") {
     "//third_party/abseil-cpp/absl/container:inlined_vector",
     "//third_party/abseil-cpp/absl/strings",
     "//third_party/abseil-cpp/absl/strings:string_view",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
 rtc_source_set("bitstream_parser_api") {
   visibility = [ "*" ]
   sources = [ "bitstream_parser.h" ]
-  deps = [
-    "..:array_view",
-    "//third_party/abseil-cpp/absl/types:optional",
-  ]
+  deps = [ "..:array_view" ]
 }
 
 rtc_library("builtin_video_decoder_factory") {
@@ -150,7 +146,6 @@ rtc_library("builtin_video_encoder_factory") {
     "../../media:rtc_simulcast_encoder_adapter",
     "../../rtc_base/system:rtc_export",
     "../environment",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
@@ -166,7 +161,6 @@ rtc_source_set("video_encoder_factory_template") {
     "../../modules/video_coding/svc:scalability_mode_util",
     "../environment",
     "//third_party/abseil-cpp/absl/algorithm:container",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
@@ -306,7 +300,6 @@ rtc_source_set("video_encoder_interface") {
     "../../api/video_codecs:video_codecs_api",
     "../../rtc_base:rtc_numerics",
     "//third_party/abseil-cpp/absl/functional:any_invocable",
-    "//third_party/abseil-cpp/absl/types:optional",
     "//third_party/abseil-cpp/absl/types:variant",
   ]
 }
@@ -321,7 +314,6 @@ rtc_source_set("video_encoder_factory_interface") {
     "../../api/video:resolution",
     "../../rtc_base:rtc_numerics",
     "../video:video_frame",
-    "//third_party/abseil-cpp/absl/types:optional",
     "//third_party/abseil-cpp/absl/types:variant",
   ]
 }
@@ -354,7 +346,6 @@ rtc_library("simple_encoder_wrapper") {
     "//third_party/abseil-cpp/absl/algorithm:container",
     "//third_party/abseil-cpp/absl/functional:any_invocable",
     "//third_party/abseil-cpp/absl/strings:string_view",
-    "//third_party/abseil-cpp/absl/types:optional",
     "//third_party/abseil-cpp/absl/types:variant",
   ]
 }
@@ -374,7 +365,6 @@ rtc_library("simple_encoder_wrapper_unittests") {
     "../../test:fileutils",
     "../../test:test_support",
     "../../test:video_test_support",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
@@ -402,7 +392,6 @@ rtc_library("libaom_av1_encoder_factory") {
     "../video:video_frame",
     "//third_party/abseil-cpp/absl/algorithm:container",
     "//third_party/abseil-cpp/absl/cleanup",
-    "//third_party/abseil-cpp/absl/types:optional",
     "//third_party/abseil-cpp/absl/types:variant",
     "//third_party/libaom",
   ]
@@ -435,7 +424,6 @@ rtc_library("libaom_av1_encoder_factory_test") {
     "../units:time_delta",
     "../units:timestamp",
     "../video:encoded_image",
-    "//third_party/abseil-cpp/absl/types:optional",
     "//third_party/abseil-cpp/absl/types:variant",
   ]
 }
@@ -489,6 +477,5 @@ rtc_library("rtc_software_fallback_wrappers") {
     "../video:video_frame_type",
     "../video:video_rtp_headers",
     "//third_party/abseil-cpp/absl/strings",
-    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }

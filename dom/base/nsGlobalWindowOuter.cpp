@@ -6766,10 +6766,19 @@ nsresult nsGlobalWindowOuter::OpenInternal(
   // XXXbz When this gets fixed to not use LegacyIsCallerNativeCode()
   // (indirectly) maybe we can nix the AutoJSAPI usage OnLinkClickEvent::Run.
   // But note that if you change this to GetEntryGlobal(), say, then
-  // OnLinkClickEvent::Run will need a full-blown AutoEntryScript.
-  const bool checkForPopup =
-      !nsContentUtils::LegacyIsCallerChromeOrNativeCode() && !aDialog &&
-      !windowExists;
+  // OnLinkClickEvent::Run will need a full-blown AutoEntryScript. (Bug 1930445)
+  const bool checkForPopup = [&]() {
+    if (aDialog) {
+      return false;
+    }
+    if (windowExists) {
+      return false;
+    }
+    if (aLoadState && aLoadState->IsFormSubmission()) {
+      return true;
+    }
+    return !nsContentUtils::LegacyIsCallerChromeOrNativeCode();
+  }();
 
   nsCOMPtr<nsIURI> uri;
 
@@ -6827,6 +6836,13 @@ nsresult nsGlobalWindowOuter::OpenInternal(
       FireAbuseEvents(aUrl, windowName, aOptions);
       return aDoJSFixups ? NS_OK : NS_ERROR_FAILURE;
     }
+  }
+
+  // Per https://github.com/whatwg/html/pull/10547, we should always consume
+  // user activation when opening a new window, even if the popup blocker is
+  // disabled or the website has popup permission.
+  if (!windowExists && mDoc) {
+    mDoc->ConsumeTransientUserGestureActivation();
   }
 
   RefPtr<BrowsingContext> domReturn;

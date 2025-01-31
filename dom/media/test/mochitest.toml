@@ -26,7 +26,8 @@ subsuite = "media"
 tags = "media-gpu"
 prefs = [
   "gfx.core-animation.low-power-telemetry-frames=60", # only for test_video_low_power_telemetry.html
- "media.setsinkid.enabled=true", # for test_setSinkId_after_loop.html
+  "media.setsinkid.enabled=true", # for test_setSinkId_after_loop.html
+  "media.ffvpx-hw.enabled=true", # test_hw_video_decoding.html
 ]
 support-files = [
   "16bit_wave_extrametadata.wav",
@@ -843,6 +844,7 @@ skip-if = [
   "os == 'mac' && os_version == '11.20' && arch == 'aarch64'", # Bug 1110922
   "os == 'win'", # Bug 1110922
   "os == 'android' && processor == 'aarch64'", # Bug 1110922
+  "os == 'mac' && os_version == '14.70' && processor == 'x86_64' && debug && mda_gpu", # Bug 1929426
 ]
 
 ["test_replay_metadata.html"]

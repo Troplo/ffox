@@ -11,6 +11,12 @@
     var(--theme-highlight-yellow),
     #521C76
   );
+  --inspector-highlight-color: inherit;
+
+  &[forced-colors-active] {
+    --inspector-highlight-background-color: Mark;
+    --inspector-highlight-color: MarkText;
+  }
 }
 
 .empty-css-variable {

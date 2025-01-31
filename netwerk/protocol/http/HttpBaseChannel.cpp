@@ -167,7 +167,7 @@ static bool IsHeaderBlacklistedForRedirectCopy(nsHttpAtom const& aHeader) {
   };
 
   size_t unused;
-  return BinarySearchIf(blackList, 0, ArrayLength(blackList),
+  return BinarySearchIf(blackList, 0, std::size(blackList),
                         HttpAtomComparator(aHeader), &unused);
 }
 
@@ -3572,7 +3572,7 @@ void HttpBaseChannel::SetChannelBlockedByOpaqueResponse() {
 }
 
 NS_IMETHODIMP
-HttpBaseChannel::SetCookie(const nsACString& aCookieHeader) {
+HttpBaseChannel::SetCookieHeaders(const nsTArray<nsCString>& aCookieHeaders) {
   if (mLoadFlags & LOAD_ANONYMOUS) return NS_OK;
 
   if (IsBrowsingContextDiscarded()) {
@@ -3580,14 +3580,19 @@ HttpBaseChannel::SetCookie(const nsACString& aCookieHeader) {
   }
 
   // empty header isn't an error
-  if (aCookieHeader.IsEmpty()) {
+  if (aCookieHeaders.IsEmpty()) {
     return NS_OK;
   }
 
   nsICookieService* cs = gHttpHandler->GetCookieService();
   NS_ENSURE_TRUE(cs, NS_ERROR_FAILURE);
 
-  return cs->SetCookieStringFromHttp(mURI, aCookieHeader, this);
+  for (const nsCString& cookieHeader : aCookieHeaders) {
+    nsresult rv = cs->SetCookieStringFromHttp(mURI, cookieHeader, this);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -4461,6 +4466,13 @@ already_AddRefed<nsILoadInfo> HttpBaseChannel::CloneLoadInfoForRedirect(
       newLoadInfo->SetLoadTriggeredFromExternal(false);
     }
     newLoadInfo->ResetSandboxedNullPrincipalID();
+
+    // Reset HTTPS-first and -only status on http redirect. To not unexpectedly
+    // downgrade requests that weren't upgraded via HTTPS-First (Bug 1904238).
+    if (isTopLevelDoc) {
+      Unused << newLoadInfo->SetHttpsOnlyStatus(
+          nsILoadInfo::HTTPS_ONLY_UNINITIALIZED);
+    }
   }
 
   newLoadInfo->AppendRedirectHistoryEntry(this, isInternalRedirect);
@@ -4711,7 +4723,6 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
       do_QueryInterface(static_cast<nsIHttpChannel*>(this)));
   if (oldTimedChannel) {
     config.timedChannelInfo = Some(dom::TimedChannelInfo());
-    config.timedChannelInfo->timingEnabled() = LoadTimingEnabled();
     config.timedChannelInfo->redirectCount() = mRedirectCount;
     config.timedChannelInfo->internalRedirectCount() = mInternalRedirectCount;
     config.timedChannelInfo->asyncOpen() = mAsyncOpenTime;
@@ -4807,8 +4818,6 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
   // Transfer the timing data (if we are dealing with an nsITimedChannel).
   nsCOMPtr<nsITimedChannel> newTimedChannel(do_QueryInterface(newChannel));
   if (config.timedChannelInfo && newTimedChannel) {
-    newTimedChannel->SetTimingEnabled(config.timedChannelInfo->timingEnabled());
-
     // If we're an internal redirect, or a document channel replacement,
     // then we shouldn't record any new timing for this and just copy
     // over the existing values.
@@ -5377,18 +5386,6 @@ HttpBaseChannel::SetMatchedTrackingInfo(
 //-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
-HttpBaseChannel::SetTimingEnabled(bool enabled) {
-  StoreTimingEnabled(enabled);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-HttpBaseChannel::GetTimingEnabled(bool* _retval) {
-  *_retval = LoadTimingEnabled();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 HttpBaseChannel::GetChannelCreation(TimeStamp* _retval) {
   *_retval = mChannelCreationTimestamp;
   return NS_OK;
@@ -5860,12 +5857,6 @@ IMPL_TIMING_ATTR(TransactionPending)
 #undef IMPL_TIMING_ATTR
 
 void HttpBaseChannel::MaybeReportTimingData() {
-  // If performance timing is disabled, there is no need for the Performance
-  // object anymore.
-  if (!LoadTimingEnabled()) {
-    return;
-  }
-
   // There is no point in continuing, since the performance object in the parent
   // isn't the same as the one in the child which will be reporting resource
   // performance.
@@ -6180,7 +6171,7 @@ nsresult HttpBaseChannel::CheckRedirectLimit(nsIURI* aNewURI,
   // upgrade behavior if we have upgrade-downgrade loop to break the loop and
   // load the http request next
   if (mozilla::StaticPrefs::
-          dom_security_https_first_add_exception_on_failiure() &&
+          dom_security_https_first_add_exception_on_failure() &&
       nsHTTPSOnlyUtils::IsUpgradeDowngradeEndlessLoop(
           mURI, aNewURI, mLoadInfo,
           {nsHTTPSOnlyUtils::UpgradeDowngradeEndlessLoopOptions::
@@ -6564,6 +6555,9 @@ static void CollectORBBlockTelemetry(
           Telemetry::LABELS_ORB_BLOCK_INITIATOR::BLOCKED_FETCH);
       break;
     case ExtContentPolicy::TYPE_SCRIPT:
+    // New `JSON` label will be added in a follow-up.
+    // https://bugzilla.mozilla.org/show_bug.cgi?id=1936599
+    case ExtContentPolicy::TYPE_JSON:
       Telemetry::AccumulateCategorical(
           Telemetry::LABELS_ORB_BLOCK_INITIATOR::SCRIPT);
       break;

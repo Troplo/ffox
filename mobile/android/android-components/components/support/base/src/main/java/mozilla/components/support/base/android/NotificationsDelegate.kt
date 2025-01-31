@@ -20,11 +20,6 @@ typealias OnPermissionGranted = () -> Unit
 typealias OnPermissionRejected = () -> Unit
 
 /**
- * Exception thrown when a [NotificationsDelegate] is not bound to any [AppCompatActivity]
- */
-class UnboundHandlerException(message: String) : Exception(message)
-
-/**
  * Handles showing notifications and asking permission, if needed.
  *
  * @param notificationManagerCompat a reference to [NotificationManagerCompat].
@@ -100,12 +95,13 @@ class NotificationsDelegate(
         onPermissionGranted: OnPermissionGranted = { },
         onPermissionRejected: OnPermissionRejected = { },
         showPermissionRationale: Boolean = false,
+        isCrashReportNotification: Boolean = false,
     ) {
         if (hasPostNotificationsPermission()) {
             notificationManagerCompat.notify(notificationTag, notificationId, notification)
             onPermissionGranted.invoke()
         } else {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !isCrashReportNotification) {
                 requestNotificationPermission(
                     onPermissionGranted = {
                         notificationManagerCompat.notify(
@@ -152,10 +148,6 @@ class NotificationsDelegate(
 
         this.onPermissionGranted = onPermissionGranted
         this.onPermissionRejected = onPermissionRejected
-
-        if (notificationPermissionHandler.isEmpty()) {
-            throw UnboundHandlerException("You must bind the NotificationPermissionHandler to an activity")
-        }
 
         if (showPermissionRationale) {
             showPermissionRationale(onPermissionGranted, onPermissionRejected)

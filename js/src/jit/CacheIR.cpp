@@ -109,7 +109,8 @@ size_t js::jit::NumInputsForCacheKind(CacheKind kind) {
   switch (kind) {
     case CacheKind::NewArray:
     case CacheKind::NewObject:
-    case CacheKind::GetIntrinsic:
+    case CacheKind::Lambda:
+    case CacheKind::LazyConstant:
       return 0;
     case CacheKind::GetProp:
     case CacheKind::TypeOf:
@@ -7372,25 +7373,26 @@ static JitCode* GetOrCreateRegExpStub(JSContext* cx, InlinableNative native) {
     cx->clearPendingException();
     return nullptr;
   }
-  JitCode* code;
+  JitZone::StubKind kind;
   switch (native) {
     case InlinableNative::IntrinsicRegExpBuiltinExecForTest:
     case InlinableNative::IntrinsicRegExpExecForTest:
-      code = cx->zone()->jitZone()->ensureRegExpExecTestStubExists(cx);
+      kind = JitZone::StubKind::RegExpExecTest;
       break;
     case InlinableNative::IntrinsicRegExpBuiltinExec:
     case InlinableNative::IntrinsicRegExpExec:
-      code = cx->zone()->jitZone()->ensureRegExpExecMatchStubExists(cx);
+      kind = JitZone::StubKind::RegExpExecMatch;
       break;
     case InlinableNative::RegExpMatcher:
-      code = cx->zone()->jitZone()->ensureRegExpMatcherStubExists(cx);
+      kind = JitZone::StubKind::RegExpMatcher;
       break;
     case InlinableNative::RegExpSearcher:
-      code = cx->zone()->jitZone()->ensureRegExpSearcherStubExists(cx);
+      kind = JitZone::StubKind::RegExpSearcher;
       break;
     default:
       MOZ_CRASH("Unexpected native");
   }
+  JitCode* code = cx->zone()->jitZone()->ensureStubExists(cx, kind);
   if (!code) {
     MOZ_ASSERT(cx->isThrowingOutOfMemory() || cx->isThrowingOverRecursed());
     cx->clearPendingException();
@@ -9733,6 +9735,25 @@ AttachDecision InlinableNativeIRGenerator::tryAttachAtomicsIsLockFree() {
   return AttachDecision::Attach;
 }
 
+AttachDecision InlinableNativeIRGenerator::tryAttachAtomicsPause() {
+  // We don't yet support inlining when the iteration count argument is present.
+  if (argc_ != 0) {
+    return AttachDecision::NoAction;
+  }
+
+  // Initialize the input operand.
+  initializeInputOperand();
+
+  // Guard callee is the `pause` native function.
+  emitNativeCalleeGuard();
+
+  writer.atomicsPauseResult();
+  writer.returnFromIC();
+
+  trackAttached("AtomicsPause");
+  return AttachDecision::Attach;
+}
+
 AttachDecision InlinableNativeIRGenerator::tryAttachBoolean() {
   // Need zero or one argument.
   if (argc_ > 1) {
@@ -10223,6 +10244,68 @@ AttachDecision InlinableNativeIRGenerator::tryAttachSetHas() {
   return AttachDecision::Attach;
 }
 
+AttachDecision InlinableNativeIRGenerator::tryAttachSetDelete() {
+  // Ensure |this| is a SetObject.
+  if (!thisval_.isObject() || !thisval_.toObject().is<SetObject>()) {
+    return AttachDecision::NoAction;
+  }
+
+  // Need a single argument.
+  if (argc_ != 1) {
+    return AttachDecision::NoAction;
+  }
+
+  // Initialize the input operand.
+  initializeInputOperand();
+
+  // Guard callee is the 'delete' native function.
+  emitNativeCalleeGuard();
+
+  // Guard |this| is a SetObject.
+  ValOperandId thisValId =
+      writer.loadArgumentFixedSlot(ArgumentKind::This, argc_);
+  ObjOperandId objId = writer.guardToObject(thisValId);
+  emitOptimisticClassGuard(objId, &thisval_.toObject(), GuardClassKind::Set);
+
+  ValOperandId argId = writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
+  writer.setDeleteResult(objId, argId);
+  writer.returnFromIC();
+
+  trackAttached("SetDelete");
+  return AttachDecision::Attach;
+}
+
+AttachDecision InlinableNativeIRGenerator::tryAttachSetAdd() {
+  // Ensure |this| is a SetObject.
+  if (!thisval_.isObject() || !thisval_.toObject().is<SetObject>()) {
+    return AttachDecision::NoAction;
+  }
+
+  // Need one argument.
+  if (argc_ != 1) {
+    return AttachDecision::NoAction;
+  }
+
+  // Initialize the input operand.
+  initializeInputOperand();
+
+  // Guard callee is the 'add' native function.
+  emitNativeCalleeGuard();
+
+  // Guard |this| is a SetObject.
+  ValOperandId thisValId =
+      writer.loadArgumentFixedSlot(ArgumentKind::This, argc_);
+  ObjOperandId objId = writer.guardToObject(thisValId);
+  emitOptimisticClassGuard(objId, &thisval_.toObject(), GuardClassKind::Set);
+
+  ValOperandId keyId = writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
+  writer.setAddResult(objId, keyId);
+  writer.returnFromIC();
+
+  trackAttached("SetAdd");
+  return AttachDecision::Attach;
+}
+
 AttachDecision InlinableNativeIRGenerator::tryAttachSetSize() {
   // Ensure |this| is a SetObject.
   if (!thisval_.isObject() || !thisval_.toObject().is<SetObject>()) {
@@ -10424,6 +10507,75 @@ AttachDecision InlinableNativeIRGenerator::tryAttachMapGet() {
   writer.returnFromIC();
 
   trackAttached("MapGet");
+  return AttachDecision::Attach;
+}
+
+AttachDecision InlinableNativeIRGenerator::tryAttachMapDelete() {
+  // Ensure |this| is a MapObject.
+  if (!thisval_.isObject() || !thisval_.toObject().is<MapObject>()) {
+    return AttachDecision::NoAction;
+  }
+
+  // Need a single argument.
+  if (argc_ != 1) {
+    return AttachDecision::NoAction;
+  }
+
+  // Initialize the input operand.
+  initializeInputOperand();
+
+  // Guard callee is the 'delete' native function.
+  emitNativeCalleeGuard();
+
+  // Guard |this| is a MapObject.
+  ValOperandId thisValId =
+      writer.loadArgumentFixedSlot(ArgumentKind::This, argc_);
+  ObjOperandId objId = writer.guardToObject(thisValId);
+  emitOptimisticClassGuard(objId, &thisval_.toObject(), GuardClassKind::Map);
+
+  ValOperandId argId = writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
+  writer.mapDeleteResult(objId, argId);
+  writer.returnFromIC();
+
+  trackAttached("MapDelete");
+  return AttachDecision::Attach;
+}
+
+AttachDecision InlinableNativeIRGenerator::tryAttachMapSet() {
+#ifdef JS_CODEGEN_X86
+  // 32-bit x86 does not have enough registers for the AutoCallVM output, the
+  // MapObject*, and two Values.
+  return AttachDecision::NoAction;
+#endif
+
+  // Ensure |this| is a MapObject.
+  if (!thisval_.isObject() || !thisval_.toObject().is<MapObject>()) {
+    return AttachDecision::NoAction;
+  }
+
+  // Need two arguments.
+  if (argc_ != 2) {
+    return AttachDecision::NoAction;
+  }
+
+  // Initialize the input operand.
+  initializeInputOperand();
+
+  // Guard callee is the 'set' native function.
+  emitNativeCalleeGuard();
+
+  // Guard |this| is a MapObject.
+  ValOperandId thisValId =
+      writer.loadArgumentFixedSlot(ArgumentKind::This, argc_);
+  ObjOperandId objId = writer.guardToObject(thisValId);
+  emitOptimisticClassGuard(objId, &thisval_.toObject(), GuardClassKind::Map);
+
+  ValOperandId keyId = writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
+  ValOperandId valId = writer.loadArgumentFixedSlot(ArgumentKind::Arg1, argc_);
+  writer.mapSetResult(objId, keyId, valId);
+  writer.returnFromIC();
+
+  trackAttached("MapSet");
   return AttachDecision::Attach;
 }
 
@@ -11304,6 +11456,64 @@ AttachDecision InlinableNativeIRGenerator::tryAttachTypedArrayConstructor() {
   return AttachDecision::Attach;
 }
 
+AttachDecision InlinableNativeIRGenerator::tryAttachMapSetConstructor(
+    InlinableNative native) {
+  MOZ_ASSERT(native == InlinableNative::MapConstructor ||
+             native == InlinableNative::SetConstructor);
+  MOZ_ASSERT(flags_.isConstructing());
+
+  // Must have either no arguments or a single (iterable) argument.
+  if (argc_ > 1) {
+    return AttachDecision::NoAction;
+  }
+
+  if (!isFirstStub()) {
+    // Attach only once to prevent slowdowns for polymorphic calls.
+    return AttachDecision::NoAction;
+  }
+
+  JSObject* templateObj;
+  if (native == InlinableNative::MapConstructor) {
+    templateObj = GlobalObject::getOrCreateMapTemplateObject(cx_);
+  } else {
+    templateObj = GlobalObject::getOrCreateSetTemplateObject(cx_);
+  }
+  if (!templateObj) {
+    cx_->recoverFromOutOfMemory();
+    return AttachDecision::NoAction;
+  }
+
+  // Initialize the input operand.
+  initializeInputOperand();
+
+  // Guard callee and newTarget are this Map/Set constructor function.
+  emitNativeCalleeGuard();
+
+  if (argc_ == 1) {
+    ValOperandId iterableId =
+        writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_, flags_);
+    if (native == InlinableNative::MapConstructor) {
+      writer.newMapObjectFromIterableResult(templateObj, iterableId);
+    } else {
+      writer.newSetObjectFromIterableResult(templateObj, iterableId);
+    }
+  } else {
+    if (native == InlinableNative::MapConstructor) {
+      writer.newMapObjectResult(templateObj);
+    } else {
+      writer.newSetObjectResult(templateObj);
+    }
+  }
+  writer.returnFromIC();
+
+  if (native == InlinableNative::MapConstructor) {
+    trackAttached("MapConstructor");
+  } else {
+    trackAttached("SetConstructor");
+  }
+  return AttachDecision::Attach;
+}
+
 AttachDecision InlinableNativeIRGenerator::tryAttachSpecializedFunctionBind(
     Handle<JSObject*> target, Handle<BoundFunctionObject*> templateObj) {
   // Try to attach a faster stub that's more specialized than what we emit in
@@ -11840,6 +12050,9 @@ AttachDecision InlinableNativeIRGenerator::tryAttachStub() {
         return tryAttachArrayConstructor();
       case InlinableNative::TypedArrayConstructor:
         return tryAttachTypedArrayConstructor();
+      case InlinableNative::MapConstructor:
+      case InlinableNative::SetConstructor:
+        return tryAttachMapSetConstructor(native);
       case InlinableNative::String:
         return tryAttachStringConstructor();
       case InlinableNative::Object:
@@ -11938,6 +12151,7 @@ AttachDecision InlinableNativeIRGenerator::tryAttachStub() {
     case InlinableNative::IntlGuardToCollator:
     case InlinableNative::IntlGuardToDateTimeFormat:
     case InlinableNative::IntlGuardToDisplayNames:
+    case InlinableNative::IntlGuardToDurationFormat:
     case InlinableNative::IntlGuardToListFormat:
     case InlinableNative::IntlGuardToNumberFormat:
     case InlinableNative::IntlGuardToPluralRules:
@@ -12241,6 +12455,8 @@ AttachDecision InlinableNativeIRGenerator::tryAttachStub() {
       return tryAttachAtomicsStore();
     case InlinableNative::AtomicsIsLockFree:
       return tryAttachAtomicsIsLockFree();
+    case InlinableNative::AtomicsPause:
+      return tryAttachAtomicsPause();
 
     // BigInt natives.
     case InlinableNative::BigInt:
@@ -12255,16 +12471,28 @@ AttachDecision InlinableNativeIRGenerator::tryAttachStub() {
       return tryAttachBoolean();
 
     // Set natives.
+    case InlinableNative::SetConstructor:
+      return AttachDecision::NoAction;  // Not callable.
     case InlinableNative::SetHas:
       return tryAttachSetHas();
+    case InlinableNative::SetDelete:
+      return tryAttachSetDelete();
+    case InlinableNative::SetAdd:
+      return tryAttachSetAdd();
     case InlinableNative::SetSize:
       return tryAttachSetSize();
 
     // Map natives.
+    case InlinableNative::MapConstructor:
+      return AttachDecision::NoAction;  // Not callable.
     case InlinableNative::MapHas:
       return tryAttachMapHas();
     case InlinableNative::MapGet:
       return tryAttachMapGet();
+    case InlinableNative::MapDelete:
+      return tryAttachMapDelete();
+    case InlinableNative::MapSet:
+      return tryAttachMapSet();
 
     // Date natives and intrinsics.
     case InlinableNative::DateGetTime:
@@ -13510,13 +13738,13 @@ AttachDecision ToBoolIRGenerator::tryAttachBigInt() {
   return AttachDecision::Attach;
 }
 
-GetIntrinsicIRGenerator::GetIntrinsicIRGenerator(JSContext* cx,
+LazyConstantIRGenerator::LazyConstantIRGenerator(JSContext* cx,
                                                  HandleScript script,
                                                  jsbytecode* pc, ICState state,
                                                  HandleValue val)
-    : IRGenerator(cx, script, pc, CacheKind::GetIntrinsic, state), val_(val) {}
+    : IRGenerator(cx, script, pc, CacheKind::LazyConstant, state), val_(val) {}
 
-void GetIntrinsicIRGenerator::trackAttached(const char* name) {
+void LazyConstantIRGenerator::trackAttached(const char* name) {
   stubName_ = name ? name : "NotAttached";
 #ifdef JS_CACHEIR_SPEW
   if (const CacheIRSpewer::Guard& sp = CacheIRSpewer::Guard(*this, name)) {
@@ -13525,11 +13753,11 @@ void GetIntrinsicIRGenerator::trackAttached(const char* name) {
 #endif
 }
 
-AttachDecision GetIntrinsicIRGenerator::tryAttachStub() {
+AttachDecision LazyConstantIRGenerator::tryAttachStub() {
   AutoAssertNoPendingException aanpe(cx_);
   writer.loadValueResult(val_);
   writer.returnFromIC();
-  trackAttached("GetIntrinsic");
+  trackAttached("LazyConstant");
   return AttachDecision::Attach;
 }
 
@@ -14253,13 +14481,20 @@ AttachDecision BinaryArithIRGenerator::tryAttachStringConcat() {
     return AttachDecision::NoAction;
   }
 
+  JitCode* code = cx_->zone()->jitZone()->ensureStubExists(
+      cx_, JitZone::StubKind::StringConcat);
+  if (!code) {
+    cx_->recoverFromOutOfMemory();
+    return AttachDecision::NoAction;
+  }
+
   ValOperandId lhsId(writer.setInputOperandId(0));
   ValOperandId rhsId(writer.setInputOperandId(1));
 
   StringOperandId lhsStrId = emitToStringGuard(lhsId, lhs_);
   StringOperandId rhsStrId = emitToStringGuard(rhsId, rhs_);
 
-  writer.callStringConcatResult(lhsStrId, rhsStrId);
+  writer.concatStringsResult(lhsStrId, rhsStrId, code);
 
   writer.returnFromIC();
   trackAttached("BinaryArith.StringConcat");
@@ -15009,6 +15244,61 @@ AttachDecision NewObjectIRGenerator::tryAttachStub() {
   AutoAssertNoPendingException aanpe(cx_);
 
   TRY_ATTACH(tryAttachPlainObject());
+
+  trackAttached(IRGenerator::NotAttached);
+  return AttachDecision::NoAction;
+}
+
+LambdaIRGenerator::LambdaIRGenerator(JSContext* cx, HandleScript script,
+                                     jsbytecode* pc, ICState state, JSOp op,
+                                     Handle<JSFunction*> canonicalFunction,
+                                     BaselineFrame* frame)
+    : IRGenerator(cx, script, pc, CacheKind::Lambda, state, frame),
+#ifdef JS_CACHEIR_SPEW
+      op_(op),
+#endif
+      canonicalFunction_(canonicalFunction) {
+  MOZ_ASSERT(canonicalFunction_);
+}
+
+void LambdaIRGenerator::trackAttached(const char* name) {
+  stubName_ = name ? name : "NotAttached";
+#ifdef JS_CACHEIR_SPEW
+  if (const CacheIRSpewer::Guard& sp = CacheIRSpewer::Guard(*this, name)) {
+    sp.opcodeProperty("op", op_);
+  }
+#endif
+}
+
+AttachDecision LambdaIRGenerator::tryAttachFunctionClone() {
+  // Don't optimize asm.js module functions.
+  if (canonicalFunction_->isNativeFun()) {
+    MOZ_ASSERT(IsAsmJSModule(canonicalFunction_));
+    return AttachDecision::NoAction;
+  }
+
+  // Stub doesn't support metadata builder.
+  if (cx_->realm()->hasAllocationMetadataBuilder()) {
+    return AttachDecision::NoAction;
+  }
+
+  writer.guardNoAllocationMetadataBuilder(
+      cx_->realm()->addressOfMetadataBuilder());
+
+  gc::AllocKind allocKind = canonicalFunction_->getAllocKind();
+  MOZ_ASSERT(allocKind == gc::AllocKind::FUNCTION ||
+             allocKind == gc::AllocKind::FUNCTION_EXTENDED);
+  writer.newFunctionCloneResult(canonicalFunction_, allocKind);
+  writer.returnFromIC();
+
+  trackAttached("Lambda.FunctionClone");
+  return AttachDecision::Attach;
+}
+
+AttachDecision LambdaIRGenerator::tryAttachStub() {
+  AutoAssertNoPendingException aanpe(cx_);
+
+  TRY_ATTACH(tryAttachFunctionClone());
 
   trackAttached(IRGenerator::NotAttached);
   return AttachDecision::NoAction;

@@ -53,7 +53,7 @@ body {
 
     /* stylelint-disable-next-line media-query-no-invalid */
     @media (-moz-bool-pref: "sidebar.verticalTabs") {
-      min-width: 800px;
+      min-width: 732px;
 
       @media (-moz-platform: macos) {
         min-width: 670px;
@@ -83,7 +83,8 @@ body {
   /* This should be used for icons and chiclets inside the input field. It makes
      the gap around them more uniform when they are close to the field edges */
   --urlbar-icon-border-radius: calc(var(--toolbarbutton-border-radius) - 1px);
-  --urlbar-searchmodeswitcher-spacing: 6px;
+  --urlbar-searchmodeswitcher-inline-padding: 6px;
+  --urlbar-searchmodeswitcher-margin-inline-end: .45em;
 
   --pocket-icon-fill: #ef4056;
 
@@ -134,19 +135,7 @@ body {
 
 #navigator-toolbox {
   appearance: none;
-  position: relative;
   z-index: var(--browser-area-z-index-toolbox);
-
-  background-color: var(--toolbox-non-lwt-bgcolor);
-  color: var(--toolbox-non-lwt-textcolor);
-
-  will-change: background-color;
-  transition: background-color var(--inactive-window-transition);
-
-  &:-moz-window-inactive {
-    background-color: var(--toolbox-non-lwt-bgcolor-inactive);
-    color: var(--toolbox-non-lwt-textcolor-inactive);
-  }
 
   &[fullscreenShouldAnimate] {
     transition: 0.8s margin-top ease-out;
@@ -163,20 +152,16 @@ body {
     border-bottom-color: var(--chrome-content-separator-color);
   }
 
-  :root[customizing] & {
-    border-bottom-style: none;
-  }
-
+  /* Themes define a set of toolbox foreground and background colors which we
+   * want to use across the toolbox and sidebar areas. That happens via the
+   * .browser-toolbox-background class. It's hard to make a theme's background
+   * images work with something other than the toolbox, so for now we ignore
+   * them on other things like the sidebar that could have
+   * .browser-toolbox-background */
   :root[lwtheme] & {
     background-image: var(--lwt-additional-images);
     background-repeat: var(--lwt-background-tiling);
     background-position: var(--lwt-background-alignment);
-    background-color: var(--lwt-accent-color);
-    color: inherit;
-
-    &:-moz-window-inactive {
-      background-color: var(--lwt-accent-color-inactive, var(--lwt-accent-color));
-    }
   }
 
   /* When a theme defines both theme_frame and additional_backgrounds, show
@@ -188,15 +173,59 @@ body {
   }
 }
 
+.browser-toolbox-background {
+  position: relative;
+  background-color: var(--toolbox-bgcolor);
+  color: var(--toolbox-textcolor);
+
+  will-change: background-color;
+  transition: background-color var(--inactive-window-transition);
+
+  &:-moz-window-inactive {
+    background-color: var(--toolbox-bgcolor-inactive);
+    color: var(--toolbox-textcolor-inactive);
+  }
+
+  :root[customizing] & {
+    border-bottom-style: none;
+  }
+
+  /* stylelint-disable-next-line media-query-no-invalid */
+  @media (-moz-platform: macos) and (-moz-bool-pref: "browser.theme.native-theme") {
+    /* Don't make the toolbox vibrant when in full-screen. macOS fullscreen has a
+     * native titlebar outside of the window (revealed on hover) anyways. */
+    :root[customtitlebar]:not([lwtheme], [macOSNativeFullscreen]) & {
+      background-color: transparent;
+
+      /* This is conceptually a background, but putting this on a
+       * pseudo-element avoids it from suppressing the chrome-content separator
+       * border, etc */
+      &::after {
+        -moz-default-appearance: -moz-window-titlebar;
+        appearance: auto;
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+      }
+    }
+  }
+}
+
 .browser-toolbar {
   appearance: none;
   /* Reset linux padding */
   padding: 0;
+  border-style: none;
+  background-color: transparent;
+  color: inherit;
 
-  &:not(.browser-titlebar) {
-    background-color: var(--toolbar-bgcolor);
-    color: var(--toolbar-color);
-    border-style: none;
+  /* stylelint-disable-next-line media-query-no-invalid */
+  @media not (-moz-bool-pref: "sidebar.verticalTabs") {
+    &:not(.browser-titlebar) {
+      background-color: var(--toolbar-bgcolor);
+      color: var(--toolbar-color);
+    }
   }
 }
 
@@ -205,7 +234,8 @@ body {
 .browser-titlebar {
   -moz-window-dragging: drag;
 
-  :root[tabsintitlebar] & {
+  :root[customtitlebar] &,
+  :root[customtitlebar] & #urlbar:popover-open {
     will-change: opacity;
     transition: opacity var(--inactive-window-transition);
 
@@ -234,14 +264,16 @@ body {
     visibility: hidden;
   }
 
-  :root:not([chromemargin], [inFullscreen]) & {
+  :root:not([customtitlebar], [inFullscreen]) & {
     display: none;
   }
 }
 
 .titlebar-spacer {
+  width: 40px;
+
   :root[inFullscreen] &,
-  :root:not([tabsintitlebar]) & {
+  :root:not([customtitlebar]) & {
     display: none;
   }
 
@@ -261,6 +293,19 @@ body {
   @media (-moz-gtk-csd-reversed-placement) {
     :root:not([sizemode=normal]) &[type="post-tabs"],
     :root[gtktiledwindow=true] &[type="post-tabs"] {
+      display: none;
+    }
+  }
+
+  @media (max-width: 500px) {
+    &[type="post-tabs"] {
+      display: none;
+    }
+  }
+
+  /* stylelint-disable-next-line media-query-no-invalid */
+  @media (-moz-bool-pref: "sidebar.verticalTabs") {
+    &[type="pre-tabs"], &[type="post-tabs"] {
       display: none;
     }
   }
@@ -288,7 +333,7 @@ body {
   -moz-default-appearance: -moz-window-button-box;
   position: relative;
 
-  :root:not([tabsintitlebar], [sizemode=fullscreen]) & {
+  :root:not([customtitlebar], [sizemode=fullscreen]) & {
     display: none;
   }
 }
@@ -303,12 +348,12 @@ body {
        as tall as the tab toolbar such that the window controls don't appear to move up.
        For MacOS, autohide is never true on the menubar.
     */
-    :root[tabsintitlebar] #navigator-toolbox:not([tabs-hidden]) > & {
+    :root[customtitlebar] #navigator-toolbox:not([tabs-hidden]) > & {
       min-height: var(--tabstrip-min-height);
     }
     /* adjust the height of the auto-hiding toolbar menubar when the tabstrip is
        hidden and we need to match the height of the nav-bar. */
-    :root[tabsintitlebar] #navigator-toolbox[tabs-hidden] > & {
+    :root[customtitlebar] #navigator-toolbox[tabs-hidden] > & {
       min-height: calc(var(--urlbar-min-height) + 2 * var(--urlbar-padding-block));
     }
 
@@ -328,6 +373,14 @@ body {
 /* Hide menu elements intended for keyboard access support */
 #main-menubar[openedwithkey=false] .show-only-for-keyboard {
   display: none;
+}
+
+/* Profiles menu */
+
+.menuitem-iconic-profile {
+  -moz-context-properties: fill, stroke;
+  fill: var(--menu-profiles-theme-bg);
+  stroke: var(--menu-profiles-theme-fg);
 }
 
 /* Navigation toolbar */
@@ -357,6 +410,13 @@ body {
   > :is(toolbarbutton, toolbaritem):first-child,
   > toolbarpaletteitem:first-child > :is(toolbarbutton, toolbaritem) {
     padding-inline-start: var(--toolbar-start-end-padding);
+  }
+}
+
+/* stylelint-disable-next-line media-query-no-invalid */
+@media not (-moz-bool-pref: "sidebar.verticalTabs") {
+  #vertical-spacer {
+    display: none;
   }
 }
 
@@ -422,8 +482,8 @@ body {
   -moz-window-dragging: inherit;
 }
 
+#fxms-bmb-button-wrapper,
 toolbarpaletteitem > #personal-bookmarks > #PlacesToolbar,
-toolbarpaletteitem:has(> toolbarbutton.fxms-bmb-button),
 #personal-bookmarks:is([overflowedItem=true], [cui-areatype="panel"]) > #PlacesToolbar {
   display: none;
 }
@@ -606,7 +666,7 @@ menupopup::part(drop-indicator) {
   width: 100%;
   display: block;
   text-align: center;
-  box-shadow: 0px 1px 0px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
 }
 
 #cfr-notification-header-stack {
@@ -1059,21 +1119,36 @@ popupnotificationcontent {
   align-items: center;
   font-size: 2em;
 
-  > div {
+  > div:nth-of-type(1) {
     width: 32px;
     height: 32px;
     background-image: url("chrome://browser/content/logos/relay.svg");
     background-repeat: no-repeat;
   }
 
-  > span:first-of-type {
-    font-weight: bold;
-    margin-inline-start: 8px;
-  }
+  > div:nth-of-type(2) {
+    direction: ltr;
+    margin-inline: 8px;
 
-  > span:last-of-type {
-    font-weight: normal;
-    white-space: pre;
+    > span:first-of-type {
+      font-weight: bold;
+    }
+
+    > span:last-of-type {
+      font-weight: normal;
+    }
+  }
+}
+
+.relay-integration-header-variation {
+  display: flex;
+  align-items: center;
+  font-weight: var(--font-weight-bold);
+  font-size: 1.5em;
+  margin: auto;
+
+  > p {
+    margin-block: auto;
   }
 }
 

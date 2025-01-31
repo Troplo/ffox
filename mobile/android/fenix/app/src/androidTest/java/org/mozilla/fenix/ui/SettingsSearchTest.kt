@@ -422,7 +422,7 @@ class SettingsSearchTest : TestSetup() {
             openEngineOverflowMenu(customSearchEngineTitle)
             clickDeleteSearchEngine()
             verifySnackBarText("Deleted $customSearchEngineTitle")
-            clickSnackbarButton("UNDO")
+            clickSnackbarButton(activityTestRule, "UNDO")
             verifyEngineListContains(customSearchEngineTitle, shouldExist = true)
             changeDefaultSearchEngine(customSearchEngineTitle)
             openEngineOverflowMenu(customSearchEngineTitle)
@@ -486,6 +486,8 @@ class SettingsSearchTest : TestSetup() {
                 activityTestRule,
                 "mozilla firefox",
                 searchTerm = "mozilla ",
+                shouldUseSearchShort = true,
+                searchEngineName = "DuckDuckGo",
             )
         }.dismissSearchBar {
         }.openThreeDotMenu {

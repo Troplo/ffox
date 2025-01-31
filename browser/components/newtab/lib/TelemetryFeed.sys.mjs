@@ -98,8 +98,6 @@ ChromeUtils.defineLazyGetter(
   () => lazy.TelemetrySession.getMetadata("").sessionId
 );
 
-// The scalar category for TopSites of Contextual Services
-const SCALAR_CATEGORY_TOPSITES = "contextual.services.topsites";
 // `contextId` is a unique identifier used by Contextual Services
 const CONTEXT_ID_PREF = "browser.contextual-services.contextId";
 ChromeUtils.defineLazyGetter(lazy, "contextId", () => {
@@ -196,11 +194,8 @@ export class TelemetryFeed {
       "browser-open-newtab-start"
     );
     // Set two scalars for the "deletion-request" ping (See bug 1602064 and 1729474)
-    Services.telemetry.scalarSet(
-      "deletion.request.impression_id",
-      this._impressionId
-    );
-    Services.telemetry.scalarSet("deletion.request.context_id", lazy.contextId);
+    Glean.deletionRequest.impressionId.set(this._impressionId);
+    Glean.deletionRequest.contextId.set(lazy.contextId);
     Glean.newtab.locale.set(Services.locale.appLocaleAsBCP47);
     Glean.newtabHandoffPreference.enabled.set(
       lazy.handoffToAwesomebarPrefValue
@@ -669,11 +664,9 @@ export class TelemetryFeed {
     const session = this.sessions.get(au.getPortIdOfSender(action));
     if (type === "impression") {
       pingType = "topsites-impression";
-      Services.telemetry.keyedScalarAdd(
-        `${SCALAR_CATEGORY_TOPSITES}.impression`,
-        `${source}_${legacyTelemetryPosition}`,
-        1
-      );
+      Glean.contextualServicesTopsites.impression[
+        `${source}_${legacyTelemetryPosition}`
+      ].add(1);
       if (session) {
         Glean.topsites.impression.record({
           advertiser_name,
@@ -685,11 +678,9 @@ export class TelemetryFeed {
       }
     } else if (type === "click") {
       pingType = "topsites-click";
-      Services.telemetry.keyedScalarAdd(
-        `${SCALAR_CATEGORY_TOPSITES}.click`,
-        `${source}_${legacyTelemetryPosition}`,
-        1
-      );
+      Glean.contextualServicesTopsites.click[
+        `${source}_${legacyTelemetryPosition}`
+      ].add(1);
       if (session) {
         Glean.topsites.click.record({
           advertiser_name,
@@ -771,6 +762,7 @@ export class TelemetryFeed {
       },
     });
     const session = this.sessions.get(au.getPortIdOfSender(action));
+
     switch (action.data?.event) {
       case "CLICK": {
         const {
@@ -783,12 +775,16 @@ export class TelemetryFeed {
           firstVisibleTimestamp,
           feature,
           scheduled_corpus_item_id,
+          corpus_item_id,
           received_rank,
           recommended_at,
           matches_selected_topic,
           selected_topics,
           is_list_card,
           format,
+          section,
+          section_position,
+          is_secton_followed,
         } = action.data.value ?? {};
         if (
           action.data.source === "POPULAR_TOPICS" ||
@@ -808,15 +804,24 @@ export class TelemetryFeed {
             newtab_visit_id: session.session_id,
             is_sponsored: card_type === "spoc",
             ...(format ? { format } : {}),
+            ...(section
+              ? {
+                  section,
+                  section_position,
+                  is_secton_followed,
+                }
+              : {}),
             matches_selected_topic,
             selected_topics,
             topic,
             is_list_card,
             position: action.data.action_position,
             tile_id,
-            ...(scheduled_corpus_item_id
+            // We conditionally add in a few props.
+            ...(corpus_item_id ? { corpus_item_id } : {}),
+            ...(scheduled_corpus_item_id ? { scheduled_corpus_item_id } : {}),
+            ...(corpus_item_id || scheduled_corpus_item_id
               ? {
-                  scheduled_corpus_item_id,
                   received_rank,
                   recommended_at,
                 }
@@ -853,18 +858,24 @@ export class TelemetryFeed {
           tile_id,
           recommendation_id,
           scheduled_corpus_item_id,
+          corpus_item_id,
           received_rank,
           recommended_at,
           thumbs_up,
           thumbs_down,
           topic,
+          section,
+          section_position,
+          is_secton_followed,
         } = action.data.value ?? {};
         Glean.pocket.thumbVotingInteraction.record({
           newtab_visit_id: session.session_id,
           tile_id,
-          ...(scheduled_corpus_item_id
+          // We conditionally add in a few props.
+          ...(corpus_item_id ? { corpus_item_id } : {}),
+          ...(scheduled_corpus_item_id ? { scheduled_corpus_item_id } : {}),
+          ...(corpus_item_id || scheduled_corpus_item_id
             ? {
-                scheduled_corpus_item_id,
                 received_rank,
                 recommended_at,
               }
@@ -874,6 +885,13 @@ export class TelemetryFeed {
           thumbs_up,
           thumbs_down,
           topic,
+          ...(section
+            ? {
+                section,
+                section_position,
+                is_secton_followed,
+              }
+            : {}),
         });
         break;
       }
@@ -886,6 +904,7 @@ export class TelemetryFeed {
           shim,
           card_type,
           scheduled_corpus_item_id,
+          corpus_item_id,
           received_rank,
           recommended_at,
           topic,
@@ -893,20 +912,32 @@ export class TelemetryFeed {
           selected_topics,
           is_list_card,
           format,
+          section,
+          section_position,
+          is_secton_followed,
         } = action.data.value ?? {};
         Glean.pocket.save.record({
           newtab_visit_id: session.session_id,
           is_sponsored: card_type === "spoc",
           ...(format ? { format } : {}),
+          ...(section
+            ? {
+                section,
+                section_position,
+                is_secton_followed,
+              }
+            : {}),
           topic,
           matches_selected_topic,
           selected_topics,
           position: action.data.action_position,
           tile_id,
           is_list_card,
-          ...(scheduled_corpus_item_id
+          // We conditionally add in a few props.
+          ...(corpus_item_id ? { corpus_item_id } : {}),
+          ...(scheduled_corpus_item_id ? { scheduled_corpus_item_id } : {}),
+          ...(corpus_item_id || scheduled_corpus_item_id
             ? {
-                scheduled_corpus_item_id,
                 received_rank,
                 recommended_at,
               }
@@ -1158,6 +1189,16 @@ export class TelemetryFeed {
         }
         break;
       }
+      case at.BLOCK_SECTION:
+      // Intentional fall-through
+      case at.CARD_SECTION_IMPRESSION:
+      // Intentional fall-through
+      case at.FOLLOW_SECTION:
+      // Intentional fall-through
+      case at.UNFOLLOW_SECTION: {
+        this.handleCardSectionUserEvent(action);
+        break;
+      }
 
       // The remaining action types come from ASRouter, which doesn't use
       // Actions from Actions.mjs, but uses these other custom strings.
@@ -1180,6 +1221,50 @@ export class TelemetryFeed {
       case msg.AS_ROUTER_TELEMETRY_USER_EVENT:
         this.handleASRouterUserEvent(action);
         break;
+    }
+  }
+
+  handleCardSectionUserEvent(action) {
+    const session = this.sessions.get(au.getPortIdOfSender(action));
+    if (session) {
+      const { section, section_position, event_source, is_secton_followed } =
+        action.data;
+      switch (action.type) {
+        case "BLOCK_SECTION":
+          Glean.newtab.sectionsBlockSection.record({
+            newtab_visit_id: session.session_id,
+            section,
+            section_position,
+            event_source,
+          });
+          break;
+        case "CARD_SECTION_IMPRESSION":
+          Glean.newtab.sectionsImpression.record({
+            newtab_visit_id: session.session_id,
+            section,
+            section_position,
+            is_secton_followed,
+          });
+          break;
+        case "FOLLOW_SECTION":
+          Glean.newtab.sectionsFollowSection.record({
+            newtab_visit_id: session.session_id,
+            section,
+            section_position,
+            event_source,
+          });
+          break;
+        case "UNFOLLOW_SECTION":
+          Glean.newtab.sectionsUnfollowSection.record({
+            newtab_visit_id: session.session_id,
+            section,
+            section_position,
+            event_source,
+          });
+          break;
+        default:
+          break;
+      }
     }
   }
 
@@ -1312,6 +1397,7 @@ export class TelemetryFeed {
     // it can be applied to multiple topsites simultaneously.
     const { data } = action;
     for (const datum of data) {
+      const { corpus_item_id, scheduled_corpus_item_id } = datum;
       if (datum.is_pocket_card) {
         Glean.pocket.dismiss.record({
           newtab_visit_id: session.session_id,
@@ -1320,9 +1406,18 @@ export class TelemetryFeed {
           position: datum.pos,
           tile_id: datum.id || datum.tile_id,
           is_list_card: datum.is_list_card,
-          ...(datum.scheduled_corpus_item_id
+          ...(datum.section
             ? {
-                scheduled_corpus_item_id: datum.scheduled_corpus_item_id,
+                section: datum.section,
+                section_position: datum.section_position,
+                is_secton_followed: datum.is_secton_followed,
+              }
+            : {}),
+          // We conditionally add in a few props.
+          ...(corpus_item_id ? { corpus_item_id } : {}),
+          ...(scheduled_corpus_item_id ? { scheduled_corpus_item_id } : {}),
+          ...(corpus_item_id || scheduled_corpus_item_id
+            ? {
                 received_rank: datum.received_rank,
                 recommended_at: datum.recommended_at,
               }
@@ -1383,18 +1478,28 @@ export class TelemetryFeed {
           category: tile.category,
         });
       } else {
+        const { corpus_item_id, scheduled_corpus_item_id } = tile;
         Glean.pocket.impression.record({
           newtab_visit_id: session.session_id,
           is_sponsored: tile.type === "spoc",
           ...(tile.format ? { format: tile.format } : {}),
+          ...(tile.section
+            ? {
+                section: tile.section,
+                section_position: tile.section_position,
+                is_secton_followed: tile.is_secton_followed,
+              }
+            : {}),
           position: tile.pos,
           tile_id: tile.id,
           topic: tile.topic,
           selected_topics: tile.selectedTopics,
           is_list_card: tile.is_list_card,
-          ...(tile.scheduled_corpus_item_id
+          // We conditionally add in a few props.
+          ...(corpus_item_id ? { corpus_item_id } : {}),
+          ...(scheduled_corpus_item_id ? { scheduled_corpus_item_id } : {}),
+          ...(corpus_item_id || scheduled_corpus_item_id
             ? {
-                scheduled_corpus_item_id: tile.scheduled_corpus_item_id,
                 received_rank: tile.received_rank,
                 recommended_at: tile.recommended_at,
               }

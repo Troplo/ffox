@@ -14,6 +14,7 @@ import org.mozilla.fenix.helpers.Constants.PackageName.GOOGLE_DOCS
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.MatcherHelper
 import org.mozilla.fenix.helpers.MatcherHelper.itemContainingText
+import org.mozilla.fenix.helpers.MatcherHelper.itemWithResIdAndText
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithText
 import org.mozilla.fenix.helpers.TestAssetHelper.getGenericAsset
 import org.mozilla.fenix.helpers.TestSetup
@@ -40,6 +41,7 @@ class PDFViewerTest : TestSetup() {
         navigationToolbar {
         }.enterURLAndEnterToBrowser(genericURL.url) {
             clickPageObject(itemContainingText("PDF form file"))
+            clickPageObject(itemWithResIdAndText("android:id/button2", "CANCEL"))
             verifyPageContent("Washington Crossing the Delaware")
             verifyTabCounter("1")
         }
@@ -55,6 +57,7 @@ class PDFViewerTest : TestSetup() {
         navigationToolbar {
         }.enterURLAndEnterToBrowser(genericURL.url) {
             clickPageObject(itemWithText("PDF form file"))
+            clickPageObject(itemWithResIdAndText("android:id/button2", "CANCEL"))
         }.clickDownloadPDFButton {
             verifyDownloadedFileName(downloadFile)
         }.clickOpen("application/pdf") {
@@ -70,6 +73,7 @@ class PDFViewerTest : TestSetup() {
         navigationToolbar {
         }.enterURLAndEnterToBrowser(genericURL.url) {
             clickPageObject(MatcherHelper.itemWithText("PDF form file"))
+            clickPageObject(itemWithResIdAndText("android:id/button2", "CANCEL"))
         }.openThreeDotMenu {
             verifyThreeDotMenuExists()
             verifyFindInPageButton()

@@ -26,9 +26,6 @@ generated-files = [
 skip-if = ["os == 'android'"] # Disabled due to crashes (see bug 1331366)
 tags = "addons"
 
-["test_ChildScalars.js"]
-skip-if = ["os == 'android'"] # Disabled due to crashes (see bug 1331366)
-
 ["test_CoveragePing.js"]
 
 ["test_EventPing.js"]
@@ -47,6 +44,7 @@ tags = "addons"
 skip-if = [
   "os == 'mac' && os_version == '10.15' && processor == 'x86_64'", # Bug 1713329
   "os == 'mac' && os_version == '11.20' && arch == 'aarch64'", # Bug 1707747
+  "os == 'mac' && os_version == '14.70' && processor == 'x86_64'", # Bug 1929422
 ]
 
 ["test_PingAPI.js"]
@@ -113,8 +111,6 @@ skip-if = ["os == 'win' && msix"] # https://bugzilla.mozilla.org/show_bug.cgi?id
 
 ["test_TelemetryScalars_impressionId.js"]
 
-["test_TelemetryScalars_multistore.js"]
-
 ["test_TelemetrySend.js"]
 skip-if = ["os == 'linux' && ccov"] # Bug 1701874
 
@@ -148,6 +144,7 @@ run-if = ["os == 'win'"]
 
 ["test_UserInteraction_annotations.js"]
 # BHR is disabled on tsan, asan, android and outside of Nightly.
+run-sequentially = "very high failure rate in parallel"
 skip-if = [
   "debug",
   "asan",
@@ -156,10 +153,10 @@ skip-if = [
   "release_or_beta",
   "os == 'mac' && os_version == '10.15' && processor == 'x86_64'", # Bug 1713329
   "os == 'mac' && os_version == '11.20' && arch == 'aarch64'", # Bug 1707747
-  "win11_2009 && bits == 32 && !debug",  # Bug 1781452
-  "os == 'linux' && !debug",  # Bug 1781452
+  "win11_2009 && bits == 32 && !debug", #  Bug 1781452
+  "os == 'linux' && !debug", #  Bug 1781452
+  "os == 'mac' && os_version == '14.70' && processor == 'x86_64'", # Bug 1929422
 ]
-run-sequentially = "very high failure rate in parallel"
 
 ["test_UtilityScalars.js"]
 run-if = ["os == 'win'"]

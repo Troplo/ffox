@@ -791,7 +791,7 @@ dialog:not([open]) {
 }
 
 dialog:modal {
-  -moz-top-layer: top !important;
+  -moz-top-layer: auto !important;
   position: fixed;
   overflow: auto;
   visibility: visible;
@@ -884,8 +884,7 @@ slot {
 
 @media print {
   input, textarea, select, button, details {
-    -moz-user-input: none !important;
-    pointer-events: none !important;
+    -moz-inert: inert;
   }
 }
 
@@ -913,7 +912,7 @@ dialog:popover-open {
 }
 
 :popover-open {
-  -moz-top-layer: top;
+  -moz-top-layer: auto;
 }
 
 :popover-open::backdrop {

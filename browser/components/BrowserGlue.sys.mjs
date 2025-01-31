@@ -28,6 +28,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.sys.mjs",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   BuiltInThemes: "resource:///modules/BuiltInThemes.sys.mjs",
+  CaptchaDetectionPingUtils:
+    "resource://gre/modules/CaptchaDetectionPingUtils.sys.mjs",
   ClientID: "resource://gre/modules/ClientID.sys.mjs",
   CloseRemoteTab: "resource://gre/modules/FxAccountsCommands.sys.mjs",
   CommonDialog: "resource://gre/modules/CommonDialog.sys.mjs",
@@ -94,6 +96,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ScreenshotsUtils: "resource:///modules/ScreenshotsUtils.sys.mjs",
   SearchSERPCategorization: "resource:///modules/SearchSERPTelemetry.sys.mjs",
   SearchSERPTelemetry: "resource:///modules/SearchSERPTelemetry.sys.mjs",
+  SelectableProfileService:
+    "resource:///modules/profiles/SelectableProfileService.sys.mjs",
   SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
   SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
   ShellService: "resource:///modules/ShellService.sys.mjs",
@@ -104,6 +108,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   TRRRacer: "resource:///modules/TRRPerformance.sys.mjs",
   TabCrashHandler: "resource:///modules/ContentCrashHandlers.sys.mjs",
   TabUnloader: "resource:///modules/TabUnloader.sys.mjs",
+  TelemetryUtils: "resource://gre/modules/TelemetryUtils.sys.mjs",
   UIState: "resource://services-sync/UIState.sys.mjs",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
   UrlbarSearchTermsPersistence:
@@ -426,6 +431,7 @@ let JSWINDOWACTORS = {
     },
     matches: ["about:shoppingsidebar"],
     remoteTypes: ["privilegedabout"],
+    messageManagerGroups: ["shopping-sidebar", "browsers", "review-checker"],
   },
 
   AboutWelcome: {
@@ -769,6 +775,7 @@ let JSWINDOWACTORS = {
       },
     },
     matches: ["about:editprofile", "about:deleteprofile", "about:newprofile"],
+    remoteTypes: ["privilegedabout"],
     enablePreference: "browser.profiles.enabled",
   },
 
@@ -790,6 +797,31 @@ let JSWINDOWACTORS = {
 
     messageManagerGroups: ["browsers"],
     enablePreference: "accessibility.blockautorefresh",
+  },
+
+  ReviewChecker: {
+    parent: {
+      esModuleURI: "resource:///actors/ReviewCheckerParent.sys.mjs",
+    },
+    child: {
+      esModuleURI: "resource:///actors/ReviewCheckerChild.sys.mjs",
+      events: {
+        ContentReady: { wantUntrusted: true },
+        PolledRequestMade: { wantUntrusted: true },
+        // This is added so the actor instantiates immediately and makes
+        // methods available to the page js on load.
+        DOMDocElementInserted: {},
+        ReportProductAvailable: { wantUntrusted: true },
+        AdClicked: { wantUntrusted: true },
+        AdImpression: { wantUntrusted: true },
+        DisableShopping: { wantUntrusted: true },
+        CloseShoppingSidebar: { wantUntrusted: true },
+      },
+    },
+    matches: ["about:shoppingsidebar"],
+    remoteTypes: ["privilegedabout"],
+    messageManagerGroups: ["review-checker", "browsers"],
+    enablePreference: "browser.shopping.experience2023.integratedSidebar",
   },
 
   ScreenshotsComponent: {
@@ -876,6 +908,8 @@ let JSWINDOWACTORS = {
     },
     matches: ["about:shoppingsidebar"],
     remoteTypes: ["privilegedabout"],
+    messageManagerGroups: ["shopping-sidebar", "browsers"],
+    enablePreference: "browser.shopping.experience2023.shoppingSidebar",
   },
 
   SpeechDispatcher: {
@@ -1819,7 +1853,7 @@ BrowserGlue.prototype = {
     // Hide the titlebar if the actual browser window will draw in it.
     let hiddenTitlebar = Services.appinfo.drawInTitlebar;
     if (hiddenTitlebar) {
-      win.windowUtils.setChromeMargin(0, 2, 2, 2);
+      win.windowUtils.setCustomTitlebar(true);
     }
 
     let docElt = win.document.documentElement;
@@ -1955,6 +1989,10 @@ BrowserGlue.prototype = {
 
     lazy.DoHController.init();
 
+    if (AppConstants.MOZ_SELECTABLE_PROFILES) {
+      lazy.SelectableProfileService.init().catch(console.error);
+    }
+
     this._firstWindowTelemetry(aWindow);
     this._firstWindowLoaded();
 
@@ -2021,6 +2059,8 @@ BrowserGlue.prototype = {
       "browser.contentblocking.features.strict",
       this._setPrefExpectationsAndUpdate
     );
+
+    lazy.CaptchaDetectionPingUtils.init();
 
     this._verifySandboxUserNamespaces(aWindow);
   },
@@ -2747,7 +2787,7 @@ BrowserGlue.prototype = {
           );
 
           if (
-            !(await shellService.hasMatchingShortcut(
+            !(await shellService.hasPinnableShortcut(
               winTaskbar.defaultPrivateGroupId,
               true
             ))
@@ -2778,7 +2818,7 @@ BrowserGlue.prototype = {
           // We always set this as long as no exception has been thrown. This
           // ensure that it is `true` both if we created one because it didn't
           // exist, or if it already existed (most likely because it was created
-          // by the installer). This avoids the need to call `hasMatchingShortcut`
+          // by the installer). This avoids the need to call `hasPinnableShortcut`
           // again, which necessarily does pointless I/O.
           Services.prefs.setBoolPref(
             PREF_PRIVATE_BROWSING_SHORTCUT_CREATED,
@@ -2942,7 +2982,26 @@ BrowserGlue.prototype = {
       // pre-init buffer.
       {
         name: "initializeFOG",
-        task: () => {
+        task: async () => {
+          // Handle Usage Profile ID.
+          // Similar logic to what's happening in `TelemetryControllerParent` for the client ID.
+          let profileID = await lazy.ClientID.getUsageProfileID();
+          const uploadEnabled = Services.prefs.getBoolPref(
+            lazy.TelemetryUtils.Preferences.FhrUploadEnabled,
+            false
+          );
+          if (
+            uploadEnabled &&
+            profileID == lazy.TelemetryUtils.knownUsageProfileID
+          ) {
+            await lazy.ClientID.resetUsageProfileIdentifier();
+          } else if (
+            !uploadEnabled &&
+            profileID != lazy.TelemetryUtils.knownUsageProfileID
+          ) {
+            await lazy.ClientID.setCanaryUsageProfileIdentifier();
+          }
+
           Services.fog.initializeFOG();
 
           // Register Glean to listen for experiment updates releated to the
@@ -3192,11 +3251,11 @@ BrowserGlue.prototype = {
       }
 
       ChromeUtils.idleDispatch(
-        () => {
+        async () => {
           if (!Services.startup.shuttingDown) {
             let startTime = Cu.now();
             try {
-              task.task();
+              await task.task();
             } catch (ex) {
               console.error(ex);
             } finally {
@@ -3235,12 +3294,7 @@ BrowserGlue.prototype = {
           Ci.nsIPK11TokenDB
         );
         let token = tokenDB.getInternalKeyToken();
-        let mpEnabled = token.hasPassword;
-        if (mpEnabled) {
-          Services.telemetry
-            .getHistogramById("MASTER_PASSWORD_ENABLED")
-            .add(mpEnabled);
-        }
+        Glean.primaryPassword.enabled.set(token.hasPassword);
       },
 
       function GMPInstallManagerSimpleCheckAndInstall() {
@@ -3418,23 +3472,38 @@ BrowserGlue.prototype = {
     // Our prompt for quitting is most important, so replace others.
     win.gDialogBox.replaceDialogIfOpen();
 
-    let titleId, buttonLabelId;
+    let titleId = {
+      id: "tabbrowser-confirm-close-tabs-title",
+      args: { tabCount: pagecount },
+    };
+    let quitButtonLabelId = "tabbrowser-confirm-close-tabs-button";
+    let closeTabButtonLabelId = "tabbrowser-confirm-close-tab-only-button";
+
+    let showCloseCurrentTabOption = false;
     if (windowcount > 1) {
-      // More than 1 window. Compose our own message.
-      titleId = {
-        id: "tabbrowser-confirm-close-windows-title",
-        args: { windowCount: windowcount },
-      };
-      buttonLabelId = "tabbrowser-confirm-close-windows-button";
+      // More than 1 window. Compose our own message based on whether
+      // the shortcut warning is on or not.
+      if (shouldWarnForShortcut) {
+        showCloseCurrentTabOption = true;
+        titleId = "tabbrowser-confirm-close-warn-shortcut-title";
+        quitButtonLabelId =
+          "tabbrowser-confirm-close-windows-warn-shortcut-button";
+      } else {
+        titleId = {
+          id: "tabbrowser-confirm-close-windows-title",
+          args: { windowCount: windowcount },
+        };
+        quitButtonLabelId = "tabbrowser-confirm-close-windows-button";
+      }
     } else if (shouldWarnForShortcut) {
-      titleId = "tabbrowser-confirm-close-tabs-with-key-title";
-      buttonLabelId = "tabbrowser-confirm-close-tabs-with-key-button";
-    } else {
-      titleId = {
-        id: "tabbrowser-confirm-close-tabs-title",
-        args: { tabCount: pagecount },
-      };
-      buttonLabelId = "tabbrowser-confirm-close-tabs-button";
+      if (win.gBrowser.visibleTabs.length > 1) {
+        showCloseCurrentTabOption = true;
+        titleId = "tabbrowser-confirm-close-warn-shortcut-title";
+        quitButtonLabelId = "tabbrowser-confirm-close-tabs-with-key-button";
+      } else {
+        titleId = "tabbrowser-confirm-close-tabs-with-key-title";
+        quitButtonLabelId = "tabbrowser-confirm-close-tabs-with-key-button";
+      }
     }
 
     // The checkbox label is different depending on whether the shortcut
@@ -3444,33 +3513,57 @@ BrowserGlue.prototype = {
       const quitKeyElement = win.document.getElementById("key_quitApplication");
       const quitKey = lazy.ShortcutUtils.prettifyShortcut(quitKeyElement);
       checkboxLabelId = {
-        id: "tabbrowser-confirm-close-tabs-with-key-checkbox",
+        id: "tabbrowser-ask-close-tabs-with-key-checkbox",
         args: { quitKey },
       };
     } else {
-      checkboxLabelId = "tabbrowser-confirm-close-tabs-checkbox";
+      checkboxLabelId = "tabbrowser-ask-close-tabs-checkbox";
     }
 
-    const [title, buttonLabel, checkboxLabel] =
+    const [title, quitButtonLabel, checkboxLabel] =
       win.gBrowser.tabLocalization.formatMessagesSync([
         titleId,
-        buttonLabelId,
+        quitButtonLabelId,
         checkboxLabelId,
       ]);
 
+    // Only format the "close current tab" message if needed
+    let closeTabButtonLabel;
+    if (showCloseCurrentTabOption) {
+      [closeTabButtonLabel] = win.gBrowser.tabLocalization.formatMessagesSync([
+        closeTabButtonLabelId,
+      ]);
+    }
+
     let warnOnClose = { value: true };
-    let flags =
-      Services.prompt.BUTTON_TITLE_IS_STRING * Services.prompt.BUTTON_POS_0 +
+
+    let flags;
+    if (showCloseCurrentTabOption) {
+      // Adds buttons for quit (BUTTON_POS_0), cancel (BUTTON_POS_1), and close current tab (BUTTON_POS_2).
+      // Also sets a flag to reorder dialog buttons so that cancel is reordered on Unix platforms.
+      flags =
+        (Services.prompt.BUTTON_TITLE_IS_STRING * Services.prompt.BUTTON_POS_0 +
+          Services.prompt.BUTTON_TITLE_CANCEL * Services.prompt.BUTTON_POS_1 +
+          Services.prompt.BUTTON_TITLE_IS_STRING *
+            Services.prompt.BUTTON_POS_2) |
+        Services.prompt.BUTTON_POS_1_IS_SECONDARY;
       Services.prompt.BUTTON_TITLE_CANCEL * Services.prompt.BUTTON_POS_1;
-    // buttonPressed will be 0 for closing, 1 for cancel (don't close/quit)
+    } else {
+      // Adds quit and cancel buttons
+      flags =
+        Services.prompt.BUTTON_TITLE_IS_STRING * Services.prompt.BUTTON_POS_0 +
+        Services.prompt.BUTTON_TITLE_CANCEL * Services.prompt.BUTTON_POS_1;
+    }
+
+    // buttonPressed will be 0 for close all, 1 for cancel (don't close/quit), 2 for close current tab
     let buttonPressed = Services.prompt.confirmEx(
       win,
       title.value,
       null,
       flags,
-      buttonLabel.value,
+      quitButtonLabel.value,
       null,
-      null,
+      showCloseCurrentTabOption ? closeTabButtonLabel.value : null,
       checkboxLabel.value,
       warnOnClose
     );
@@ -3483,6 +3576,11 @@ BrowserGlue.prototype = {
       } else {
         Services.prefs.setBoolPref("browser.tabs.warnOnClose", false);
       }
+    }
+
+    // Close the current tab if user selected BUTTON_POS_2
+    if (buttonPressed === 2) {
+      win.gBrowser.removeTab(win.gBrowser.selectedTab);
     }
 
     this._quitSource = "unknown";
@@ -3686,7 +3784,12 @@ BrowserGlue.prototype = {
       if (!(await lazy.PlacesBackups.hasRecentBackup())) {
         idleTime /= 2;
       }
-      this._userIdleService.addIdleObserver(this, idleTime);
+
+      if (!this._isObservingIdle) {
+        this._userIdleService.addIdleObserver(this, idleTime);
+        this._isObservingIdle = true;
+      }
+
       this._bookmarksBackupIdleTime = idleTime;
 
       if (this._isNewProfile) {
@@ -4633,13 +4736,28 @@ BrowserGlue.prototype = {
           template: "multistage",
           id: data?.id || "ABOUT_WELCOME_MODAL",
           backdrop: data?.backdrop,
-          screens: data?.screens,
+          screens: data?.modalScreens || data?.screens,
           UTMTerm: data?.UTMTerm,
+          disableEscClose: data?.requireAction,
+          // displayed as a window modal by default
         },
       },
     };
 
     lazy.SpecialMessageActions.handleAction(config, gBrowser);
+  },
+
+  async _showSetToDefaultSpotlight(message, browser) {
+    const config = {
+      type: "SHOW_SPOTLIGHT",
+      data: message,
+    };
+
+    try {
+      lazy.SpecialMessageActions.handleAction(config, browser);
+    } catch (e) {
+      console.error("Couldn't render spotlight", message, e);
+    }
   },
 
   async _maybeShowDefaultBrowserPrompt() {
@@ -4699,6 +4817,21 @@ BrowserGlue.prototype = {
     );
     if (willPrompt) {
       let win = lazy.BrowserWindowTracker.getTopWindow();
+      let setToDefaultFeature = lazy.NimbusFeatures.setToDefaultPrompt;
+
+      // Send exposure telemetry if user will see default prompt or experimental
+      // message
+      await setToDefaultFeature.ready();
+      await setToDefaultFeature.recordExposureEvent();
+
+      const { showSpotlightPrompt, message } =
+        setToDefaultFeature.getAllVariables();
+
+      if (showSpotlightPrompt && message) {
+        // Show experimental message
+        this._showSetToDefaultSpotlight(message, win.gBrowser.selectedBrowser);
+        return;
+      }
       DefaultBrowserCheck.prompt(win);
     } else if (await lazy.QuickSuggest.maybeShowOnboardingDialog()) {
       return;
@@ -5235,14 +5368,12 @@ var ContentBlockingCategoriesPrefs = {
     for (let item of rulesArray) {
       switch (item) {
         case "tp":
-          this.CATEGORY_PREFS[type][
-            "privacy.trackingprotection.enabled"
-          ] = true;
+          this.CATEGORY_PREFS[type]["privacy.trackingprotection.enabled"] =
+            true;
           break;
         case "-tp":
-          this.CATEGORY_PREFS[type][
-            "privacy.trackingprotection.enabled"
-          ] = false;
+          this.CATEGORY_PREFS[type]["privacy.trackingprotection.enabled"] =
+            false;
           break;
         case "tpPrivate":
           this.CATEGORY_PREFS[type][
@@ -5351,14 +5482,12 @@ var ContentBlockingCategoriesPrefs = {
           this.CATEGORY_PREFS[type]["privacy.query_stripping.enabled"] = false;
           break;
         case "qpsPBM":
-          this.CATEGORY_PREFS[type][
-            "privacy.query_stripping.enabled.pbmode"
-          ] = true;
+          this.CATEGORY_PREFS[type]["privacy.query_stripping.enabled.pbmode"] =
+            true;
           break;
         case "-qpsPBM":
-          this.CATEGORY_PREFS[type][
-            "privacy.query_stripping.enabled.pbmode"
-          ] = false;
+          this.CATEGORY_PREFS[type]["privacy.query_stripping.enabled.pbmode"] =
+            false;
           break;
         case "fpp":
           this.CATEGORY_PREFS[type]["privacy.fingerprintingProtection"] = true;
@@ -5367,14 +5496,12 @@ var ContentBlockingCategoriesPrefs = {
           this.CATEGORY_PREFS[type]["privacy.fingerprintingProtection"] = false;
           break;
         case "fppPrivate":
-          this.CATEGORY_PREFS[type][
-            "privacy.fingerprintingProtection.pbmode"
-          ] = true;
+          this.CATEGORY_PREFS[type]["privacy.fingerprintingProtection.pbmode"] =
+            true;
           break;
         case "-fppPrivate":
-          this.CATEGORY_PREFS[type][
-            "privacy.fingerprintingProtection.pbmode"
-          ] = false;
+          this.CATEGORY_PREFS[type]["privacy.fingerprintingProtection.pbmode"] =
+            false;
           break;
         case "cookieBehavior0":
           this.CATEGORY_PREFS[type]["network.cookie.cookieBehavior"] =
@@ -5690,6 +5817,13 @@ export var DefaultBrowserCheck = {
     win.MozXULElement.insertFTLIfNeeded(
       "browser/defaultBrowserNotification.ftl"
     );
+    // Record default prompt impression
+    let now = Math.floor(Date.now() / 1000).toString();
+    Services.prefs.setCharPref(
+      "browser.shell.mostRecentDefaultPromptSeen",
+      now
+    );
+
     // Resolve the translations for the prompt elements and return only the
     // string values
 
@@ -5770,6 +5904,7 @@ export var DefaultBrowserCheck = {
     }
     if (checkboxState) {
       shellService.shouldCheckDefaultBrowser = false;
+      Services.prefs.setCharPref("browser.shell.userDisabledDefaultCheck", now);
     }
 
     try {

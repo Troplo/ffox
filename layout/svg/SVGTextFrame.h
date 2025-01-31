@@ -199,6 +199,8 @@ class SVGTextFrame final : public SVGDisplayContainerFrame {
   void Init(nsIContent* aContent, nsContainerFrame* aParent,
             nsIFrame* aPrevInFlow) override;
 
+  void DidSetComputedStyle(ComputedStyle* aOldComputedStyle) override;
+
   nsresult AttributeChanged(int32_t aNamespaceID, nsAtom* aAttribute,
                             int32_t aModType) override;
 
@@ -362,7 +364,7 @@ class SVGTextFrame final : public SVGDisplayContainerFrame {
       mFrame->GetContent()->AddMutationObserver(this);
       SetEnabledCallbacks(kCharacterDataChanged | kAttributeChanged |
                           kContentAppended | kContentInserted |
-                          kContentRemoved);
+                          kContentWillBeRemoved);
     }
 
     // nsISupports

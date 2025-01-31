@@ -59,7 +59,7 @@ pub(super) enum MaybeKnown<T> {
     Computed(Word),
 }
 
-impl<'w> BlockContext<'w> {
+impl BlockContext<'_> {
     /// Emit code to compute the length of a run-time array.
     ///
     /// Given `array`, an expression referring a runtime-sized array, return the
@@ -270,6 +270,9 @@ impl<'w> BlockContext<'w> {
         match sequence_ty.indexable_length(self.ir_module) {
             Ok(crate::proc::IndexableLength::Known(known_length)) => {
                 Ok(MaybeKnown::Known(known_length))
+            }
+            Ok(crate::proc::IndexableLength::Pending) => {
+                unreachable!()
             }
             Ok(crate::proc::IndexableLength::Dynamic) => {
                 let length_id = self.write_runtime_array_length(sequence, block)?;
@@ -512,7 +515,7 @@ impl<'w> BlockContext<'w> {
         block: &mut Block,
     ) -> Result<BoundsCheckResult, Error> {
         // If the value of `index` is known at compile time, find it now.
-        index.try_resolve_to_constant(self.ir_function, self.ir_module);
+        index.try_resolve_to_constant(&self.ir_function.expressions, self.ir_module);
 
         let policy = self.writer.bounds_check_policies.choose_policy(
             base,

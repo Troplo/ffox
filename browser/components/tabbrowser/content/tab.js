@@ -24,8 +24,6 @@
             <image class="tab-icon-overlay" role="presentation"/>
           </stack>
           <vbox class="tab-label-container"
-                onoverflow="this.setAttribute('textoverflow', 'true');"
-                onunderflow="this.removeAttribute('textoverflow');"
                 align="start"
                 pack="center"
                 flex="1">
@@ -85,7 +83,7 @@
         ".tab-group-line": "selected=visuallyselected,multiselected",
         ".tab-loading-burst": "pinned,bursting,notselectedsinceload",
         ".tab-content":
-          "pinned,selected=visuallyselected,titlechanged,attention",
+          "pinned,selected=visuallyselected,multiselected,titlechanged,attention",
         ".tab-icon-stack":
           "sharing,pictureinpicture,crashed,busy,soundplaying,soundplaying-scheduledremoval,pinned,muted,blocked,selected=visuallyselected,activemedia-blocked,indicator-replaces-favicon",
         ".tab-throbber":
@@ -125,6 +123,10 @@
       if (!("_lastAccessed" in this)) {
         this.updateLastAccessed();
       }
+
+      let labelContainer = this.querySelector(".tab-label-container");
+      labelContainer.addEventListener("overflow", this);
+      labelContainer.addEventListener("underflow", this);
     }
 
     get owner() {
@@ -195,13 +197,14 @@
       return this.hasAttribute("pinned");
     }
 
-    get visible() {
+    get isOpen() {
       return (
-        this.isConnected &&
-        !this.hidden &&
-        !this.closing &&
-        !this.group?.collapsed
+        this.isConnected && !this.closing && this != FirefoxViewHandler.tab
       );
+    }
+
+    get visible() {
+      return this.isOpen && !this.hidden && !this.group?.collapsed;
     }
 
     get hidden() {
@@ -348,7 +351,7 @@
 
     updateLastUnloadedByTabUnloader() {
       this._lastUnloaded = Date.now();
-      Services.telemetry.scalarAdd("browser.engagement.tab_unload_count", 1);
+      Glean.browserEngagement.tabUnloadCount.add(1);
     }
 
     recordTimeFromUnloadToReload() {
@@ -360,7 +363,7 @@
       Services.telemetry
         .getHistogramById("TAB_UNLOAD_TO_RELOAD")
         .add(diff_in_msec / 1000);
-      Services.telemetry.scalarAdd("browser.engagement.tab_reload_count", 1);
+      Glean.browserEngagement.tabReloadCount.add(1);
       delete this._lastUnloaded;
     }
 
@@ -692,6 +695,14 @@
 
     on_AriaFocus() {
       this.updateA11yDescription();
+    }
+
+    on_overflow(event) {
+      event.currentTarget.toggleAttribute("textoverflow", true);
+    }
+
+    on_underflow(event) {
+      event.currentTarget.removeAttribute("textoverflow");
     }
   }
 

@@ -49,12 +49,8 @@
 #include "nsTArray.h"
 #include "nsThreadUtils.h"
 
-#define HTTP_BASE_CHANNEL_IID                        \
-  {                                                  \
-    0x9d5cde03, 0xe6e9, 0x4612, {                    \
-      0xbf, 0xef, 0xbb, 0x66, 0xf3, 0xbb, 0x74, 0x46 \
-    }                                                \
-  }
+#define HTTP_BASE_CHANNEL_IID \
+  {0x9d5cde03, 0xe6e9, 0x4612, {0xbf, 0xef, 0xbb, 0x66, 0xf3, 0xbb, 0x74, 0x46}}
 
 class nsIProgressEventSink;
 class nsISecurityConsoleMessage;
@@ -263,7 +259,8 @@ class HttpBaseChannel : public nsHashPropertyBag,
   NS_IMETHOD SetDocumentURI(nsIURI* aDocumentURI) override;
   NS_IMETHOD GetRequestVersion(uint32_t* major, uint32_t* minor) override;
   NS_IMETHOD GetResponseVersion(uint32_t* major, uint32_t* minor) override;
-  NS_IMETHOD SetCookie(const nsACString& aCookieHeader) override;
+  NS_IMETHOD SetCookieHeaders(
+      const nsTArray<nsCString>& aCookieHeaders) override;
   NS_IMETHOD GetThirdPartyFlags(uint32_t* aForce) override;
   NS_IMETHOD SetThirdPartyFlags(uint32_t aForce) override;
   NS_IMETHOD GetForceAllowThirdPartyCookie(bool* aForce) override;
@@ -924,8 +921,6 @@ class HttpBaseChannel : public nsHashPropertyBag,
     (uint32_t, UploadStreamHasHeaders, 1),
     (uint32_t, ChannelIsForDownload, 1),
     (uint32_t, TracingEnabled, 1),
-    // True if timing collection is enabled
-    (uint32_t, TimingEnabled, 1),
     (uint32_t, ReportTiming, 1),
     (uint32_t, AllowSpdy, 1),
     (uint32_t, AllowHttp3, 1),

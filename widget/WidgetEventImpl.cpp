@@ -28,6 +28,7 @@
 #include "nsContentUtils.h"
 #include "nsIContent.h"
 #include "nsIDragSession.h"
+#include "nsMathUtils.h"
 #include "nsPrintfCString.h"
 
 #if defined(XP_WIN)
@@ -801,8 +802,8 @@ double WidgetPointerHelper::ComputeAltitudeAngle(int32_t aTiltX,
   if (!aTiltY) {
     return kHalfPi - std::abs(tiltXRadians);
   }
-  return std::atan(1.0 / std::sqrt(std::pow(std::tan(tiltXRadians), 2) +
-                                   std::pow(std::tan(tiltYRadians), 2)));
+  return std::atan(1.0 /
+                   NS_hypot(std::tan(tiltXRadians), std::tan(tiltYRadians)));
 }
 
 // static
@@ -897,6 +898,36 @@ bool WidgetMouseEventBase::InputSourceSupportsHover() const {
     default:
       return false;
   }
+}
+
+bool WidgetMouseEventBase::DOMEventShouldUseFractionalCoords() const {
+  if (!StaticPrefs::dom_event_pointer_fractional_coordinates_enabled()) {
+    return false;  // We completely don't support fractional coordinates
+  }
+  // If we support fractional coordinates only for PointerEvent, the spec
+  // recommend that `click`, `auxclick` and `contextmenu` keep using integer
+  // coordinates.
+  // https://w3c.github.io/pointerevents/#event-coordinates
+  if (mClass == ePointerEventClass && mMessage != ePointerClick &&
+      mMessage != ePointerAuxClick && mMessage != eContextMenu) {
+    return true;
+  }
+  // Untrusted events can be initialized with double values.  However, Chrome
+  // returns integer coordinates for non-PointerEvent instances, `click`,
+  // `auxclick` and `contextmenu`.  Therefore, it may be risky to allow
+  // fractional coordinates for all untrusted events right now because web apps
+  // may initialize untrusted events with quotients.
+  // https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/core/events/pointer_event.h;l=59-91;drc=80c2637874588837a2d656dbd79ad8f227dc67e8
+  // https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/core/events/pointer_event.cc;l=110-117;drc=8e948282d37c0e119e3102236878d6f4d5052c16
+  if (!IsTrusted()) {
+    return StaticPrefs::
+        dom_event_mouse_fractional_coordinates_untrusted_enabled();
+  }
+  // CSSOM suggested that MouseEvent interface can treat fractional values in
+  // all instances.  However, it's risky for backward compatibility.  Therefore,
+  // we don't have a plan to enable it for now.
+  return MOZ_UNLIKELY(
+      StaticPrefs::dom_event_mouse_fractional_coordinates_trusted_enabled());
 }
 
 /******************************************************************************
@@ -1442,9 +1473,8 @@ void WidgetKeyboardEvent::GetDOMKeyName(KeyNameIndex aKeyNameIndex,
     return;
   }
 
-  MOZ_RELEASE_ASSERT(
-      static_cast<size_t>(aKeyNameIndex) < ArrayLength(kKeyNames),
-      "Illegal key enumeration value");
+  MOZ_RELEASE_ASSERT(static_cast<size_t>(aKeyNameIndex) < std::size(kKeyNames),
+                     "Illegal key enumeration value");
   aKeyName = kKeyNames[aKeyNameIndex];
 }
 
@@ -1457,7 +1487,7 @@ void WidgetKeyboardEvent::GetDOMCodeName(CodeNameIndex aCodeNameIndex,
   }
 
   MOZ_RELEASE_ASSERT(
-      static_cast<size_t>(aCodeNameIndex) < ArrayLength(kCodeNames),
+      static_cast<size_t>(aCodeNameIndex) < std::size(kCodeNames),
       "Illegal physical code enumeration value");
 
   // Generate some continuous runs of codes, rather than looking them up.
@@ -1496,8 +1526,8 @@ void WidgetKeyboardEvent::GetDOMCodeName(CodeNameIndex aCodeNameIndex,
 /* static */
 KeyNameIndex WidgetKeyboardEvent::GetKeyNameIndex(const nsAString& aKeyValue) {
   if (!sKeyNameIndexHashtable) {
-    sKeyNameIndexHashtable = new KeyNameIndexHashtable(ArrayLength(kKeyNames));
-    for (size_t i = 0; i < ArrayLength(kKeyNames); i++) {
+    sKeyNameIndexHashtable = new KeyNameIndexHashtable(std::size(kKeyNames));
+    for (size_t i = 0; i < std::size(kKeyNames); i++) {
       sKeyNameIndexHashtable->InsertOrUpdate(nsDependentString(kKeyNames[i]),
                                              static_cast<KeyNameIndex>(i));
     }
@@ -1510,9 +1540,8 @@ KeyNameIndex WidgetKeyboardEvent::GetKeyNameIndex(const nsAString& aKeyValue) {
 CodeNameIndex WidgetKeyboardEvent::GetCodeNameIndex(
     const nsAString& aCodeValue) {
   if (!sCodeNameIndexHashtable) {
-    sCodeNameIndexHashtable =
-        new CodeNameIndexHashtable(ArrayLength(kCodeNames));
-    for (size_t i = 0; i < ArrayLength(kCodeNames); i++) {
+    sCodeNameIndexHashtable = new CodeNameIndexHashtable(std::size(kCodeNames));
+    for (size_t i = 0; i < std::size(kCodeNames); i++) {
       sCodeNameIndexHashtable->InsertOrUpdate(nsDependentString(kCodeNames[i]),
                                               static_cast<CodeNameIndex>(i));
     }
@@ -1568,7 +1597,7 @@ uint32_t WidgetKeyboardEvent::GetFallbackKeyCodeOfPunctuationKey(
 #undef NS_DEFINE_COMMAND_WITH_PARAM
 #undef NS_DEFINE_COMMAND_NO_EXEC_COMMAND
 
-  MOZ_RELEASE_ASSERT(static_cast<size_t>(aCommand) < ArrayLength(kCommands),
+  MOZ_RELEASE_ASSERT(static_cast<size_t>(aCommand) < std::size(kCommands),
                      "Illegal command enumeration value");
   return kCommands[static_cast<CommandInt>(aCommand)];
 }
@@ -2181,7 +2210,7 @@ void InternalEditorInputEvent::GetDOMInputTypeName(EditorInputType aInputType,
   }
 
   MOZ_RELEASE_ASSERT(
-      static_cast<size_t>(aInputType) < ArrayLength(kInputTypeNames),
+      static_cast<size_t>(aInputType) < std::size(kInputTypeNames),
       "Illegal input type enumeration value");
   aInputTypeName.Assign(kInputTypeNames[static_cast<size_t>(aInputType)]);
 }
@@ -2194,8 +2223,8 @@ EditorInputType InternalEditorInputEvent::GetEditorInputType(
   }
 
   if (!sInputTypeHashtable) {
-    sInputTypeHashtable = new InputTypeHashtable(ArrayLength(kInputTypeNames));
-    for (size_t i = 0; i < ArrayLength(kInputTypeNames); i++) {
+    sInputTypeHashtable = new InputTypeHashtable(std::size(kInputTypeNames));
+    for (size_t i = 0; i < std::size(kInputTypeNames); i++) {
       sInputTypeHashtable->InsertOrUpdate(nsDependentString(kInputTypeNames[i]),
                                           static_cast<EditorInputType>(i));
     }
