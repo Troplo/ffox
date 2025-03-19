@@ -50,6 +50,7 @@
   flex-direction: row;
   flex: 1;
   box-sizing: border-box;
+  will-change: translate;
 
   /* Reset UA popover rules */
   width: initial;
@@ -1158,7 +1159,7 @@ moz-input-box > menupopup .context-menu-add-engine > .menu-iconic-left::after {
   height: 16px;
   border-radius: var(--urlbar-icon-border-radius);
   -moz-context-properties: fill;
-  fill: var(--text-color-deemphasized);
+  fill: currentColor;
   list-style-image: url("chrome://global/skin/icons/search-glass.svg");
 }
 

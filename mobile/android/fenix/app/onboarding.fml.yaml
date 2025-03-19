@@ -57,6 +57,41 @@ features:
               primary-button-label: juno_onboarding_enable_notifications_positive_button
               secondary-button-label: juno_onboarding_enable_notifications_negative_button
 
+            theme-selection:
+              card-type: theme-selection
+              title: onboarding_customize_theme_title
+              body: onboarding_customize_theme_description
+              image-res: ic_pick_a_theme
+              ordering: 33
+              primary-button-label: onboarding_save_and_continue_button
+              extra-data:
+                customization-theme-data:
+                  - theme-type: theme-system
+                    label: onboarding_customize_theme_system_option
+                    image-res: ic_pick_a_theme_system_auto
+                  - theme-type: theme-light
+                    label: onboarding_customize_theme_light_option
+                    image-res: ic_pick_a_theme_light
+                  - theme-type: theme-dark
+                    label: onboarding_customize_theme_dark_option
+                    image-res: ic_pick_a_theme_dark
+
+            toolbar-placement:
+              card-type: toolbar-placement
+              title: onboarding_customize_toolbar_title
+              body: onboarding_customize_toolbar_description
+              image-res: ic_onboarding_customize_toolbar
+              ordering: 37
+              primary-button-label: onboarding_save_and_continue_button
+              extra-data:
+                customization-toolbar-data:
+                  - toolbar-type: toolbar-top
+                    label: onboarding_customize_toolbar_top_option
+                    image-res: ic_onboarding_top_toolbar
+                  - toolbar-type: toolbar-bottom
+                    label: onboarding_customize_toolbar_bottom_option
+                    image-res: ic_onboarding_bottom_toolbar
+
 objects:
 
   OnboardingCardData:
@@ -143,6 +178,12 @@ objects:
         description: >
           An optional terms of service data for the onboarding card.
         default: null
+      marketing-data:
+        type: Option<MarketingData>
+        description: >
+          An optional marketing data for the onboarding card.
+        default: null
+
   AddOnData:
       description: An object to describe an add-on to be installed from the onboarding card.
       fields:
@@ -223,45 +264,61 @@ objects:
   TermsOfServiceData:
     description: An object to describe the terms of service onboarding card.
     fields:
-      lineOneText:
+      line-one-text:
         type: Text
         description: The text for line one.
         # This should never be defaulted.
         default: ""
-      lineOneLinkText:
+      line-one-link-text:
         type: Text
         description: The text for the link of line one.
         # This should never be defaulted.
         default: ""
-      lineOneLinkURL:
+      line-one-link-url:
         type: Text
         description: The url for the link of line one.
         # This should never be defaulted.
         default: ""
-      lineTwoText:
+      line-two-text:
         type: Text
         description: The text for line two.
         # This should never be defaulted.
         default: ""
-      lineTwoLinkText:
+      line-two-link-text:
         type: Text
         description: The text for the link of line two.
         # This should never be defaulted.
         default: ""
-      lineTwoLinkURL:
+      line-two-link-url:
         type: Text
         description: The url for the link of line two.
         # This should never be defaulted.
         default: ""
-      lineThreeText:
+      line-three-text:
         type: Text
         description: The text for line three.
         # This should never be defaulted.
         default: ""
-      lineThreeLinkText:
+      line-three-link-text:
         type: Text
         description: The text for the link of line three.
         # This should never be defaulted.
+        default: ""
+
+  MarketingData:
+    description: An object to describe the marketing data onboarding card.
+    fields:
+      body-line-one-text:
+        type: Text
+        description: The text for line one of the body.
+        default: ""
+      body-line-one-link-text:
+        type: Text
+        description: The link text from line one of the body.
+        default: ""
+      body-line-two-text:
+        type: Text
+        description: The text for line two of the body.
         default: ""
 
 enums:
@@ -285,6 +342,8 @@ enums:
         description: Allows user to choose between dark and light themes.
       terms-of-service:
         description: Page to display the terms of services.
+      marketing-data:
+        description: Allows user to opt out of marketing data collection.
 
   ToolbarType:
     description: An enum to describe a toolbar placement option.

@@ -149,7 +149,7 @@ export class SearchSettings {
    *   If this parameter is "test", then the settings will not be written. As
    *   some tests manipulate the settings directly, we allow turning off writing to
    *   avoid writing stale settings data.
-   * @returns {object}
+   * @returns {Promise<object>}
    *   Returns the settings file data.
    */
   async get(origin = "") {
@@ -834,6 +834,27 @@ export class SearchSettings {
             );
             engine._iconMapObj ||= {};
             engine._iconMapObj[16] = iconURL;
+            continue;
+          }
+
+          // MAX_ICON_SIZE is not enforced in some cases. In those cases, we
+          // rescale the icon to 32x32.
+          if (byteArray.length > lazy.SearchUtils.MAX_ICON_SIZE) {
+            try {
+              [byteArray, contentType] = lazy.SearchUtils.rescaleIcon(
+                byteArray,
+                contentType
+              );
+              let byteString = String.fromCharCode(...byteArray);
+              let url = "data:" + contentType + ";base64," + btoa(byteString);
+
+              engine._iconMapObj ||= {};
+              engine._iconMapObj[32] = url;
+            } catch {
+              lazy.logConsole.warn(
+                `_iconURL migration: failed to resize icon of search engine ${engine._name}.`
+              );
+            }
             continue;
           }
 

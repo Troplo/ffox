@@ -669,8 +669,8 @@ static bool IsPercentageAware(const nsIFrame* aFrame, WritingMode aWM) {
   if ((pos->ISizeDependsOnContainer(aWM) && !pos->ISize(aWM).IsAuto()) ||
       pos->MaxISizeDependsOnContainer(aWM) ||
       pos->MinISizeDependsOnContainer(aWM) ||
-      pos->GetInset(LogicalSide::IStart, aWM).HasPercent() ||
-      pos->GetInset(LogicalSide::IEnd, aWM).HasPercent()) {
+      pos->mOffset.Get(LogicalSide::IStart, aWM).MaybePercentageAware() ||
+      pos->mOffset.Get(LogicalSide::IEnd, aWM).MaybePercentageAware()) {
     return true;
   }
 
@@ -1505,7 +1505,10 @@ void nsLineLayout::SetSpanForEmptyLine(PerSpanData* aPerSpanData,
     pfd->mBlockDirAlign = VALIGN_OTHER;
     pfd->mFrame->SetRect(aWM, pfd->mBounds, aContainerSize);
     if (pfd->mSpan) {
-      SetSpanForEmptyLine(pfd->mSpan, aWM, aContainerSize, aBStartEdge);
+      // For child spans, the block-start edge is relative to that of parent,
+      // which is zero (since it is empty). See NOTE in
+      // `nsLineLayout::ReflowFrame`.
+      SetSpanForEmptyLine(pfd->mSpan, aWM, aContainerSize, 0);
     }
   }
 }

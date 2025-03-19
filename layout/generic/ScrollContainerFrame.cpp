@@ -3160,7 +3160,7 @@ void ScrollContainerFrame::ScrollToImpl(
           schedulePaint = false;
           PAINT_SKIP_LOG("Skipping due to APZ scroll\n");
         } else if (mScrollableByAPZ) {
-          nsIWidget* widget = presContext->GetNearestWidget();
+          nsIWidget* widget = GetNearestWidget();
           WindowRenderer* renderer =
               widget ? widget->GetWindowRenderer() : nullptr;
           if (renderer) {
@@ -4293,7 +4293,10 @@ nsRect ScrollContainerFrame::RestrictToRootDisplayPort(
     return aDisplayportBase;
   }
   const mozilla::PresShell* const rootPresShell = rootPresContext->PresShell();
-  nsIFrame* rootFrame = rootPresShell->GetRootScrollContainerFrame();
+  nsIFrame* displayRootFrame = nsLayoutUtils::GetDisplayRootFrame(this);
+  nsIFrame* rootFrame = displayRootFrame->IsMenuPopupFrame()
+                            ? displayRootFrame
+                            : rootPresShell->GetRootScrollContainerFrame();
   if (!rootFrame) {
     rootFrame = rootPresShell->GetRootFrame();
   }
