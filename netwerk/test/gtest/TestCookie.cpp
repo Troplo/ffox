@@ -132,7 +132,7 @@ void GetACookieNoHttp(nsICookieService* aCookieService, const char* aSpec,
                                   uri, uri, principal,
                                   false,    // aLoadedAsData
                                   nullptr,  // aEventObject
-                                  DocumentFlavorHTML);
+                                  DocumentFlavor::HTML);
   Unused << NS_WARN_IF(NS_FAILED(rv));
 
   nsAutoString cookie;
@@ -181,9 +181,9 @@ void InitPrefs(nsIPrefBranch* aPrefBranch) {
   // we use the most restrictive set of prefs we can;
   // however, we don't test third party blocking here.
   aPrefBranch->SetIntPref(kCookiesPermissions, 0);  // accept all
-  // Set quotaPerHost to maxPerHost - 1, so there is only one cookie
+  // Set quotaPerHost to maxPerHost, so there is only one cookie
   // will be evicted everytime.
-  aPrefBranch->SetIntPref(kPrefCookieQuotaPerHost, 49);
+  aPrefBranch->SetIntPref(kPrefCookieQuotaPerHost, 50);
   // Set the base domain limit to 50 so we have a known value.
   aPrefBranch->SetIntPref(kCookiesMaxPerHost, 50);
 
@@ -750,53 +750,62 @@ TEST(TestCookie, TestCookieMain)
   const nsCOMPtr<nsICookieManager>& cookieMgr2 = cookieMgr;
   ASSERT_TRUE(cookieMgr2);
 
+  nsCOMPtr<nsIURI> uri;
+  NS_NewURI(getter_AddRefs(uri), "https://cookie.test"_ns);
+
   mozilla::OriginAttributes attrs;
 
   // first, ensure a clean slate
   EXPECT_NS_SUCCEEDED(cookieMgr->RemoveAll());
   // add some cookies
-  EXPECT_TRUE(NS_SUCCEEDED(cookieMgr2->AddNative("cookiemgr.test"_ns,  // domain
-                                                 "/foo"_ns,            // path
-                                                 "test1"_ns,           // name
-                                                 "yes"_ns,             // value
-                                                 false,      // is secure
-                                                 false,      // is httponly
-                                                 true,       // is session
-                                                 INT64_MAX,  // expiry time
-                                                 &attrs,     // originAttributes
-                                                 nsICookie::SAMESITE_NONE,
-                                                 nsICookie::SCHEME_HTTPS,
-                                                 false,   // is partitioned
-                                                 nullptr  // operation ID
-                                                 )));
-  EXPECT_TRUE(NS_SUCCEEDED(cookieMgr2->AddNative(
-      "cookiemgr.test"_ns,             // domain
-      "/foo"_ns,                       // path
-      "test2"_ns,                      // name
-      "yes"_ns,                        // value
-      false,                           // is secure
-      true,                            // is httponly
-      true,                            // is session
-      PR_Now() / PR_USEC_PER_SEC + 2,  // expiry time
-      &attrs,                          // originAttributes
-      nsICookie::SAMESITE_NONE, nsICookie::SCHEME_HTTPS,
-      false,   // is partitioned
-      nullptr  // operation ID
-      )));
-  EXPECT_TRUE(NS_SUCCEEDED(cookieMgr2->AddNative("new.domain"_ns,  // domain
-                                                 "/rabbit"_ns,     // path
-                                                 "test3"_ns,       // name
-                                                 "yes"_ns,         // value
-                                                 false,            // is secure
-                                                 false,      // is httponly
-                                                 true,       // is session
-                                                 INT64_MAX,  // expiry time
-                                                 &attrs,     // originAttributes
-                                                 nsICookie::SAMESITE_NONE,
-                                                 nsICookie::SCHEME_HTTPS,
-                                                 false,   // is partitioned
-                                                 nullptr  // operation ID
-                                                 )));
+  EXPECT_TRUE(NS_SUCCEEDED(
+      cookieMgr2->AddNative(uri,
+                            "cookiemgr.test"_ns,  // domain
+                            "/foo"_ns,            // path
+                            "test1"_ns,           // name
+                            "yes"_ns,             // value
+                            false,                // is secure
+                            false,                // is httponly
+                            true,                 // is session
+                            INT64_MAX,            // expiry time
+                            &attrs,               // originAttributes
+                            nsICookie::SAMESITE_NONE, nsICookie::SCHEME_HTTPS,
+                            false,    // is partitioned
+                            true,     // from http
+                            nullptr,  // operation ID
+                            [](CookieStruct&) -> bool { return true; })));
+  EXPECT_TRUE(NS_SUCCEEDED(
+      cookieMgr2->AddNative(uri,
+                            "cookiemgr.test"_ns,             // domain
+                            "/foo"_ns,                       // path
+                            "test2"_ns,                      // name
+                            "yes"_ns,                        // value
+                            false,                           // is secure
+                            true,                            // is httponly
+                            true,                            // is session
+                            PR_Now() / PR_USEC_PER_SEC + 2,  // expiry time
+                            &attrs,                          // originAttributes
+                            nsICookie::SAMESITE_NONE, nsICookie::SCHEME_HTTPS,
+                            false,    // is partitioned
+                            true,     // from http
+                            nullptr,  // operation ID
+                            [](CookieStruct&) -> bool { return true; })));
+  EXPECT_TRUE(NS_SUCCEEDED(
+      cookieMgr2->AddNative(uri,
+                            "new.domain"_ns,  // domain
+                            "/rabbit"_ns,     // path
+                            "test3"_ns,       // name
+                            "yes"_ns,         // value
+                            false,            // is secure
+                            false,            // is httponly
+                            true,             // is session
+                            INT64_MAX,        // expiry time
+                            &attrs,           // originAttributes
+                            nsICookie::SAMESITE_NONE, nsICookie::SCHEME_HTTPS,
+                            false,    // is partitioned
+                            true,     // from http
+                            nullptr,  // operation ID
+                            [](CookieStruct&) -> bool { return true; })));
   // confirm using enumerator
   nsTArray<RefPtr<nsICookie>> cookies;
   EXPECT_NS_SUCCEEDED(cookieMgr->GetCookies(cookies));
@@ -936,12 +945,14 @@ TEST(TestCookie, TestCookieMain)
     int32_t sameSiteAttr;
     cookie->GetSameSite(&sameSiteAttr);
     if (name.EqualsLiteral("unset")) {
-      EXPECT_TRUE(sameSiteAttr == nsICookie::SAMESITE_NONE);
+      EXPECT_TRUE(sameSiteAttr == nsICookie::SAMESITE_UNSET);
     } else if (name.EqualsLiteral("unspecified")) {
-      EXPECT_TRUE(sameSiteAttr == nsICookie::SAMESITE_NONE);
+      EXPECT_TRUE(sameSiteAttr == nsICookie::SAMESITE_UNSET);
     } else if (name.EqualsLiteral("empty")) {
-      EXPECT_TRUE(sameSiteAttr == nsICookie::SAMESITE_NONE);
+      EXPECT_TRUE(sameSiteAttr == nsICookie::SAMESITE_UNSET);
     } else if (name.EqualsLiteral("bogus")) {
+      EXPECT_TRUE(sameSiteAttr == nsICookie::SAMESITE_UNSET);
+    } else if (name.EqualsLiteral("none")) {
       EXPECT_TRUE(sameSiteAttr == nsICookie::SAMESITE_NONE);
     } else if (name.EqualsLiteral("strict")) {
       EXPECT_TRUE(sameSiteAttr == nsICookie::SAMESITE_STRICT);
@@ -990,52 +1001,6 @@ TEST(TestCookie, TestCookieMain)
   // *** "noncompliant cookie" tests
   // *** IP address tests
   // *** speed tests
-}
-
-TEST(TestCookie, SameSiteLax)
-{
-  Preferences::SetBool("network.cookie.sameSite.laxByDefault", true);
-
-  nsresult rv;
-
-  nsCOMPtr<nsICookieService> cookieService =
-      do_GetService(kCookieServiceCID, &rv);
-  ASSERT_NS_SUCCEEDED(rv);
-
-  nsCOMPtr<nsICookieManager> cookieMgr =
-      do_GetService(NS_COOKIEMANAGER_CONTRACTID, &rv);
-  ASSERT_NS_SUCCEEDED(rv);
-
-  EXPECT_NS_SUCCEEDED(cookieMgr->RemoveAll());
-
-  SetACookie(cookieService, "http://samesite.test", "unset=yes");
-
-  nsTArray<RefPtr<nsICookie>> cookies;
-  EXPECT_NS_SUCCEEDED(cookieMgr->GetCookies(cookies));
-  EXPECT_EQ(cookies.Length(), (uint64_t)1);
-
-  Cookie* cookie = static_cast<Cookie*>(cookies[0].get());
-  EXPECT_EQ(cookie->RawSameSite(), nsICookie::SAMESITE_NONE);
-  EXPECT_EQ(cookie->SameSite(), nsICookie::SAMESITE_LAX);
-
-  Preferences::SetCString("network.cookie.sameSite.laxByDefault.disabledHosts",
-                          "foo.com,samesite.test,bar.net");
-
-  EXPECT_NS_SUCCEEDED(cookieMgr->RemoveAll());
-
-  cookies.SetLength(0);
-  EXPECT_NS_SUCCEEDED(cookieMgr->GetCookies(cookies));
-  EXPECT_EQ(cookies.Length(), (uint64_t)0);
-
-  SetACookie(cookieService, "http://samesite.test", "unset=yes");
-
-  cookies.SetLength(0);
-  EXPECT_NS_SUCCEEDED(cookieMgr->GetCookies(cookies));
-  EXPECT_EQ(cookies.Length(), (uint64_t)1);
-
-  cookie = static_cast<Cookie*>(cookies[0].get());
-  EXPECT_EQ(cookie->RawSameSite(), nsICookie::SAMESITE_NONE);
-  EXPECT_EQ(cookie->SameSite(), nsICookie::SAMESITE_LAX);
 }
 
 TEST(TestCookie, OnionSite)

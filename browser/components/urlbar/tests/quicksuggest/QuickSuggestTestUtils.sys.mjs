@@ -8,16 +8,19 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   AmpSuggestions: "resource:///modules/urlbar/private/AmpSuggestions.sys.mjs",
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
-  ExperimentFakes: "resource://testing-common/NimbusTestUtils.sys.mjs",
-  ExperimentManager: "resource://nimbus/lib/ExperimentManager.sys.mjs",
+  NimbusTestUtils: "resource://testing-common/NimbusTestUtils.sys.mjs",
   QuickSuggest: "resource:///modules/QuickSuggest.sys.mjs",
   Region: "resource://gre/modules/Region.sys.mjs",
   RemoteSettingsServer:
     "resource://testing-common/RemoteSettingsServer.sys.mjs",
-  SearchUtils: "resource://gre/modules/SearchUtils.sys.mjs",
+  SearchUtils: "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
+  Suggestion:
+    "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
   TestUtils: "resource://testing-common/TestUtils.sys.mjs",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
   UrlbarUtils: "resource:///modules/UrlbarUtils.sys.mjs",
+  YelpSubjectType:
+    "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
 });
 
@@ -130,6 +133,20 @@ class _QuickSuggestTestUtils {
     }
   }
 
+  get RS_COLLECTION() {
+    return {
+      AMP: "quicksuggest-amp",
+      OTHER: "quicksuggest-other",
+    };
+  }
+
+  get RS_TYPE() {
+    return {
+      AMP: "amp",
+      WIKIPEDIA: "wikipedia",
+    };
+  }
+
   get DEFAULT_CONFIG() {
     // Return a clone so callers can modify it.
     return Cu.cloneInto(DEFAULT_CONFIG, this);
@@ -148,7 +165,7 @@ class _QuickSuggestTestUtils {
    *     - `record.attachment` - Optional. This should be the attachment itself
    *       and not its metadata. It should be a JSONable object.
    *     - `record.collection` - Optional. The name of the RS collection that
-   *       the record should be added to. Defaults to "quicksuggest".
+   *       the record should be added to. Defaults to "quicksuggest-other".
    * @param {Array} options.merinoSuggestions
    *   Array of Merino suggestion objects. If given, this function will start
    *   the mock Merino server and set `quicksuggest.dataCollection.enabled` to
@@ -183,24 +200,11 @@ class _QuickSuggestTestUtils {
   } = {}) {
     this.#log("ensureQuickSuggestInit", "Started");
 
-    this.#log("ensureQuickSuggestInit", "Awaiting ExperimentManager.onStartup");
-    await lazy.ExperimentManager.onStartup();
+    this.#log("ensureQuickSuggestInit", "Awaiting ExperimentAPI.init");
+    const initializedExperimentAPI = await lazy.ExperimentAPI.init();
 
     this.#log("ensureQuickSuggestInit", "Awaiting ExperimentAPI.ready");
     await lazy.ExperimentAPI.ready();
-
-    // Make a Map from collection name to the array of records that should be
-    // added to that collection.
-    let recordsByCollection = remoteSettingsRecords.reduce((memo, record) => {
-      let collection = record.collection || "quicksuggest";
-      let records = memo.get(collection);
-      if (!records) {
-        records = [];
-        memo.set(collection, records);
-      }
-      records.push(record);
-      return memo;
-    }, new Map());
 
     // Set up the local remote settings server.
     this.#log("ensureQuickSuggestInit", "Preparing remote settings server");
@@ -209,11 +213,13 @@ class _QuickSuggestTestUtils {
     }
 
     this.#remoteSettingsServer.removeRecords();
-    for (let [collection, records] of recordsByCollection.entries()) {
+    for (let [collection, records] of this.#recordsByCollection(
+      remoteSettingsRecords
+    )) {
       await this.#remoteSettingsServer.addRecords({ collection, records });
     }
     await this.#remoteSettingsServer.addRecords({
-      collection: "quicksuggest",
+      collection: this.RS_COLLECTION.OTHER,
       records: [{ type: "configuration", configuration: config }],
     });
 
@@ -221,14 +227,17 @@ class _QuickSuggestTestUtils {
     await this.#remoteSettingsServer.start();
     this.#log("ensureQuickSuggestInit", "Remote settings server started");
 
-    // Init Suggest and set prefs. Do this after setting up remote settings
+    // Init Suggest and force the region to US and the locale to en-US, which
+    // will cause Suggest to be enabled along with all suggestion types that are
+    // enabled in the US by default. Do this after setting up remote settings
     // because the Rust backend will immediately try to sync.
     this.#log(
       "ensureQuickSuggestInit",
       "Calling QuickSuggest.init() and setting prefs"
     );
-    await lazy.QuickSuggest.init();
-    prefs.push(["quicksuggest.enabled", true]);
+    await lazy.QuickSuggest.init({ region: "US", locale: "en-US" });
+
+    // Set prefs requested by the caller.
     for (let [name, value] of prefs) {
       lazy.UrlbarPrefs.set(name, value);
     }
@@ -256,6 +265,12 @@ class _QuickSuggestTestUtils {
       if (!cleanupCalled) {
         cleanupCalled = true;
         await this.#uninitQuickSuggest(prefs, !!merinoSuggestions);
+
+        if (initializedExperimentAPI) {
+          // Only reset if we're in an xpcshell-test and actually initialized
+          // the ExperimentAPI.
+          lazy.ExperimentAPI._resetForTests();
+        }
       }
     };
     this.registerCleanupFunction?.(cleanup);
@@ -299,10 +314,15 @@ class _QuickSuggestTestUtils {
    */
   async setRemoteSettingsRecords(records, { forceSync = true } = {}) {
     this.#log("setRemoteSettingsRecords", "Started");
-    await this.#remoteSettingsServer.setRecords({
-      collection: "quicksuggest",
-      records,
-    });
+
+    this.#remoteSettingsServer.removeRecords();
+    for (let [collection, recs] of this.#recordsByCollection(records)) {
+      await this.#remoteSettingsServer.addRecords({
+        collection,
+        records: recs,
+      });
+    }
+
     if (forceSync) {
       this.#log("setRemoteSettingsRecords", "Forcing sync");
       await this.forceSync();
@@ -324,7 +344,7 @@ class _QuickSuggestTestUtils {
     let type = "configuration";
     this.#remoteSettingsServer.removeRecords({ type });
     await this.#remoteSettingsServer.addRecords({
-      collection: "quicksuggest",
+      collection: this.RS_COLLECTION.OTHER,
       records: [{ type, configuration: config }],
     });
     this.#log("setConfig", "Forcing sync");
@@ -375,12 +395,14 @@ class _QuickSuggestTestUtils {
    */
   ampRemoteSettings({
     keywords = ["amp"],
+    full_keywords = keywords.map(kw => [kw, 1]),
     url = "https://example.com/amp",
     title = "Amp Suggestion",
     score = 0.3,
   } = {}) {
     return {
       keywords,
+      full_keywords,
       url,
       title,
       score,
@@ -455,6 +477,22 @@ class _QuickSuggestTestUtils {
 
     if (result.payload.source == "rust") {
       result.payload.iconBlob = iconBlob;
+      result.payload.suggestionObject = new lazy.Suggestion.Amp(
+        title,
+        url,
+        originalUrl, // rawUrl
+        null, // icon,
+        null, // iconMimetype
+        fullKeyword,
+        blockId,
+        advertiser,
+        iabCategory,
+        impressionUrl,
+        clickUrl,
+        clickUrl, // rawClickUrl
+        0.3, // score
+        null // ftsMatchInfo
+      );
     } else {
       result.payload.icon = icon;
     }
@@ -507,7 +545,7 @@ class _QuickSuggestTestUtils {
     suggestedIndex = -1,
     isSuggestedIndexRelativeToGroup = true,
   } = {}) {
-    return {
+    let result = {
       suggestedIndex,
       isSuggestedIndexRelativeToGroup,
       type: lazy.UrlbarUtils.RESULT_TYPE.URL,
@@ -529,6 +567,18 @@ class _QuickSuggestTestUtils {
         telemetryType: "adm_nonsponsored",
       },
     };
+
+    if (source == "rust") {
+      result.payload.suggestionObject = new lazy.Suggestion.Wikipedia(
+        title,
+        url,
+        null, // icon
+        null, // iconMimetype
+        fullKeyword
+      );
+    }
+
+    return result;
   }
 
   /**
@@ -608,184 +658,166 @@ class _QuickSuggestTestUtils {
     min_keyword_length = undefined,
     score = 0.29,
   } = {}) {
-    let [maxLen, maxWordCount] = keywords.reduce(
-      ([len, wordCount], kw) => [
-        Math.max(len, kw.length),
-        Math.max(wordCount, kw.split(/\s+/).filter(s => !!s).length),
-      ],
-      [0, 0]
-    );
     return {
       type: "weather",
       attachment: {
         keywords,
         min_keyword_length,
         score,
-        max_keyword_length: maxLen,
-        max_keyword_word_count: maxWordCount,
       },
     };
   }
 
   /**
-   * Returns a remote settings geonames record populated with some cities.
+   * Returns remote settings records containing geonames populated with some
+   * cities.
    *
-   * @returns {object}
-   *   A geonames record for storing in remote settings.
+   * @returns {Array}
+   *   One or more geonames records for storing in remote settings.
    */
-  geonamesRecord() {
+  geonamesRecords() {
     let geonames = [
       // Waterloo, AL
       {
-        id: 1,
+        id: 4096497,
         name: "Waterloo",
-        latitude: "34.91814",
-        longitude: "-88.0642",
         feature_class: "P",
         feature_code: "PPL",
-        country_code: "US",
-        admin1_code: "AL",
+        country: "US",
+        admin1: "AL",
+        admin2: "077",
         population: 200,
-        alternate_names: ["waterloo"],
-        alternate_names_2: [{ name: "waterloo" }],
+        latitude: "34.91814",
+        longitude: "-88.0642",
       },
       // AL
       {
-        id: 2,
+        id: 4829764,
         name: "Alabama",
-        latitude: "32.75041",
-        longitude: "-86.75026",
         feature_class: "A",
         feature_code: "ADM1",
-        country_code: "US",
-        admin1_code: "AL",
+        country: "US",
+        admin1: "AL",
         population: 4530315,
-        alternate_names: ["al", "alabama"],
-        alternate_names_2: [
-          { name: "alabama" },
-          { name: "al", iso_language: "abbr" },
-        ],
+        latitude: "32.75041",
+        longitude: "-86.75026",
       },
       // Waterloo, IA
       {
-        id: 3,
+        id: 4880889,
         name: "Waterloo",
-        latitude: "42.49276",
-        longitude: "-92.34296",
         feature_class: "P",
         feature_code: "PPLA2",
-        country_code: "US",
-        admin1_code: "IA",
+        country: "US",
+        admin1: "IA",
+        admin2: "013",
+        admin3: "94597",
         population: 68460,
-        alternate_names: ["waterloo"],
-        alternate_names_2: [{ name: "waterloo" }],
+        latitude: "42.49276",
+        longitude: "-92.34296",
       },
       // IA
       {
-        id: 4,
+        id: 4862182,
         name: "Iowa",
-        latitude: "42.00027",
-        longitude: "-93.50049",
         feature_class: "A",
         feature_code: "ADM1",
-        country_code: "US",
-        admin1_code: "IA",
+        country: "US",
+        admin1: "IA",
         population: 2955010,
-        alternate_names: ["ia", "iowa"],
-        alternate_names_2: [
-          { name: "iowa" },
-          { name: "ia", iso_language: "abbr" },
-        ],
+        latitude: "42.00027",
+        longitude: "-93.50049",
       },
       // Made-up cities with the same name in the US and CA. The CA city has a
       // larger population.
       {
         id: 100,
         name: "US CA City",
-        latitude: "38.06084",
-        longitude: "-97.92977",
         feature_class: "P",
         feature_code: "PPL",
-        country_code: "US",
-        admin1_code: "IA",
+        country: "US",
+        admin1: "IA",
         population: 1,
-        alternate_names: ["us ca city"],
-        alternate_names_2: [{ name: "us ca city" }],
+        latitude: "38.06084",
+        longitude: "-97.92977",
       },
       {
         id: 101,
         name: "US CA City",
-        latitude: "45.50884",
-        longitude: "-73.58781",
         feature_class: "P",
         feature_code: "PPL",
-        country_code: "CA",
-        admin1_code: "08",
+        country: "CA",
+        admin1: "08",
         population: 2,
-        alternate_names: ["us ca city"],
-        alternate_names_2: [{ name: "us ca city" }],
+        latitude: "45.50884",
+        longitude: "-73.58781",
       },
       // Made-up cities that are only ~1.5 km apart.
       {
         id: 102,
         name: "Twin City A",
-        latitude: "33.748889",
-        longitude: "-84.39",
         feature_class: "P",
         feature_code: "PPL",
-        country_code: "US",
-        admin1_code: "GA",
+        country: "US",
+        admin1: "GA",
         population: 1,
-        alternate_names: ["twin city a"],
-        alternate_names_2: [{ name: "twin city a" }],
+        latitude: "33.748889",
+        longitude: "-84.39",
       },
       {
         id: 103,
         name: "Twin City B",
-        latitude: "33.76",
-        longitude: "-84.4",
         feature_class: "P",
         feature_code: "PPL",
-        country_code: "US",
-        admin1_code: "GA",
+        country: "US",
+        admin1: "GA",
         population: 2,
-        alternate_names: ["twin city b"],
-        alternate_names_2: [{ name: "twin city b" }],
+        latitude: "33.76",
+        longitude: "-84.4",
       },
       {
         id: 1850147,
         name: "Tokyo",
-        latitude: "35.6895",
-        longitude: "139.69171",
         feature_class: "P",
         feature_code: "PPLC",
-        country_code: "JP",
-        admin1_code: "Tokyo-to",
-        population: 8336599,
-        alternate_names: ["tokyo"],
-        alternate_names_2: [{ name: "tokyo" }],
+        country: "JP",
+        admin1: "Tokyo-to",
+        population: 9733276,
+        latitude: "35.6895",
+        longitude: "139.69171",
       },
     ];
-    let [maxLen, maxWordCount] = geonames.reduce(
-      ([len, wordCount], geoname) => [
-        Math.max(len, ...geoname.alternate_names.map(n => n.length)),
-        Math.max(
-          wordCount,
-          ...geoname.alternate_names.map(
-            n => n.split(/\s+/).filter(s => !!s).length
-          )
-        ),
-      ],
-      [0, 0]
-    );
-    return {
-      type: "geonames",
-      attachment: {
-        geonames,
-        max_alternate_name_length: maxLen,
-        max_alternate_name_word_count: maxWordCount,
+
+    return [
+      {
+        type: "geonames-2",
+        attachment: geonames,
       },
-    };
+    ];
+  }
+
+  /**
+   * Returns remote settings records containing geonames alternates (alternate
+   * names) populated with some names.
+   *
+   * @returns {Array}
+   *   One or more geonames alternates records for storing in remote settings.
+   */
+  geonamesAlternatesRecords() {
+    return [
+      {
+        type: "geonames-alternates",
+        attachment: [
+          {
+            language: "abbr",
+            alternates_by_geoname_id: [
+              [4829764, ["AL"]],
+              [4862182, ["IA"]],
+            ],
+          },
+        ],
+      },
+    ];
   }
 
   /**
@@ -812,7 +844,7 @@ class _QuickSuggestTestUtils {
       url = url.href;
     }
 
-    return {
+    let result = {
       isBestMatch: true,
       suggestedIndex: 1,
       type: lazy.UrlbarUtils.RESULT_TYPE.URL,
@@ -834,6 +866,21 @@ class _QuickSuggestTestUtils {
         telemetryType: "amo",
       },
     };
+
+    if (source == "rust") {
+      result.payload.suggestionObject = new lazy.Suggestion.Amo(
+        title,
+        originalUrl, // url
+        icon,
+        description,
+        "4.7", // rating
+        1, // numberOfRatings
+        "amo-suggestion@example.com", // guid
+        0.2 // score
+      );
+    }
+
+    return result;
   }
 
   /**
@@ -872,8 +919,87 @@ class _QuickSuggestTestUtils {
         bottomTextL10n: { id: "firefox-suggest-mdn-bottom-text" },
         source: "rust",
         provider: "Mdn",
+        suggestionObject: new lazy.Suggestion.Mdn(
+          title,
+          url,
+          description,
+          0.2 // score
+        ),
       },
     };
+  }
+
+  /**
+   * Returns an expected Yelp result that can be passed to `check_results()` in
+   * xpcshell tests.
+   *
+   * @returns {object}
+   *   An object that can be passed to `check_results()`.
+   */
+  yelpResult({
+    url,
+    title = undefined,
+    titleL10n = undefined,
+    source = "rust",
+    provider = "Yelp",
+    isTopPick = false,
+    // The default Yelp suggestedIndex is 0, unlike most other Suggest
+    // suggestion types, which use -1.
+    suggestedIndex = 0,
+    isSuggestedIndexRelativeToGroup = true,
+    originalUrl = undefined,
+    suggestedType = lazy.YelpSubjectType.SERVICE,
+  }) {
+    const utmParameters = "&utm_medium=partner&utm_source=mozilla";
+
+    originalUrl ??= url;
+    originalUrl = new URL(originalUrl);
+    originalUrl.searchParams.delete("find_loc");
+    originalUrl = originalUrl.toString();
+
+    url += utmParameters;
+
+    if (isTopPick) {
+      suggestedIndex = 1;
+      isSuggestedIndexRelativeToGroup = false;
+    }
+
+    let result = {
+      type: lazy.UrlbarUtils.RESULT_TYPE.URL,
+      source: lazy.UrlbarUtils.RESULT_SOURCE.SEARCH,
+      isBestMatch: !!isTopPick,
+      suggestedIndex,
+      isSuggestedIndexRelativeToGroup,
+      heuristic: false,
+      payload: {
+        source,
+        provider,
+        telemetryType: "yelp",
+        bottomTextL10n: { id: "firefox-suggest-yelp-bottom-text" },
+        url,
+        originalUrl,
+        title,
+        titleL10n,
+        icon: null,
+        isSponsored: true,
+      },
+    };
+
+    if (source == "rust") {
+      result.payload.suggestionObject = new lazy.Suggestion.Yelp(
+        originalUrl, // url
+        title,
+        null, // icon
+        null, // iconMimetype
+        0.2, // score
+        false, // hasLocationSign
+        false, // subjectExactMatch
+        suggestedType, // subjectType
+        "find_loc" // locationParam
+      );
+    }
+
+    return result;
   }
 
   /**
@@ -920,13 +1046,14 @@ class _QuickSuggestTestUtils {
         },
         bottomTextL10n: {
           id: "firefox-suggest-weather-sponsored",
-          args: { provider: "AccuWeather" },
+          args: { provider: "AccuWeather®" },
           cacheable: true,
         },
         source,
         provider,
         isSponsored: true,
         telemetryType: "weather",
+        helpUrl: lazy.QuickSuggest.HELP_URL,
       },
     };
   }
@@ -1193,7 +1320,7 @@ class _QuickSuggestTestUtils {
     await lazy.ExperimentAPI.ready();
 
     let doExperimentCleanup =
-      await lazy.ExperimentFakes.enrollWithFeatureConfig({
+      await lazy.NimbusTestUtils.enrollWithFeatureConfig({
         enabled: true,
         featureId: "urlbar",
         value: valueOverrides,
@@ -1201,7 +1328,7 @@ class _QuickSuggestTestUtils {
 
     return async () => {
       this.#log("enrollExperiment.cleanup", "Awaiting experiment cleanup");
-      doExperimentCleanup();
+      await doExperimentCleanup();
     };
   }
 
@@ -1306,6 +1433,33 @@ class _QuickSuggestTestUtils {
 
   #log(fnName, msg) {
     this.info?.(`QuickSuggestTestUtils.${fnName} ${msg}`);
+  }
+
+  #recordsByCollection(records) {
+    // Make a Map from collection name to the array of records that should be
+    // added to that collection.
+    let recordsByCollection = records.reduce((memo, record) => {
+      let collection = record.collection || this.RS_COLLECTION.OTHER;
+      let recs = memo.get(collection);
+      if (!recs) {
+        recs = [];
+        memo.set(collection, recs);
+      }
+      recs.push(record);
+      return memo;
+    }, new Map());
+
+    // Make sure the two main collections, "quicksuggest-amp" and
+    // "quicksuggest-other", are present. Otherwise the Rust component will log
+    // 404 errors because it expects them to exist. The errors are harmless but
+    // annoying.
+    for (let collection of Object.values(this.RS_COLLECTION)) {
+      if (!recordsByCollection.has(collection)) {
+        recordsByCollection.set(collection, []);
+      }
+    }
+
+    return recordsByCollection;
   }
 
   #remoteSettingsServer;

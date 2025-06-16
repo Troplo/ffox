@@ -28,8 +28,10 @@
 #include "js/StreamConsumer.h"
 #include "threading/LockGuard.h"
 #include "threading/Thread.h"
+#include "util/DifferentialTesting.h"
 #include "vm/HelperThreadState.h"  // Tier2GeneratorTask
 #include "vm/PlainObject.h"        // js::PlainObject
+#include "vm/Warnings.h"           // WarnNumberASCII
 #include "wasm/WasmBaselineCompile.h"
 #include "wasm/WasmCompile.h"
 #include "wasm/WasmDebug.h"
@@ -57,7 +59,7 @@ static UniqueChars Tier2ResultsContext(const ScriptedCaller& scriptedCaller) {
              : UniqueChars();
 }
 
-void js::wasm::ReportTier2ResultsOffThread(bool success,
+void js::wasm::ReportTier2ResultsOffThread(bool cancelled, bool success,
                                            Maybe<uint32_t> maybeFuncIndex,
                                            const ScriptedCaller& scriptedCaller,
                                            const UniqueChars& error,
@@ -67,8 +69,10 @@ void js::wasm::ReportTier2ResultsOffThread(bool success,
   const char* contextString = context ? context.get() : "unknown";
 
   // Display the main error, if any.
-  if (!success) {
-    const char* errorString = error ? error.get() : "out of memory";
+  if (!success || cancelled) {
+    const char* errorString = error       ? error.get()
+                              : cancelled ? "compilation cancelled"
+                                          : "out of memory";
     if (maybeFuncIndex.isSome()) {
       LogOffThread(
           "'%s': wasm partial tier-2 (func index %u) failed with '%s'.\n",
@@ -94,13 +98,14 @@ void js::wasm::ReportTier2ResultsOffThread(bool success,
 
 class Module::CompleteTier2GeneratorTaskImpl
     : public CompleteTier2GeneratorTask {
-  SharedBytes bytecode_;
+  SharedBytes codeSection_;
   SharedModule module_;
   mozilla::Atomic<bool> cancelled_;
 
  public:
-  CompleteTier2GeneratorTaskImpl(const ShareableBytes& bytecode, Module& module)
-      : bytecode_(&bytecode), module_(&module), cancelled_(false) {}
+  CompleteTier2GeneratorTaskImpl(const ShareableBytes* codeSection,
+                                 Module& module)
+      : codeSection_(codeSection), module_(&module), cancelled_(false) {}
 
   ~CompleteTier2GeneratorTaskImpl() override {
     module_->completeTier2Listener_ = nullptr;
@@ -120,13 +125,13 @@ class Module::CompleteTier2GeneratorTaskImpl
       // that's okay.
       UniqueChars error;
       UniqueCharsVector warnings;
-      bool success = CompileCompleteTier2(bytecode_->vector, *module_, &error,
+      bool success = CompileCompleteTier2(codeSection_, *module_, &error,
                                           &warnings, &cancelled_);
       if (!cancelled_) {
         // We could try to dispatch a runnable to the thread that started this
         // compilation, so as to report the warning/error using a JSContext*.
         // For now we just report to stderr.
-        ReportTier2ResultsOffThread(success, mozilla::Nothing(),
+        ReportTier2ResultsOffThread(cancelled_, success, mozilla::Nothing(),
                                     module_->codeMeta().scriptedCaller(), error,
                                     warnings);
       }
@@ -153,11 +158,12 @@ Module::~Module() {
   MOZ_ASSERT(!testingTier2Active_);
 }
 
-void Module::startTier2(const ShareableBytes& bytecode,
+void Module::startTier2(const ShareableBytes* codeSection,
                         JS::OptimizedEncodingListener* listener) {
   MOZ_ASSERT(!testingTier2Active_);
+  MOZ_ASSERT_IF(codeMeta().codeSectionRange.isSome(), codeSection);
 
-  auto task = MakeUnique<CompleteTier2GeneratorTaskImpl>(bytecode, *this);
+  auto task = MakeUnique<CompleteTier2GeneratorTaskImpl>(codeSection, *this);
   if (!task) {
     return;
   }
@@ -171,9 +177,10 @@ void Module::startTier2(const ShareableBytes& bytecode,
 }
 
 bool Module::finishTier2(UniqueCodeBlock tier2CodeBlock,
-                         UniqueLinkData tier2LinkData) const {
-  if (!code_->finishTier2(std::move(tier2CodeBlock),
-                          std::move(tier2LinkData))) {
+                         UniqueLinkData tier2LinkData,
+                         const CompileAndLinkStats& tier2Stats) const {
+  if (!code_->finishTier2(std::move(tier2CodeBlock), std::move(tier2LinkData),
+                          tier2Stats)) {
     return false;
   }
 
@@ -920,7 +927,7 @@ bool Module::instantiate(JSContext* cx, ImportValues& imports,
   }
 
   UniqueDebugState maybeDebug;
-  if (codeMeta().debugEnabled) {
+  if (code().debugEnabled()) {
     maybeDebug = cx->make_unique<DebugState>(*code_, *this);
     if (!maybeDebug) {
       ReportOutOfMemory(cx);
@@ -978,6 +985,28 @@ bool Module::instantiate(JSContext* cx, ImportValues& imports,
       codeMeta().isAsmJS() ? JSUseCounter::ASMJS : JSUseCounter::WASM;
   cx->runtime()->setUseCounter(instance, useCounter);
   SetUseCountersForFeatureUsage(cx, instance, moduleMeta().featureUsage);
+
+  // Warn for deprecated features. Don't do this with differential testing as
+  // that will think these warnings are significant.
+  if (!js::SupportDifferentialTesting()) {
+    // Warn if the user is using the legacy exceptions proposal.
+    if (moduleMeta().featureUsage & FeatureUsage::LegacyExceptions) {
+      if (!js::WarnNumberASCII(cx, JSMSG_WASM_LEGACY_EXCEPTIONS_DEPRECATED)) {
+        if (cx->isExceptionPending()) {
+          cx->clearPendingException();
+        }
+      }
+    }
+
+    // Warn if the user is using asm.js still.
+    if (JS::Prefs::warn_asmjs_deprecation() && codeMeta().isAsmJS()) {
+      if (!js::WarnNumberASCII(cx, JSMSG_USE_ASM_DEPRECATED)) {
+        if (cx->isExceptionPending()) {
+          cx->clearPendingException();
+        }
+      }
+    }
+  }
 
   if (cx->options().testWasmAwaitTier2() &&
       code().mode() != CompileMode::LazyTiering) {

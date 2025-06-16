@@ -22,8 +22,12 @@ import mozilla.components.feature.app.links.AppLinksInterceptor
 import mozilla.components.feature.app.links.AppLinksUseCases
 import mozilla.components.feature.contextmenu.ContextMenuUseCases
 import mozilla.components.feature.customtabs.store.CustomTabsServiceStore
+import mozilla.components.feature.downloads.DateTimeProvider
+import mozilla.components.feature.downloads.DefaultDateTimeProvider
+import mozilla.components.feature.downloads.DefaultFileSizeFormatter
 import mozilla.components.feature.downloads.DownloadMiddleware
 import mozilla.components.feature.downloads.DownloadsUseCases
+import mozilla.components.feature.downloads.FileSizeFormatter
 import mozilla.components.feature.media.MediaSessionFeature
 import mozilla.components.feature.media.middleware.RecordingDevicesMiddleware
 import mozilla.components.feature.prompts.PromptMiddleware
@@ -122,7 +126,7 @@ class Components(
     val engineDefaultSettings by lazy {
         DefaultSettings(
             requestInterceptor = AppContentInterceptor(context),
-            trackingProtectionPolicy = settings.createTrackingProtectionPolicy(),
+            trackingProtectionPolicy = EngineProvider.createTrackingProtectionPolicy(context),
             javascriptEnabled = !settings.shouldBlockJavaScript(),
             remoteDebuggingEnabled = settings.shouldEnableRemoteDebugging(),
             webFontsEnabled = !settings.shouldBlockWebFonts(),
@@ -134,7 +138,7 @@ class Components(
 
     val engine: Engine by lazy {
         engineOverride ?: EngineProvider.createEngine(context, engineDefaultSettings).apply {
-            this@Components.settings.setupSafeBrowsing(this)
+            EngineProvider.setupSafeBrowsing(this, this@Components.settings.shouldUseSafeBrowsing())
             WebCompatFeature.install(this)
             WebCompatReporterFeature.install(this, "focus-geckoview")
         }
@@ -245,12 +249,15 @@ class Components(
     val appLinksInterceptor by lazy {
         AppLinksInterceptor(
             context,
-            interceptLinkClicks = true,
             launchInApp = {
                 context.settings.openLinksInExternalApp
             },
         )
     }
+
+    val fileSizeFormatter: FileSizeFormatter by lazy { DefaultFileSizeFormatter(context.applicationContext) }
+
+    val dateTimeProvider: DateTimeProvider by lazy { DefaultDateTimeProvider() }
 }
 
 private fun createCrashReporter(context: Context): CrashReporter {

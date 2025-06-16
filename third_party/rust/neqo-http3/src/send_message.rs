@@ -4,7 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, cmp::min, fmt::Debug, num::NonZeroUsize, rc::Rc};
+use std::{
+    cell::RefCell,
+    cmp::min,
+    fmt::{self, Debug, Display, Formatter},
+    num::NonZeroUsize,
+    rc::Rc,
+};
 
 use neqo_common::{qdebug, qtrace, Encoder, Header, MessageType};
 use neqo_qpack::encoder::QPackEncoder;
@@ -151,7 +157,7 @@ impl SendMessage {
     }
 
     fn stream_id(&self) -> StreamId {
-        Option::<StreamId>::from(&self.stream).unwrap()
+        Option::<StreamId>::from(&self.stream).expect("stream has ID")
     }
 
     fn get_stream_info(&self) -> Http3StreamInfo {
@@ -183,7 +189,7 @@ impl SendStream for SendMessage {
             // cheap, thus not worth optimizing.
             conn.stream_set_writable_event_low_watermark(
                 self.stream_id(),
-                NonZeroUsize::new(MIN_DATA_FRAME_SIZE).unwrap(),
+                NonZeroUsize::new(MIN_DATA_FRAME_SIZE).ok_or(Error::Internal)?,
             )?;
             return Ok(0);
         }
@@ -324,8 +330,8 @@ impl HttpSendStream for SendMessage {
     }
 }
 
-impl ::std::fmt::Display for SendMessage {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for SendMessage {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "SendMesage {}", self.stream_id())
     }
 }

@@ -7,6 +7,7 @@
 use crate::std::borrow::Cow;
 use crate::std::ffi::{OsStr, OsString};
 use crate::std::path::{Path, PathBuf};
+use crate::std::process::Command;
 use crate::{lang, logging::LogTarget, std};
 use anyhow::Context;
 use once_cell::sync::Lazy;
@@ -17,6 +18,48 @@ const MINIDUMP_PRUNE_SAVE_COUNT: usize = 10;
 #[cfg(test)]
 pub mod test {
     pub const MINIDUMP_PRUNE_SAVE_COUNT: usize = super::MINIDUMP_PRUNE_SAVE_COUNT;
+
+    cfg_if::cfg_if! {
+        if #[cfg(target_os = "linux")] {
+            use crate::std::{mock, env};
+
+            fn cfg_get_data_dir_root() -> crate::std::path::PathBuf {
+                let cfg = super::Config::new();
+                cfg.get_data_dir_root("vendor").unwrap()
+            }
+
+            #[test]
+            fn data_dir_root_xdg_default() {
+                mock::builder()
+                    .set(env::MockHomeDir, "home_dir".into())
+                    .run(|| {
+                        let path = cfg_get_data_dir_root();
+                        assert_eq!(path, crate::std::path::PathBuf::from("home_dir/.config/vendor"));
+                     });
+            }
+
+            #[test]
+            fn data_dir_root_xdg_home() {
+                mock::builder()
+                    .set(env::MockEnv("XDG_CONFIG_HOME".into()), "home_dir/xdg/config".into())
+                    .run(|| {
+                        let path = cfg_get_data_dir_root();
+                        assert_eq!(path, crate::std::path::PathBuf::from("home_dir/xdg/config/vendor"));
+                    });
+            }
+
+            #[test]
+            fn data_dir_root_legacy_force() {
+                mock::builder()
+                    .set(env::MockHomeDir, "home_dir".into())
+                    .set(env::MockEnv("MOZ_LEGACY_HOME".into()), "1".into())
+                    .run(|| {
+                        let path = cfg_get_data_dir_root();
+                        assert_eq!(path, crate::std::path::PathBuf::from("home_dir/.vendor"));
+                    });
+            }
+        }
+    }
 }
 
 mod buildid_section {
@@ -404,6 +447,28 @@ impl Config {
         Ok(())
     }
 
+    /// Restart the program based on the configured restart command.
+    pub fn restart_process(&self) {
+        if self.restart_command.is_none() {
+            // The restart button should be hidden in this case, so this error should not occur.
+            log::error!("no process configured for restart");
+            return;
+        }
+
+        let mut cmd = Command::new(self.restart_command.as_ref().unwrap());
+        cmd.args(&self.restart_args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if let Some(xul_app_file) = &self.app_file {
+            cmd.env("XUL_APP_FILE", xul_app_file);
+        }
+        log::debug!("restarting process: {:?}", cmd);
+        if let Err(e) = cmd.spawn() {
+            log::error!("failed to restart process: {e}");
+        }
+    }
+
     /// Get the path of a program in the installation.
     ///
     /// The returned path isn't guaranteed to exist.
@@ -428,6 +493,22 @@ impl Config {
         }
     }
 
+    #[cfg(all(target_os = "linux", any(not(mock), test)))]
+    fn get_data_dir_root(&self, vendor: &str) -> anyhow::Result<PathBuf> {
+        // home_dir is deprecated due to incorrect behavior on windows, but we only use it on linux
+        #[allow(deprecated)]
+        let data_path = if std::env::var_os("MOZ_LEGACY_HOME").is_some() {
+            std::env::home_dir().map(|h| h.join(format!(".{}", vendor.to_lowercase())))
+        } else {
+            std::env::var_os("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .or_else(|| std::env::home_dir().map(|home| home.join(".config")))
+                .map(|h| h.join(format!("{}", vendor.to_lowercase())))
+        }
+        .with_context(|| self.string("crashreporter-error-no-home-dir"))?;
+        Ok(data_path)
+    }
+
     cfg_if::cfg_if! {
         if #[cfg(mock)] {
             fn get_data_dir(&self, vendor: &str, product: &str) -> anyhow::Result<PathBuf> {
@@ -439,11 +520,7 @@ impl Config {
             }
         } else if #[cfg(target_os = "linux")] {
             fn get_data_dir(&self, vendor: &str, product: &str) -> anyhow::Result<PathBuf> {
-                // home_dir is deprecated due to incorrect behavior on windows, but we only use it on linux
-                #[allow(deprecated)]
-                let mut data_path =
-                    std::env::home_dir().with_context(|| self.string("crashreporter-error-no-home-dir"))?;
-                data_path.push(format!(".{}", vendor.to_lowercase()));
+            let mut data_path = self.get_data_dir_root(vendor)?;
                 data_path.push(product.to_lowercase());
                 data_path.push("Crash Reports");
                 Ok(data_path)

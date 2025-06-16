@@ -78,6 +78,9 @@ const PREF_SYSTEM_ADDON_SET = "extensions.systemAddonSet";
 
 const PREF_EM_LAST_APP_BUILD_ID = "extensions.lastAppBuildId";
 
+const PREF_DATA_COLLECTION_PERMISSIONS_ENABLED =
+  "extensions.dataCollectionPermissions.enabled";
+
 // Specify a list of valid built-in add-ons to load.
 const BUILT_IN_ADDONS_URI = "chrome://browser/content/built_in_addons.json";
 
@@ -92,12 +95,17 @@ const FILE_XPI_STATES = "addonStartup.json.lz4";
 const KEY_PROFILEDIR = "ProfD";
 const KEY_ADDON_APP_DIR = "XREAddonAppDir";
 const KEY_APP_DISTRIBUTION = "XREAppDist";
-const KEY_APP_FEATURES = "XREAppFeat";
 
 const KEY_APP_PROFILE = "app-profile";
+// Location of add-ons included in the omni jar and listed in built_in_addons.json.
+// TODO: consider renaming to `KEY_APP_BUILTIN_ADDONS` when `KEY_APP_BUILTINS`
+// has been removed (since it would be confusing to have two similar `KEY_APP_`
+// constants while `KEY_APP_BUILTINS` is still defined).
+const KEY_APP_SYSTEM_BUILTINS = "app-builtin-addons";
 const KEY_APP_SYSTEM_PROFILE = "app-system-profile";
+// Location of add-on xpi files signed with a system signature downloaded from balrog.
 const KEY_APP_SYSTEM_ADDONS = "app-system-addons";
-const KEY_APP_SYSTEM_DEFAULTS = "app-system-defaults";
+// Location of add-ons included in the omni jar and manually installed through maybeInstallBuiltinAddon method.
 const KEY_APP_BUILTINS = "app-builtin";
 const KEY_APP_GLOBAL = "app-global";
 const KEY_APP_SYSTEM_LOCAL = "app-system-local";
@@ -136,6 +144,17 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "enabledScopesPref",
   PREF_EM_ENABLED_SCOPES,
   AddonManager.SCOPE_ALL
+);
+
+// An hidden pref that can be used in tests (in particular
+// xpcshell-tests unit tests) that may need to opt-out from
+// XPIProvider startup logic that will be auto-installing
+// the default theme.
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "skipDefaultThemeInstall",
+  "extensions.skipInstallDefaultThemeForTests",
+  false
 );
 
 Object.defineProperty(lazy, "enabledScopes", {
@@ -590,7 +609,10 @@ class XPIState {
       // than whatever value it may have cached.
       mtime = aFile.clone().lastModifiedTime;
     } catch (e) {
-      logger.warn("Can't get modified time of ${path}", aFile, e);
+      logger.warn("Can't get modified time of ${path} ${e}", {
+        path: aFile?.path,
+        e,
+      });
     }
 
     let changed = mtime != this.lastModifiedTime;
@@ -975,6 +997,76 @@ var BuiltInLocation = new (class _BuiltInLocation extends XPIStateLocation {
 })();
 
 /**
+ * A "location" for system addons installed from assets packaged into the app.
+ */
+var SystemBuiltInLocation =
+  new (class _SystemBuiltInLocation extends XPIStateLocation {
+    constructor() {
+      super(KEY_APP_SYSTEM_BUILTINS, null, AddonManager.SCOPE_APPLICATION);
+      // This location is locked and system addons are added and removed
+      // from this location through XPIProvider.scanForChanges and
+      // XPIDatabaseReconcile.processFileChanges based on what readAddons
+      // methods return.
+      this.locked = true;
+    }
+
+    // The installer object is responsible for moving files around on disk
+    // when (un)installing an addon.  Since this location handles only addons
+    // that are embedded within the browser, these are no-ops.
+    makeInstaller() {
+      return {
+        installAddon() {},
+        uninstallAddon() {},
+      };
+    }
+
+    /**
+     * Finds all the add-ons installed in this location.
+     *
+     * @returns {Map<AddonID, {builtin: { addon_version: String, res_url: String}}>}
+     *        A map of add-ons present in this location.
+     */
+    readAddons() {
+      let addons = new Map();
+
+      let manifest = XPIProvider.builtInAddons;
+
+      if (!("builtins" in manifest)) {
+        logger.debug("No list of valid builtins add-ons found.");
+        return addons;
+      }
+
+      for (let { addon_id, addon_version, res_url } of manifest.builtins) {
+        addons.set(addon_id, { builtin: { addon_version, res_url } });
+      }
+
+      return addons;
+    }
+
+    get hidden() {
+      return true;
+    }
+
+    get isBuiltin() {
+      return true;
+    }
+
+    get isSystem() {
+      return true;
+    }
+
+    get enumerable() {
+      return true;
+    }
+
+    // Builtin addons are never linked, return false
+    // here for correct behavior elsewhere.
+    isLinkedAddon(/* aId */) {
+      return false;
+    }
+  })();
+
+/**
  * An object which identifies a directory install location for add-ons. The
  * location consists of a directory which contains the add-ons installed in the
  * location.
@@ -1131,55 +1223,6 @@ class DirectoryLocation extends XPIStateLocation {
 }
 
 /**
- * An object which identifies a built-in install location for add-ons, such
- * as default system add-ons.
- *
- * This location should point either to a XPI, or a directory in a local build.
- */
-class SystemAddonDefaults extends DirectoryLocation {
-  /**
-   * Read the manifest of allowed add-ons and build a mapping between ID and URI
-   * for each.
-   *
-   * @returns {Map<AddonID, nsIFile>}
-   *        A map of add-ons present in this location.
-   */
-  readAddons() {
-    let addons = new Map();
-
-    let manifest = XPIProvider.builtInAddons;
-
-    if (!("system" in manifest)) {
-      logger.debug("No list of valid system add-ons found.");
-      return addons;
-    }
-
-    for (let id of manifest.system) {
-      let file = this.dir.clone();
-      file.append(`${id}.xpi`);
-
-      // Only attempt to load unpacked directory if unofficial build.
-      if (!AppConstants.MOZILLA_OFFICIAL && !file.exists()) {
-        file = this.dir.clone();
-        file.append(`${id}`);
-      }
-
-      addons.set(id, file);
-    }
-
-    return addons;
-  }
-
-  get isSystem() {
-    return true;
-  }
-
-  get isBuiltin() {
-    return true;
-  }
-}
-
-/**
  * An object which identifies a directory install location for system add-ons
  * updates.
  */
@@ -1193,10 +1236,11 @@ class SystemAddonLocation extends DirectoryLocation {
    *        The directory for the install location.
    * @param {integer} scope
    *        The scope of add-ons installed in this location.
-   * @param {boolean} resetSet
-   *        True to throw away the current add-on set
+   * @param {boolean} appChanged
+   *        True if the app version has changed from the one that has
+   *        last run on the current profile.
    */
-  constructor(name, dir, scope, resetSet) {
+  constructor(name, dir, scope, appChanged) {
     let addonSet = SystemAddonLocation._loadAddonSet();
     let directory = null;
 
@@ -1215,8 +1259,25 @@ class SystemAddonLocation extends DirectoryLocation {
     this._addonSet = addonSet;
     this._baseDir = dir;
 
-    if (resetSet) {
+    // Resetting system-signed addon set got from Balrog on:
+    // - a startup detected as an application version downgrade
+    // - a startup detected as an application version upgrade where there is a builtin addon version
+    //   higher than the addon version part of the system-signed addon set.
+    const isAppVersionDowngrade =
+      appChanged &&
+      Services.appinfo.lastAppVersion &&
+      Services.vc.compare(
+        Services.appinfo.version,
+        Services.appinfo.lastAppVersion
+      ) < 0;
+    if (isAppVersionDowngrade) {
+      logger.info(
+        "SystemAddonLocation directory reset on detected application downgrade"
+      );
       this.installer.resetAddonSet();
+    } else if (appChanged && addonSet.directory) {
+      const builtInsMap = SystemBuiltInLocation.readAddons();
+      this.installer.updateAddonSetOnAppVersionChanged(builtInsMap);
     }
   }
 
@@ -1402,6 +1463,22 @@ var XPIStates = {
       logger.warn("Error parsing extensions state: ${error}", { error: e });
     }
 
+    // Let's remove invalid `_processedColors` properties in the theme add-ons.
+    for (let location of Object.values(state || {})) {
+      for (let data of Object.values(location.addons || {})) {
+        if (data.type === "theme" && data.startupData) {
+          // Some profiles have an outdated version of `startupData` containing
+          // `_processedColors` properties, which in certain cases prevent the
+          // data from being updated correctly. These properties are removed
+          // here. See bug 1830136.
+          delete data.startupData.lwtData?.darkTheme?._processedColors;
+          delete data.startupData.lwtData?.theme?._processedColors;
+          delete data.startupData.lwtDarkStyles?._processedColors;
+          delete data.startupData.lwtStyles?._processedColors;
+        }
+      }
+    }
+
     // When upgrading from a build prior to bug 857456, convert startup
     // metadata.
     let done = false;
@@ -1443,6 +1520,7 @@ var XPIStates = {
     let oldLocations = new Set(Object.keys(oldState));
 
     let startupScanScopes;
+    let buildIdChanged = false;
     if (
       Services.appinfo.appBuildID ==
       Services.prefs.getCharPref(PREF_EM_LAST_APP_BUILD_ID, "")
@@ -1452,12 +1530,85 @@ var XPIStates = {
         0
       );
     } else {
+      buildIdChanged = true;
       // If the build id has changed, we need to do a full scan on first startup.
       Services.prefs.setCharPref(
         PREF_EM_LAST_APP_BUILD_ID,
         Services.appinfo.appBuildID
       );
       startupScanScopes = AddonManager.SCOPE_ALL;
+    }
+
+    const hasScanScopeAll = startupScanScopes & AddonManager.SCOPE_ALL;
+
+    // Restrict logic to recreate "app-builtin-addons" and "app-system-addons" locations
+    // data (in case of missing/corrupted/stale addonStartup.json.lz4 file) to the first
+    // XPIStates.scanForChanges call originated early on the XPIProvider startup.
+    if (!hasScanScopeAll && shouldRestoreLocationData) {
+      if (!oldLocations.size) {
+        // Scan all locations if there are no locations found in addonStartup.json.lz4.
+        logger.warn(
+          "Force scan SCOPE_ALL locations on empty XPIStates locations data"
+        );
+        startupScanScopes = AddonManager.SCOPE_ALL;
+      }
+
+      const hasScopeApplication =
+        startupScanScopes & AddonManager.SCOPE_APPLICATION;
+      const hasScopeProfile = startupScanScopes & AddonManager.SCOPE_PROFILE;
+      const systemAddonSet = SystemAddonLocation._loadAddonSet();
+      const hasSystemAddonDirectory = !!systemAddonSet.directory;
+      const getMissingIds = ({ knownIds, expectedIds }) => {
+        return new Set(expectedIds).difference(new Set(knownIds));
+      };
+
+      // Recover from lost or stale XPIStates data for the "app-builtin-addons" location.
+      if (!hasScopeApplication && !oldLocations.has(KEY_APP_SYSTEM_BUILTINS)) {
+        logger.warn(
+          `Force scan SCOPE_APPLICATION (${KEY_APP_SYSTEM_BUILTINS} location missing from XPIStates)`
+        );
+        startupScanScopes |= AddonManager.SCOPE_APPLICATION;
+      } else if (!hasScopeApplication) {
+        // Detect stale/incomplete location data.
+        const missingIds = getMissingIds({
+          knownIds: new Set(
+            Object.keys(oldState[KEY_APP_SYSTEM_BUILTINS].addons ?? {})
+          ),
+          expectedIds: new Set(SystemBuiltInLocation.readAddons().keys()),
+        });
+        if (missingIds.size) {
+          logger.warn(
+            `Force scan SCOPE_APPLICATION location (detected missing builtins: ${JSON.stringify(Array.from(missingIds))})`
+          );
+          startupScanScopes |= AddonManager.SCOPE_APPLICATION;
+        }
+      }
+
+      // Recover from lost or stale XPIStates data for the "app-system-addons" location.
+      if (
+        hasSystemAddonDirectory &&
+        !hasScopeProfile &&
+        !oldLocations.has(KEY_APP_SYSTEM_ADDONS)
+      ) {
+        logger.warn(
+          `Force scan SCOPE_PROFILE (${KEY_APP_SYSTEM_ADDONS} location missing from XPIStates)`
+        );
+        startupScanScopes |= AddonManager.SCOPE_PROFILE;
+      } else if (hasSystemAddonDirectory && !hasScopeProfile) {
+        // Detect stale/incomplete location data.
+        const missingIds = getMissingIds({
+          knownIds: new Set(
+            Object.keys(oldState[KEY_APP_SYSTEM_ADDONS].addons ?? {})
+          ),
+          expectedIds: new Set(Object.keys(systemAddonSet.addons ?? {})),
+        });
+        if (missingIds.size) {
+          logger.warn(
+            `Force scan SCOPE_PROFILE location (detected missing system-addons: ${JSON.stringify(Array.from(missingIds))})`
+          );
+          startupScanScopes |= AddonManager.SCOPE_PROFILE;
+        }
+      }
     }
 
     for (let loc of XPIStates.locations()) {
@@ -1477,15 +1628,24 @@ var XPIStates = {
         continue;
       }
 
+      const isEnumerableBuiltin = loc.enumerable && loc.isBuiltin;
+
       // Don't bother scanning scopes where we don't have addons installed if they
       // do not allow sideloading new addons.  Once we have an addon in one of those
       // locations, we need to check the location for changes (updates/deletions).
-      if (!loc.size && !(loc.scope & lazy.AddonSettings.SCOPES_SIDELOAD)) {
+      if (
+        !isEnumerableBuiltin &&
+        !loc.size &&
+        !(loc.scope & lazy.AddonSettings.SCOPES_SIDELOAD)
+      ) {
         continue;
       }
 
       let knownIds = new Set(loc.keys());
-      for (let [id, file] of loc.readAddons()) {
+
+      // readAddons() returns a Map of entries. These entries can be nsIFile or
+      // objects with a rel_url string property.
+      for (let [id, entry] of loc.readAddons()) {
         knownIds.delete(id);
 
         let xpiState = loc.get(id);
@@ -1502,14 +1662,32 @@ var XPIStates = {
           logger.debug("New add-on ${id} in ${loc}", { id, loc: loc.name });
 
           changed = true;
-          xpiState = loc.addFile(id, file);
+          if (entry instanceof Ci.nsIFile) {
+            xpiState = loc.addFile(id, entry);
+            xpiState.getModTime(xpiState.file);
+          } else {
+            xpiState = loc._addState(id, {
+              enabled: false,
+              rootURI: entry.builtin.res_url,
+            });
+          }
           if (!loc.isSystem) {
             this.sideLoadedAddons.set(id, xpiState);
           }
         } else {
-          let addonChanged =
-            xpiState.getModTime(file) || file.path != xpiState.path;
-          xpiState.file = file.clone();
+          let addonChanged = false;
+          if (entry instanceof Ci.nsIFile) {
+            addonChanged =
+              xpiState.getModTime(entry) || entry.path != xpiState.path;
+            xpiState.file = entry.clone();
+          } else {
+            addonChanged =
+              buildIdChanged ||
+              entry.builtin.addon_version != xpiState.version ||
+              entry.builtin.res_url != xpiState.rootURI;
+            xpiState.version = entry.builtin.addon_version;
+            xpiState.rootURI = entry.builtin.res_url;
+          }
 
           if (addonChanged) {
             changed = true;
@@ -1651,6 +1829,33 @@ var XPIStates = {
           FILE_XPI_STATES
         ),
         finalizeAt: AddonManagerPrivate.finalShutdown,
+        saveFailureHandler(ex) {
+          logger.error(`Failed to save ${FILE_XPI_STATES} data to disk`, ex);
+          let profile_state;
+          if (Services.appinfo.lastAppVersion == null) {
+            profile_state = "new";
+          } else if (
+            Services.appinfo.version === Services.appinfo.lastAppVersion &&
+            Services.appinfo.appBuildID === Services.appinfo.lastAppBuildID
+          ) {
+            profile_state = "existing";
+          } else {
+            profile_state = "existingWithVersionChanged";
+          }
+          let error_type = "Unknown";
+          if (ex?.message?.includes("too much recursion")) {
+            // This error is associated to a known issue (Bug 1964281) and so it is
+            // special handled here to make sure we can tell it apart from
+            // any other InternalError error object that may be raised from IOUtils.
+            error_type = "TooMuchRecursion";
+          } else if (ex?.name) {
+            error_type = ex.name;
+          }
+          Glean.addonsManager.xpistatesWriteErrors.record({
+            error_type,
+            profile_state,
+          });
+        },
         compression: "lz4",
       });
       this._jsonFile.data = this;
@@ -2202,7 +2407,7 @@ export var XPIProvider = {
   //
   // NOTE: XPIProvider will wait for these promises (and the startupPromises one)
   // to have settled before allowing the application to proceed with shutting down
-  // (see quitApplicationGranted blocker at the end of the XPIProvider.startup).
+  // (see appShutdownConfirmed blocker at the end of the XPIProvider.startup).
   enabledAddonsStartupPromises: [],
 
   databaseReady: Promise.all([dbReadyPromise, providerReadyPromise]),
@@ -2304,22 +2509,13 @@ export var XPIProvider = {
       return new DirectoryLocation(aName, dir, aScope, aLocked, aIsSystem);
     }
 
-    function SystemDefaultsLoc(name, scope, key, paths) {
-      try {
-        var dir = lazy.FileUtils.getDir(key, paths);
-      } catch (e) {
-        return null;
-      }
-      return new SystemAddonDefaults(name, dir, scope);
-    }
-
     function SystemLoc(aName, aScope, aKey, aPaths) {
       try {
         var dir = lazy.FileUtils.getDir(aKey, aPaths);
       } catch (e) {
         return null;
       }
-      return new SystemAddonLocation(aName, dir, aScope, aAppChanged !== false);
+      return new SystemAddonLocation(aName, dir, aScope, aAppChanged);
     }
 
     function RegistryLoc(aName, aScope, aKey) {
@@ -2361,11 +2557,9 @@ export var XPIProvider = {
       ],
 
       [
-        SystemDefaultsLoc,
-        KEY_APP_SYSTEM_DEFAULTS,
-        AddonManager.SCOPE_PROFILE,
-        KEY_APP_FEATURES,
-        [],
+        () => SystemBuiltInLocation,
+        KEY_APP_SYSTEM_BUILTINS,
+        AddonManager.SCOPE_APPLICATION,
       ],
 
       [() => BuiltInLocation, KEY_APP_BUILTINS, AddonManager.SCOPE_APPLICATION],
@@ -2532,6 +2726,11 @@ export var XPIProvider = {
       Services.prefs.addObserver(PREF_LANGPACK_SIGNATURES, this);
       Services.obs.addObserver(this, NOTIFICATION_FLUSH_PERMISSIONS);
 
+      Services.prefs.addObserver(
+        PREF_DATA_COLLECTION_PERMISSIONS_ENABLED,
+        this
+      );
+
       this.checkForChanges(aAppChanged, aOldAppVersion, aOldPlatformVersion);
 
       AddonManagerPrivate.markProviderSafe(this);
@@ -2554,12 +2753,20 @@ export var XPIProvider = {
           AddonManagerPrivate.notifyAddonChanged(null, "theme")
         );
       }
-      // Keep version in sync with toolkit/mozapps/extensions/default-theme/manifest.json
-      this.maybeInstallBuiltinAddon(
-        "default-theme@mozilla.org",
-        "1.4.1",
-        "resource://default-theme/"
-      );
+
+      const isInAutomationOrXPCShellTests =
+        Cu.isInAutomation || Services.env.exists("XPCSHELL_TEST_PROFILE_DIR");
+      if (
+        AppConstants.platform != "android" &&
+        !(isInAutomationOrXPCShellTests && lazy.skipDefaultThemeInstall)
+      ) {
+        // Keep version in sync with toolkit/mozapps/extensions/default-theme/manifest.json
+        this.maybeInstallBuiltinAddon(
+          "default-theme@mozilla.org",
+          "1.4.1",
+          "resource://default-theme/"
+        );
+      }
 
       resolveProviderReady(Promise.all(this.startupPromises));
 
@@ -2629,7 +2836,7 @@ export var XPIProvider = {
 
       // Let these shutdown a little earlier when they still have access to most
       // of XPCOM
-      lazy.AsyncShutdown.quitApplicationGranted.addBlocker(
+      lazy.AsyncShutdown.appShutdownConfirmed.addBlocker(
         "XPIProvider shutdown",
         async () => {
           // Do not enter shutdown before we actually finished starting as this
@@ -2781,6 +2988,11 @@ export var XPIProvider = {
 
     // Stop anything we were doing asynchronously
     XPIExports.XPIInstall.cancelAll();
+
+    Services.prefs.removeObserver(
+      PREF_DATA_COLLECTION_PERMISSIONS_ENABLED,
+      this
+    );
 
     for (let install of XPIExports.XPIInstall.installs) {
       if (install.onShutdown()) {
@@ -3181,9 +3393,7 @@ export var XPIProvider = {
   async getNewSideloads() {
     if (XPIStates.scanForChanges(false)) {
       // We detected changes. Update the database to account for them.
-      await XPIExports.XPIDatabase.asyncLoadDB(false);
-      XPIExports.XPIDatabaseReconcile.processFileChanges({}, false);
-      XPIExports.XPIDatabase.updateActiveAddons();
+      await this._updateDatabase({ aSchemaChange: false });
     }
 
     let addons = await Promise.all(
@@ -3340,6 +3550,20 @@ export var XPIProvider = {
           case PREF_LANGPACK_SIGNATURES:
             XPIExports.XPIDatabase.updateAddonAppDisabledStates();
             break;
+
+          case PREF_DATA_COLLECTION_PERMISSIONS_ENABLED:
+            // When this pref is enabled, we need to update the DB. It is fine
+            // to only do this when the pref is enabled because the UI and APIs
+            // are backward compatible.
+            if (
+              Services.prefs.getBoolPref(
+                PREF_DATA_COLLECTION_PERMISSIONS_ENABLED,
+                false
+              )
+            ) {
+              this._updateDatabase({ aSchemaChange: true });
+            }
+            break;
         }
     }
   },
@@ -3347,6 +3571,19 @@ export var XPIProvider = {
   uninstallSystemProfileAddon(aID) {
     let location = XPIStates.getLocation(KEY_APP_SYSTEM_PROFILE);
     return XPIExports.XPIInstall.uninstallAddonFromLocation(aID, location);
+  },
+
+  async _updateDatabase({ aSchemaChange }) {
+    await XPIExports.XPIDatabase.asyncLoadDB(false);
+    XPIExports.XPIDatabaseReconcile.processFileChanges(
+      /* aManifests */ {},
+      /* aAppChanged */ false,
+      /* aOldAppVersion, */ false,
+      /* aOldPlatformVersion */ false,
+      aSchemaChange
+    );
+    XPIExports.XPIDatabase.updateActiveAddons();
+    Services.obs.notifyObservers(null, "xpi-provider:database-updated");
   },
 };
 
@@ -3385,10 +3622,11 @@ export var XPIInternal = {
   DB_SCHEMA,
   DIR_STAGE,
   DIR_TRASH,
+  KEY_APP_BUILTINS,
   KEY_APP_PROFILE,
-  KEY_APP_SYSTEM_PROFILE,
   KEY_APP_SYSTEM_ADDONS,
-  KEY_APP_SYSTEM_DEFAULTS,
+  KEY_APP_SYSTEM_BUILTINS,
+  KEY_APP_SYSTEM_PROFILE,
   PREF_BRANCH_INSTALLED_ADDON,
   PREF_SYSTEM_ADDON_SET,
   SystemAddonLocation,

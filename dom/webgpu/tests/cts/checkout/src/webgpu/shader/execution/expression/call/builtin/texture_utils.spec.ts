@@ -4,8 +4,11 @@ Tests for texture_utils.ts
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { assert } from '../../../../../../common/util/util.js';
-import { isMultisampledTextureFormat, kDepthStencilFormats } from '../../../../../format_info.js';
-import { GPUTest } from '../../../../../gpu_test.js';
+import {
+  isTextureFormatPossiblyMultisampled,
+  kDepthStencilFormats,
+} from '../../../../../format_info.js';
+import { AllFeaturesMaxLimitsGPUTest, GPUTest } from '../../../../../gpu_test.js';
 import { getTextureDimensionFromView, virtualMipSize } from '../../../../../util/texture/base.js';
 import {
   kTexelRepresentationInfo,
@@ -19,14 +22,13 @@ import {
   convertPerTexelComponentToResultFormat,
   createTextureWithRandomDataAndGetTexels,
   graphWeights,
-  isSupportedViewFormatCombo,
   makeRandomDepthComparisonTexelGenerator,
   queryMipLevelMixWeightsForDevice,
   readTextureToTexelViews,
   texelsApproximatelyEqual,
 } from './texture_utils.js';
 
-export const g = makeTestGroup(GPUTest);
+export const g = makeTestGroup(AllFeaturesMaxLimitsGPUTest);
 
 function texelFormat(texel: Readonly<PerTexelComponent<number>>, rep: TexelRepresentationInfo) {
   return rep.componentOrder.map(component => `${component}: ${texel[component]}`).join(', ');
@@ -44,14 +46,12 @@ g.test('createTextureWithRandomDataAndGetTexels_with_generator')
     u
       .combine('format', kDepthStencilFormats)
       .combine('viewDimension', ['2d', '2d-array', 'cube', 'cube-array'] as const)
-      .filter(t => isSupportedViewFormatCombo(t.format, t.viewDimension))
   )
-  .beforeAllSubcases(t => {
-    t.skipIfTextureViewDimensionNotSupported(t.params.viewDimension);
-    t.selectDeviceForTextureFormatOrSkipTestCase(t.params.format);
-  })
   .fn(async t => {
     const { format, viewDimension } = t.params;
+    t.skipIfTextureFormatNotSupported(format);
+    t.skipIfTextureViewDimensionNotSupported(viewDimension);
+    t.skipIfTextureFormatAndViewDimensionNotCompatible(format, viewDimension);
     // choose an odd size (9) so we're more likely to test alignment issue.
     const size = chooseTextureSize({ minSize: 9, minBlocks: 4, format, viewDimension });
     t.debug(`size: ${size.map(v => v.toString()).join(', ')}`);
@@ -85,21 +85,20 @@ g.test('readTextureToTexelViews')
         { srcFormat: 'stencil8', texelViewFormat: 'stencil8' },
       ] as const)
       .combine('viewDimension', ['1d', '2d', '2d-array', '3d', 'cube', 'cube-array'] as const)
-      .filter(t => isSupportedViewFormatCombo(t.srcFormat, t.viewDimension))
       .combine('sampleCount', [1, 4] as const)
       .unless(
         t =>
           t.sampleCount > 1 &&
-          (!isMultisampledTextureFormat(t.srcFormat, false) || t.viewDimension !== '2d')
+          (!isTextureFormatPossiblyMultisampled(t.srcFormat) || t.viewDimension !== '2d')
       )
   )
-  .beforeAllSubcases(t => {
-    t.skipIfTextureViewDimensionNotSupported(t.params.viewDimension);
-    // recheck if multisampled is supported with compat mode flag
-    t.skipIfMultisampleNotSupportedForFormat(t.params.srcFormat);
-  })
   .fn(async t => {
     const { srcFormat, texelViewFormat, viewDimension, sampleCount } = t.params;
+    t.skipIfTextureViewDimensionNotSupported(viewDimension);
+    t.skipIfTextureFormatAndViewDimensionNotCompatible(srcFormat, viewDimension);
+    if (sampleCount > 1) {
+      t.skipIfTextureFormatNotMultisampled(srcFormat);
+    }
     // choose an odd size (9) so we're more likely to test alignment issue.
     const size = chooseTextureSize({ minSize: 9, minBlocks: 4, format: srcFormat, viewDimension });
     t.debug(`size: ${size.map(v => v.toString()).join(', ')}`);

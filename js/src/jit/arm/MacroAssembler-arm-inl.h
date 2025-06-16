@@ -1427,13 +1427,13 @@ void MacroAssembler::branch16(Condition cond, const Address& lhs, Imm32 rhs,
 }
 
 void MacroAssembler::branch32(Condition cond, Register lhs, Register rhs,
-                              Label* label) {
+                              Label* label, LhsHighBitsAreClean) {
   ma_cmp(lhs, rhs);
   ma_b(label, cond);
 }
 
 void MacroAssembler::branch32(Condition cond, Register lhs, Imm32 rhs,
-                              Label* label) {
+                              Label* label, LhsHighBitsAreClean) {
   ScratchRegisterScope scratch(*this);
 
   ma_cmp(lhs, rhs, scratch);
@@ -2563,14 +2563,14 @@ void MacroAssembler::spectreBoundsCheckPtr(Register index,
 
 // ========================================================================
 // Memory access primitives.
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedDouble(
-    FloatRegister src, const Address& addr) {
+FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
+                                               const Address& addr) {
   ScratchRegisterScope scratch(*this);
   BufferOffset offset = ma_vstr(src, addr, scratch);
   return FaultingCodeOffset(offset.getOffset());
 }
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedDouble(
-    FloatRegister src, const BaseIndex& addr) {
+FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
+                                               const BaseIndex& addr) {
   ScratchRegisterScope scratch(*this);
   SecondScratchRegisterScope scratch2(*this);
   uint32_t scale = Imm32::ShiftOf(addr.scale).value;
@@ -2579,14 +2579,14 @@ FaultingCodeOffset MacroAssembler::storeUncanonicalizedDouble(
   return FaultingCodeOffset(offset.getOffset());
 }
 
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat32(
-    FloatRegister src, const Address& addr) {
+FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
+                                                const Address& addr) {
   ScratchRegisterScope scratch(*this);
   BufferOffset offset = ma_vstr(src.asSingle(), addr, scratch);
   return FaultingCodeOffset(offset.getOffset());
 }
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat32(
-    FloatRegister src, const BaseIndex& addr) {
+FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
+                                                const BaseIndex& addr) {
   ScratchRegisterScope scratch(*this);
   SecondScratchRegisterScope scratch2(*this);
   uint32_t scale = Imm32::ShiftOf(addr.scale).value;
@@ -2595,15 +2595,17 @@ FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat32(
   return FaultingCodeOffset(offset.getOffset());
 }
 
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat16(
-    FloatRegister src, const Address& dest, Register scratch) {
+FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
+                                                const Address& dest,
+                                                Register scratch) {
   ma_vxfer(src, scratch);
 
   // store16 uses |strh|, which supports unaligned access.
   return store16(scratch, dest);
 }
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat16(
-    FloatRegister src, const BaseIndex& dest, Register scratch) {
+FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
+                                                const BaseIndex& dest,
+                                                Register scratch) {
   ma_vxfer(src, scratch);
 
   // store16 uses |strh|, which supports unaligned access.

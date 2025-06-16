@@ -19,14 +19,16 @@ const PREF_WALLPAPERS_ENABLED =
 const PREF_WALLPAPERS_HIGHLIGHT_SEEN_COUNTER =
   "browser.newtabpage.activity-stream.newtabWallpapers.highlightSeenCounter";
 
-const PREF_WALLPAPERS_V2_ENABLED =
-  "browser.newtabpage.activity-stream.newtabWallpapers.v2.enabled";
-
-const WALLPAPER_REMOTE_SETTINGS_COLLECTION = "newtab-wallpapers";
 const WALLPAPER_REMOTE_SETTINGS_COLLECTION_V2 = "newtab-wallpapers-v2";
 
 const PREF_WALLPAPERS_CUSTOM_WALLPAPER_ENABLED =
   "browser.newtabpage.activity-stream.newtabWallpapers.customWallpaper.enabled";
+
+const PREF_WALLPAPERS_CUSTOM_WALLPAPER_UUID =
+  "browser.newtabpage.activity-stream.newtabWallpapers.customWallpaper.uuid";
+
+const PREF_SELECTED_WALLPAPER =
+  "browser.newtabpage.activity-stream.newtabWallpapers.wallpaper";
 
 export class WallpaperFeed {
   constructor() {
@@ -56,22 +58,12 @@ export class WallpaperFeed {
       PREF_WALLPAPERS_ENABLED
     );
 
-    const wallpapersV2Enabled = Services.prefs.getBoolPref(
-      PREF_WALLPAPERS_V2_ENABLED
-    );
-
-    if (wallpapersEnabled || wallpapersV2Enabled) {
+    if (wallpapersEnabled) {
       if (!this.wallpaperClient) {
         // getting collection
-        if (wallpapersV2Enabled) {
-          this.wallpaperClient = this.RemoteSettings(
-            WALLPAPER_REMOTE_SETTINGS_COLLECTION_V2
-          );
-        } else {
-          this.wallpaperClient = this.RemoteSettings(
-            WALLPAPER_REMOTE_SETTINGS_COLLECTION
-          );
-        }
+        this.wallpaperClient = this.RemoteSettings(
+          WALLPAPER_REMOTE_SETTINGS_COLLECTION_V2
+        );
       }
 
       this.wallpaperClient.on("sync", this._onSync);
@@ -93,6 +85,49 @@ export class WallpaperFeed {
   }
 
   async updateWallpapers(isStartup = false) {
+    let uuid = Services.prefs.getStringPref(
+      PREF_WALLPAPERS_CUSTOM_WALLPAPER_UUID,
+      ""
+    );
+
+    const selectedWallpaper = Services.prefs.getStringPref(
+      PREF_SELECTED_WALLPAPER,
+      ""
+    );
+
+    if (uuid && selectedWallpaper === "custom") {
+      const wallpaperDir = PathUtils.join(PathUtils.profileDir, "wallpaper");
+      const filePath = PathUtils.join(wallpaperDir, uuid);
+
+      try {
+        let testFile = await IOUtils.getFile(filePath);
+
+        if (!testFile) {
+          throw new Error("File does not exist");
+        }
+
+        let passableFile = await File.createFromNsIFile(testFile);
+
+        this.store.dispatch(
+          ac.BroadcastToContent({
+            type: at.WALLPAPERS_CUSTOM_SET,
+            data: passableFile,
+          })
+        );
+      } catch (error) {
+        console.warn(`Wallpaper file not found: ${error.message}`);
+        Services.prefs.clearUserPref(PREF_WALLPAPERS_CUSTOM_WALLPAPER_UUID);
+        return;
+      }
+    } else {
+      this.store.dispatch(
+        ac.BroadcastToContent({
+          type: at.WALLPAPERS_CUSTOM_SET,
+          data: null,
+        })
+      );
+    }
+
     // retrieving all records in collection
     const records = await this.wallpaperClient.get();
     if (!records?.length) {
@@ -189,6 +224,67 @@ export class WallpaperFeed {
     );
   }
 
+  async wallpaperUpload(file) {
+    try {
+      const wallpaperDir = PathUtils.join(PathUtils.profileDir, "wallpaper");
+
+      // create wallpaper directory if it does not exist
+      await IOUtils.makeDirectory(wallpaperDir, { ignoreExisting: true });
+
+      let uuid = Services.uuid.generateUUID().toString().slice(1, -1);
+      Services.prefs.setStringPref(PREF_WALLPAPERS_CUSTOM_WALLPAPER_UUID, uuid);
+
+      const filePath = PathUtils.join(wallpaperDir, uuid);
+
+      // convert to Uint8Array for IOUtils
+      const arrayBuffer = await file.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+
+      await IOUtils.write(filePath, uint8Array, { tmpPath: `${filePath}.tmp` });
+
+      this.store.dispatch(
+        ac.BroadcastToContent({
+          type: at.WALLPAPERS_CUSTOM_SET,
+          data: file,
+        })
+      );
+
+      return filePath;
+    } catch (error) {
+      console.error("Error saving wallpaper:", error);
+      return null;
+    }
+  }
+
+  async removeCustomWallpaper() {
+    try {
+      let uuid = Services.prefs.getStringPref(
+        PREF_WALLPAPERS_CUSTOM_WALLPAPER_UUID,
+        ""
+      );
+
+      if (!uuid) {
+        return;
+      }
+
+      const wallpaperDir = PathUtils.join(PathUtils.profileDir, "wallpaper");
+      const filePath = PathUtils.join(wallpaperDir, uuid);
+
+      await IOUtils.remove(filePath, { ignoreAbsent: true });
+
+      Services.prefs.clearUserPref(PREF_WALLPAPERS_CUSTOM_WALLPAPER_UUID);
+
+      this.store.dispatch(
+        ac.BroadcastToContent({
+          type: at.WALLPAPERS_CUSTOM_SET,
+          data: null,
+        })
+      );
+    } catch (error) {
+      console.error("Failed to remove custom wallpaper:", error);
+    }
+  }
+
   async onAction(action) {
     switch (action.type) {
       case at.INIT:
@@ -204,8 +300,7 @@ export class WallpaperFeed {
           action.data.name ===
             "newtabWallpapers.newtabWallpapers.customColor.enabled" ||
           action.data.name === "newtabWallpapers.customWallpaper.enabled" ||
-          action.data.name === "newtabWallpapers.enabled" ||
-          action.data.name === "newtabWallpapers.v2.enabled"
+          action.data.name === "newtabWallpapers.enabled"
         ) {
           this.wallpaperTeardown();
           await this.wallpaperSetup(false /* isStartup */);
@@ -219,6 +314,12 @@ export class WallpaperFeed {
         break;
       case at.WALLPAPERS_FEATURE_HIGHLIGHT_SEEN:
         this.wallpaperSeenEvent();
+        break;
+      case at.WALLPAPER_UPLOAD:
+        this.wallpaperUpload(action.data);
+        break;
+      case at.WALLPAPER_REMOVE_UPLOAD:
+        await this.removeCustomWallpaper();
         break;
     }
   }

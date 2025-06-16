@@ -43,8 +43,6 @@ const SELECTABLE_ELEMENT_SELECTOR = "[role=button], [selectable]";
 const KEYBOARD_SELECTABLE_ELEMENT_SELECTOR =
   "[role=button]:not([keyboard-inaccessible]), [selectable]";
 
-const ZERO_PREFIX_HISTOGRAM_DWELL_TIME = "FX_URLBAR_ZERO_PREFIX_DWELL_TIME_MS";
-
 const RESULT_MENU_COMMANDS = {
   DISMISS: "dismiss",
   HELP: "help",
@@ -433,7 +431,7 @@ export class UrlbarView {
       return;
     }
 
-    let l10n = { id: "firefox-suggest-feedback-acknowledgment" };
+    let l10n = { id: "urlbar-feedback-acknowledgment" };
     await this.#l10nCache.ensure(l10n);
     if (row.result != result) {
       return;
@@ -517,6 +515,8 @@ export class UrlbarView {
    *   True if the Urlbar focus border should be shown after the view is closed.
    */
   close({ elementPicked = false, showFocusBorder = true } = {}) {
+    const isShowingZeroPrefix =
+      this.#queryContext && !this.#queryContext.searchString;
     this.controller.cancelQuery();
     // We do not show the focus border when an element is picked because we'd
     // flash it just before the input is blurred. The focus border is removed
@@ -571,13 +571,12 @@ export class UrlbarView {
       this.#blobUrlsByResultUrl.clear();
     }
 
-    if (this.#isShowingZeroPrefix) {
+    if (isShowingZeroPrefix) {
       if (elementPicked) {
         Glean.urlbarZeroprefix.engagement.add(1);
       } else {
         Glean.urlbarZeroprefix.abandonment.add(1);
       }
-      this.#setIsShowingZeroPrefix(false);
     }
   }
 
@@ -734,9 +733,10 @@ export class UrlbarView {
       this.clear();
     }
 
-    // Now that the view has finished updating for this query, call
-    // `#setIsShowingZeroPrefix()`.
-    this.#setIsShowingZeroPrefix(!queryContext.searchString);
+    // Now that the view has finished updating for this query, record the exposure.
+    if (!queryContext.searchString) {
+      Glean.urlbarZeroprefix.exposure.add(1);
+    }
 
     // If the query returned results, we're done.
     if (this.#queryUpdatedResults) {
@@ -1075,7 +1075,6 @@ export class UrlbarView {
   #resultMenuCommands;
   #rows;
   #rawSelectedElement;
-  #zeroPrefixStopwatchInstance = null;
 
   /**
    * #rawSelectedElement may be disconnected from the DOM (e.g. it was remove()d)
@@ -1885,7 +1884,7 @@ export class UrlbarView {
           ...result.payload.tags.map((tag, i) => {
             const element = this.#createElement("span");
             element.className = "urlbarView-tag";
-            this.#addTextContentWithHighlights(
+            lazy.UrlbarUtils.addTextContentWithHighlights(
               element,
               tag,
               result.payloadHighlights.tags[i]
@@ -2036,7 +2035,11 @@ export class UrlbarView {
         displayedUrl = "\u200e" + displayedUrl;
         urlHighlights = this.#offsetHighlights(urlHighlights, 1);
       }
-      this.#addTextContentWithHighlights(url, displayedUrl, urlHighlights);
+      lazy.UrlbarUtils.addTextContentWithHighlights(
+        url,
+        displayedUrl,
+        urlHighlights
+      );
       this.#updateOverflowTooltip(url, result.payload.displayUrl);
     } else {
       url.textContent = "";
@@ -2170,7 +2173,7 @@ export class UrlbarView {
       if (update.l10n) {
         this.#l10nCache.setElementL10n(node, update.l10n);
       } else if (update.textContent) {
-        this.#addTextContentWithHighlights(
+        lazy.UrlbarUtils.addTextContentWithHighlights(
           node,
           update.textContent,
           update.highlights
@@ -2218,6 +2221,9 @@ export class UrlbarView {
       this.#l10nCache.setElementL10n(bottom, result.payload.bottomTextL10n);
     } else {
       this.#l10nCache.removeElementL10n(bottom);
+      if (result.payload.bottomText) {
+        bottom.textContent = result.payload.bottomText;
+      }
     }
   }
 
@@ -2392,8 +2398,6 @@ export class UrlbarView {
           return { id: "urlbar-group-addon" };
         case "mdn":
           return { id: "urlbar-group-mdn" };
-        case "pocket":
-          return { id: "urlbar-group-pocket" };
         case "yelp":
           return { id: "urlbar-group-local" };
       }
@@ -2760,6 +2764,13 @@ export class UrlbarView {
       return;
     }
 
+    // Firefox 140 temporary fix for localized weather suggestions
+    if (result.payload.titleHtml) {
+      // eslint-disable-next-line no-unsanitized/property
+      titleNode.innerHTML = result.payload.titleHtml;
+      return;
+    }
+
     // TODO: `text` is intended only for WebExtensions. We should remove it and
     // the WebExtensions urlbar API since we're no longer using it.
     if (result.payload.text) {
@@ -2810,7 +2821,7 @@ export class UrlbarView {
     }
 
     this.#l10nCache.removeElementL10n(titleNode);
-    this.#addTextContentWithHighlights(
+    lazy.UrlbarUtils.addTextContentWithHighlights(
       titleNode,
       result.title,
       result.titleHighlights
@@ -2914,44 +2925,6 @@ export class UrlbarView {
       this.#l10nCache.setElementL10n(actionNode, {
         id: "urlbar-result-action-switch-tab",
       });
-    }
-  }
-
-  /**
-   * Adds text content to a node, placing substrings that should be highlighted
-   * inside <em> nodes.
-   *
-   * @param {Element} parentNode
-   *   The text content will be added to this node.
-   * @param {string} textContent
-   *   The text content to give the node.
-   * @param {Array} highlights
-   *   The matches to highlight in the text.
-   */
-  #addTextContentWithHighlights(parentNode, textContent, highlights) {
-    parentNode.textContent = "";
-    if (!textContent) {
-      return;
-    }
-    highlights = (highlights || []).concat([[textContent.length, 0]]);
-    let index = 0;
-    for (let [highlightIndex, highlightLength] of highlights) {
-      if (highlightIndex - index > 0) {
-        parentNode.appendChild(
-          this.document.createTextNode(
-            textContent.substring(index, highlightIndex)
-          )
-        );
-      }
-      if (highlightLength > 0) {
-        let strong = this.#createElement("strong");
-        strong.textContent = textContent.substring(
-          highlightIndex,
-          highlightIndex + highlightLength
-        );
-        parentNode.appendChild(strong);
-      }
-      index = highlightIndex + highlightLength;
     }
   }
 
@@ -3099,9 +3072,6 @@ export class UrlbarView {
         if (lazy.UrlbarPrefs.get("mdn.featureGate")) {
           idArgs.push({ id: "urlbar-group-mdn" });
         }
-        if (lazy.UrlbarPrefs.get("pocketFeatureGate")) {
-          idArgs.push({ id: "urlbar-group-pocket" });
-        }
         if (lazy.UrlbarPrefs.get("yelpFeatureGate")) {
           idArgs.push({ id: "urlbar-group-local" });
         }
@@ -3175,33 +3145,6 @@ export class UrlbarView {
     }
 
     return idArgs;
-  }
-
-  get #isShowingZeroPrefix() {
-    return !!this.#zeroPrefixStopwatchInstance;
-  }
-
-  #setIsShowingZeroPrefix(isShowing) {
-    if (!!isShowing == !!this.#zeroPrefixStopwatchInstance) {
-      return;
-    }
-
-    if (!isShowing) {
-      TelemetryStopwatch.finish(
-        ZERO_PREFIX_HISTOGRAM_DWELL_TIME,
-        this.#zeroPrefixStopwatchInstance
-      );
-      this.#zeroPrefixStopwatchInstance = null;
-      return;
-    }
-
-    this.#zeroPrefixStopwatchInstance = {};
-    TelemetryStopwatch.start(
-      ZERO_PREFIX_HISTOGRAM_DWELL_TIME,
-      this.#zeroPrefixStopwatchInstance
-    );
-
-    Glean.urlbarZeroprefix.exposure.add(1);
   }
 
   /**
@@ -3386,9 +3329,15 @@ export class UrlbarView {
       // Update result action text.
       if (localSearchMode) {
         // Update the result action text for a local one-off.
+        const messageIDs = {
+          actions: "urlbar-result-action-search-actions",
+          bookmarks: "urlbar-result-action-search-bookmarks",
+          history: "urlbar-result-action-search-history",
+          tabs: "urlbar-result-action-search-tabs",
+        };
         let name = lazy.UrlbarUtils.getResultSourceName(localSearchMode.source);
         this.#l10nCache.setElementL10n(action, {
-          id: `urlbar-result-action-search-${name}`,
+          id: messageIDs[name],
         });
         if (result.heuristic) {
           item.setAttribute("source", name);

@@ -17,7 +17,7 @@ defines: [asyncTest, assert.throwsAsync]
  * @returns {void}
  */
 function asyncTest(testFunc) {
-  if (!Object.hasOwn(globalThis, "$DONE")) {
+  if (!Object.prototype.hasOwnProperty.call(globalThis, "$DONE")) {
     throw new Test262Error("asyncTest called without async flag");
   }
   if (typeof testFunc !== "function") {
@@ -242,7 +242,7 @@ var TemporalHelpers = {
       assert.sameValue(eraName, undefined);
       return undefined;
     }
-    assert(Object.hasOwn(TemporalHelpers.CalendarEras, calendarId));
+    assert(Object.prototype.hasOwnProperty.call(TemporalHelpers.CalendarEras, calendarId));
 
     if (eraName === undefined) {
       return undefined;
@@ -1214,6 +1214,10 @@ var TemporalHelpers = {
         "11-18[U-CA=iso8601]",
         "11-18[u-CA=iso8601]",
         "11-18[FOO=bar]",
+        "-999999-01-01[u-ca=gregory]",
+        "-999999-01-01[u-ca=chinese]",
+        "+999999-01-01[u-ca=gregory]",
+        "+999999-01-01[u-ca=chinese]",
       ];
     },
 
@@ -1245,6 +1249,10 @@ var TemporalHelpers = {
         "1976-10-01",
         "--10-01",
         "--1001",
+        "-999999-10-01",
+        "-999999-10-01[u-ca=iso8601]",
+        "+999999-10-01",
+        "+999999-10-01[u-ca=iso8601]",
       ];
     },
 
@@ -1306,6 +1314,8 @@ var TemporalHelpers = {
         "1976-11[U-CA=iso8601]",
         "1976-11[u-CA=iso8601]",
         "1976-11[FOO=bar]",
+        "+999999-01",
+        "-999999-01",
       ];
     },
 

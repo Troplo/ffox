@@ -41,7 +41,12 @@ interface nsIRFPService : nsISupports
   void cleanAllOverrides();
 
   /**
-   * The bitfield of the default enabled RFP Targets.
+   * Enabled baseline FPP targets.
+   */
+  readonly attribute nsIRFPTargetSetIDL enabledFingerprintingProtectionsBaseline;
+
+  /**
+   * Enabled FPP targets.
    */
   readonly attribute nsIRFPTargetSetIDL enabledFingerprintingProtections;
 
@@ -73,6 +78,9 @@ interface nsIRFPService : nsISupports
    * OriginAttributesPattern.
    */
   void cleanRandomKeyByOriginAttributesPattern(in AString aPattern);
+
+  [binaryname(GetSpoofedUserAgentService)]
+  ACString getSpoofedUserAgent(in boolean aDesktopMode);
 
   /**
    * Test function for generating and return the fingerprinting randomization

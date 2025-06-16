@@ -343,13 +343,17 @@ class WebConsoleActor extends Actor {
    * Create a grip for the given value.
    *
    * @param mixed value
+   * @param object objectActorAttributes
+   *        See createValueGrip in devtools/server/actors/object/utils.js
    * @return object
    */
-  createValueGrip(value) {
+  createValueGrip(value, objectActorAttributes = {}) {
     return createValueGrip(
       this.targetActor.threadActor,
       value,
-      this.targetActor.objectsPool
+      this.targetActor.objectsPool,
+      0,
+      objectActorAttributes
     );
   }
 
@@ -948,26 +952,29 @@ class WebConsoleActor extends Actor {
         result = evalResult.yield;
       } else if ("throw" in evalResult) {
         const error = evalResult.throw;
-        errorGrip = this.createValueGrip(error);
+        const allowSideEffect = !eager;
+        errorGrip = this.createValueGrip(error, { allowSideEffect });
 
         exceptionStack = this.prepareStackForRemote(evalResult.stack);
 
         if (exceptionStack) {
-          // Set the frame based on the topmost stack frame for the exception.
-          const {
-            filename: source,
-            sourceId,
-            lineNumber: line,
-            columnNumber: column,
-          } = exceptionStack[0];
-          frame = { source, sourceId, line, column };
-
           exceptionStack =
             WebConsoleUtils.removeFramesAboveDebuggerEval(exceptionStack);
+
+          // Set the frame based on the topmost stack frame for the exception.
+          if (exceptionStack && exceptionStack.length) {
+            const {
+              filename: source,
+              sourceId,
+              lineNumber: line,
+              columnNumber: column,
+            } = exceptionStack[0];
+            frame = { source, sourceId, line, column };
+          }
         }
 
         errorMessage = String(error);
-        if (typeof error === "object" && error !== null) {
+        if (allowSideEffect && typeof error === "object" && error !== null) {
           try {
             errorMessage = DevToolsUtils.callPropertyOnObject(
               error,
@@ -1008,7 +1015,11 @@ class WebConsoleActor extends Actor {
           const line = error.errorLineNumber;
           const column = error.errorColumnNumber;
 
-          if (typeof line === "number" && typeof column === "number") {
+          if (
+            !frame &&
+            typeof line === "number" &&
+            typeof column === "number"
+          ) {
             // Set frame only if we have line/column numbers.
             frame = {
               source: "debugger eval code",
@@ -1617,7 +1628,7 @@ class WebConsoleActor extends Actor {
             // We need to load sub-properties as well to render the table in a nice way.
             const actor =
               grip && this.targetActor.objectsPool.getActorByID(grip.actor);
-            if (actor) {
+            if (actor && typeof actor.enumProperties === "function") {
               const res = actor
                 .enumProperties({
                   ignoreNonIndexedProperties: isArray(grip),

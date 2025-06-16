@@ -1,9 +1,5 @@
 use alloc::string::String;
-use core::{
-    mem::{self, size_of, size_of_val},
-    ops::Range,
-    slice,
-};
+use core::{mem, ops::Range};
 
 use arrayvec::ArrayVec;
 
@@ -88,7 +84,7 @@ impl super::CommandBuffer {
     }
 
     fn add_push_constant_data(&mut self, data: &[u32]) -> Range<u32> {
-        let data_raw = unsafe { slice::from_raw_parts(data.as_ptr().cast(), size_of_val(data)) };
+        let data_raw = bytemuck::cast_slice(data);
         let start = self.data_bytes.len();
         assert!(start < u32::MAX as usize);
         self.data_bytes.extend_from_slice(data_raw);
@@ -500,7 +496,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
     unsafe fn begin_render_pass(
         &mut self,
         desc: &crate::RenderPassDescriptor<super::QuerySet, super::TextureView>,
-    ) {
+    ) -> Result<(), crate::DeviceError> {
         debug_assert!(self.state.end_of_pass_timestamp.is_none());
         if let Some(ref t) = desc.timestamp_writes {
             if let Some(index) = t.beginning_of_pass_write_index {
@@ -561,6 +557,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
                         self.cmd_buffer.commands.push(C::BindAttachment {
                             attachment,
                             view: cat.target.view.clone(),
+                            depth_slice: cat.depth_slice,
                         });
                         if let Some(ref rat) = cat.resolve_target {
                             self.state
@@ -582,6 +579,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
                     self.cmd_buffer.commands.push(C::BindAttachment {
                         attachment,
                         view: dsat.target.view.clone(),
+                        depth_slice: None,
                     });
                     if aspects.contains(crate::FormatAspects::DEPTH)
                         && !dsat.depth_ops.contains(crate::AttachmentOps::STORE)
@@ -669,6 +667,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
                     .push(C::ClearStencil(dsat.clear_value.1));
             }
         }
+        Ok(())
     }
     unsafe fn end_render_pass(&mut self) {
         for (attachment, dst) in self.state.resolve_attachments.drain(..) {
@@ -1077,6 +1076,14 @@ impl crate::CommandEncoder for super::CommandEncoder {
             first_instance_location: self.state.first_instance_location.clone(),
         });
     }
+    unsafe fn draw_mesh_tasks(
+        &mut self,
+        _group_count_x: u32,
+        _group_count_y: u32,
+        _group_count_z: u32,
+    ) {
+        unreachable!()
+    }
     unsafe fn draw_indirect(
         &mut self,
         buffer: &super::Buffer,
@@ -1120,6 +1127,14 @@ impl crate::CommandEncoder for super::CommandEncoder {
             });
         }
     }
+    unsafe fn draw_mesh_tasks_indirect(
+        &mut self,
+        _buffer: &<Self::A as crate::Api>::Buffer,
+        _offset: wgt::BufferAddress,
+        _draw_count: u32,
+    ) {
+        unreachable!()
+    }
     unsafe fn draw_indirect_count(
         &mut self,
         _buffer: &super::Buffer,
@@ -1135,6 +1150,16 @@ impl crate::CommandEncoder for super::CommandEncoder {
         _buffer: &super::Buffer,
         _offset: wgt::BufferAddress,
         _count_buffer: &super::Buffer,
+        _count_offset: wgt::BufferAddress,
+        _max_count: u32,
+    ) {
+        unreachable!()
+    }
+    unsafe fn draw_mesh_tasks_indirect_count(
+        &mut self,
+        _buffer: &<Self::A as crate::Api>::Buffer,
+        _offset: wgt::BufferAddress,
+        _count_buffer: &<Self::A as crate::Api>::Buffer,
         _count_offset: wgt::BufferAddress,
         _max_count: u32,
     ) {
@@ -1177,7 +1202,7 @@ impl crate::CommandEncoder for super::CommandEncoder {
 
     unsafe fn dispatch(&mut self, count: [u32; 3]) {
         // Empty dispatches are invalid in OpenGL, but valid in WebGPU.
-        if count.iter().any(|&c| c == 0) {
+        if count.contains(&0) {
             return;
         }
         self.cmd_buffer.commands.push(C::Dispatch(count));

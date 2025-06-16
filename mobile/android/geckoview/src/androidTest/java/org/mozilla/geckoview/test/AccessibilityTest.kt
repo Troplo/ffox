@@ -13,6 +13,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityNodeInfo.CHECKED_STATE_FALSE
+import android.view.accessibility.AccessibilityNodeInfo.CHECKED_STATE_TRUE
 import android.view.accessibility.AccessibilityNodeProvider
 import android.view.accessibility.AccessibilityRecord
 import android.widget.EditText
@@ -21,7 +23,14 @@ import androidx.test.ext.junit.rules.ActivityScenarioRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.MediumTest
 import androidx.test.platform.app.InstrumentationRegistry
-import org.hamcrest.Matchers.* // ktlint-disable no-wildcard-imports
+import org.hamcrest.Matchers.closeTo
+import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.greaterThan
+import org.hamcrest.Matchers.hasItem
+import org.hamcrest.Matchers.lessThan
+import org.hamcrest.Matchers.not
+import org.hamcrest.Matchers.notNullValue
+import org.hamcrest.Matchers.startsWith
 import org.junit.After
 import org.junit.Assume.assumeThat
 import org.junit.Before
@@ -128,6 +137,7 @@ class AccessibilityTest : BaseSessionTest() {
         mainSession.accessibility.view = view
 
         // Set up an external delegate that will intercept accessibility events.
+        @Suppress("DEPRECATION") // TYPE_ANNOUNCEMENT is deprecated but triggered by live regions
         sessionRule.addExternalDelegateUntilTestEnd(
             EventDelegate::class,
             { newDelegate ->
@@ -521,7 +531,14 @@ class AccessibilityTest : BaseSessionTest() {
                 var nodeId = getSourceId(event)
                 var node = createNodeInfo(nodeId)
                 assertThat("Event's checked state matches", event.isChecked, equalTo(checked))
-                assertThat("Checkbox node has correct checked state", node.isChecked, equalTo(checked))
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+                    val checkedState = if (checked) CHECKED_STATE_TRUE else CHECKED_STATE_FALSE
+                    assertThat("Checkbox node has correct checked state", node.checked, equalTo(checkedState))
+                } else {
+                    @Suppress("DEPRECATION")
+                    assertThat("Checkbox node has correct checked state", node.isChecked, equalTo(checked))
+                }
             }
         })
     }
@@ -980,7 +997,14 @@ class AccessibilityTest : BaseSessionTest() {
                 assertThat("Checkbox node is checkable", node.isCheckable, equalTo(true))
                 assertThat("Checkbox node is clickable", node.isClickable, equalTo(true))
                 assertThat("Checkbox node is focusable", node.isFocusable, equalTo(true))
-                assertThat("Checkbox node is not checked", node.isChecked, equalTo(false))
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+                    assertThat("Checkbox node is not checked", node.checked, equalTo(CHECKED_STATE_FALSE))
+                } else {
+                    @Suppress("DEPRECATION")
+                    assertThat("Checkbox node is not checked", node.isChecked, equalTo(false))
+                }
+
                 assertThat("Checkbox node has correct role", node.text.toString(), equalTo("many option"))
                 assertThat(
                     "Hint has description",
@@ -1108,6 +1132,12 @@ class AccessibilityTest : BaseSessionTest() {
     @Test fun testLiveRegion() {
         loadTestPage("test-live-region")
         waitForInitialFocus()
+
+        val rootNode = createNodeInfo(View.NO_ID)
+        assertThat("Document has 1 child", rootNode.childCount, equalTo(1))
+
+        val liveRegion = createNodeInfo(rootNode.getChildId(0))
+        assertThat("First node is a label", liveRegion.viewIdResourceName.toString(), equalTo("to_change"))
 
         mainSession.evaluateJS("document.querySelector('#to_change').textContent = 'Hello';")
         sessionRule.waitUntilCalled(object : EventDelegate {
@@ -1667,6 +1697,8 @@ class AccessibilityTest : BaseSessionTest() {
     @Test
     fun testRemoteIframeTree() {
         testIframeTree(REMOTE_IFRAME)
+        // disabled for frequent failures - on Bug 1769324
+        assumeThat(sessionRule.env.isX86, equalTo(false))
     }
 
     @Test

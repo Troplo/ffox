@@ -12,9 +12,10 @@
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
-  SearchSettings: "resource://gre/modules/SearchSettings.sys.mjs",
-  SearchUtils: "resource://gre/modules/SearchUtils.sys.mjs",
-  OpenSearchEngine: "resource://gre/modules/OpenSearchEngine.sys.mjs",
+  SearchSettings: "moz-src:///toolkit/components/search/SearchSettings.sys.mjs",
+  SearchUtils: "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
+  OpenSearchEngine:
+    "moz-src:///toolkit/components/search/OpenSearchEngine.sys.mjs",
 });
 
 ChromeUtils.defineLazyGetter(lazy, "logConsole", () => {
@@ -25,7 +26,7 @@ ChromeUtils.defineLazyGetter(lazy, "logConsole", () => {
 });
 
 // Supported OpenSearch parameters
-// See http://opensearch.a9.com/spec/1.1/querysyntax/#core
+// See https://web.archive.org/web/20060203040832/http://opensearch.a9.com/spec/1.1/querysyntax/#core
 const OS_PARAM_INPUT_ENCODING = "inputEncoding";
 const OS_PARAM_LANGUAGE = "language";
 const OS_PARAM_OUTPUT_ENCODING = "outputEncoding";
@@ -121,7 +122,7 @@ export class QueryParameter {
 /**
  * Perform OpenSearch parameter substitution on a parameter value.
  *
- * @see http://opensearch.a9.com/spec/1.1/querysyntax/#core
+ * @see https://web.archive.org/web/20060203040832/http://opensearch.a9.com/spec/1.1/querysyntax/#core
  *
  * @param {string} paramValue
  *   The OpenSearch search parameters.
@@ -135,7 +136,7 @@ export class QueryParameter {
  * @returns {string}
  *   An updated parameter string.
  */
-function ParamSubstitution(paramValue, searchTerms, queryCharset) {
+function paramSubstitution(paramValue, searchTerms, queryCharset) {
   const PARAM_REGEXP = /\{(\w+)(\??)\}/g;
   return paramValue.replace(PARAM_REGEXP, function (match, name, optional) {
     // {searchTerms} is by far the most common param so handle it first.
@@ -177,9 +178,19 @@ function ParamSubstitution(paramValue, searchTerms, queryCharset) {
  * EngineURL holds a query URL and all associated parameters.
  */
 export class EngineURL {
+  /** @type {QueryParameter[]} */
   params = [];
+  /** @type {string[]} */
   rels = [];
-  #searchTermParamName = null;
+  /** @type {string} */
+  template;
+
+  /**
+   * The name of the parameter used for the search term.
+   *
+   * @type {?string}
+   */
+  #searchTermParam = null;
 
   /**
    * Creates an EngineURL.
@@ -194,7 +205,7 @@ export class EngineURL {
    *   must contain the string "{searchTerms}", to indicate where the user
    *   entered search terms should be inserted.
    *
-   * @see http://opensearch.a9.com/spec/1.1/querysyntax/#urltag
+   * @see https://web.archive.org/web/20060203040832/http://opensearch.a9.com/spec/1.1/querysyntax/#urltag
    *
    * @throws NS_ERROR_NOT_IMPLEMENTED if aType is unsupported.
    */
@@ -246,13 +257,16 @@ export class EngineURL {
     let urlParms = new URLSearchParams(templateURI.query);
     for (let [name, value] of urlParms.entries()) {
       if (value == "{searchTerms}") {
-        this.#searchTermParamName = name;
+        this.#searchTermParam = name;
       }
     }
   }
 
   /**
-   * @param {QueryParameter} param the QueryParameter to add
+   * Adds a QueryParameter object to the list of params.
+   *
+   * @param {QueryParameter} param
+   *   The QueryParameter to add.
    */
   addQueryParameter(param) {
     if (param.value == "{searchTerms}") {
@@ -264,8 +278,8 @@ export class EngineURL {
 
   /**
    * Adds a QueryParameter by name and value.
-   * Exists because this is a frequent operation and because it allows
-   * other files to add QueryParameters without importing QueryParameter
+   * This exists because it's a frequent operation and it allows
+   * other files to add QueryParameters without importing QueryParameter.
    *
    * @param {string} name name of the parameter
    * @param {string} value value of the parameter
@@ -282,25 +296,24 @@ export class EngineURL {
    *   The name of the parameter.
    */
   setSearchTermParamName(name) {
-    if (this.#searchTermParamName) {
+    if (this.#searchTermParam) {
       lazy.logConsole.warn(
         "set searchTermParamName: searchTermParamName was set twice."
       );
     }
     this.params.push(new QueryParameter(name, "{searchTerms}"));
-    this.#searchTermParamName = name;
+    this.#searchTermParam = name;
   }
 
   /**
    * Returns the name of the parameter used for the search term.
    *
-   * @returns {string|null}
-   *   A string which is the name of the parameter, or null
-   *   if no parameter can be found or is not supported (e.g. POST,
-   *   or contained within the URL).
+   * @returns {?string}
+   *   A string which is the name of the parameter, or null if no parameter
+   *   can be found (e.g. if search terms are contained within the URL).
    */
   get searchTermParamName() {
-    return this.#searchTermParamName;
+    return this.#searchTermParam;
   }
 
   /**
@@ -315,7 +328,7 @@ export class EngineURL {
    *   The submission data containing the URL and post data for the URL.
    */
   getSubmission(searchTerms, queryCharset) {
-    let escapedSearchTerms = "";
+    let escapedSearchTerms;
     try {
       escapedSearchTerms = Services.textToSubURI.ConvertAndEscape(
         queryCharset,
@@ -331,48 +344,30 @@ export class EngineURL {
       );
     }
 
-    // textToSubURI encodes spaces with '+' but we want to use %20 if the search
-    // terms are part of the URL. We only use '+' if they are a query parameter.
-    let url = ParamSubstitution(
-      this.template,
-      escapedSearchTerms.replaceAll("+", "%20"),
+    let templateURI = new URL(this.template);
+    let paramString = this.#encodeParams(escapedSearchTerms, queryCharset);
+
+    let postData = null;
+    let query = paramSubstitution(
+      templateURI.search,
+      escapedSearchTerms,
       queryCharset
     );
-
-    // Create an application/x-www-form-urlencoded representation of our params
-    // (name=value&name=value&name=value)
-    let dataArray = [];
-    for (let param of this.params) {
-      // QueryPreferenceParameters might not have a preferenced saved, or a valid value.
-      if (param.value != null) {
-        let value = ParamSubstitution(
-          param.value,
-          escapedSearchTerms,
-          queryCharset
-        );
-        dataArray.push(param.name + "=" + value);
-      }
-    }
-    let dataString = dataArray.join("&");
-
-    var postData = null;
-    if (this.method == "GET") {
-      // GET method requests have no post data, and append the encoded
-      // query string to the url...
-      if (dataString) {
-        if (url.includes("?")) {
-          url = `${url}&${dataString}`;
-        } else {
-          url = `${url}?${dataString}`;
-        }
+    if (this.method == "GET" && paramString) {
+      // Query parameters may be specified in the template url AND in `this.params`.
+      // Thus, we need to supply both with the search terms and join them.
+      if (query) {
+        query += "&" + paramString;
+      } else {
+        query = paramString;
       }
     } else if (this.method == "POST") {
       // POST method requests must wrap the encoded text in a MIME
       // stream and supply that as POSTDATA.
-      var stringStream = Cc[
+      let stringStream = Cc[
         "@mozilla.org/io/string-input-stream;1"
       ].createInstance(Ci.nsIStringInputStream);
-      stringStream.setByteStringData(dataString);
+      stringStream.setByteStringData(paramString);
 
       postData = Cc["@mozilla.org/network/mime-input-stream;1"].createInstance(
         Ci.nsIMIMEInputStream
@@ -381,7 +376,54 @@ export class EngineURL {
       postData.setData(stringStream);
     }
 
-    return new Submission(Services.io.newURI(url), postData);
+    templateURI.search = query;
+
+    // textToSubURI encodes spaces with '+', but we want to use '%20' if the
+    // search terms are part of the file path or ref. We only use '+' if they
+    // are part of a query parameter.
+    let urlSearchTerms = escapedSearchTerms.replaceAll("+", "%20");
+    templateURI.pathname = paramSubstitution(
+      // The braces in filePath are percent-encoded, so we
+      // decode them to ensure paramSubstitution finds them.
+      decodeURIComponent(templateURI.pathname),
+      urlSearchTerms,
+      queryCharset
+    );
+    templateURI.hash = paramSubstitution(
+      templateURI.hash,
+      urlSearchTerms,
+      queryCharset
+    );
+
+    return new Submission(templateURI.URI, postData);
+  }
+
+  /**
+   * Returns a application/x-www-form-urlencoded representation of the params
+   * using the specified search term (name=value&name=value&name=value).
+   * Can be used for GET and POST.
+   *
+   * @param {string} escapedSearchTerms
+   *   The user's search terms escaped with the correct charset.
+   * @param {string} queryCharset
+   *   The character set that is being used for the query.
+   * @returns {string}
+   *   Parameter string containing the search terms.
+   */
+  #encodeParams(escapedSearchTerms, queryCharset) {
+    let dataArray = [];
+    for (let param of this.params) {
+      // QueryPreferenceParameters might not have a preferenced saved, or a valid value.
+      if (param.value != null) {
+        let value = paramSubstitution(
+          param.value,
+          escapedSearchTerms,
+          queryCharset
+        );
+        dataArray.push(param.name + "=" + value);
+      }
+    }
+    return dataArray.join("&");
   }
 
   _hasRelation(rel) {
@@ -429,7 +471,7 @@ export class EngineURL {
 }
 
 /**
- * SearchEngine represents WebExtension based search engines.
+ * SearchEngine is the base class that all search engine classes inherit from.
  *
  * @implements {nsISearchEngine}
  */
@@ -441,8 +483,6 @@ export class SearchEngine {
   // This will stay null for engines installed in the profile before we moved
   // to a JSON storage.
   _loadPath = null;
-  // The engine's description
-  _description = "";
   // The engine's name.
   _name = null;
   // The name of the charset used to submit the search terms.
@@ -518,8 +558,9 @@ export class SearchEngine {
   }
 
   /**
-   * Add an icon to the icon map used by getIconURL().
-   * Icon must be square.
+   * Directly adds a local icon to the icon map without notifying observers.
+   * Icon must be square and should be behind a local URL
+   * (i.e., data, or moz-extension).
    *
    * @param {string} iconURL
    *   String with the icon's URI.
@@ -537,85 +578,83 @@ export class SearchEngine {
   }
 
   /**
-   * Sets the .iconURI property of the engine. If size is provided
-   * an entry will be added to _iconMapObj that will enable accessing
-   * icon's data through getIconURL() APIs.
+   * Adds an icon from an http[s], data, or moz-extension URL to the
+   * icon map, downloading http[s] icons and rescaling icons with a size
+   * larger than MAX_ICON_SIZE.
    *
    * @param {string} iconURL
-   *   A URI string pointing to the engine's icon. Must have a http[s]
-   *   or data scheme. Icons with HTTP[S] schemes will be
-   *   downloaded and converted to data URIs for storage in the engine
-   *   XML files, if the engine is not built-in.
+   *   A URI string pointing to the engine's icon.
+   *   Must have http[s], data, or moz-extension protocol.
    * @param {number} [size]
-   *   Width and height of the icon.
+   *   Width and height of the icon (determined automatically if not provided).
    * @param {boolean} [override]
-   *   Whether the new URI should override an existing one.
+   * Whether the new URI should override an existing one.
+   * @returns {Promise<void>}
+   *   Resolves when the icon was set.
+   *   Rejects with an Error if there was an error.
    */
   async _setIcon(iconURL, size, override = true) {
-    let uri = lazy.SearchUtils.makeURI(iconURL);
-
-    // Ignore bad URIs
-    if (!uri) {
-      return;
-    }
-
     lazy.logConsole.debug(
       "_setIcon: Setting icon url for",
       this.name,
       "to",
-      limitURILength(uri.spec)
+      limitURILength(iconURL)
     );
-    // Only accept remote icons from http[s]
+
+    [iconURL, size] = await this._downloadAndRescaleIcon(iconURL, size);
+    this._addIconToMap(iconURL, size, override);
+
+    if (this._engineAddedToStore) {
+      lazy.SearchUtils.notifyAction(
+        this,
+        lazy.SearchUtils.MODIFIED_TYPE.ICON_CHANGED
+      );
+    }
+  }
+
+  /**
+   * Downloads the requested icon if the url is http[s], determines
+   * its size if not provided and rescales the icon if its size exceeds
+   * MAX_ICON_SIZE.
+   *
+   * @param {string} iconURL
+   *   A URI string pointing to the engine's icon.
+   *   Must have http[s], data, or moz-extension protocol.
+   * @param {number} [size]
+   *   Width and height of the icon (determined automatically if not provided).
+   * @returns {Promise<[string, number]>}
+   *   Resolves to [dataURL, size] if successful and rejects if there was an error.
+   */
+  async _downloadAndRescaleIcon(iconURL, size) {
+    let uri = lazy.SearchUtils.makeURI(iconURL);
+
+    if (!uri) {
+      throw new Error(`Invalid URI`);
+    }
+
     switch (uri.scheme) {
       case "moz-extension": {
         if (!size) {
-          let byteArray, contentType;
-          try {
-            [byteArray, contentType] = await lazy.SearchUtils.fetchIcon(uri);
-          } catch {
-            lazy.logConsole.warn(
-              `Failed to load icon of search engine ${this.name}.`
-            );
-            return;
-          }
+          let [byteArray, contentType] = await lazy.SearchUtils.fetchIcon(uri);
           size = lazy.SearchUtils.decodeSize(byteArray, contentType, 16);
         }
-
-        this._addIconToMap(iconURL, size, override);
-        break;
+        return [iconURL, size];
       }
       // We also fetch data URLs to ensure the size doesn't exceed MAX_ICON_SIZE.
       case "data":
       case "http":
       case "https": {
-        let byteArray, contentType;
-        try {
-          [byteArray, contentType] = await lazy.SearchUtils.fetchIcon(uri);
-        } catch {
-          lazy.logConsole.warn(
-            `Failed to load icon of search engine ${this.name}.`
-          );
-          return;
-        }
-
+        let [byteArray, contentType] = await lazy.SearchUtils.fetchIcon(uri);
         if (byteArray.length > lazy.SearchUtils.MAX_ICON_SIZE) {
-          try {
-            lazy.logConsole.debug(
-              `Rescaling icon for search engine ${this.name}.`
-            );
-            [byteArray, contentType] = lazy.SearchUtils.rescaleIcon(
-              byteArray,
-              contentType,
-              32
-            );
-            size = 32;
-          } catch (ex) {
-            lazy.logConsole.error(
-              `Unable to rescale  icon for search engine ${this.name}:`,
-              ex
-            );
-            return;
-          }
+          lazy.logConsole.debug(
+            `Rescaling icon for search engine ${this.name}.`
+          );
+          [byteArray, contentType] = lazy.SearchUtils.rescaleIcon(
+            byteArray,
+            contentType,
+            32
+          );
+          size = 32;
         }
 
         if (!size) {
@@ -623,16 +662,10 @@ export class SearchEngine {
         }
 
         let dataURL = "data:" + contentType + ";base64," + byteArray.toBase64();
-        this._addIconToMap(dataURL, size, override);
-        break;
+        return [dataURL, size];
       }
-    }
-
-    if (this._engineAddedToStore) {
-      lazy.SearchUtils.notifyAction(
-        this,
-        lazy.SearchUtils.MODIFIED_TYPE.ICON_CHANGED
-      );
+      default:
+        throw new Error(`URL scheme ${uri.scheme} is not allowed`);
     }
   }
 
@@ -722,10 +755,12 @@ export class SearchEngine {
       this._definedAliases = [details.keyword?.trim()];
     }
 
-    this._description = details.description;
     if (details.iconURL) {
       this._setIcon(details.iconURL).catch(e =>
-        lazy.logConsole.log("Error while setting search engine icon:", e)
+        lazy.logConsole.warn(
+          `Error while setting icon for search engine ${details.name}:`,
+          e.message
+        )
       );
     }
     this._setUrls(details);
@@ -849,7 +884,10 @@ export class SearchEngine {
         extension.manifest.chrome_settings_overrides.search_provider
       );
     }
-    lazy.SearchUtils.notifyAction(this, lazy.SearchUtils.MODIFIED_TYPE.CHANGED);
+
+    if (this.searchURLWithNoTerms.spec != this.getAttr("overriddenURL")) {
+      this.setAttr("overriddenURL", this.searchURLWithNoTerms.spec, true);
+    }
   }
 
   /**
@@ -869,6 +907,7 @@ export class SearchEngine {
         );
       }
       this.clearAttr("overriddenBy");
+      this.clearAttr("overriddenURL");
       lazy.SearchUtils.notifyAction(
         this,
         lazy.SearchUtils.MODIFIED_TYPE.CHANGED
@@ -901,7 +940,6 @@ export class SearchEngine {
   _initWithJSON(json) {
     this.#id = json.id ?? this.#id;
     this._name = json._name;
-    this._description = json.description;
     this._queryCharset =
       json.queryCharset || lazy.SearchUtils.DEFAULT_QUERY_CHARSET;
     this._iconMapObj = json._iconMapObj || null;
@@ -938,7 +976,6 @@ export class SearchEngine {
       "id",
       "_name",
       "_loadPath",
-      "description",
       "_iconMapObj",
       "_metaData",
       "_urls",
@@ -962,8 +999,17 @@ export class SearchEngine {
     return json;
   }
 
-  setAttr(name, val) {
+  setAttr(name, val, sendNotification = false) {
+    // Cache whether the attribute actually changes so we don't lose that info
+    // when updating `_metaData`.
+    let hasChangedAttr = val != this[name];
     this._metaData[name] = val;
+    if (hasChangedAttr && sendNotification) {
+      lazy.SearchUtils.notifyAction(
+        this,
+        lazy.SearchUtils.MODIFIED_TYPE.CHANGED
+      );
+    }
   }
 
   getAttr(name) {
@@ -972,6 +1018,14 @@ export class SearchEngine {
 
   clearAttr(name) {
     delete this._metaData[name];
+  }
+
+  /**
+   * @type {string}
+   *   The partner code being used by this search engine in the Search URL.
+   */
+  get partnerCode() {
+    return "";
   }
 
   /**
@@ -1017,20 +1071,14 @@ export class SearchEngine {
 
   set alias(val) {
     var value = val ? val.trim() : "";
-    if (value != this.alias) {
-      this.setAttr("alias", value);
-      lazy.SearchUtils.notifyAction(
-        this,
-        lazy.SearchUtils.MODIFIED_TYPE.CHANGED
-      );
-    }
+    this.setAttr("alias", value, true);
   }
 
   /**
    * Returns a list of aliases, including a user defined alias and
    * a list defined by webextension keywords.
    *
-   * @returns {Array}
+   * @returns {string[]}
    */
   get aliases() {
     return [
@@ -1069,22 +1117,13 @@ export class SearchEngine {
     return this.isAppProvided ? this._telemetryId : null;
   }
 
-  get description() {
-    return this._description;
-  }
-
   get hidden() {
     return this.getAttr("hidden") || false;
   }
+
   set hidden(val) {
     var value = !!val;
-    if (value != this.hidden) {
-      this.setAttr("hidden", value);
-      lazy.SearchUtils.notifyAction(
-        this,
-        lazy.SearchUtils.MODIFIED_TYPE.CHANGED
-      );
-    }
+    this.setAttr("hidden", value, true);
   }
 
   get hideOneOffButton() {
@@ -1092,13 +1131,7 @@ export class SearchEngine {
   }
   set hideOneOffButton(val) {
     const value = !!val;
-    if (value != this.hideOneOffButton) {
-      this.setAttr("hideOneOffButton", value);
-      lazy.SearchUtils.notifyAction(
-        this,
-        lazy.SearchUtils.MODIFIED_TYPE.CHANGED
-      );
-    }
+    this.setAttr("hideOneOffButton", value, true);
   }
 
   /**
@@ -1129,6 +1162,16 @@ export class SearchEngine {
     return false;
   }
 
+  /**
+   * If this engine has been overridden by a third-party engine, the id returned
+   * will be the engine it was overriden by. Otherwise this will return null.
+   *
+   * @returns {?string}
+   */
+  get overriddenById() {
+    return this.getAttr("overriddenBy");
+  }
+
   get isGeneralPurposeEngine() {
     return false;
   }
@@ -1139,6 +1182,13 @@ export class SearchEngine {
 
   get name() {
     return this._name;
+  }
+
+  /**
+   * Anonymized path of where we initially loaded the engine from.
+   */
+  get loadPath() {
+    return this._loadPath;
   }
 
   get queryCharset() {
@@ -1363,7 +1413,7 @@ export class SearchEngine {
    * Returns the icon URL for the search engine closest to the preferred width
    * or undefined if the engine has no icons.
    *
-   * @param {number} preferredWidth
+   * @param {number} [preferredWidth]
    *   Width of the requested icon. If not specified, it is assumed that
    *   16x16 is desired.
    * @returns {Promise<string|undefined>}

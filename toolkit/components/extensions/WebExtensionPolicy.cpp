@@ -511,7 +511,7 @@ bool WebExtensionPolicy::IsExtensionProcess(GlobalObject& aGlobal) {
 bool WebExtensionPolicy::BackgroundServiceWorkerEnabled(GlobalObject& aGlobal) {
   // When MOZ_WEBEXT_WEBIDL_ENABLED is not set at compile time, extension APIs
   // are not available to extension service workers. To avoid confusion, the
-  // extensions.backgroundServiceWorkerEnabled.enabled pref is locked to false
+  // extensions.backgroundServiceWorker.enabled pref is locked to false
   // in modules/libpref/init/all.js when MOZ_WEBEXT_WEBIDL_ENABLED is not set.
   return StaticPrefs::extensions_backgroundServiceWorker_enabled_AtStartup();
 }
@@ -608,13 +608,7 @@ bool WebExtensionPolicy::CanAccessContext(nsILoadContext* aContext) const {
 
 bool WebExtensionPolicy::CanAccessWindow(
     const dom::WindowProxyHolder& aWindow) const {
-  if (PrivateBrowsingAllowed()) {
-    return true;
-  }
-  // match browsing mode with policy
-  nsIDocShell* docShell = aWindow.get()->GetDocShell();
-  nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(docShell);
-  return !(loadContext && loadContext->UsePrivateBrowsing());
+  return PrivateBrowsingAllowed() || !aWindow.get()->UsePrivateBrowsing();
 }
 
 void WebExtensionPolicy::GetReadyPromise(

@@ -20,13 +20,13 @@ export class NetErrorChild extends RemotePageChild {
     const exportableFunctions = [
       "RPMGetAppBuildID",
       "RPMGetInnerMostURI",
-      "RPMAddToHistogram",
       "RPMRecordGleanEvent",
       "RPMCheckAlternateHostAvailable",
       "RPMGetHttpResponseHeader",
       "RPMIsTRROnlyFailure",
       "RPMIsFirefox",
       "RPMOpenPreferences",
+      "RPMHasConnectivity",
       "RPMGetTRRSkipReason",
       "RPMGetTRRDomain",
       "RPMIsSiteSpecificTRRError",
@@ -76,10 +76,6 @@ export class NetErrorChild extends RemotePageChild {
 
   RPMGetAppBuildID() {
     return Services.appinfo.appBuildID;
-  }
-
-  RPMAddToHistogram(histID, bin) {
-    Services.telemetry.getHistogramById(histID).add(bin);
   }
 
   RPMRecordGleanEvent(category, name, extra) {
@@ -134,11 +130,15 @@ export class NetErrorChild extends RemotePageChild {
       },
     };
 
-    Services.uriFixup.checkHost(
-      info.fixedURI,
-      onLookupCompleteListener,
-      this.document.nodePrincipal.originAttributes
-    );
+    try {
+      Services.uriFixup.checkHost(
+        info.fixedURI,
+        onLookupCompleteListener,
+        this.document.nodePrincipal.originAttributes
+      );
+    } catch (ex) {
+      // Ignore errors.
+    }
   }
 
   // Get the header from the http response of the failed channel. This function
@@ -174,6 +174,11 @@ export class NetErrorChild extends RemotePageChild {
 
   RPMIsFirefox() {
     return lazy.AppInfo.isFirefox;
+  }
+
+  RPMHasConnectivity() {
+    // Whether the browser has active network interfaces or not.
+    return Services.io.connectivity;
   }
 
   _getTRRSkipReason() {

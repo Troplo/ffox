@@ -30,6 +30,7 @@
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/Geolocation.h"
 #include "mozilla/dom/HTMLEmbedElement.h"
 #include "mozilla/dom/HTMLIFrameElement.h"
 #include "mozilla/dom/Location.h"
@@ -473,6 +474,10 @@ already_AddRefed<BrowsingContext> BrowsingContext::CreateDetached(
   fields.Get<IDX_AllowJavascript>() =
       inherit ? inherit->GetAllowJavascript() : true;
 
+  fields.Get<IDX_IPAddressSpace>() = inherit
+                                         ? inherit->GetIPAddressSpace()
+                                         : nsILoadInfo::IPAddressSpace::Public;
+
   fields.Get<IDX_IsPopupRequested>() = aOptions.isPopupRequested;
 
   fields.Get<IDX_TopLevelCreatedByWebContent>() =
@@ -751,6 +756,10 @@ static bool OwnerAllowsFullscreen(const Element& aEmbedder) {
 
 void BrowsingContext::SetEmbedderElement(Element* aEmbedder) {
   mEmbeddedByThisProcess = true;
+
+  if (RefPtr<WindowContext> parent = GetParentWindowContext()) {
+    parent->ClearLightDOMChildren();
+  }
 
   // Update embedder-element-specific fields in a shared transaction.
   // Don't do this when clearing our embedder, as we're being destroyed either
@@ -1218,6 +1227,21 @@ Span<RefPtr<BrowsingContext>> BrowsingContext::NonSyntheticChildren() const {
     return current->NonSyntheticChildren();
   }
   return Span<RefPtr<BrowsingContext>>();
+}
+
+BrowsingContext* BrowsingContext::NonSyntheticLightDOMChildAt(
+    uint32_t aIndex) const {
+  if (WindowContext* current = mCurrentWindowContext) {
+    return current->NonSyntheticLightDOMChildAt(aIndex);
+  }
+  return nullptr;
+}
+
+uint32_t BrowsingContext::NonSyntheticLightDOMChildrenCount() const {
+  if (WindowContext* current = mCurrentWindowContext) {
+    return current->NonSyntheticLightDOMChildrenCount();
+  }
+  return 0;
 }
 
 void BrowsingContext::GetWindowContexts(
@@ -2021,7 +2045,7 @@ nsresult BrowsingContext::LoadURI(nsDocShellLoadState* aLoadState,
 
   const auto& sourceBC = aLoadState->SourceBrowsingContext();
 
-  if (net::SchemeIsJavascript(aLoadState->URI())) {
+  if (aLoadState->URI()->SchemeIs("javascript")) {
     if (!XRE_IsParentProcess()) {
       // Web content should only be able to load javascript: URIs into documents
       // whose principals the caller principal subsumes, which by definition
@@ -2116,7 +2140,7 @@ nsresult BrowsingContext::InternalLoad(nsDocShellLoadState* aLoadState) {
 
   const auto& sourceBC = aLoadState->SourceBrowsingContext();
 
-  if (net::SchemeIsJavascript(aLoadState->URI())) {
+  if (aLoadState->URI()->SchemeIs("javascript")) {
     if (!XRE_IsParentProcess()) {
       // Web content should only be able to load javascript: URIs into documents
       // whose principals the caller principal subsumes, which by definition
@@ -2265,8 +2289,8 @@ PopupBlocker::PopupControlState BrowsingContext::RevisePopupAbuseLevel(
     case PopupBlocker::openAllowed:
       break;
     case PopupBlocker::openBlocked:
-      if (IsPopupAllowed() || (StaticPrefs::dom_popup_experimental() && doc &&
-                               doc->HasValidTransientUserGestureActivation())) {
+      if (IsPopupAllowed() ||
+          (doc && doc->HasValidTransientUserGestureActivation())) {
         // Go down one state enum step:
         //   openBlocked (2) -> openControlled (1)
         abuse = PopupBlocker::openControlled;
@@ -3216,6 +3240,33 @@ void BrowsingContext::SetWatchedByDevTools(bool aWatchedByDevTools,
   SetWatchedByDevToolsInternal(aWatchedByDevTools, aRv);
 }
 
+RefPtr<nsGeolocationService> BrowsingContext::GetGeolocationServiceOverride() {
+  // Override can be set only to the top-level browsing context,
+  // but when the geolocation coordinates are requested for iframe,
+  // we should return the override which is set for its top-level context.
+  return Top()->mGeolocationServiceOverride;
+}
+
+void BrowsingContext::SetGeolocationServiceOverride(
+    const Optional<nsIDOMGeoPosition*>& aGeolocationOverride) {
+  MOZ_ASSERT(
+      IsTop(),
+      "Should only set GeolocationServiceOverride in the top browsing context");
+  if (aGeolocationOverride.WasPassed()) {
+    if (!mGeolocationServiceOverride) {
+      mGeolocationServiceOverride = new nsGeolocationService();
+      mGeolocationServiceOverride->Init();
+    }
+    mGeolocationServiceOverride->Update(aGeolocationOverride.Value());
+  } else if (RefPtr<nsGeolocationService> serviceOverride =
+                 mGeolocationServiceOverride.forget()) {
+    // Create an original service and move the locators.
+    RefPtr<nsGeolocationService> service =
+        nsGeolocationService::GetGeolocationService();
+    serviceOverride->MoveLocators(service);
+  }
+}
+
 auto BrowsingContext::CanSet(FieldIndex<IDX_DefaultLoadFlags>,
                              const uint32_t& aDefaultLoadFlags,
                              ContentParent* aSource) -> CanSetResult {
@@ -3492,8 +3543,16 @@ void BrowsingContext::DidSet(FieldIndex<IDX_FullZoom>, float aOldValue) {
     }
 
     for (BrowsingContext* child : Children()) {
+      // When passing the outer document's full-zoom down to the inner
+      // document, scale by the effective CSS 'zoom' on the embedder element:
+      auto fullZoom = GetFullZoom();
+      if (auto* elem = child->GetEmbedderElement()) {
+        if (auto* frame = elem->GetPrimaryFrame()) {
+          fullZoom = frame->Style()->EffectiveZoom().Zoom(fullZoom);
+        }
+      }
       // Setting full zoom on a discarded context has no effect.
-      Unused << child->SetFullZoom(GetFullZoom());
+      Unused << child->SetFullZoom(fullZoom);
     }
   }
 
@@ -3944,6 +4003,26 @@ void BrowsingContext::GetContiguousHistoryEntries(
     auto infos = Canonical()->GetContiguousSessionHistoryInfos(aActiveEntry);
     aNavigation->InitializeHistoryEntries(infos, &aActiveEntry);
   }
+}
+
+// https://html.spec.whatwg.org/multipage/interaction.html#consume-history-action-user-activation
+// Step 3 onward
+void BrowsingContext::ConsumeHistoryActivation() {
+  // 3. Let navigables be the inclusive descendant navigables of top's active
+  // document.
+  // 4. Let windows be the list of Window objects constructed by taking the
+  // active window of each item in navigables.
+  PreOrderWalk([&](BrowsingContext* aBrowsingContext) {
+    RefPtr<WindowContext> windowContext =
+        aBrowsingContext->GetCurrentWindowContext();
+    // 5. For each window in windows, set window's last history-action
+    // activation timestamp to window's last activation timestamp.
+    if (aBrowsingContext->IsInProcess() && windowContext &&
+        windowContext->GetUserActivationState() ==
+            UserActivation::State::FullActivated) {
+      windowContext->UpdateLastHistoryActivation();
+    }
+  });
 }
 
 }  // namespace dom

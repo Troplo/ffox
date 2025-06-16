@@ -4,23 +4,21 @@ createPipelineLayout validation tests.
 TODO: review existing tests, write descriptions, and make sure tests are complete.
 `;
 
+import { AllFeaturesMaxLimitsGPUTest } from '../.././gpu_test.js';
 import { makeTestGroup } from '../../../common/framework/test_group.js';
-import { count } from '../../../common/util/util.js';
+import { count, range } from '../../../common/util/util.js';
 import {
   bufferBindingTypeInfo,
   getBindingLimitForBindingType,
   kBufferBindingTypes,
 } from '../../capability_info.js';
 import { GPUConst } from '../../constants.js';
-import { MaxLimitsTestMixin } from '../../gpu_test.js';
-
-import { ValidationTest } from './validation_test.js';
 
 function clone<T extends GPUBindGroupLayoutDescriptor>(descriptor: T): T {
   return JSON.parse(JSON.stringify(descriptor));
 }
 
-export const g = makeTestGroup(MaxLimitsTestMixin(ValidationTest));
+export const g = makeTestGroup(AllFeaturesMaxLimitsGPUTest);
 
 g.test('number_of_dynamic_buffers_exceeds_the_maximum_value')
   .desc(
@@ -106,8 +104,7 @@ g.test('number_of_bind_group_layouts_exceeds_the_maximum_value')
       entries: [],
     };
 
-    // 4 is the maximum number of bind group layouts.
-    const maxBindGroupLayouts = [1, 2, 3, 4].map(() =>
+    const maxBindGroupLayouts = range(t.device.limits.maxBindGroups, () =>
       t.device.createBindGroupLayout(bindGroupLayoutDescriptor)
     );
 
@@ -145,9 +142,7 @@ g.test('bind_group_layouts,device_mismatch')
     { layout0Mismatched: true, layout1Mismatched: false },
     { layout0Mismatched: false, layout1Mismatched: true },
   ])
-  .beforeAllSubcases(t => {
-    t.selectMismatchedDeviceOrSkipTestCase(undefined);
-  })
+  .beforeAllSubcases(t => t.usesMismatchedDevice())
   .fn(t => {
     const { layout0Mismatched, layout1Mismatched } = t.params;
 

@@ -68,6 +68,7 @@ import org.mozilla.fenix.ext.requireComponents
 import org.mozilla.fenix.ext.setTextColor
 import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.library.LibraryPageFragment
+import org.mozilla.fenix.library.bookmarks.ui.BookmarksListSortOrder
 import org.mozilla.fenix.library.bookmarks.ui.BookmarksMiddleware
 import org.mozilla.fenix.library.bookmarks.ui.BookmarksScreen
 import org.mozilla.fenix.library.bookmarks.ui.BookmarksState
@@ -75,6 +76,9 @@ import org.mozilla.fenix.library.bookmarks.ui.BookmarksStore
 import org.mozilla.fenix.library.bookmarks.ui.BookmarksSyncMiddleware
 import org.mozilla.fenix.library.bookmarks.ui.BookmarksTelemetryMiddleware
 import org.mozilla.fenix.library.bookmarks.ui.LifecycleHolder
+import org.mozilla.fenix.library.bookmarks.ui.PrivateBrowsingLockMiddleware
+import org.mozilla.fenix.lifecycle.registerForVerification
+import org.mozilla.fenix.lifecycle.verifyUser
 import org.mozilla.fenix.snackbar.FenixSnackbarDelegate
 import org.mozilla.fenix.snackbar.SnackbarBinding
 import org.mozilla.fenix.tabstray.Page
@@ -100,6 +104,7 @@ class BookmarkFragment : LibraryPageFragment<BookmarkNode>(), UserInteractionHan
     private var _binding: FragmentBookmarkBinding? = null
     private val binding get() = _binding!!
     private val snackbarBinding = ViewBoundFeatureWrapper<SnackbarBinding>()
+    private val verificationResultLauncher = registerForVerification()
 
     override val selectedItems get() = bookmarkStore.state.mode.selectedItems
 
@@ -122,8 +127,21 @@ class BookmarkFragment : LibraryPageFragment<BookmarkNode>(), UserInteractionHan
                         )
 
                         BookmarksStore(
-                            initialState = BookmarksState.default,
+                            initialState = BookmarksState.default.copy(
+                                sortOrder = BookmarksListSortOrder.fromString(
+                                    value = requireContext().settings().bookmarkListSortOrder,
+                                    default = BookmarksListSortOrder.Alphabetical(true),
+                                ),
+                            ),
                             middleware = listOf(
+                                // NB: Order matters — this middleware must be first to intercept actions
+                                // related to private mode and trigger verification before any other middleware runs.
+                                PrivateBrowsingLockMiddleware(
+                                    appStore = requireComponents.appStore,
+                                    requireAuth = {
+                                        verifyUser(fallbackVerification = verificationResultLauncher)
+                                    },
+                                ),
                                 BookmarksTelemetryMiddleware(),
                                 BookmarksSyncMiddleware(requireComponents.backgroundServices.syncStore, lifecycleScope),
                                 BookmarksMiddleware(
@@ -149,13 +167,11 @@ class BookmarkFragment : LibraryPageFragment<BookmarkNode>(), UserInteractionHan
                                             NavGraphDirections.actionGlobalSearchDialog(sessionId = null),
                                         )
                                     },
-                                    shareBookmark = { url, title ->
+                                    shareBookmarks = { bookmarks ->
                                         lifecycleHolder.navController.nav(
                                             R.id.bookmarkFragment,
                                             BookmarkFragmentDirections.actionGlobalShareFragment(
-                                                data = arrayOf(
-                                                    ShareData(url = url, title = title),
-                                                ),
+                                                data = bookmarks.asShareDataArray(),
                                             ),
                                         )
                                     },
@@ -182,6 +198,9 @@ class BookmarkFragment : LibraryPageFragment<BookmarkNode>(), UserInteractionHan
                                                 EngineSession.LoadUrlFlags.ALLOW_JAVASCRIPT_URL,
                                             ),
                                         )
+                                    },
+                                    saveBookmarkSortOrder = {
+                                        lifecycleHolder.context.settings().bookmarkListSortOrder = it.asString
                                     },
                                     lastSavedFolderCache = context.settings().lastSavedFolderCache,
                                 ),
@@ -251,6 +270,7 @@ class BookmarkFragment : LibraryPageFragment<BookmarkNode>(), UserInteractionHan
                 appStore = requireContext().components.appStore,
                 snackbarDelegate = FenixSnackbarDelegate(binding.root),
                 navController = findNavController(),
+                tabsUseCases = requireContext().components.useCases.tabsUseCases,
                 sendTabUseCases = SendTabUseCases(requireComponents.backgroundServices.accountManager),
                 customTabSessionId = null,
             ),

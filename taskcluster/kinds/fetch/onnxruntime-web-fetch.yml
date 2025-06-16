@@ -2,29 +2,21 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ---
-ort-training.wasm:
-    description: Onnx runtime wasm training SIMD and threaded 1.20.0-dev.20240827-1d059b8702
-    fetch:
-        type: static-url
-        url: https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.0-dev.20240827-1d059b8702/dist/ort-training-wasm-simd-threaded.wasm
-        sha256: 7eb4ae0c65323064f8e4bf28916a3c4c1836e88ac3b5e29cad51a0737f96487e
-        size: 11861991
-
 ort.jsep.wasm:
-    description: Onnx runtime wasm SIMD, threaded and JSEP 1.20.1
+    description: Onnx runtime wasm SIMD, threaded and JSEP 1.22.0-dev.20250409-89f8206ba4
     fetch:
         type: static-url
-        url: https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort-wasm-simd-threaded.jsep.wasm
-        sha256: 185b0861a6cd6cbdfb057289338090436483cc59e10a7bc83bd167b15531a51b
-        size: 21663894
+        url: https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0-dev.20250409-89f8206ba4/dist/ort-wasm-simd-threaded.jsep.wasm
+        sha256: c46655e8a94afc45338d4cb2b840475f88e5012d524509916e505079c00bfa39
+        size: 21596019
 
-ort.wasm:
-    description: Onnx runtime wasm SIMD and threaded 1.20.1
+wllama.wasm:
+    description: Llama.cpp WASM files
     fetch:
         type: static-url
-        url: https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort-wasm-simd-threaded.wasm
-        sha256: 207d02be4591c156b0a98f024f3d58005b5b04c92274d759fb390338c63559ea
-        size: 11246032
+        url: https://storage.googleapis.com/moz-model-hub/wasm/3.0.4/wllama.wasm
+        sha256: a46b325da7a75012b268fdec4a078c6b32a7dd29834af39f7dabe47906f941b1
+        size: 1555738
 
 xenova-all-minilm-l6-v2:
     description: feature extraction model
@@ -97,3 +89,39 @@ mozilla-smart-tab-emb:
         revision: 2278e76f67ada584cfd3149fd2661dad03674e4d
         path-prefix: "onnx-models/Mozilla/smart-tab-embedding/main/"
         artifact-name: smart-tab-embedding.tar.zst
+
+smollm2-360-instruct-gguf:
+    description: SmolLM2 360M text summarization model GGUF
+    fetch:
+        type: git
+        repo: https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct-GGUF
+        revision: 593b5a2e04c8f3e4ee880263f93e0bd2901ad47f
+        path-prefix: "onnx-models/HuggingFaceTB/SmolLM2-360M-Instruct-GGUF/main/"
+        artifact-name: smollm2-360-instruct-gguf.tar.zst
+
+speecht5-tts:
+    description: microsoft/speecht5_tts with ONNX weights to be compatible with Transformers.js
+    fetch:
+        type: git
+        repo: https://huggingface.co/Xenova/speecht5_tts
+        revision: 73001d8bf5a9a7532c9cede52b5d3c21936939b1
+        path-prefix: "onnx-models/Xenova/speecht5_tts/main/"
+        artifact-name: speecht5_tts.tar.zst
+
+speecht5-tts-vocoder:
+    description: vocoder for speecht5_tts
+    fetch:
+        type: git
+        repo: https://huggingface.co/Xenova/speecht5_hifigan
+        revision: 05bbb2dea568f207f71113f71c9ecc216840238e
+        path-prefix: "onnx-models/Xenova/speecht5_hifigan/main/"
+        artifact-name: speecht5_tts_hifigan.tar.zst
+
+speecht5-tts-speaker:
+    description: speaker embedding for speecht5_tts
+    fetch:
+        type: git
+        repo: https://huggingface.co/datasets/Xenova/transformers.js-docs
+        revision: 4cc21eccd7f4ad1174c2f721c02468e43bf39b60
+        path-prefix: "onnx-models/Xenova/transformers.js-docs/main/"
+        artifact-name: speecht5_tts_speaker_embedding.tar.zst

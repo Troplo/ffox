@@ -487,6 +487,28 @@ mozilla::ipc::IPCResult Quota::RecvInitializePersistentStorage(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult Quota::RecvInitializeAllTemporaryOrigins(
+    InitializeAllTemporaryOriginsResolver&& aResolver) {
+  AssertIsOnBackgroundThread();
+
+  if (NS_WARN_IF(!StaticPrefs::dom_quotaManager_testing())) {
+    return IPC_FAIL(this, "QuotaManager is not in testing mode!");
+  }
+
+  QM_TRY(MOZ_TO_RESULT(!QuotaManager::IsShuttingDown()),
+         ResolveBoolResponseAndReturn(aResolver));
+
+  QM_TRY_UNWRAP(const NotNull<RefPtr<QuotaManager>> quotaManager,
+                QuotaManager::GetOrCreate(),
+                ResolveBoolResponseAndReturn(aResolver));
+
+  quotaManager->InitializeAllTemporaryOrigins()->Then(
+      GetCurrentSerialEventTarget(), __func__,
+      BoolPromiseResolveOrRejectCallback(this, std::move(aResolver)));
+
+  return IPC_OK();
+}
+
 mozilla::ipc::IPCResult Quota::RecvInitializeTemporaryGroup(
     const PrincipalInfo& aPrincipalInfo,
     InitializeTemporaryOriginResolver&& aResolve) {
@@ -603,7 +625,17 @@ mozilla::ipc::IPCResult Quota::RecvInitializePersistentClient(
                 QuotaManager::GetOrCreate(),
                 ResolveBoolResponseAndReturn(aResolve));
 
-  quotaManager->InitializePersistentClient(aPrincipalInfo, aClientType)
+  QM_TRY_UNWRAP(
+      PrincipalMetadata principalMetadata,
+      GetInfoFromValidatedPrincipalInfo(*quotaManager, aPrincipalInfo),
+      ResolveBoolResponseAndReturn(aResolve));
+
+  OriginMetadata originMetadata{std::move(principalMetadata),
+                                PERSISTENCE_TYPE_PERSISTENT};
+
+  ClientMetadata clientMetadata{std::move(originMetadata), aClientType};
+
+  quotaManager->InitializePersistentClient(clientMetadata)
       ->Then(GetCurrentSerialEventTarget(), __func__,
              BoolPromiseResolveOrRejectCallback(this, std::move(aResolve)));
 
@@ -613,6 +645,7 @@ mozilla::ipc::IPCResult Quota::RecvInitializePersistentClient(
 mozilla::ipc::IPCResult Quota::RecvInitializeTemporaryClient(
     const PersistenceType& aPersistenceType,
     const PrincipalInfo& aPrincipalInfo, const Type& aClientType,
+    const bool& aCreateIfNonExistent,
     InitializeTemporaryClientResolver&& aResolve) {
   AssertIsOnBackgroundThread();
 
@@ -634,8 +667,16 @@ mozilla::ipc::IPCResult Quota::RecvInitializeTemporaryClient(
                 QuotaManager::GetOrCreate(),
                 ResolveBoolResponseAndReturn(aResolve));
 
-  quotaManager
-      ->InitializeTemporaryClient(aPersistenceType, aPrincipalInfo, aClientType)
+  QM_TRY_UNWRAP(
+      PrincipalMetadata principalMetadata,
+      GetInfoFromValidatedPrincipalInfo(*quotaManager, aPrincipalInfo),
+      ResolveBoolResponseAndReturn(aResolve));
+
+  OriginMetadata originMetadata{std::move(principalMetadata), aPersistenceType};
+
+  ClientMetadata clientMetadata{std::move(originMetadata), aClientType};
+
+  quotaManager->InitializeTemporaryClient(clientMetadata, aCreateIfNonExistent)
       ->Then(GetCurrentSerialEventTarget(), __func__,
              BoolPromiseResolveOrRejectCallback(this, std::move(aResolve)));
 

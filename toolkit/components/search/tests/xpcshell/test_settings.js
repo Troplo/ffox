@@ -477,11 +477,14 @@ add_task(async function test_settings_write() {
   delete settingsTemplate.locale;
 
   for (let engine of settingsTemplate.engines) {
-    // Remove _shortName from the settings template, as it is no longer supported,
-    // but older settings used to have it, so we keep it in the template as an
-    // example.
+    // Remove _shortName and description from the settings template, as they are
+    // no longer supported, but older settings used to have them. We keep them
+    // in the template as an example.
     if ("_shortName" in engine) {
       delete engine._shortName;
+    }
+    if ("description" in engine) {
+      delete engine.description;
     }
     if ("_urls" in engine) {
       // Only app-provided engines support purpose, others do not,
@@ -564,11 +567,38 @@ add_task(async function test_settings_write_prevented_during_reload() {
   );
 });
 
+add_task(async function test_correct_change_reason_when_no_default_engine() {
+  Services.fog.initializeFOG();
+
+  let ss = Services.search.wrappedJSObject;
+
+  await loadSettingsFile("settings/settings-loading.json", false, false);
+  const settingsFileWritten = promiseAfterSettings();
+
+  await ss.reset();
+  await Services.search.init();
+
+  await settingsFileWritten;
+
+  sinon.stub(ss, "appDefaultEngine").get(() => null);
+  ss.forceCurrentEngineToBeNull();
+  ss._getEngineDefault(false);
+
+  let snapshot = Glean.searchEngineDefault.changed.testGetValue();
+  Assert.equal(
+    snapshot[0].extra.change_reason,
+    "no-existing-default",
+    "Should have triggered default changed event with reason 'no-existing-default'"
+  );
+
+  removeSettingsFile();
+  sinon.restore();
+});
+
 var EXPECTED_ENGINE = {
   engine: {
     name: "Test search engine",
     alias: "",
-    description: "A test search engine (based on Google search)",
     wrappedJSObject: {
       _extensionID: "test-addon-id@mozilla.org",
       _iconURL:

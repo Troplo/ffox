@@ -1,11 +1,6 @@
-use std::{
-    mem::{size_of, size_of_val},
-    ptr,
-    string::String,
-    sync::Arc,
-    thread,
-    vec::Vec,
-};
+use alloc::{string::String, sync::Arc, vec::Vec};
+use core::ptr;
+use std::thread;
 
 use parking_lot::Mutex;
 use windows::{
@@ -61,6 +56,7 @@ impl super::Adapter {
         adapter: DxgiAdapter,
         library: &Arc<D3D12Lib>,
         instance_flags: wgt::InstanceFlags,
+        memory_budget_thresholds: wgt::MemoryBudgetThresholds,
         dxc_container: Option<Arc<shader_compilation::DxcContainer>>,
     ) -> Option<crate::ExposedAdapter<super::Api>> {
         // Create the device so that we can get the capabilities.
@@ -432,6 +428,23 @@ impl super::Adapter {
                 && features1.Int64ShaderOps.as_bool(),
         );
 
+        let float16_supported = {
+            let mut features4 = Direct3D12::D3D12_FEATURE_DATA_D3D12_OPTIONS4::default();
+            let hr = unsafe {
+                device.CheckFeatureSupport(
+                    Direct3D12::D3D12_FEATURE_D3D12_OPTIONS4, // https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_feature#syntax
+                    ptr::from_mut(&mut features4).cast(),
+                    size_of::<Direct3D12::D3D12_FEATURE_DATA_D3D12_OPTIONS4>() as _,
+                )
+            };
+            hr.is_ok() && features4.Native16BitShaderOpsSupported.as_bool()
+        };
+
+        features.set(
+            wgt::Features::SHADER_F16,
+            shader_model >= naga::back::hlsl::ShaderModel::V6_2 && float16_supported,
+        );
+
         features.set(
             wgt::Features::TEXTURE_INT64_ATOMIC,
             shader_model >= naga::back::hlsl::ShaderModel::V6_6
@@ -490,10 +503,7 @@ impl super::Adapter {
 
         let base = wgt::Limits::default();
 
-        let mut downlevel = wgt::DownlevelCapabilities::default();
-        // https://github.com/gfx-rs/wgpu/issues/2471
-        downlevel.flags -=
-            wgt::DownlevelFlags::VERTEX_AND_INSTANCE_INDEX_RESPECTS_RESPECTIVE_FIRST_VALUE_IN_INDIRECT_DRAW;
+        let downlevel = wgt::DownlevelCapabilities::default();
 
         // See https://learn.microsoft.com/en-us/windows/win32/direct3d12/hardware-feature-levels#feature-level-support
         let max_color_attachments = 8;
@@ -508,6 +518,7 @@ impl super::Adapter {
                 private_caps,
                 presentation_timer,
                 workarounds,
+                memory_budget_thresholds,
                 dxc_container,
             },
             info,
@@ -619,7 +630,7 @@ impl crate::Adapter for super::Adapter {
 
     unsafe fn open(
         &self,
-        _features: wgt::Features,
+        features: wgt::Features,
         limits: &wgt::Limits,
         memory_hints: &wgt::MemoryHints,
     ) -> Result<crate::OpenDevice<super::Api>, crate::DeviceError> {
@@ -638,12 +649,15 @@ impl crate::Adapter for super::Adapter {
         };
 
         let device = super::Device::new(
+            self.raw.clone(),
             self.device.clone(),
             queue.clone(),
+            features,
             limits,
             memory_hints,
             self.private_caps,
             &self.library,
+            self.memory_budget_thresholds,
             self.dxc_container.clone(),
         )?;
         Ok(crate::OpenDevice {

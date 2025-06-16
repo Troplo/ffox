@@ -210,6 +210,7 @@ const VERIFY_SIGNATURES_FROM_FS = false;
  * @typedef {import("../translations").TranslationModelRecord} TranslationModelRecord
  * @typedef {import("../translations").RemoteSettingsClient} RemoteSettingsClient
  * @typedef {import("../translations").TranslationModelPayload} TranslationModelPayload
+ * @typedef {import("../translations").TranslationsEnginePayload} TranslationsEnginePayload
  * @typedef {import("../translations").LanguageTranslationModelFiles} LanguageTranslationModelFiles
  * @typedef {import("../translations").WasmRecord} WasmRecord
  * @typedef {import("../translations").LangTags} LangTags
@@ -217,6 +218,9 @@ const VERIFY_SIGNATURES_FROM_FS = false;
  * @typedef {import("../translations").ModelLanguages} ModelLanguages
  * @typedef {import("../translations").SupportedLanguages} SupportedLanguages
  * @typedef {import("../translations").TranslationErrors} TranslationErrors
+ *
+ * // Implementation exists at toolkit/content/widgets/findbar.js
+ * @typedef {any} MozFindbar
  */
 
 /**
@@ -426,17 +430,6 @@ export class TranslationsParent extends JSWindowActorParent {
   resolveEngine = null;
 
   /**
-   * The cached URI spec where the panel was first ever shown, as determined by the
-   * browser.translations.panelShown pref.
-   *
-   * Holding on to this URI value allows us to show the introductory message in the panel
-   * when the panel opens, as long as the active panel is open on that particular URI.
-   *
-   * @type {string | null}
-   */
-  firstShowUriSpec = null;
-
-  /**
    * The TranslationsEngineParent instance which requests from this
    * TranslationsParent are being handled by.
    *
@@ -451,6 +444,25 @@ export class TranslationsParent extends JSWindowActorParent {
    * to be checked after calls to `await`.
    */
   #isDestroyed = false;
+
+  /**
+   * The findBar associated with this TranslationsParent actor instance.
+   * This will be null until the findBar is initialized in the current tab.
+   * If the find-in-page functionality is never used, this will never be initialized.
+   *
+   * @type {MozFindbar | null}
+   */
+  #findBar = null;
+
+  /**
+   * Returns the findBar associated with this TranslationsParent actor if one has been
+   * initialized for the current tab, otherwise null.
+   *
+   * @returns {MozFindbar | null}
+   */
+  get findBar() {
+    return this.#findBar;
+  }
 
   /**
    * There is only one static TranslationsParent for all of the top ChromeWindows.
@@ -494,6 +506,11 @@ export class TranslationsParent extends JSWindowActorParent {
         languagePair,
         false // reportAsAutoTranslate
       );
+    }
+
+    const browser = this.browsingContext.top.embedderElement;
+    if (browser) {
+      this.#registerFindBarEventListeners(browser);
     }
   }
 
@@ -854,6 +871,7 @@ export class TranslationsParent extends JSWindowActorParent {
         detectedLanguages
       );
 
+      /* eslint-disable-next-line no-shadow */
       const { CustomEvent } = browser.ownerGlobal;
       browser.dispatchEvent(
         new CustomEvent("TranslationsParent:OfferTranslation", {
@@ -958,6 +976,7 @@ export class TranslationsParent extends JSWindowActorParent {
       case "https":
       case "http":
       case "file":
+      case "moz-extension":
         return false;
     }
     return true;
@@ -1002,7 +1021,7 @@ export class TranslationsParent extends JSWindowActorParent {
 
   /**
    * The "Accept-Language" values that the localizer or user has indicated for
-   * the preferences for the web. https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Accept-Language
+   * the preferences for the web. https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Accept-Language
    *
    * Note that this preference always has English in the fallback chain, even if the
    * user doesn't actually speak English, and to other languages they potentially do
@@ -1075,6 +1094,15 @@ export class TranslationsParent extends JSWindowActorParent {
     ].reverse();
 
     return TranslationsParent.#mostRecentTargetLanguages;
+  }
+
+  /**
+   * Returns true if the active user has ever triggered a translation request, otherwise false.
+   *
+   * @returns {boolean}
+   */
+  static hasUserEverTranslated() {
+    return !!TranslationsParent.#getMostRecentTargetLanguages().length;
   }
 
   /**
@@ -1172,6 +1200,113 @@ export class TranslationsParent extends JSWindowActorParent {
     );
 
     TranslationsParent.#observingPrefs = true;
+  }
+
+  /**
+   * @param {CustomEvent} event
+   */
+  handleEvent(event) {
+    if (this.#isDestroyed) {
+      return;
+    }
+
+    const { type } = event;
+
+    switch (type) {
+      case "TabFindInitialized": {
+        const browser = event.target.linkedBrowser;
+        this.#registerFindBarEventListeners(browser);
+        break;
+      }
+      case "SwapDocShells": {
+        const newBrowser = event.detail;
+        newBrowser.addEventListener(
+          "EndSwapDocShells",
+          () => {
+            this.#registerFindBarEventListeners(newBrowser);
+          },
+          { once: true }
+        );
+        break;
+      }
+      case "findbaropen": {
+        this.sendAsyncMessage("Translations:FindBarOpen");
+        break;
+      }
+      case "findbarclose": {
+        this.sendAsyncMessage("Translations:FindBarClose");
+        break;
+      }
+    }
+  }
+
+  /**
+   * Registers event listeners related to the FindBar associated with the current tab.
+   *
+   * If the FindBar has been initialized, we need to listen for it to open or close.
+   * If it hasn't been initialized, we need to listen for it to be initialized.
+   *
+   * We also ned to handle the SwapDocShells event, in which case we may need to
+   * associate with a new FindBar in the new DocShell.
+   *
+   * @param {any} browser
+   */
+  #registerFindBarEventListeners(browser) {
+    if (AppConstants.platform === "android") {
+      return;
+    }
+
+    const tabBrowser = browser.getTabBrowser();
+    const tab = tabBrowser.getTabForBrowser(browser);
+    const findBar = tabBrowser.getCachedFindBar(tab);
+
+    if (findBar) {
+      // This tab already has an initialized find bar, so
+      // so we can hook up event listeners directly.
+      this.#findBar = findBar;
+      findBar.addEventListener("findbaropen", this, { capture: true });
+      findBar.addEventListener("findbarclose", this, { capture: true });
+    } else {
+      // Otherwise we need to listen for a find bar to be
+      // initialized for this tab, and then we will hook
+      // up the event listeners above.
+      tab.addEventListener("TabFindInitialized", this, { once: true });
+    }
+
+    // Finally, if we swap doc shells, we will need to update
+    // which find bar the TranslationsParent actor is bound to.
+    browser.addEventListener("SwapDocShells", this, { capture: true });
+  }
+
+  /**
+   * Removes all event listeners associated with the FindBar in this tab.
+   */
+  #removeFindBarEventListeners() {
+    if (AppConstants.platform === "android") {
+      return;
+    }
+
+    if (this.#findBar) {
+      this.#findBar.removeEventListener("findbaropen", this);
+      this.#findBar.removeEventListener("findbarclose", this);
+      this.#findBar = null;
+      return;
+    }
+
+    // This tab has not initialized a find bar yet, so
+    // we need to remove our event listener that will
+    // register the other find-bar listeners when it does.
+    const browser = this.browsingContext?.top.embedderElement;
+
+    if (!browser) {
+      return;
+    }
+
+    const tabBrowser = browser.getTabBrowser();
+    const tab = tabBrowser.getTabForBrowser(browser);
+
+    tab.removeEventListener("TabFindInitialized", this);
+    browser.removeEventListener("SwapDocShells", this);
   }
 
   /**
@@ -1348,6 +1483,10 @@ export class TranslationsParent extends JSWindowActorParent {
   }
 
   async receiveMessage({ name, data }) {
+    if (this.#isDestroyed) {
+      return undefined;
+    }
+
     switch (name) {
       case "Translations:ReportLangTags": {
         const { htmlLangAttribute, href } = data;
@@ -1362,6 +1501,10 @@ export class TranslationsParent extends JSWindowActorParent {
           lazy.console.log("Failed to get the detected languages.", error);
         });
 
+        if (this.#isDestroyed) {
+          return undefined;
+        }
+
         if (!detectedLanguages) {
           // The actor was already destroyed, and the detectedLanguages weren't reported
           // in time.
@@ -1371,6 +1514,10 @@ export class TranslationsParent extends JSWindowActorParent {
         this.languageState.detectedLanguages = detectedLanguages;
 
         if (await this.shouldAutoTranslate(detectedLanguages)) {
+          if (this.#isDestroyed) {
+            return undefined;
+          }
+
           this.translate(
             {
               sourceLanguage: detectedLanguages.docLangTag,
@@ -1379,6 +1526,10 @@ export class TranslationsParent extends JSWindowActorParent {
             true // reportAsAutoTranslate
           );
         } else {
+          if (this.#isDestroyed) {
+            return undefined;
+          }
+
           this.maybeOfferTranslations(detectedLanguages).catch(error =>
             lazy.console.error(error)
           );
@@ -1410,6 +1561,10 @@ export class TranslationsParent extends JSWindowActorParent {
           this
         );
 
+        if (this.#isDestroyed) {
+          return undefined;
+        }
+
         if (!port) {
           lazy.console.error(
             `Failed to create a translations port for language pair: ${lazy.TranslationsUtils.serializeLanguagePair(requestedLanguagePair)}`
@@ -1433,7 +1588,11 @@ export class TranslationsParent extends JSWindowActorParent {
   }
 
   /**
+   * Retrieves the payload required to construct the TranslationsEngine for the given language pair.
+   *
    * @param {LanguagePair} languagePair
+   *
+   * @returns {Promise<TranslationsEnginePayload>}
    */
   static async getTranslationsEnginePayload(languagePair) {
     const wasmStartTime = Cu.now();
@@ -1742,7 +1901,7 @@ export class TranslationsParent extends JSWindowActorParent {
     fallback = "code",
     languageDisplay = "standard",
   } = {}) {
-    return new Services.intl.DisplayNames(undefined, {
+    return new Services.intl.DisplayNames(Services.locale.appLocaleAsBCP47, {
       type: "language",
       languageDisplay,
       fallback,
@@ -2111,17 +2270,16 @@ export class TranslationsParent extends JSWindowActorParent {
 
     TranslationsParent.#maybeStartObservingPrefs();
 
-    const { promise, resolve } = Promise.withResolvers();
-    const records = new Map();
-    const now = Date.now();
-    const client = TranslationsParent.#getTranslationModelsRemoteClient();
-
     // Load the models. If no data is present, then there will be an initial sync.
     // Rely on Remote Settings for the syncing strategy for receiving updates.
     lazy.console.log(`Getting remote language models.`);
+    const now = Date.now();
+
+    const { promise, resolve } = Promise.withResolvers();
+    const client = TranslationsParent.#getTranslationModelsRemoteClient();
 
     /** @type {TranslationModelRecord[]} */
-    const translationModelRecords =
+    const maxSupportedVersionRecords =
       await TranslationsParent.getMaxSupportedVersionRecords(client, {
         minSupportedMajorVersion:
           TranslationsParent.LANGUAGE_MODEL_MAJOR_VERSION_MIN,
@@ -2137,17 +2295,29 @@ export class TranslationsParent extends JSWindowActorParent {
           )}`,
       });
 
-    if (translationModelRecords.length === 0) {
+    if (maxSupportedVersionRecords.length === 0) {
       throw new Error("Unable to retrieve the translation models.");
     }
 
-    for (const record of TranslationsParent.#ensureLanguagePairsHavePivots(
-      translationModelRecords
-    )) {
-      if (record.fileType === "lex" && !lazy.useLexicalShortlist) {
-        // Do not include lexical shortlists if our config is set to not use them.
-        continue;
-      }
+    // Filter out language pairs that do not have pivot coverage.
+    const pivotFilteredRecords =
+      TranslationsParent.#ensureLanguagePairsHavePivots(
+        maxSupportedVersionRecords
+      );
+
+    // Exclude the lexical shortlist records based on the pref configuration.
+    const lexFilteredRecords = lazy.useLexicalShortlist
+      ? pivotFilteredRecords
+      : pivotFilteredRecords.filter(r => r.fileType !== "lex");
+
+    // For each language-pair key, find the version of the "model" file-type record
+    // and discard records that do not match that version exactly.
+    const versionFilteredRecords =
+      TranslationsParent.#filterByModelVersion(lexFilteredRecords);
+
+    // Build a final mapping of id to record.
+    const records = new Map();
+    for (const record of versionFilteredRecords) {
       records.set(record.id, record);
     }
 
@@ -2246,6 +2416,61 @@ export class TranslationsParent extends JSWindowActorParent {
       return true;
     });
     return after;
+  }
+
+  /**
+   * Finds the version of the "model" file-type record for each language-pair key
+   * and retains only records that match that version exactly.
+   *
+   * Even though we retrieve our records via getMaxSupportedVersionRecords(), it is
+   * possible that the maximum version for each record type is not the same. For example,
+   * if we upgraded a model from a shared-vocab configuration to a split-vocab configuration,
+   * then we might have a leftover shared "vocab" file of version `N.M`, while the rest of the
+   * newly updated files for that language pair are all at version `N.M+1`.
+   *
+   * In such a case, we want to ignore the file from the older version, since it is not
+   * intended to be utilized in the current config. The version of the "model" file-type
+   * record is guaranteed to be the exact intended version for the current configuration.
+   *
+   * @param {TranslationModelRecord[]} records
+   * @returns {TranslationModelRecord[]} The records after filtering.
+   */
+  static #filterByModelVersion(records) {
+    const recordGroups = new Map();
+    for (const record of records) {
+      const key = TranslationsParent.nonPivotKey(
+        record.fromLang,
+        record.toLang,
+        record.variant
+      );
+
+      let recordGroup = recordGroups.get(key);
+      if (!recordGroup) {
+        recordGroup = [];
+        recordGroups.set(key, recordGroup);
+      }
+
+      recordGroup.push(record);
+    }
+
+    const filteredRecords = [];
+    for (const [key, groupedRecords] of recordGroups) {
+      const modelRecordVersion = groupedRecords.find(
+        ({ fileType }) => fileType === "model"
+      )?.version;
+
+      if (!modelRecordVersion) {
+        throw new Error(`No model file found for "${key}".`);
+      }
+
+      for (const record of groupedRecords) {
+        if (record.version === modelRecordVersion) {
+          filteredRecords.push(record);
+        }
+      }
+    }
+
+    return filteredRecords;
   }
 
   /**
@@ -2748,7 +2973,7 @@ export class TranslationsParent extends JSWindowActorParent {
     ];
 
     /** @type {LanguageTranslationModelFiles} */
-    const results = {};
+    const languageModelFiles = {};
 
     // Use Promise.all to download (or retrieve from cache) the model files in parallel.
     await Promise.all(
@@ -2782,7 +3007,7 @@ export class TranslationsParent extends JSWindowActorParent {
         /** @type {{buffer: ArrayBuffer }} */
         const { buffer } = await client.attachments.download(record);
 
-        results[record.fileType] = {
+        languageModelFiles[record.fileType] = {
           buffer,
           record,
         };
@@ -2802,30 +3027,30 @@ export class TranslationsParent extends JSWindowActorParent {
     // Validate that all of the files we expected were actually available and
     // downloaded.
 
-    if (!results.model) {
+    if (!languageModelFiles.model) {
       throw new Error(
         `No model file was found for "${sourceLanguage}" to "${targetLanguage}."`
       );
     }
 
-    if (!results.lex && lazy.useLexicalShortlist) {
+    if (!languageModelFiles.lex && lazy.useLexicalShortlist) {
       throw new Error(
         `No lex file was found for "${sourceLanguage}" to "${targetLanguage}."`
       );
     }
 
-    if (results.vocab) {
-      if (results.srcvocab) {
+    if (languageModelFiles.vocab) {
+      if (languageModelFiles.srcvocab) {
         throw new Error(
           `A srcvocab and vocab file were both included for "${sourceLanguage}" to "${targetLanguage}." Only one is needed.`
         );
       }
-      if (results.trgvocab) {
+      if (languageModelFiles.trgvocab) {
         throw new Error(
           `A trgvocab and vocab file were both included for "${sourceLanguage}" to "${targetLanguage}." Only one is needed.`
         );
       }
-    } else if (!results.srcvocab || !results.trgvocab) {
+    } else if (!languageModelFiles.srcvocab || !languageModelFiles.trgvocab) {
       throw new Error(
         `No vocab files were provided for "${sourceLanguage}" to "${targetLanguage}."`
       );
@@ -2836,7 +3061,7 @@ export class TranslationsParent extends JSWindowActorParent {
       sourceLanguage,
       targetLanguage,
       variant,
-      languageModelFiles: results,
+      languageModelFiles,
     };
   }
 
@@ -3102,9 +3327,30 @@ export class TranslationsParent extends JSWindowActorParent {
 
       TranslationsParent.storeMostRecentTargetLanguage(targetLanguage);
 
+      let isFindBarOpen;
+
+      if (this.#findBar) {
+        isFindBarOpen = !this.#findBar.hidden;
+      }
+
+      if (isFindBarOpen === undefined && AppConstants.platform !== "android") {
+        const browser = this.browsingContext?.top.embedderElement;
+        if (browser) {
+          const tabBrowser = browser.getTabBrowser();
+          const findBar = tabBrowser.getCachedFindBar();
+
+          if (findBar) {
+            isFindBarOpen = findBar.hidden;
+          } else {
+            isFindBarOpen = false;
+          }
+        }
+      }
+
       this.sendAsyncMessage(
         "Translations:TranslatePage",
         {
+          isFindBarOpen,
           languagePair,
           port,
         },
@@ -3155,7 +3401,8 @@ export class TranslationsParent extends JSWindowActorParent {
       TranslationsParent.isInAutomation() &&
       !TranslationsParent.#isTranslationsEngineMocked
     ) {
-      return null;
+      // In automation assume English is the language, but don't be confident.
+      return { confident: false, language: "en", languages: [] };
     }
     return this.sendQuery("Translations:IdentifyLanguage").catch(error => {
       if (this.#isDestroyed) {
@@ -3444,11 +3691,13 @@ export class TranslationsParent extends JSWindowActorParent {
       }
       langTags.identifiedLangTag = identifyResult.language;
       langTags.identifiedLangConfident = identifyResult.confident;
+
+      maybeNormalizeDocLangTag();
+      langTags.identifiedLangTag = langTags.docLangTag;
+
       if (this.#isDestroyed) {
         return null;
       }
-      maybeNormalizeDocLangTag();
-      langTags.identifiedLangTag = langTags.docLangTag;
     }
 
     if (!langTags.docLangTag) {
@@ -3876,6 +4125,7 @@ export class TranslationsParent extends JSWindowActorParent {
     }
 
     this.#ensureTranslationsDiscarded();
+    this.#removeFindBarEventListeners();
 
     this.#isDestroyed = true;
   }
@@ -3958,6 +4208,8 @@ class TranslationsLanguageState {
     if (!browser) {
       return;
     }
+
+    /* eslint-disable-next-line no-shadow */
     const { CustomEvent } = browser.ownerGlobal;
     browser.dispatchEvent(
       new CustomEvent("TranslationsParent:LanguageState", {

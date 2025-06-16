@@ -5,6 +5,9 @@
 //! - texture/sampler pairs
 //! - expression reference counts
 
+use alloc::{boxed::Box, vec};
+use core::ops;
+
 use super::{ExpressionError, FunctionError, ModuleInfo, ShaderStages, ValidationFlags};
 use crate::diagnostic_filter::{DiagnosticFilterNode, StandardFilterableTriggeringRule};
 use crate::span::{AddSpan as _, WithSpan};
@@ -12,7 +15,6 @@ use crate::{
     arena::{Arena, Handle},
     proc::{ResolveContext, TypeResolution},
 };
-use std::ops;
 
 pub type NonUniformResult = Option<Handle<crate::Expression>>;
 
@@ -156,8 +158,11 @@ pub struct ExpressionInfo {
     /// originates. Otherwise, this is `None`.
     pub uniformity: Uniformity,
 
-    /// The number of statements and other expressions using this
-    /// expression's value.
+    /// The number of direct references to this expression in statements and
+    /// other expressions.
+    ///
+    /// This is a _local_ reference count only, it may be non-zero for
+    /// expressions that are ultimately unused.
     pub ref_count: usize,
 
     /// The global variable into which this expression produces a pointer.
@@ -261,7 +266,7 @@ pub struct FunctionInfo {
     /// How this function and its callees use this module's globals.
     ///
     /// This is indexed by `Handle<GlobalVariable>` indices. However,
-    /// `FunctionInfo` implements `std::ops::Index<Handle<GlobalVariable>>`,
+    /// `FunctionInfo` implements `core::ops::Index<Handle<GlobalVariable>>`,
     /// so you can simply index this struct with a global handle to retrieve
     /// its usage information.
     global_uses: Box<[GlobalUse]>,
@@ -269,7 +274,7 @@ pub struct FunctionInfo {
     /// Information about each expression in this function's body.
     ///
     /// This is indexed by `Handle<Expression>` indices. However, `FunctionInfo`
-    /// implements `std::ops::Index<Handle<Expression>>`, so you can simply
+    /// implements `core::ops::Index<Handle<Expression>>`, so you can simply
     /// index this struct with an expression handle to retrieve its
     /// `ExpressionInfo`.
     expressions: Box<[ExpressionInfo]>,
@@ -360,7 +365,7 @@ impl FunctionInfo {
     ) -> NonUniformResult {
         let info = &mut self.expressions[expr.index()];
         info.ref_count += 1;
-        // mark the used global as read
+        // Record usage if this expression may access a global
         if let Some(global) = info.assignable_global {
             self.global_uses[global.index()] |= global_use;
         }
@@ -656,7 +661,7 @@ impl FunctionInfo {
                 gather: _,
                 coordinate,
                 array_index,
-                offset: _,
+                offset,
                 level,
                 depth_ref,
             } => {
@@ -683,6 +688,7 @@ impl FunctionInfo {
                     Sl::Gradient { x, y } => self.add_ref(x).or(self.add_ref(y)),
                 };
                 let dref_nur = depth_ref.and_then(|h| self.add_ref(h));
+                let offset_nur = offset.and_then(|h| self.add_ref(h));
                 Uniformity {
                     non_uniform_result: self
                         .add_ref(image)
@@ -690,7 +696,8 @@ impl FunctionInfo {
                         .or(self.add_ref(coordinate))
                         .or(array_nur)
                         .or(level_nur)
-                        .or(dref_nur),
+                        .or(dref_nur)
+                        .or(offset_nur),
                     requirements: if level.implicit_derivatives() {
                         UniformityRequirements::IMPLICIT_LEVEL
                     } else {
@@ -805,6 +812,13 @@ impl FunctionInfo {
             },
             E::SubgroupOperationResult { .. } => Uniformity {
                 non_uniform_result: Some(handle),
+                requirements: UniformityRequirements::empty(),
+            },
+            E::RayQueryVertexPositions {
+                query,
+                committed: _,
+            } => Uniformity {
+                non_uniform_result: self.add_ref(query),
                 requirements: UniformityRequirements::empty(),
             },
         };
@@ -1208,6 +1222,19 @@ impl ModuleInfo {
         )?;
         info.uniformity = uniformity.result;
         info.may_kill = uniformity.exit.contains(ExitFlags::MAY_KILL);
+
+        // If there are any globals referenced directly by a named expression,
+        // ensure they are marked as used even if they are not referenced
+        // anywhere else. An important case where this matters is phony
+        // assignments used to include a global in the shader's resource
+        // interface. https://www.w3.org/TR/WGSL/#phony-assignment-section
+        for &handle in fun.named_expressions.keys() {
+            if let Some(global) = info[handle].assignable_global {
+                if info.global_uses[global.index()].is_empty() {
+                    info.global_uses[global.index()] = GlobalUse::QUERY;
+                }
+            }
+        }
 
         Ok(info)
     }

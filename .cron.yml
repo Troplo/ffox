@@ -48,14 +48,14 @@ jobs:
       when:
           - {weekday: "Friday", hour: 7, minute: 0}
 
-    - name: merge-central-to-beta-dry-run
+    - name: merge-main-to-beta-dry-run
       job:
           type: trigger-action
           action-name: merge-automation
           include-cron-input: false
           extra-input:
               force-dry-run: true
-              behavior: central-to-beta
+              behavior: main-to-beta
               push: true
       run-on-projects:
           - mozilla-central
@@ -154,9 +154,7 @@ jobs:
           include-push-tasks: true
       run-on-projects:
           - mozilla-central
-      when:
-          - {weekday: 'Monday', hour: 10, minute: 30}
-          - {weekday: 'Thursday', hour: 10, minute: 30}
+      when: []  # Bug 1961831 - Disabled temporarily during provider transition
 
     - name: custom-car-perf-testing
       job:
@@ -182,7 +180,7 @@ jobs:
       run-on-projects:
           - mozilla-beta
           - mozilla-release
-          - mozilla-esr128
+          - mozilla-esr140
           - elm
           - cypress
       # For all non m-c jobs we just run once daily matching the 10 UTC
@@ -237,7 +235,7 @@ jobs:
           - mozilla-central
           - mozilla-beta
           - mozilla-release
-          - mozilla-esr128
+          - mozilla-esr140
       when:
           by-project:
               # No default branch
@@ -250,9 +248,8 @@ jobs:
               mozilla-release:
                   - {hour: 7, minute: 0}
                   - {hour: 19, minute: 0}
-              mozilla-esr128:
-                  - {hour: 7, minute: 0}
-                  - {hour: 19, minute: 0}
+              # Bug 1965205: Enable this after esr140 got a release
+              mozilla-esr140: []
 
     - name: periodic-update
       job:
@@ -263,7 +260,8 @@ jobs:
           - mozilla-central
           - mozilla-beta
           - mozilla-release
-          - mozilla-esr128
+          # Bug 1965206: Enable this once esr140 has branched off of release
+          # - mozilla-esr140
       when:
           - {weekday: 'Monday', hour: 8, minute: 0}
           - {weekday: 'Thursday', hour: 8, minute: 0}
@@ -360,6 +358,7 @@ jobs:
           type: decision-task
           treeherder-symbol: perftest
           target-tasks-method: perftest
+          include-push-tasks: true
       run-on-projects:
           - mozilla-central
       when:
@@ -370,6 +369,7 @@ jobs:
           type: decision-task
           treeherder-symbol: perftest-auto
           target-tasks-method: perftest-on-autoland
+          include-push-tasks: true
       when: []
 
     - name: scriptworker-canary
@@ -404,7 +404,7 @@ jobs:
       job:
           type: decision-task
           treeherder-symbol: snap-upstream
-          target-tasks-method: snap_upstream_tests
+          target-tasks-method: snap_upstream_tasks
       run-on-projects:
           - mozilla-central
       when:

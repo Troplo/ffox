@@ -19,7 +19,10 @@ export const INITIAL_STATE = {
     // Have we received real data from the app yet?
     initialized: false,
     locale: "",
-    isForStartupCache: false,
+    isForStartupCache: {
+      App: false,
+      Wallpaper: false,
+    },
     customizeMenuVisible: false,
   },
   Ads: {
@@ -102,6 +105,20 @@ export const INITIAL_STATE = {
     isUserLoggedIn: false,
     recentSavesEnabled: false,
     showTopicSelection: false,
+    report: {
+      visible: false,
+      data: {},
+    },
+    sectionPersonalization: {},
+  },
+  // Messages received from ASRouter to render in newtab
+  Messages: {
+    // messages received from ASRouter are initially visible
+    isHidden: false,
+    // portID for that tab that was sent the message
+    portID: "",
+    // READONLY Message data received from ASRouter
+    messageData: {},
   },
   Notifications: {
     showNotifications: false,
@@ -114,6 +131,13 @@ export const INITIAL_STATE = {
   Personalization: {
     lastUpdated: null,
     initialized: false,
+  },
+  InferredPersonalization: {
+    initialized: false,
+    lastUpdated: null,
+    inferredIntrests: {},
+    coarseInferredInterests: {},
+    coarsePrivateInferredInterests: {},
   },
   Search: {
     // When search hand-off is enabled, we render a big button that is styled to
@@ -128,6 +152,7 @@ export const INITIAL_STATE = {
     wallpaperList: [],
     highlightSeenCounter: 0,
     categories: [],
+    uploadedWallpaper: "",
   },
   Weather: {
     initialized: false,
@@ -155,15 +180,24 @@ function App(prevState = INITIAL_STATE.App, action) {
     case at.TOP_SITES_UPDATED:
       // Toggle `isForStartupCache` when receiving the `TOP_SITES_UPDATE` action
       // so that sponsored tiles can be rendered as usual. See Bug 1826360.
-      return Object.assign({}, prevState, action.data || {}, {
-        isForStartupCache: false,
-      });
+      return {
+        ...prevState,
+        isForStartupCache: { ...prevState.isForStartupCache, App: false },
+      };
     case at.DISCOVERY_STREAM_SPOCS_UPDATE:
       // Toggle `isForStartupCache` when receiving the `DISCOVERY_STREAM_SPOCS_UPDATE_STARTUPCACHE` action
       // so that spoc cards can be rendered as usual.
-      return Object.assign({}, prevState, action.data || {}, {
-        isForStartupCache: false,
-      });
+      return {
+        ...prevState,
+        isForStartupCache: { ...prevState.isForStartupCache, App: false },
+      };
+    case at.WALLPAPERS_CUSTOM_SET:
+      // Toggle `isForStartupCache.Wallpaper` when receiving the `WALLPAPERS_CUSTOM_SET` action
+      // so that custom wallpaper can be rendered as usual.
+      return {
+        ...prevState,
+        isForStartupCache: { ...prevState.isForStartupCache, Wallpaper: false },
+      };
     case at.SHOW_PERSONALIZE:
       return Object.assign({}, prevState, {
         customizeMenuVisible: true,
@@ -533,6 +567,24 @@ function Sections(prevState = INITIAL_STATE.Sections, action) {
   }
 }
 
+function Messages(prevState = INITIAL_STATE.Messages, action) {
+  switch (action.type) {
+    case at.MESSAGE_SET:
+      if (prevState.messageData.messageType) {
+        return prevState;
+      }
+      return {
+        ...prevState,
+        messageData: action.data.message,
+        portID: action.data.portID || "",
+      };
+    case at.MESSAGE_TOGGLE_VISIBILITY:
+      return { ...prevState, isHidden: action.data };
+    default:
+      return prevState;
+  }
+}
+
 function Pocket(prevState = INITIAL_STATE.Pocket, action) {
   switch (action.type) {
     case at.POCKET_WAITING_FOR_SPOC:
@@ -568,6 +620,28 @@ function Personalization(prevState = INITIAL_STATE.Personalization, action) {
       };
     case at.DISCOVERY_STREAM_PERSONALIZATION_RESET:
       return { ...INITIAL_STATE.Personalization };
+    default:
+      return prevState;
+  }
+}
+
+function InferredPersonalization(
+  prevState = INITIAL_STATE.InferredPersonalization,
+  action
+) {
+  switch (action.type) {
+    case at.INFERRED_PERSONALIZATION_UPDATE:
+      return {
+        ...prevState,
+        initialized: true,
+        inferredInterests: action.data.inferredInterests,
+        coarseInferredInterests: action.data.coarseInferredInterests,
+        coarsePrivateInferredInterests:
+          action.data.coarsePrivateInferredInterests,
+        lastUpdated: action.data.lastUpdated,
+      };
+    case at.INFERRED_PERSONALIZATION_RESET:
+      return { ...INITIAL_STATE.InferredPersonalization };
     default:
       return prevState;
   }
@@ -862,8 +936,52 @@ function DiscoveryStream(prevState = INITIAL_STATE.DiscoveryStream, action) {
       return {
         ...prevState,
         showBlockSectionConfirmation: true,
-        sectionData: action.data,
+        sectionPersonalization: action.data,
       };
+    case at.REPORT_AD_OPEN:
+      return {
+        ...prevState,
+        report: {
+          ...prevState.report,
+          card_type: action.data?.card_type,
+          position: action.data?.position,
+          placement_id: action.data?.placement_id,
+          reporting_url: action.data?.reporting_url,
+          url: action.data?.url,
+          visible: true,
+        },
+      };
+    case at.REPORT_CONTENT_OPEN:
+      return {
+        ...prevState,
+        report: {
+          ...prevState.report,
+          card_type: action.data?.card_type,
+          corpus_item_id: action.data?.corpus_item_id,
+          is_section_followed: action.data?.is_section_followed,
+          received_rank: action.data?.received_rank,
+          recommended_at: action.data?.recommended_at,
+          scheduled_corpus_item_id: action.data?.scheduled_corpus_item_id,
+          section_position: action.data?.section_position,
+          section: action.data?.section,
+          title: action.data?.title,
+          topic: action.data?.topic,
+          url: action.data?.url,
+          visible: true,
+        },
+      };
+    case at.REPORT_CLOSE:
+    case at.REPORT_AD_SUBMIT:
+    case at.REPORT_CONTENT_SUBMIT:
+      return {
+        ...prevState,
+        report: {
+          ...prevState.report,
+          visible: false,
+        },
+      };
+    case at.SECTION_PERSONALIZATION_UPDATE:
+      return { ...prevState, sectionPersonalization: action.data };
     default:
       return prevState;
   }
@@ -896,6 +1014,8 @@ function Wallpapers(prevState = INITIAL_STATE.Wallpapers, action) {
       };
     case at.WALLPAPERS_CATEGORY_SET:
       return { ...prevState, categories: action.data };
+    case at.WALLPAPERS_CUSTOM_SET:
+      return { ...prevState, uploadedWallpaper: action.data };
     default:
       return prevState;
   }
@@ -976,9 +1096,11 @@ export const reducers = {
   Prefs,
   Dialog,
   Sections,
+  Messages,
   Notifications,
   Pocket,
   Personalization,
+  InferredPersonalization,
   DiscoveryStream,
   Search,
   Wallpapers,

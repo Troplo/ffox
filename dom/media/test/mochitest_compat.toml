@@ -59,6 +59,7 @@ support-files = [
   "aspect_ratio_5_2_hevc.mp4^headers^",
   "av1.mp4",
   "av1.mp4^headers^",
+  "avc-2bytes-nalu.mp4",
   "background_video.js",
   "badtags.ogg",
   "badtags.ogg^headers^",
@@ -862,6 +863,7 @@ skip-if = ["wmfme"] # Bug 1781539
 
 ["test_mediatrack_events.html"]
 scheme = "https"
+skip-if = ["os == 'mac' && os_version == '15.30' && arch == 'aarch64' && debug"] # TIMEOUT
 
 ["test_mediatrack_parsing_ogg.html"]
 
@@ -954,8 +956,6 @@ skip-if = ["appname == 'seamonkey'"] #  Seamonkey: Bug 598252, bug 1307337, bug 
 ["test_playback_reactivate.html"]
 
 ["test_preload_actions.html"]
-
-["test_preload_attribute.html"]
 
 ["test_preload_suspend.html"]
 

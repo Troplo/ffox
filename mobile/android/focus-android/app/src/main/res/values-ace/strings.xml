@@ -55,7 +55,6 @@
   <string name="menu_settings">Atô</string>
   <string name="menu_about">Bhaih</string>
   <string name="menu_help">Beunantu</string>
-  <string name="menu_rights" moz:removedIn="137">Hak Droeneuh</string>
   <!--
     Menu item: This is the label for a menu entry that shows how many trackers have been blocked
     for the currently loaded website. The number of blocked trackers is shown below this label.
@@ -454,8 +453,6 @@
   <string name="onboarding_first_screen_title">Neupiyôh bak %1$s</string>
   <!-- New Onboarding flow first screen subtitle the one that appears under title -->
   <string name="onboarding_first_screen_subtitle">Bagah. Rahsia. Hana karu.</string>
-  <!-- New Onboarding flow first screen button label -->
-  <string name="onboarding_first_screen_button_text" moz:removedIn="137" tools:ignore="UnusedResources">Puphôn</string>
   <!--
     Onboarding second screen: Title
 
@@ -613,13 +610,13 @@
   <!-- Preference for block autoplay audio and video -->
   <string name="preference_block_autoplay_audio_video">Tham audio ngön video</string>
   <!-- Preference for studies -->
-  <string name="preference_studies">Beuet</string>
+  <string name="preference_studies" moz:removedIn="140">Beuet</string>
   <!-- Title of the remove studies button -->
-  <string name="studies_remove">Sampôh</string>
+  <string name="studies_remove" moz:removedIn="140">Sampôh</string>
   <!-- Title of the active section on the studies list -->
-  <string name="studies_active">Aktif</string>
+  <string name="studies_active" moz:removedIn="140">Aktif</string>
   <!-- Title of the completed section on the studies list -->
-  <string name="studies_completed">Seuleusoe</string>
+  <string name="studies_completed" moz:removedIn="140">Seuleusoe</string>
   <!-- Text Button for show biometric prompt -->
   <string name="show_biometric_button_text">Peuhah</string>
   <!--

@@ -4,7 +4,7 @@
 "use strict";
 
 registerCleanupFunction(() =>
-  Services.prefs.clearUserPref("sidebar.position_start")
+  Services.prefs.clearUserPref(POSITION_SETTING_PREF)
 );
 
 add_task(async function test_sidebar_position_start() {
@@ -22,7 +22,7 @@ add_task(async function test_sidebar_position_start() {
 });
 
 add_task(async function test_sidebar_position_end() {
-  Services.prefs.setBoolPref("sidebar.position_start", false);
+  Services.prefs.setBoolPref(POSITION_SETTING_PREF, false);
 
   const win = await BrowserTestUtils.openNewBrowserWindow();
   const { document } = win;
@@ -31,8 +31,8 @@ add_task(async function test_sidebar_position_end() {
   ok(sidebar, "Sidebar is shown.");
   await sidebar.updateComplete;
 
-  is(sidebar.style.order, "6", "Sidebar is shown at the end");
-  is(sidebarBox.style.order, "4", "Sidebar is shown at the end");
+  is(sidebar.style.order, "5", "Sidebar is shown at the end");
+  is(sidebarBox.style.order, "3", "Sidebar is shown at the end");
 
   await BrowserTestUtils.closeWindow(win);
 });
@@ -45,8 +45,8 @@ add_task(async function test_sidebar_position_end_new_window() {
   ok(sidebar, "Sidebar is shown.");
   await sidebar.updateComplete;
 
-  is(sidebar.style.order, "6", "Sidebar is shown at the end");
-  is(sidebarBox.style.order, "4", "Sidebar is shown at the end");
+  is(sidebar.style.order, "5", "Sidebar is shown at the end");
+  is(sidebarBox.style.order, "3", "Sidebar is shown at the end");
 
   await BrowserTestUtils.closeWindow(win);
 });

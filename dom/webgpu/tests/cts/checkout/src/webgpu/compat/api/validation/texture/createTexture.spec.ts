@@ -6,9 +6,10 @@ Tests that textureBindingViewDimension must compatible with texture dimension
 import { makeTestGroup } from '../../../../../common/framework/test_group.js';
 import { kTextureDimensions, kTextureViewDimensions } from '../../../../capability_info.js';
 import {
-  kColorTextureFormats,
   kCompatModeUnsupportedStorageTextureFormats,
-  kTextureFormatInfo,
+  kDifferentBaseFormatTextureFormats,
+  getBlockInfoForTextureFormat,
+  getBaseFormatForTextureFormat,
 } from '../../../../format_info.js';
 import { getTextureDimensionFromView } from '../../../../util/texture/base.js';
 import { CompatibilityTest } from '../../../compatibility_test.js';
@@ -75,7 +76,7 @@ g.test('invalidTextureBindingViewDimension')
           usage: GPUTextureUsage.TEXTURE_BINDING,
           dimension,
           textureBindingViewDimension,
-        } as GPUTextureDescriptor); // MAINTENANCE_TODO: remove cast once textureBindingViewDimension is added to IDL
+        });
       },
       shouldError
     );
@@ -90,7 +91,7 @@ g.test('depthOrArrayLayers_incompatible_with_textureBindingViewDimension')
   )
   .params(u =>
     u //
-      .combine('textureBindingViewDimension', ['2d', 'cube'])
+      .combine('textureBindingViewDimension', ['2d', 'cube'] as const)
       .combine('depthOrArrayLayers', [1, 3, 6, 12])
   )
   .fn(t => {
@@ -106,7 +107,7 @@ g.test('depthOrArrayLayers_incompatible_with_textureBindingViewDimension')
           format: 'rgba8unorm',
           usage: GPUTextureUsage.TEXTURE_BINDING,
           textureBindingViewDimension,
-        } as GPUTextureDescriptor); // MAINTENANCE_TODO: remove cast once textureBindingViewDimension is added to IDL
+        });
       },
       shouldError
     );
@@ -121,27 +122,19 @@ g.test('format_reinterpretation')
   )
   .params(u =>
     u //
-      .combine('format', kColorTextureFormats as GPUTextureFormat[])
-      .filter(
-        ({ format }) =>
-          !!kTextureFormatInfo[format].baseFormat &&
-          kTextureFormatInfo[format].baseFormat !== format
-      )
+      .combine('format', kDifferentBaseFormatTextureFormats)
   )
-  .beforeAllSubcases(t => {
-    const info = kTextureFormatInfo[t.params.format];
-    t.skipIfTextureFormatNotSupported(t.params.format);
-    t.selectDeviceOrSkipTestCase(info.feature);
-  })
   .fn(t => {
     const { format } = t.params;
-    const info = kTextureFormatInfo[format];
+    t.skipIfTextureFormatNotSupported(format);
+    const info = getBlockInfoForTextureFormat(format);
+    const baseFormat = getBaseFormatForTextureFormat(format);
 
     const formatPairs = [
-      { format, viewFormats: [info.baseFormat!] },
-      { format: info.baseFormat!, viewFormats: [format] },
-      { format, viewFormats: [format, info.baseFormat!] },
-      { format: info.baseFormat!, viewFormats: [format, info.baseFormat!] },
+      { format, viewFormats: [baseFormat] },
+      { format: baseFormat, viewFormats: [format] },
+      { format, viewFormats: [format, baseFormat] },
+      { format: baseFormat, viewFormats: [format, baseFormat] },
     ];
     for (const { format, viewFormats } of formatPairs) {
       t.expectGPUErrorInCompatibilityMode(

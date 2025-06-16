@@ -32,6 +32,12 @@
 // reason is that it is easy to detect the real platform. So there is no benefit
 // for hiding the platform: it only brings breakages, like keyboard shortcuts
 // won't work in macOS if we spoof it as a Windows platform.
+
+// We use this value for Desktop mode in Android.
+// That's why it is defined here, outside of
+// the platform-specific definitions.
+#define SPOOFED_UA_OS_OTHER "X11; Linux x86_64"
+
 #ifdef XP_WIN
 #  define SPOOFED_UA_OS "Windows NT 10.0; Win64; x64"
 #  define SPOOFED_APPVERSION "5.0 (Windows)"
@@ -50,7 +56,7 @@
 #else
 // For Linux and other platforms, like BSDs, SunOS and etc, we will use Linux
 // platform.
-#  define SPOOFED_UA_OS "X11; Linux x86_64"
+#  define SPOOFED_UA_OS SPOOFED_UA_OS_OTHER
 #  define SPOOFED_APPVERSION "5.0 (X11)"
 #  define SPOOFED_OSCPU "Linux x86_64"
 #  define SPOOFED_MAX_TOUCH_POINTS 10
@@ -219,8 +225,7 @@ class nsRFPService final : public nsIObserver, public nsIRFPService {
 
   static bool IsRFPEnabledFor(
       bool aIsPrivateMode, RFPTarget aTarget,
-      const Maybe<RFPTargetSet>& aOverriddenFingerprintingSettings,
-      bool aSkipChromePrincipalCheck = false);
+      const Maybe<RFPTargetSet>& aOverriddenFingerprintingSettings);
 
   static bool IsSystemPrincipalOrAboutFingerprintingProtection(JSContext*,
                                                                JSObject*);
@@ -270,7 +275,8 @@ class nsRFPService final : public nsIObserver, public nsIRFPService {
   // --------------------------------------------------------------------------
 
   // This method generates the spoofed value of User Agent.
-  static void GetSpoofedUserAgent(nsACString& userAgent);
+  static void GetSpoofedUserAgent(nsACString& userAgent,
+                                  bool aAndroidDesktopMode = false);
 
   // --------------------------------------------------------------------------
 
@@ -356,7 +362,7 @@ class nsRFPService final : public nsIObserver, public nsIRFPService {
   // and third-party URI. Otherwise, it will return Nothing() to indicate using
   // the default RFPTargets.
   static Maybe<RFPTargetSet> GetOverriddenFingerprintingSettingsForURI(
-      nsIURI* aFirstPartyURI, nsIURI* aThirdPartyURI);
+      nsIURI* aFirstPartyURI, nsIURI* aThirdPartyURI, bool aIsPrivate);
 
   // --------------------------------------------------------------------------
 
@@ -400,6 +406,12 @@ class nsRFPService final : public nsIObserver, public nsIRFPService {
 
   // Returns the device pixel ratio at the given zoom level.
   static double GetDevicePixelRatioAtZoom(float aZoom);
+
+  // Returns the value of privacy.resistFingerprinting.exemptedDomains pref
+  static void GetExemptedDomainsLowercase(nsCString& aExemptedDomains);
+
+  static CSSIntRect GetSpoofedScreenAvailSize(const nsRect& aRect, float aScale,
+                                              bool aIsFullscreen);
 
  private:
   nsresult Init();
@@ -494,6 +506,25 @@ class nsRFPService final : public nsIObserver, public nsIRFPService {
   static RFPTargetSet CreateOverridesFromText(
       const nsString& aOverridesText,
       RFPTargetSet aBaseOverrides = RFPTargetSet());
+
+  enum FingerprintingProtectionType : uint8_t {
+    RFP,
+    FPP,
+    Baseline,
+    None,
+  };
+
+  static FingerprintingProtectionType GetFingerprintingProtectionType(
+      bool aIsPrivateMode);
+
+  static Maybe<bool> HandleExeptionalRFPTargets(
+      RFPTarget aTarget, bool aIsPrivateMode,
+      FingerprintingProtectionType aMode);
+
+  static bool IsTargetActiveForMode(RFPTarget aTarget,
+                                    FingerprintingProtectionType aMode);
+
+  static nsCString* sExemptedDomainsLowercase;
 };
 
 }  // namespace mozilla

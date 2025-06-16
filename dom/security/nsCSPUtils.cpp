@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsAboutProtocolUtils.h"
 #include "nsAttrValue.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsContentUtils.h"
@@ -113,20 +114,19 @@ bool CSP_ShouldResponseInheritCSP(nsIChannel* aChannel) {
   nsresult rv = aChannel->GetURI(getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, false);
 
-  bool isAbout = uri->SchemeIs("about");
-  if (isAbout) {
-    nsAutoCString aboutSpec;
-    rv = uri->GetSpec(aboutSpec);
-    NS_ENSURE_SUCCESS(rv, false);
-    // also allow about:blank#foo
-    if (StringBeginsWith(aboutSpec, "about:blank"_ns) ||
-        StringBeginsWith(aboutSpec, "about:srcdoc"_ns)) {
-      return true;
-    }
-  }
+  return CSP_ShouldURIInheritCSP(uri);
+}
 
-  return uri->SchemeIs("blob") || uri->SchemeIs("data") ||
-         uri->SchemeIs("filesystem") || uri->SchemeIs("javascript");
+bool CSP_ShouldURIInheritCSP(nsIURI* aURI) {
+  if (!aURI) {
+    return false;
+  }
+  // about:blank and about:srcdoc
+  if ((aURI->SchemeIs("about")) && (NS_IsContentAccessibleAboutURI(aURI))) {
+    return true;
+  }
+  return aURI->SchemeIs("blob") || aURI->SchemeIs("data") ||
+         aURI->SchemeIs("filesystem") || aURI->SchemeIs("javascript");
 }
 
 void CSP_ApplyMetaCSPToDoc(mozilla::dom::Document& aDoc,
@@ -152,19 +152,15 @@ void CSP_ApplyMetaCSPToDoc(mozilla::dom::Document& aDoc,
   // CSPs delivered via a <meta> tag can not be report-only.
   bool reportOnly = false;
 
-  if (nsIURI* uri = aDoc.GetDocumentURI(); uri->SchemeIs("chrome")) {
-    nsAutoCString spec;
-    uri->GetSpec(spec);
-    if (spec.EqualsLiteral("chrome://browser/content/browser.xhtml")) {
-      // Make the <meta> policy in browser.xhtml toggleable.
-      if (!StaticPrefs::security_browser_xhtml_csp_enabled()) {
-        return;
-      }
+  if (nsIURI* uri = aDoc.GetDocumentURI(); CSP_IsBrowserXHTML(uri)) {
+    // Make the <meta> policy in browser.xhtml toggleable.
+    if (!StaticPrefs::security_browser_xhtml_csp_enabled()) {
+      return;
+    }
 
-      // Make the policy report-only to be able to collect telemetry.
-      if (StaticPrefs::security_browser_xhtml_csp_report_only()) {
-        reportOnly = true;
-      }
+    // Make the policy report-only to be able to collect telemetry.
+    if (StaticPrefs::security_browser_xhtml_csp_report_only()) {
+      reportOnly = true;
     }
   }
 
@@ -178,6 +174,16 @@ void CSP_ApplyMetaCSPToDoc(mozilla::dom::Document& aDoc,
     inner->SetCsp(csp);
   }
   aDoc.ApplySettingsFromCSP(false);
+}
+
+bool CSP_IsBrowserXHTML(nsIURI* aURI) {
+  if (!aURI->SchemeIs("chrome")) {
+    return false;
+  }
+
+  nsAutoCString spec;
+  aURI->GetSpec(spec);
+  return spec.EqualsLiteral("chrome://browser/content/browser.xhtml");
 }
 
 void CSP_GetLocalizedStr(const char* aName, const nsTArray<nsString>& aParams,
@@ -375,7 +381,6 @@ CSPDirective CSP_ContentTypeToDirective(nsContentPolicyType aType) {
       return nsIContentSecurityPolicy::CONNECT_SRC_DIRECTIVE;
 
     case nsIContentPolicy::TYPE_OBJECT:
-    case nsIContentPolicy::TYPE_OBJECT_SUBREQUEST:
     case nsIContentPolicy::TYPE_INTERNAL_EMBED:
     case nsIContentPolicy::TYPE_INTERNAL_OBJECT:
       return nsIContentSecurityPolicy::OBJECT_SRC_DIRECTIVE;
@@ -407,6 +412,28 @@ CSPDirective CSP_ContentTypeToDirective(nsContentPolicyType aType) {
       // Do not add default: so that compilers can catch the missing case.
   }
   return nsIContentSecurityPolicy::DEFAULT_SRC_DIRECTIVE;
+}
+
+already_AddRefed<nsIContentSecurityPolicy> CSP_CreateFromHeader(
+    const nsAString& aHeaderValue, nsIURI* aSelfURI,
+    nsIPrincipal* aLoadingPrincipal, ErrorResult& aRv) {
+  RefPtr<nsCSPContext> csp = new nsCSPContext();
+  // Hard code some default values until we have a use case where we can provide
+  // something else.
+  // When inheriting from this CSP, these values will be overwritten anyway.
+  aRv = csp->SetRequestContextWithPrincipal(aLoadingPrincipal, aSelfURI,
+                                            /* aReferrer */ ""_ns,
+                                            /* aInnerWindowId */ 0);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  aRv = CSP_AppendCSPFromHeader(csp, aHeaderValue, /* aReportOnly */ false);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  return csp.forget();
 }
 
 nsCSPHostSrc* CSP_CreateHostSrcFromSelfURI(nsIURI* aSelfURI) {
@@ -1083,6 +1110,24 @@ bool nsCSPTrustedTypesDirectivePolicyName::visit(
 
 void nsCSPTrustedTypesDirectivePolicyName::toString(nsAString& aOutStr) const {
   aOutStr.Append(mName);
+}
+
+/* =============== nsCSPTrustedTypesDirectiveInvalidToken =============== */
+
+nsCSPTrustedTypesDirectiveInvalidToken::nsCSPTrustedTypesDirectiveInvalidToken(
+    const nsAString& aInvalidToken)
+    : mInvalidToken{aInvalidToken} {}
+
+bool nsCSPTrustedTypesDirectiveInvalidToken::visit(
+    nsCSPSrcVisitor* aVisitor) const {
+  MOZ_ASSERT_UNREACHABLE(
+      "Should only be called for other overloads of this method.");
+  return false;
+}
+
+void nsCSPTrustedTypesDirectiveInvalidToken::toString(
+    nsAString& aOutStr) const {
+  aOutStr.Append(mInvalidToken);
 }
 
 /* ===== nsCSPDirective ====================== */

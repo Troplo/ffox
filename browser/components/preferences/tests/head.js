@@ -1,6 +1,9 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+const { NimbusTestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/NimbusTestUtils.sys.mjs"
+);
 const { PermissionTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/PermissionTestUtils.sys.mjs"
 );
@@ -15,8 +18,9 @@ ChromeUtils.defineLazyGetter(this, "QuickSuggestTestUtils", () => {
 
 ChromeUtils.defineESModuleGetters(this, {
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
-  ExperimentFakes: "resource://testing-common/NimbusTestUtils.sys.mjs",
 });
+
+NimbusTestUtils.init(this);
 
 const kDefaultWait = 2000;
 
@@ -403,11 +407,7 @@ async function assertSuggestVisibility(expectedByElementId) {
 }
 
 const DEFAULT_LABS_RECIPES = [
-  ExperimentFakes.recipe("nimbus-qa-1", {
-    bucketConfig: {
-      ...ExperimentFakes.recipe.bucketConfig,
-      count: 1000,
-    },
+  NimbusTestUtils.factories.recipe("nimbus-qa-1", {
     targeting: "true",
     isRollout: true,
     isFirefoxLabsOptIn: true,
@@ -432,11 +432,7 @@ const DEFAULT_LABS_RECIPES = [
     ],
   }),
 
-  ExperimentFakes.recipe("nimbus-qa-2", {
-    bucketConfig: {
-      ...ExperimentFakes.recipe.bucketConfig,
-      count: 1000,
-    },
+  NimbusTestUtils.factories.recipe("nimbus-qa-2", {
     targeting: "true",
     isRollout: true,
     isFirefoxLabsOptIn: true,
@@ -462,11 +458,7 @@ const DEFAULT_LABS_RECIPES = [
     ],
   }),
 
-  ExperimentFakes.recipe("targeting-false", {
-    bucketConfig: {
-      ...ExperimentFakes.recipe.bucketConfig,
-      count: 1000,
-    },
+  NimbusTestUtils.factories.recipe("targeting-false", {
     targeting: "false",
     isRollout: true,
     isFirefoxLabsOptIn: true,
@@ -477,11 +469,12 @@ const DEFAULT_LABS_RECIPES = [
     requiresRestart: false,
   }),
 
-  ExperimentFakes.recipe("bucketing-false", {
+  NimbusTestUtils.factories.recipe("bucketing-false", {
     bucketConfig: {
-      ...ExperimentFakes.recipe.bucketConfig,
+      ...NimbusTestUtils.factories.recipe.bucketConfig,
       count: 0,
     },
+    isRollout: true,
     targeting: "true",
     isFirefoxLabsOptIn: true,
     firefoxLabsTitle: "experimental-features-ime-search",
@@ -522,15 +515,7 @@ async function setupLabsTest(recipes) {
   await ExperimentAPI._rsLoader.updateRecipes("test");
 
   return async function cleanup() {
-    const store = ExperimentAPI._manager.store;
-
-    store._store._saver.disarm();
-    if (store._store._saver.isRunning) {
-      await store._store._saver._runningPromise;
-    }
-
-    await IOUtils.remove(store._store.path);
-
+    await NimbusTestUtils.removeStore(ExperimentAPI.manager.store);
     await SpecialPowers.popPrefEnv();
   };
 }

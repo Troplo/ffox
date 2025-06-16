@@ -141,7 +141,9 @@ def split_raptor_subtests(config, tests):
         # test job for every subtest (i.e. split out each page-load URL into its own job)
         subtests = test["raptor"].pop("subtests", None)
         if not subtests:
-            if "macosx1400" not in test["test-platform"]:
+            if all(
+                p not in test["test-platform"] for p in ("macosx1400", "macosx1500")
+            ):
                 yield test
             continue
 
@@ -446,4 +448,72 @@ def setup_lull_schedule(config, tasks):
             # so that it can be accessible through mozci
             lull_schedule = attrs.pop("lull-schedule")
             task.setdefault("extra", {})["lull-schedule"] = lull_schedule
+        yield task
+
+
+@task_transforms.add
+def setup_lambdatest_options(config, tasks):
+    for task in tasks:
+        if task.get("worker", {}).get("os", "") == "linux-lambda":
+            commands = task["worker"]["command"]
+            modified = []
+            for command in commands:
+                modified.append(
+                    [
+                        c
+                        for c in command
+                        if not c.startswith("--conditioned-profile")
+                        and not c.startswith("--power-test")
+                    ]
+                )
+            task["worker"]["command"] = modified
+            task["worker"]["env"]["DISABLE_USB_POWER_METER_RESET"] = "1"
+        yield task
+
+
+@task_transforms.add
+def select_tasks_to_lambda(config, tasks):
+    """
+    all motionmark tests
+    unity-webgl test
+    all non-power-testing youtube-playback tests
+    all vpl (video-playback-latency) tests
+
+    """
+    tests_to_run_at_lambdatest = [
+        "motionmark-1-3",
+        "motionmark-htmlsuite-1-3",
+        "unity-webgl",
+        "video-playback-latency",
+        "youtube-playback-av1-sfr",
+        "youtube-playback-hfr",
+        "youtube-playback-vp9-sfr",
+    ]
+
+    tests_to_run_at_lambdatest.extend(
+        [f"{t}-nofis" for t in tests_to_run_at_lambdatest]
+    )
+
+    for task in tasks:
+        if "android" in task["label"] and "a55" in task["label"]:
+            if any([t in task["label"] for t in tests_to_run_at_lambdatest]):
+                if task["worker-type"] == "t-bitbar-gw-perf-a55":
+                    task["tags"]["os"] = "linux-lambda"
+                    task["worker"]["os"] = "linux-lambda"
+                    task["worker-type"] = "t-lambda-perf-a55"
+                    task["worker"]["env"][
+                        "TASKCLUSTER_WORKER_TYPE"
+                    ] = "t-lambda-perf-a55"
+                    cmds = []
+                    for cmd in task["worker"]["command"]:
+                        cmds.append(
+                            [
+                                c.replace(
+                                    "/builds/taskcluster/script.py",
+                                    "/home/ltuser/taskcluster/script.py",
+                                )
+                                for c in cmd
+                            ]
+                        )
+                    task["worker"]["command"] = cmds
         yield task

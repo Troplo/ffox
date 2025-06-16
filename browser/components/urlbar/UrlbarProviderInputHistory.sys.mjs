@@ -23,16 +23,14 @@ ChromeUtils.defineESModuleGetters(lazy, {
   UrlbarResult: "resource:///modules/UrlbarResult.sys.mjs",
 });
 
-// Constants to support an alternative frecency algorithm.
-const PAGES_USE_ALT_FRECENCY = Services.prefs.getBoolPref(
-  "places.frecency.pages.alternative.featureGate",
-  false
-);
-const PAGES_FRECENCY_FIELD = PAGES_USE_ALT_FRECENCY
-  ? "alt_frecency"
-  : "frecency";
-
-const SQL_ADAPTIVE_QUERY = `/* do not warn (bug 487789) */
+ChromeUtils.defineLazyGetter(lazy, "SQL_ADAPTIVE_QUERY", () => {
+  // Constants to support an alternative frecency algorithm.
+  const PAGES_USE_ALT_FRECENCY =
+    lazy.PlacesUtils.history.isAlternativeFrecencyEnabled;
+  const PAGES_FRECENCY_FIELD = PAGES_USE_ALT_FRECENCY
+    ? "alt_frecency"
+    : "frecency";
+  return `/* do not warn (bug 487789) */
    SELECT h.url,
           h.title,
           EXISTS(SELECT 1 FROM moz_bookmarks WHERE fk = h.id) AS bookmarked,
@@ -66,6 +64,7 @@ const SQL_ADAPTIVE_QUERY = `/* do not warn (bug 487789) */
                             NULL)
    ORDER BY rank DESC, ${PAGES_FRECENCY_FIELD} DESC
    LIMIT :maxResults`;
+});
 
 /**
  * Class used to create the provider.
@@ -81,9 +80,7 @@ class ProviderInputHistory extends UrlbarProvider {
   }
 
   /**
-   * The type of the provider, must be one of UrlbarUtils.PROVIDER_TYPE.
-   *
-   * @returns {UrlbarUtils.PROVIDER_TYPE}
+   * @returns {Values<typeof UrlbarUtils.PROVIDER_TYPE>}
    */
   get type() {
     return UrlbarUtils.PROVIDER_TYPE.PROFILE;
@@ -95,9 +92,8 @@ class ProviderInputHistory extends UrlbarProvider {
    * with this provider, to save on resources.
    *
    * @param {UrlbarQueryContext} queryContext The query context object
-   * @returns {boolean} Whether this provider should be invoked for the search.
    */
-  isActive(queryContext) {
+  async isActive(queryContext) {
     return (
       (lazy.UrlbarPrefs.get("suggest.history") ||
         lazy.UrlbarPrefs.get("suggest.bookmark") ||
@@ -245,7 +241,7 @@ class ProviderInputHistory extends UrlbarProvider {
    */
   _getAdaptiveQuery(queryContext) {
     return [
-      SQL_ADAPTIVE_QUERY,
+      lazy.SQL_ADAPTIVE_QUERY,
       {
         parent: lazy.PlacesUtils.tagsFolderId,
         search_string: queryContext.lowerCaseSearchString,

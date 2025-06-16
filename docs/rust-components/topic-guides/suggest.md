@@ -1,8 +1,3 @@
----
-myst:
-  enable_extensions: ["colon_fence"]
----
-
 # Suggest
 
 The API for the `SuggestStore` can be found in the [MozillaComponents Kotlin documentation](https://mozilla.github.io/application-services/kotlin/kotlin-components-docs/mozilla.appservices.suggest/-suggest-store/index.html).
@@ -43,14 +38,14 @@ import MozillaAppServices
 
 ```js
 ChromeUtils.defineESModuleGetters(lazy, {
-  RemoteSettingsServer: "resource://gre/modules/RustSuggest.sys.mjs",
-  SuggestApiException: "resource://gre/modules/RustSuggest.sys.mjs",
-  SuggestIngestionConstraints: "resource://gre/modules/RustSuggest.sys.mjs",
-  SuggestStore: "resource://gre/modules/RustSuggest.sys.mjs",
-  SuggestStoreBuilder: "resource://gre/modules/RustSuggest.sys.mjs",
-  Suggestion: "resource://gre/modules/RustSuggest.sys.mjs",
-  SuggestionProvider: "resource://gre/modules/RustSuggest.sys.mjs",
-  SuggestionQuery: "resource://gre/modules/RustSuggest.sys.mjs",
+  RemoteSettingsServer: "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
+  SuggestApiException: "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
+  SuggestIngestionConstraints: "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
+  SuggestStore: "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
+  SuggestStoreBuilder: "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
+  Suggestion: "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
+  SuggestionProvider: "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
+  SuggestionQuery: "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
 });
 ```
 

@@ -10,6 +10,7 @@
 #include <deque>
 
 #include "mozilla/Attributes.h"
+#include "mozilla/LinkedList.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/AtomList.h"
 #include "mozilla/dom/Promise.h"
@@ -29,6 +30,7 @@ class AutoSlowOperation;
 
 class CycleCollectedJSContext;
 class CycleCollectedJSRuntime;
+class PromiseJobRunnable;
 
 namespace dom {
 class Exception;
@@ -72,15 +74,20 @@ struct CycleCollectorResults {
   uint32_t mNumSlices;
 };
 
-class MicroTaskRunnable {
+class MicroTaskRunnable : public LinkedListElement<MicroTaskRunnable> {
  public:
   MicroTaskRunnable() = default;
   NS_INLINE_DECL_REFCOUNTING(MicroTaskRunnable)
   MOZ_CAN_RUN_SCRIPT virtual void Run(AutoSlowOperation& aAso) = 0;
   virtual bool Suppressed() { return false; }
+  virtual void TraceMicroTask(JSTracer* aTracer) {}
 
  protected:
-  virtual ~MicroTaskRunnable() = default;
+  virtual ~MicroTaskRunnable() {
+    if (isInList()) {
+      remove();
+    }
+  }
 };
 
 // Store the suppressed mictotasks in another microtask so that operations
@@ -174,6 +181,8 @@ class CycleCollectedJSContext : dom::PerThreadAtomCache, private JS::JobQueue {
   std::deque<RefPtr<MicroTaskRunnable>>& GetMicroTaskQueue();
   std::deque<RefPtr<MicroTaskRunnable>>& GetDebuggerMicroTaskQueue();
 
+  void TraceMicroTasks(JSTracer* aTracer);
+
   JSContext* Context() const {
     MOZ_ASSERT(mJSContext);
     return mJSContext;
@@ -245,6 +254,10 @@ class CycleCollectedJSContext : dom::PerThreadAtomCache, private JS::JobQueue {
   uint32_t MicroTaskLevel() const { return mMicroTaskLevel; }
 
   void SetMicroTaskLevel(uint32_t aLevel) { mMicroTaskLevel = aLevel; }
+
+  void EnterSyncOperation() { ++mSyncOperations; }
+  void LeaveSyncOperation() { --mSyncOperations; }
+  bool IsInSyncOperation() const { return mSyncOperations > 0; }
 
   MOZ_CAN_RUN_SCRIPT
   bool PerformMicroTaskCheckPoint(bool aForce = false);
@@ -339,16 +352,25 @@ class CycleCollectedJSContext : dom::PerThreadAtomCache, private JS::JobQueue {
 
   uint32_t mMicroTaskLevel;
 
+  uint32_t mSyncOperations;
+
   std::deque<RefPtr<MicroTaskRunnable>> mPendingMicroTaskRunnables;
   std::deque<RefPtr<MicroTaskRunnable>> mDebuggerMicroTaskQueue;
   RefPtr<SuppressedMicroTasks> mSuppressedMicroTasks;
   uint64_t mSuppressionGeneration;
 
+ protected:
+  mozilla::LinkedList<MicroTaskRunnable> mMicrotasksToTrace;
+
+ private:
+  friend class PromiseJobRunnable;
+  RefPtr<PromiseJobRunnable> mRecycledPromiseJob;
+
   // How many times the debugger has interrupted execution, possibly creating
   // microtask checkpoints in places that they would not normally occur.
   uint32_t mDebuggerRecursionDepth;
 
-  uint32_t mMicroTaskRecursionDepth;
+  Maybe<uint32_t> mMicroTaskRecursionDepth;
 
   // This implements about-to-be-notified rejected promises list in the spec.
   // https://html.spec.whatwg.org/multipage/webappapis.html#about-to-be-notified-rejected-promises-list

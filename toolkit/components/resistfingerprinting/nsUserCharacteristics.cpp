@@ -5,6 +5,7 @@
 
 #include "nsUserCharacteristics.h"
 
+#include "nsICryptoHash.h"
 #include "nsID.h"
 #include "nsIGfxInfo.h"
 #include "nsIUUIDGenerator.h"
@@ -50,6 +51,7 @@
 #include "nsThreadUtils.h"
 #include "mozilla/dom/Navigator.h"
 #include "nsIGSettingsService.h"
+#include "nsIPropertyBag2.h"
 #include "nsITimer.h"
 #include "gfxConfig.h"
 
@@ -64,6 +66,7 @@
 #elif defined(XP_MACOSX)
 #  include "nsMacUtilsImpl.h"
 #  include <CoreFoundation/CoreFoundation.h>
+#  include "CFTypeRefPtr.h"
 #endif
 
 using namespace mozilla;
@@ -87,10 +90,25 @@ int MaxTouchPoints() {
 }  // extern "C"
 };  // namespace testing
 
+using FunctionName = nsCString;
+using AdditionalContext = nsCString;
 using PopulatePromiseBase =
-    MozPromise<void_t, std::pair<nsCString, Variant<nsresult, nsCString>>,
+    MozPromise<void_t, std::tuple<FunctionName, nsresult, AdditionalContext>,
                false>;
 using PopulatePromise = PopulatePromiseBase::Private;
+
+#define REJECT(aPromise, aFuncName, aRv, aError)                          \
+  aPromise->Reject(std::tuple<FunctionName, nsresult, AdditionalContext>( \
+                       aFuncName, aRv, aError),                           \
+                   __func__);
+
+#define REJECT_AND_FORGET(aPromise, aFuncName, aRv, aError) \
+  REJECT(aPromise, aFuncName, aRv, aError);                 \
+  return (aPromise).forget();
+
+#define REJECT_VOID(aPromise, aFuncName, aRv, aError) \
+  REJECT(aPromise, aFuncName, aRv, aError);           \
+  return;
 
 // ==================================================================
 // ==================================================================
@@ -107,9 +125,7 @@ already_AddRefed<PopulatePromise> ContentPageStuff() {
   if (NS_FAILED(rv)) {
     MOZ_LOG(gUserCharacteristicsLog, mozilla::LogLevel::Error,
             ("Could not create Content Page"));
-    populatePromise->Reject(
-        std::pair(__func__, "CREATION_FAILED"_ns.AsString()), __func__);
-    return populatePromise.forget();
+    REJECT_AND_FORGET(populatePromise, __func__, rv, "CREATION_FAILED");
   }
   MOZ_LOG(gUserCharacteristicsLog, mozilla::LogLevel::Debug,
           ("Created Content Page"));
@@ -121,20 +137,16 @@ already_AddRefed<PopulatePromise> ContentPageStuff() {
         },
         [=](JSContext*, JS::Handle<JS::Value>, mozilla::ErrorResult& error) {
           if (error.Failed()) {
-            nsresult rv = error.StealNSResult();
-            populatePromise->Reject(std::pair("ContentPageStuff"_ns, rv),
-                                    __func__);
-            return;
+            REJECT_VOID(populatePromise, "ContentPageStuff",
+                        error.StealNSResult(), "REJECTED_WITH_ERROR");
           }
-          populatePromise->Reject(
-              std::pair("ContentPageStuff"_ns, "UNKNOWN"_ns.AsString()),
-              __func__);
+          REJECT(populatePromise, "ContentPageStuff", NS_ERROR_FAILURE,
+                 "REJECTED_WITHOUT_ERROR");
         });
   } else {
     MOZ_LOG(gUserCharacteristicsLog, mozilla::LogLevel::Error,
             ("Did not get a Promise back from ContentPageStuff"));
-    populatePromise->Reject(std::pair(__func__, "NO_PROMISE"_ns.AsString()),
-                            __func__);
+    REJECT(populatePromise, __func__, NS_ERROR_FAILURE, "NO_PROMISE");
   }
 
   return populatePromise.forget();
@@ -201,32 +213,40 @@ void PopulateCSSProperties() {
 }
 
 void PopulateScreenProperties() {
+  nsCString screensMetrics = "["_ns;
+
   auto& screenManager = widget::ScreenManager::GetSingleton();
-  RefPtr<widget::Screen> screen = screenManager.GetPrimaryScreen();
-  MOZ_ASSERT(screen);
+  const auto& screens = screenManager.CurrentScreenList();
+  for (const auto& screen : screens) {
+    int32_t left, top, width, height;
 
-  dom::ScreenColorGamut colorGamut;
-  screen->GetColorGamut(&colorGamut);
-  glean::characteristics::color_gamut.Set((int)colorGamut);
+    screen->GetRect(&left, &top, &width, &height);
+    screensMetrics.AppendPrintf(R"({"rect":[%d,%d,%d,%d],)", left, top, width,
+                                height);
 
-  int32_t colorDepth;
-  screen->GetColorDepth(&colorDepth);
-  glean::characteristics::color_depth.Set(colorDepth);
-  glean::characteristics::pixel_depth.Set(screen->GetPixelDepth());
+    screen->GetAvailRect(&left, &top, &width, &height);
+    screensMetrics.AppendPrintf(R"("availRect":[%d,%d,%d,%d],)", left, top,
+                                width, height);
 
-  glean::characteristics::orientation_angle.Set(screen->GetOrientationAngle());
-  glean::characteristics::video_dynamic_range.Set(screen->GetIsHDR());
+    screensMetrics.AppendPrintf(R"("colorDepth":%d,)", screen->GetColorDepth());
+    screensMetrics.AppendPrintf(R"("pixelDepth":%d,)", screen->GetPixelDepth());
+    screensMetrics.AppendPrintf(R"("oAngle":%d,)",
+                                screen->GetOrientationAngle());
+    screensMetrics.AppendPrintf(
+        R"("oType":%d,)", static_cast<uint32_t>(screen->GetOrientationType()));
+    screensMetrics.AppendPrintf(R"("hdr":%d,)", screen->GetIsHDR());
+    screensMetrics.AppendPrintf(R"("scaleFactor":%f})",
+                                screen->GetContentsScaleFactor());
 
-  glean::characteristics::color_gamut.Set((int)colorGamut);
-  glean::characteristics::color_depth.Set(colorDepth);
-  const LayoutDeviceIntRect rect = screen->GetRect();
-  glean::characteristics::screen_height.Set(rect.Height());
-  glean::characteristics::screen_width.Set(rect.Width());
-  glean::characteristics::posx.Set(rect.X());
-  glean::characteristics::posy.Set(rect.Y());
+    if (&screen != &screens.LastElement()) {
+      screensMetrics.Append(",");
+    }
+  }
 
-  glean::characteristics::screen_orientation.Set(
-      (int)screen->GetOrientationType());
+  screensMetrics.Append("]");
+
+  glean::characteristics::screens.Set(screensMetrics);
+
   glean::characteristics::target_frame_rate.Set(gfxPlatform::TargetFrameRate());
 
   nsCOMPtr<nsPIDOMWindowInner> innerWindow =
@@ -261,6 +281,102 @@ void PopulateMissingFonts() {
   gfxPlatformFontList::PlatformFontList()->GetMissingFonts(aMissingFonts);
 
   glean::characteristics::missing_fonts.Set(aMissingFonts);
+}
+
+nsresult ProcessFingerprintedFonts(const char* aFonts[],
+                                   nsCString& aOutAllowlistedHex,
+                                   nsCString& aOutNonAllowlistedHex) {
+  nsresult rv;
+  // Create hashes
+  nsCOMPtr<nsICryptoHash> allowlisted =
+      do_CreateInstance(NS_CRYPTO_HASH_CONTRACTID, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsICryptoHash> nonallowlisted =
+      do_CreateInstance(NS_CRYPTO_HASH_CONTRACTID, &rv);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Init hashes
+  rv = allowlisted->Init(nsICryptoHash::SHA256);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = nonallowlisted->Init(nsICryptoHash::SHA256);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Iterate over fonts and update hashes
+  for (size_t i = 0; aFonts[i] != nullptr; ++i) {
+    nsCString font(aFonts[i]);
+    bool found = false;
+    FontVisibility visibility =
+        gfxPlatformFontList::PlatformFontList()->GetFontVisibility(font, found);
+    if (!found) {
+      continue;
+    }
+
+    if (visibility == FontVisibility::Base ||
+        visibility == FontVisibility::LangPack) {
+      allowlisted->Update(reinterpret_cast<const uint8_t*>(font.get()),
+                          font.Length());
+    } else {
+      nonallowlisted->Update(reinterpret_cast<const uint8_t*>(font.get()),
+                             font.Length());
+    }
+  }
+
+  // Finish hashes
+  nsAutoCString allowlistedDigest;
+  nsAutoCString nonallowlistedDigest;
+  allowlisted->Finish(false, allowlistedDigest);
+  nonallowlisted->Finish(false, nonallowlistedDigest);
+
+  // Convert to hex
+  const char HEX[] = "0123456789abcdef";
+  for (size_t i = 0; i < 32; ++i) {
+    uint8_t b = allowlistedDigest[i];
+    aOutAllowlistedHex.Append(HEX[(b >> 4) & 0xF]);
+    aOutAllowlistedHex.Append(HEX[b & 0xF]);
+
+    b = nonallowlistedDigest[i];
+    aOutNonAllowlistedHex.Append(HEX[(b >> 4) & 0xF]);
+    aOutNonAllowlistedHex.Append(HEX[b & 0xF]);
+  }
+
+  return NS_OK;
+}
+
+already_AddRefed<PopulatePromise> PopulateFingerprintedFonts() {
+  RefPtr<PopulatePromise> populatePromise = new PopulatePromise(__func__);
+
+#include "FingerprintedFonts.inc"
+
+#define FONT_PAIR(list, metric)                                   \
+  {                                                               \
+    list, {                                                       \
+      glean::characteristics::fonts_##metric##_allowlisted,       \
+          glean::characteristics::fonts_##metric##_nonallowlisted \
+    }                                                             \
+  }
+  std::pair<const char**,
+            std::pair<glean::impl::StringMetric, glean::impl::StringMetric>>
+      fontLists[] = {FONT_PAIR(fpjs, fpjs), FONT_PAIR(variantA, variant_a),
+                     FONT_PAIR(variantB, variant_b)};
+
+#undef FONT_PAIR
+
+  for (const auto& [fontList, metrics] : fontLists) {
+    nsCString allowlistedHex;
+    nsCString nonallowlistedHex;
+    nsresult rv =
+        ProcessFingerprintedFonts(fontList, allowlistedHex, nonallowlistedHex);
+    if (NS_FAILED(rv)) {
+      REJECT_AND_FORGET(populatePromise, __func__, rv,
+                        "ProcessFingerprintedFonts"_ns.AsString());
+    }
+
+    metrics.first.Set(allowlistedHex);
+    metrics.second.Set(nonallowlistedHex);
+  }
+
+  populatePromise->Resolve(void_t(), __func__);
+  return populatePromise.forget();
 }
 
 void PopulatePrefs() {
@@ -418,25 +534,6 @@ void PopulateFontPrefs() {
       Preferences::HasUserValue("font.name-list.emoji"));
 }
 
-void PopulateScaling() {
-  nsCString output = "["_ns;
-
-  auto& screenManager = widget::ScreenManager::GetSingleton();
-  const auto& screens = screenManager.CurrentScreenList();
-  for (const auto& screen : screens) {
-    // Technically, not the same as (display resolution / shown resolution), but
-    // this is the value the fingerprinters can access/compute.
-    output.Append(std::to_string(screen->GetContentsScaleFactor()));
-    if (&screen != &screens.LastElement()) {
-      output.Append(",");
-    }
-  }
-
-  output.Append("]");
-
-  glean::characteristics::scalings.Set(output);
-}
-
 already_AddRefed<PopulatePromise> PopulateMediaDevices() {
   RefPtr<PopulatePromise> populatePromise = new PopulatePromise(__func__);
   MediaManager::Get()->GetPhysicalDevices()->Then(
@@ -478,8 +575,8 @@ already_AddRefed<PopulatePromise> PopulateMediaDevices() {
         // GetPhysicalDevices() never rejects but we'll add the following
         // just in case it changes in the future
         reason->mMessage.StripChar(',');
-        populatePromise->Reject(
-            std::pair("PopulateMediaDevices"_ns, reason->mMessage), __func__);
+        REJECT(populatePromise, "PopulateMediaDevices", NS_ERROR_FAILURE,
+               reason->mMessage);
       });
   return populatePromise.forget();
 }
@@ -518,13 +615,19 @@ void PopulateTextAntiAliasing() {
   }
 #elif defined(XP_MACOSX)
   uint32_t value = 2;  // default = medium
-  CFNumberRef prefValue = (CFNumberRef)CFPreferencesCopyAppValue(
-      CFSTR("AppleFontSmoothing"), kCFPreferencesAnyApplication);
+  auto prefValue = CFTypeRefPtr<CFPropertyListRef>::WrapUnderCreateRule(
+      CFPreferencesCopyAppValue(CFSTR("AppleFontSmoothing"),
+                                kCFPreferencesAnyApplication));
   if (prefValue) {
-    if (!CFNumberGetValue(prefValue, kCFNumberIntType, &value)) {
-      value = 2;
+    if (CFGetTypeID(prefValue.get()) == CFNumberGetTypeID()) {
+      if (!CFNumberGetValue(static_cast<CFNumberRef>(prefValue.get()),
+                            kCFNumberIntType, &value)) {
+        value = 2;  // default = medium
+      }
+    } else if (CFGetTypeID(prefValue.get()) == CFStringGetTypeID()) {
+      // For some reason, the value can be a string
+      value = CFStringGetIntValue(static_cast<CFStringRef>(prefValue.get()));
     }
-    CFRelease(prefValue);
   }
   levels.AppendElement(value);
 #elif defined(XP_LINUX)
@@ -571,20 +674,16 @@ void PopulateErrors(
     }
 
     const auto& errorVar = result.RejectValue();
-    if (errorVar.second.is<nsresult>()) {
-      nsresult error = errorVar.second.as<nsresult>();
-      MOZ_LOG(gUserCharacteristicsLog, mozilla::LogLevel::Error,
-              ("%s rejected with nsresult: %u.", errorVar.first.get(),
-               static_cast<uint32_t>(error)));
-      errors.AppendPrintf("%s:%u", errorVar.first.get(),
-                          static_cast<uint32_t>(error));
-    } else if (errorVar.second.is<nsCString>()) {
-      nsCString error = errorVar.second.as<nsCString>();
-      MOZ_LOG(
-          gUserCharacteristicsLog, mozilla::LogLevel::Error,
-          ("%s rejected with reason: %s.", errorVar.first.get(), error.get()));
-      errors.AppendPrintf("%s:%s", errorVar.first.get(), error.get());
-    }
+    nsCString funcName = std::get<0>(errorVar);
+    nsresult rv = std::get<1>(errorVar);
+    nsCString additionalCtx = std::get<2>(errorVar);
+
+    errors.AppendPrintf("%s:%" PRIu32 ":%s", funcName.get(),
+                        static_cast<uint32_t>(rv), additionalCtx.get());
+    MOZ_LOG(gUserCharacteristicsLog, mozilla::LogLevel::Error,
+            ("Error encountered: %s:%" PRIu32 ":%s", funcName.get(),
+             static_cast<uint32_t>(rv), additionalCtx.get()));
+
     errors.Append(",");
   }
   if (errors.Length() > 0) {
@@ -643,11 +742,39 @@ already_AddRefed<PopulatePromise> PopulateTimeZone() {
     glean::characteristics::timezone.Set(timeZone);
     populatePromise->Resolve(void_t(), __func__);
   } else {
-    populatePromise->Reject(std::pair(__func__, "NO_RESULT"_ns.AsString()),
-                            __func__);
+    REJECT(populatePromise, __func__, NS_ERROR_FAILURE,
+           nsPrintfCString("ICUError=%" PRIu8,
+                           static_cast<uint8_t>(result.unwrapErr())));
   }
 
   return populatePromise.forget();
+}
+
+void PopulateModelName() {
+  nsCString modelName("null");
+
+  nsCOMPtr<nsIPropertyBag2> sysInfo =
+      do_GetService("@mozilla.org/system-info;1");
+  NS_ENSURE_TRUE_VOID(sysInfo);
+
+#if defined(XP_MACOSX)
+  sysInfo->GetPropertyAsACString(u"appleModelId"_ns, modelName);
+#elif defined(MOZ_WIDGET_ANDROID)
+  sysInfo->GetPropertyAsACString(u"manufacturer"_ns, modelName);
+  modelName.AppendLiteral(" ");
+  nsCString temp;
+  sysInfo->GetPropertyAsACString(u"device"_ns, temp);
+  modelName.Append(temp);
+#elif defined(XP_WIN)
+  sysInfo->GetPropertyAsACString(u"winModelId"_ns, modelName);
+#elif defined(XP_LINUX)
+  sysInfo->GetPropertyAsACString(u"linuxProductSku"_ns, modelName);
+  if (modelName.IsEmpty()) {
+    sysInfo->GetPropertyAsACString(u"linuxProductName"_ns, modelName);
+  }
+#endif
+
+  glean::characteristics::machine_model_name.Set(modelName);
 }
 
 const RefPtr<PopulatePromise>& TimoutPromise(
@@ -658,12 +785,11 @@ const RefPtr<PopulatePromise>& TimoutPromise(
       getter_AddRefs(timeout),
       [=](auto) {
         // NOTE: has no effect if `promise` has already been resolved.
-        promise->Reject(std::pair(funcName, "TIMEOUT"_ns.AsString()), __func__);
+        REJECT(promise, funcName, NS_ERROR_FAILURE, "TIMEOUT");
       },
       delay, nsITimer::TYPE_ONE_SHOT, "UserCharacteristicsPromiseTimeout");
   if (NS_FAILED(rv)) {
-    promise->Reject(std::pair(funcName, "TIMEOUT_CREATION"_ns.AsString()),
-                    __func__);
+    REJECT(promise, funcName, rv, "TIMEOUT_CREATION");
   }
 
   auto cancelTimeoutRes = [timeout = std::move(timeout)]() {
@@ -681,7 +807,7 @@ const RefPtr<PopulatePromise>& TimoutPromise(
 // metric is set, this variable should be incremented. It'll be a lot. It's
 // okay. We're going to need it to know (including during development) what is
 // the source of the data we are looking at.
-const int kSubmissionSchema = 21;
+const int kSubmissionSchema = 27;
 
 const auto* const kUUIDPref =
     "toolkit.telemetry.user_characteristics_ping.uuid";
@@ -694,10 +820,10 @@ const auto* const kOptOutPref =
     "toolkit.telemetry.user_characteristics_ping.opt-out";
 const auto* const kSendOncePref =
     "toolkit.telemetry.user_characteristics_ping.send-once";
-const auto* const kCanvasRandomizationPrincipalCheckPref =
-    "privacy.resistFingerprinting.randomization.canvas.disable_for_chrome";
 const auto* const kFingerprintingProtectionOverridesPref =
     "privacy.fingerprintingProtection.overrides";
+const auto* const kBaselineFPPOverridesPref =
+    "privacy.baselineFingerprintingProtection.overrides";
 
 namespace {
 
@@ -751,7 +877,6 @@ void AfterPingSentSteps(bool aUpdatePref) {
       Preferences::SetBool(kSendOncePref, false);
     }
   }
-  Preferences::SetBool(kCanvasRandomizationPrincipalCheckPref, false);
 }
 
 /*
@@ -787,11 +912,18 @@ bool nsUserCharacteristics::ShouldSubmit() {
     return false;
   }
 
-  nsAutoString fppOverrides;
-  nsresult rv = Preferences::GetString(kFingerprintingProtectionOverridesPref,
-                                       fppOverrides);
-  if (NS_FAILED(rv) || !fppOverrides.IsEmpty()) {
+  nsAutoString overrides;
+  nsresult rv =
+      Preferences::GetString(kFingerprintingProtectionOverridesPref, overrides);
+  if (NS_FAILED(rv) || !overrides.IsEmpty()) {
     // If there are any overrides, we don't want to send the ping
+    // as it will mess up data.
+    return false;
+  }
+
+  rv = Preferences::GetString(kBaselineFPPOverridesPref, overrides);
+  if (NS_FAILED(rv) || !overrides.IsEmpty()) {
+    // If there are any baseline overrides, we don't want to send the ping
     // as it will mess up data.
     return false;
   }
@@ -855,9 +987,6 @@ void nsUserCharacteristics::PopulateDataAndEventuallySubmit(
   MOZ_LOG(gUserCharacteristicsLog, LogLevel::Warning, ("Populating Data"));
   MOZ_ASSERT(XRE_IsParentProcess());
 
-  // Enable canvas principal check for randomization
-  Preferences::SetBool(kCanvasRandomizationPrincipalCheckPref, true);
-
   if (NS_FAILED(PopulateEssentials())) {
     // We couldn't populate important metrics. Don't submit a ping.
     AfterPingSentSteps(false);
@@ -875,16 +1004,17 @@ void nsUserCharacteristics::PopulateDataAndEventuallySubmit(
 
     promises.AppendElement(PopulateMediaDevices());
     promises.AppendElement(PopulateTimeZone());
+    promises.AppendElement(PopulateFingerprintedFonts());
     PopulateMissingFonts();
     PopulateCSSProperties();
     PopulateScreenProperties();
     PopulatePrefs();
     PopulateFontPrefs();
-    PopulateScaling();
     PopulateKeyboardLayout();
     PopulateLanguages();
     PopulateTextAntiAliasing();
     PopulateProcessorCount();
+    PopulateModelName();
     PopulateMisc(false);
   }
 

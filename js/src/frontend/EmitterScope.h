@@ -51,8 +51,6 @@ class EmitterScope : public Nestable<EmitterScope> {
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
   mozilla::Maybe<UsingEmitter> usingEmitter_;
 
-  mozilla::Maybe<ForOfDisposalEmitter> forOfDisposalEmitter_;
-
  private:
   BlockKind blockKind_ = BlockKind::Other;
 #endif
@@ -174,13 +172,7 @@ class EmitterScope : public Nestable<EmitterScope> {
   // a lexical scope and a module scope.
   [[nodiscard]] bool prepareForDisposableScopeBody(BytecodeEmitter* bce);
 
-  [[nodiscard]] bool emitSwitchBlockEndForDisposableScopeBodyEnd(
-      BytecodeEmitter* bce);
-
   [[nodiscard]] bool emitDisposableScopeBodyEnd(BytecodeEmitter* bce);
-
-  [[nodiscard]] bool emitDisposableScopeBodyEndForNonLocalJump(
-      BytecodeEmitter* bce);
 
  public:
   [[nodiscard]] bool prepareForModuleDisposableScopeBody(BytecodeEmitter* bce);

@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -23,14 +24,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import mozilla.components.compose.base.annotation.LightDarkPreview
+import mozilla.components.compose.base.button.PrimaryButton
 import mozilla.components.concept.storage.Address
 import mozilla.components.concept.storage.CreditCardsAddressesStorage
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.SwitchWithLabel
-import org.mozilla.fenix.compose.button.PrimaryButton
 import org.mozilla.fenix.compose.list.RadioButtonListItem
 import org.mozilla.fenix.compose.list.TextListItem
 import org.mozilla.fenix.theme.FirefoxTheme
@@ -178,11 +179,13 @@ private fun AddressesManagementSection(
 
         PrimaryButton(
             text = stringResource(R.string.debug_drawer_add_new_address),
+            modifier = Modifier.fillMaxWidth(),
             onClick = { onAddAddressClick(selectedLocaleLangTagForAddingAddress) },
         )
 
         PrimaryButton(
             text = stringResource(R.string.debug_drawer_delete_all_addresses),
+            modifier = Modifier.fillMaxWidth(),
             onClick = onDeleteAllAddressesClick,
         )
 
@@ -224,7 +227,7 @@ private fun List<DebugLocaleEnabledState>.updateLocaleEnabled(localeToUpdate: De
     }
 
 @Composable
-@LightDarkPreview
+@PreviewLightDark
 private fun AddressesScreenPreview() {
     FirefoxTheme {
         Box(

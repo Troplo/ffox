@@ -6,9 +6,9 @@
 const {
   PureComponent,
   createFactory,
-} = require("resource://devtools/client/shared/vendor/react.js");
+} = require("resource://devtools/client/shared/vendor/react.mjs");
 const dom = require("resource://devtools/client/shared/vendor/react-dom-factories.js");
-const PropTypes = require("resource://devtools/client/shared/vendor/react-prop-types.js");
+const PropTypes = require("resource://devtools/client/shared/vendor/react-prop-types.mjs");
 const {
   CONNECTION_TYPES,
 } = require("resource://devtools/client/shared/remote-debugging/constants.js");
@@ -184,7 +184,13 @@ class DebugTargetInfo extends PureComponent {
       console.error(ex);
     }
 
-    this.props.toolbox.target.navigateTo({ url });
+    // Do not waitForLoad as we don't wait navigateTo to resolve anyway.
+    // Bug 1968023: navigateTo is flaky and sometimes never catches the
+    // STATE_STOP notification necessary for waitForLoad=true.
+    this.props.toolbox.commands.targetCommand.navigateTo(
+      url,
+      false /* waitForLoad */
+    );
   }
 
   shallRenderConnection() {
@@ -369,13 +375,13 @@ class DebugTargetInfo extends PureComponent {
           className: "qa-back-button",
           icon: "chrome://browser/skin/back.svg",
           l10nId: "toolbox.debugTargetInfo.back",
-          onClick: () => this.props.toolbox.target.goBack(),
+          onClick: () => this.props.toolbox.commands.targetCommand.goBack(),
         }),
         this.renderNavigationButton({
           className: "qa-forward-button",
           icon: "chrome://browser/skin/forward.svg",
           l10nId: "toolbox.debugTargetInfo.forward",
-          onClick: () => this.props.toolbox.target.goForward(),
+          onClick: () => this.props.toolbox.commands.targetCommand.goForward(),
         })
       );
     }

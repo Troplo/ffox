@@ -450,6 +450,14 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
     obj->setReservedSlotPrivateUnbarriered(Slots::HashCodeScramblerSlot, hcs);
   }
 
+  static constexpr uint32_t hashShiftToNumHashBuckets(uint32_t hashShift) {
+    return 1 << (js::kHashNumberBits - hashShift);
+  }
+  static constexpr uint32_t numHashBucketsToDataCapacity(
+      uint32_t numHashBuckets) {
+    return uint32_t(numHashBuckets * FillFactor);
+  }
+
   // Logarithm base 2 of the number of buckets in the hash table initially.
   static constexpr uint32_t InitialBucketsLog2 = 1;
   static constexpr uint32_t InitialBuckets = 1 << InitialBucketsLog2;
@@ -469,6 +477,13 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
   // The minimum permitted value of (liveCount / dataLength).
   // If that ratio drops below this value, we shrink the table.
   static constexpr double MinDataFill = 0.25;
+
+  // Note: a lower hash shift results in a higher capacity.
+  static constexpr uint32_t MinHashShift = 8;
+  static constexpr uint32_t MaxHashBuckets =
+      hashShiftToNumHashBuckets(MinHashShift);  // 16777216
+  static constexpr uint32_t MaxDataCapacity =
+      numHashBucketsToDataCapacity(MaxHashBuckets);  // 44739242
 
   template <typename F>
   void forEachIterator(F&& f) {
@@ -507,6 +522,9 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
       std::tuple<Data*, Data**, HashCodeScrambler*, size_t>;
   AllocationResult allocateBuffer(JSContext* cx, uint32_t dataCapacity,
                                   uint32_t buckets) {
+    MOZ_ASSERT(dataCapacity <= MaxDataCapacity);
+    MOZ_ASSERT(buckets <= MaxHashBuckets);
+
     size_t numBytes = 0;
     if (MOZ_UNLIKELY(!calcAllocSize(dataCapacity, buckets, &numBytes))) {
       ReportAllocationOverflow(cx);
@@ -727,6 +745,38 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
     new (entry) Data(std::forward<ElementInput>(element), chain);
     return true;
   }
+
+#ifdef NIGHTLY_BUILD
+  /*
+   * If the table already contains an entry that matches |element|,
+   * return that entry. Otherwise add a new entry.
+   *
+   * On success, return a pointer to the element, whether there was already a
+   * matching element or not. On allocation failure, return a nullptr. If this
+   * returns a nullptr, it means the element was not added to the table.
+   */
+  template <typename ElementInput>
+  [[nodiscard]] T* getOrAdd(JSContext* cx, ElementInput&& element) {
+    HashNumber h;
+    if (hasAllocatedBuffer()) {
+      h = prepareHash(Ops::getKey(element));
+      if (Data* e = lookup(Ops::getKey(element), h)) {
+        return &e->element;
+      }
+      if (getDataLength() == getDataCapacity() && !rehashOnFull(cx)) {
+        return nullptr;
+      }
+    } else {
+      if (!initBuffer(cx)) {
+        return nullptr;
+      }
+      h = prepareHash(Ops::getKey(element));
+    }
+    auto [entry, chain] = addEntry(h);
+    new (entry) Data(std::forward<ElementInput>(element), chain);
+    return &entry->element;
+  }
+#endif  // #ifdef NIGHTLY_BUILD
 
   /*
    * If the table contains an element matching l, remove it and return true.
@@ -1032,7 +1082,7 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
 
   /* The size of the hash table, in elements. Always a power of two. */
   uint32_t hashBuckets() const {
-    return 1 << (js::kHashNumberBits - getHashShift());
+    return hashShiftToNumHashBuckets(getHashShift());
   }
 
   void destroyData(Data* data, uint32_t length) {
@@ -1164,22 +1214,13 @@ class MOZ_STACK_CLASS OrderedHashTableImpl {
       return true;
     }
 
-    // Ensure the new capacity fits into INT32_MAX.
-    constexpr size_t maxCapacityLog2 =
-        mozilla::tl::FloorLog2<size_t(INT32_MAX / FillFactor)>::value;
-    static_assert(maxCapacityLog2 < kHashNumberBits);
-
-    // Fail if |(js::kHashNumberBits - newHashShift) > maxCapacityLog2|.
-    //
-    // Reorder |kHashNumberBits| so both constants are on the right-hand side.
-    if (MOZ_UNLIKELY(newHashShift < (js::kHashNumberBits - maxCapacityLog2))) {
+    if (MOZ_UNLIKELY(newHashShift < MinHashShift)) {
       ReportAllocationOverflow(cx);
       return false;
     }
 
-    uint32_t newHashBuckets = uint32_t(1)
-                              << (js::kHashNumberBits - newHashShift);
-    uint32_t newCapacity = uint32_t(newHashBuckets * FillFactor);
+    uint32_t newHashBuckets = hashShiftToNumHashBuckets(newHashShift);
+    uint32_t newCapacity = numHashBucketsToDataCapacity(newHashBuckets);
 
     auto [newData, newHashTable, newHcs, numBytes] =
         allocateBuffer(cx, newCapacity, newHashBuckets);
@@ -1324,6 +1365,14 @@ class MOZ_STACK_CLASS OrderedHashMapImpl {
   [[nodiscard]] bool put(JSContext* cx, K&& key, V&& value) {
     return impl.put(cx, Entry(std::forward<K>(key), std::forward<V>(value)));
   }
+
+#ifdef NIGHTLY_BUILD
+  template <typename K, typename V>
+  [[nodiscard]] Entry* getOrAdd(JSContext* cx, K&& key, V&& value) {
+    return impl.getOrAdd(cx,
+                         Entry(std::forward<K>(key), std::forward<V>(value)));
+  }
+#endif  // #ifdef NIGHTLY_BUILD
 
 #ifdef DEBUG
   mozilla::Maybe<HashNumber> hash(const Lookup& key) const {

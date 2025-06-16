@@ -10,6 +10,7 @@ use std::{
     borrow::Borrow,
     cell::{Ref, RefCell},
     cmp::{max, min},
+    fmt::{self, Debug, Display, Formatter},
     ops::Deref,
     rc::Rc,
 };
@@ -19,8 +20,7 @@ use neqo_crypto::{random, randomize};
 use smallvec::{smallvec, SmallVec};
 
 use crate::{
-    frame::FRAME_TYPE_NEW_CONNECTION_ID, packet::PacketBuilder, recovery::RecoveryToken,
-    stats::FrameStats, Error, Res,
+    frame::FrameType, packet::PacketBuilder, recovery::RecoveryToken, stats::FrameStats, Error, Res,
 };
 
 pub const MAX_CONNECTION_ID_LEN: usize = 20;
@@ -34,7 +34,7 @@ const CONNECTION_ID_SEQNO_EMPTY: u64 = u64::MAX - 1;
 
 #[derive(Clone, Default, Eq, Hash, PartialEq)]
 pub struct ConnectionId {
-    pub(crate) cid: SmallVec<[u8; MAX_CONNECTION_ID_LEN]>,
+    cid: SmallVec<[u8; MAX_CONNECTION_ID_LEN]>,
 }
 
 impl ConnectionId {
@@ -83,13 +83,13 @@ impl From<SmallVec<[u8; MAX_CONNECTION_ID_LEN]>> for ConnectionId {
 
 impl<T: AsRef<[u8]> + ?Sized> From<&T> for ConnectionId {
     fn from(buf: &T) -> Self {
-        Self::from(SmallVec::from(buf.as_ref()))
+        Self::from(SmallVec::from_slice(buf.as_ref()))
     }
 }
 
 impl<'a> From<ConnectionIdRef<'a>> for ConnectionId {
     fn from(cidref: ConnectionIdRef<'a>) -> Self {
-        Self::from(SmallVec::from(cidref.cid))
+        Self::from(SmallVec::from_slice(cidref.cid))
     }
 }
 
@@ -101,14 +101,14 @@ impl Deref for ConnectionId {
     }
 }
 
-impl ::std::fmt::Debug for ConnectionId {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Debug for ConnectionId {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "CID {}", hex_with_len(&self.cid))
     }
 }
 
-impl ::std::fmt::Display for ConnectionId {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for ConnectionId {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}", hex(&self.cid))
     }
 }
@@ -124,14 +124,14 @@ pub struct ConnectionIdRef<'a> {
     cid: &'a [u8],
 }
 
-impl ::std::fmt::Debug for ConnectionIdRef<'_> {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Debug for ConnectionIdRef<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "CID {}", hex_with_len(self.cid))
     }
 }
 
-impl ::std::fmt::Display for ConnectionIdRef<'_> {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for ConnectionIdRef<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}", hex(self.cid))
     }
 }
@@ -306,7 +306,7 @@ impl ConnectionIdEntry<[u8; 16]> {
             return false;
         }
 
-        builder.encode_varint(FRAME_TYPE_NEW_CONNECTION_ID);
+        builder.encode_varint(FrameType::NewConnectionId);
         builder.encode_varint(self.seqno);
         builder.encode_varint(0u64);
         builder.encode_vec(1, &self.cid);
@@ -557,7 +557,14 @@ impl ConnectionIdManager {
         stats: &mut FrameStats,
     ) {
         if self.generator.deref().borrow().generates_empty_cids() {
-            debug_assert_eq!(self.generator.borrow_mut().generate_cid().unwrap().len(), 0);
+            debug_assert_eq!(
+                self.generator
+                    .borrow_mut()
+                    .generate_cid()
+                    .expect("OK in debug assert")
+                    .len(),
+                0
+            );
             return;
         }
 

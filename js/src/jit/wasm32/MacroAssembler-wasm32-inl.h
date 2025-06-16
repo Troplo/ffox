@@ -735,12 +735,12 @@ void MacroAssembler::branch16(Condition cond, const Address& lhs, Imm32 rhs,
 }
 
 void MacroAssembler::branch32(Condition cond, Register lhs, Register rhs,
-                              Label* label) {
+                              Label* label, LhsHighBitsAreClean) {
   MOZ_CRASH();
 }
 
 void MacroAssembler::branch32(Condition cond, Register lhs, Imm32 rhs,
-                              Label* label) {
+                              Label* label, LhsHighBitsAreClean) {
   MOZ_CRASH();
 }
 
@@ -893,32 +893,33 @@ void MacroAssembler::spectreMovePtr(Condition cond, Register src,
   MOZ_CRASH();
 }
 
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedDouble(
-    FloatRegister src, const Address& dest) {
+FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
+                                               const Address& dest) {
   MOZ_CRASH();
 }
 
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedDouble(
-    FloatRegister src, const BaseIndex& dest) {
+FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
+                                               const BaseIndex& dest) {
   MOZ_CRASH();
 }
 
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat32(
-    FloatRegister src, const Address& dest) {
+FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
+                                                const Address& dest) {
   MOZ_CRASH();
 }
 
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat32(
-    FloatRegister src, const BaseIndex& dest) {
+FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
+                                                const BaseIndex& dest) {
   MOZ_CRASH();
 }
 
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat16(
-    FloatRegister src, const Address& dest, Register) {
+FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
+                                                const Address& dest, Register) {
   MOZ_CRASH();
 }
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat16(
-    FloatRegister src, const BaseIndex& dest, Register) {
+FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
+                                                const BaseIndex& dest,
+                                                Register) {
   MOZ_CRASH();
 }
 

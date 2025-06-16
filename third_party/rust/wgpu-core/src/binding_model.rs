@@ -6,7 +6,6 @@ use alloc::{
     vec::Vec,
 };
 use core::{fmt, mem::ManuallyDrop, ops::Range};
-use std::sync::OnceLock;
 
 use arrayvec::ArrayVec;
 use thiserror::Error;
@@ -38,8 +37,6 @@ use crate::{
 pub enum BindGroupLayoutEntryError {
     #[error("Cube dimension is not expected for texture storage")]
     StorageTextureCube,
-    #[error("Read-write and read-only storage textures are not allowed by baseline webgpu, they require the native only feature TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES")]
-    StorageTextureReadWrite,
     #[error("Atomic storage textures are not allowed by baseline webgpu, they require the native only feature TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES")]
     StorageTextureAtomic,
     #[error("Arrays of bindings unsupported for this type of binding")]
@@ -188,6 +185,8 @@ pub enum CreateBindGroupError {
         layout_flt: bool,
         sampler_flt: bool,
     },
+    #[error("TLAS binding {binding} is required to support vertex returns but is missing flag AccelerationStructureFlags::ALLOW_RAY_HIT_VERTEX_RETURN")]
+    MissingTLASVertexReturn { binding: u32 },
     #[error("Bound texture views can not have both depth and stencil aspects enabled")]
     DepthStencilAspect,
     #[error("The adapter does not support read access for storage textures of format {0:?}")]
@@ -380,7 +379,7 @@ impl BindingTypeMaxCountValidator {
                 wgt::BindingType::StorageTexture { .. } => {
                     self.storage_textures.add(binding.visibility, count);
                 }
-                wgt::BindingType::AccelerationStructure => {
+                wgt::BindingType::AccelerationStructure { .. } => {
                     self.acceleration_structures.add(binding.visibility, count);
                 }
             }
@@ -600,7 +599,7 @@ pub struct BindGroupLayout {
     /// We cannot unconditionally remove from the pool, as BGLs that don't come from the pool
     /// (derived BGLs) must not be removed.
     pub(crate) origin: bgl::Origin,
-    pub(crate) exclusive_pipeline: OnceLock<ExclusivePipeline>,
+    pub(crate) exclusive_pipeline: crate::OnceCellOrLock<ExclusivePipeline>,
     #[allow(unused)]
     pub(crate) binding_count_validator: BindingTypeMaxCountValidator,
     /// The `label` from the descriptor used to create the resource.

@@ -43,6 +43,7 @@ import android.widget.FrameLayout
 import androidx.annotation.RequiresApi
 import androidx.annotation.VisibleForTesting
 import androidx.annotation.VisibleForTesting.Companion.PRIVATE
+import androidx.core.graphics.createBitmap
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import kotlinx.coroutines.runBlocking
@@ -184,7 +185,7 @@ class SystemEngineView @JvmOverloads constructor(
                     onLoadingStateChange(false)
                     onSecurityChange(
                         secure = cert != null,
-                        host = cert?.let { Uri.parse(url).host },
+                        host = cert?.let { url.toUri().host },
                         issuer = cert?.issuedBy?.oName,
                     )
                 }
@@ -220,7 +221,7 @@ class SystemEngineView @JvmOverloads constructor(
 
                 val (matches, stringCategory) = getOrCreateUrlMatcher(resources, it).matches(
                     resourceUri,
-                    Uri.parse(session?.currentUrl),
+                    session?.currentUrl?.toUri() ?: Uri.EMPTY,
                 )
 
                 if (!request.isForMainFrame && matches) {
@@ -265,7 +266,12 @@ class SystemEngineView @JvmOverloads constructor(
                             is InterceptionResponse.AppIntent -> {
                                 if (request.isForMainFrame) {
                                     session.notifyObservers {
-                                        onLaunchIntentRequest(url = url, appIntent = appIntent)
+                                        onLaunchIntentRequest(
+                                            url = url,
+                                            appIntent = appIntent,
+                                            fallbackUrl = fallbackUrl,
+                                            appName = appName,
+                                        )
                                     }
                                 }
 
@@ -750,7 +756,7 @@ class SystemEngineView @JvmOverloads constructor(
     }
 
     private fun createThumbnailUsingDrawingView(view: View, onFinish: (Bitmap?) -> Unit) {
-        val outBitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        val outBitmap = createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(outBitmap)
         view.draw(canvas)
         onFinish(outBitmap)
@@ -758,7 +764,7 @@ class SystemEngineView @JvmOverloads constructor(
 
     @RequiresApi(Build.VERSION_CODES.O)
     private fun createThumbnailUsingPixelCopy(view: View, onFinish: (Bitmap?) -> Unit) {
-        val out = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        val out = createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
         val viewRect = view.getRectWithViewLocation()
         val window = (context as Activity).window
 
@@ -813,7 +819,7 @@ class SystemEngineView @JvmOverloads constructor(
         internal const val SECOND_MS: Int = 1000
 
         @Volatile
-        internal var URL_MATCHER: UrlMatcher? = null
+        internal var urlMatcher: UrlMatcher? = null
 
         private val urlMatcherCategoryMap = mapOf(
             UrlMatcher.ADVERTISING to TrackingProtectionPolicy.TrackingCategory.AD,
@@ -837,8 +843,8 @@ class SystemEngineView @JvmOverloads constructor(
         internal fun getOrCreateUrlMatcher(resources: Resources, policy: TrackingProtectionPolicy): UrlMatcher {
             val categories = urlMatcherCategoryMap.filterValues { policy.contains(it) }.keys
 
-            URL_MATCHER?.setCategoriesEnabled(categories) ?: run {
-                URL_MATCHER = UrlMatcher.createMatcher(
+            urlMatcher?.setCategoriesEnabled(categories) ?: run {
+                urlMatcher = UrlMatcher.createMatcher(
                     resources,
                     R.raw.domain_blocklist,
                     R.raw.domain_safelist,
@@ -846,7 +852,7 @@ class SystemEngineView @JvmOverloads constructor(
                 )
             }
 
-            return URL_MATCHER as UrlMatcher
+            return urlMatcher as UrlMatcher
         }
     }
 }

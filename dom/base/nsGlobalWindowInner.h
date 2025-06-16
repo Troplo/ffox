@@ -130,6 +130,7 @@ class Selection;
 struct SizeToContentConstraints;
 class WebTaskScheduler;
 class WebTaskSchedulerMainThread;
+class WebTaskSchedulingState;
 class SpeechSynthesis;
 class Timeout;
 class TrustedTypePolicyFactory;
@@ -334,10 +335,16 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   void Freeze(bool aIncludeSubWindows = true);
   void Thaw(bool aIncludeSubWindows = true);
   virtual bool IsFrozen() const override;
-  virtual bool HasActiveIndexedDBDatabases() override;
+  virtual bool HasActiveIndexedDBDatabases() const override;
   virtual bool HasActivePeerConnections() override;
   virtual bool HasOpenWebSockets() const override;
+  void AudioPlaybackChanged(bool aIsPlayingAudio);
+  virtual bool HasScheduledNormalOrHighPriorityWebTasks() const override;
   void SyncStateFromParentWindow();
+  virtual void UpdateWebSocketCount(int32_t aDelta) override;
+  // Increase/Decrease the number of active IndexedDB databases for the
+  // decision making of timeout-throttling.
+  virtual void UpdateActiveIndexedDBDatabaseCount(int32_t aDelta) override;
 
   // Called on the current inner window of a browsing context when its
   // background state changes according to selected tab or visibility of the
@@ -421,8 +428,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   static bool IsPrivilegedChromeWindow(JSContext*, JSObject* aObj);
 
   static bool DeviceSensorsEnabled(JSContext*, JSObject*);
-
-  static bool CachesEnabled(JSContext* aCx, JSObject*);
 
   // WebIDL permission Func for whether Glean APIs are permitted.
   static bool IsGleanNeeded(JSContext*, JSObject*);
@@ -717,7 +722,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
       JSContext* aCx,
       const mozilla::dom::FunctionOrTrustedScriptOrString& aHandler,
       int32_t aTimeout, const mozilla::dom::Sequence<JS::Value>& /* unused */,
-      mozilla::ErrorResult& aError);
+      nsIPrincipal* aSubjectPrincipal, mozilla::ErrorResult& aError);
 
   MOZ_CAN_RUN_SCRIPT
   void ClearTimeout(int32_t aHandle);
@@ -728,7 +733,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
       const mozilla::dom::FunctionOrTrustedScriptOrString& aHandler,
       const int32_t aTimeout,
       const mozilla::dom::Sequence<JS::Value>& /* unused */,
-      mozilla::ErrorResult& aError);
+      nsIPrincipal* aSubjectPrincipal, mozilla::ErrorResult& aError);
 
   MOZ_CAN_RUN_SCRIPT
   void ClearInterval(int32_t aHandle);
@@ -759,6 +764,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
       const nsACString& aQuery, mozilla::dom::CallerType aCallerType,
       mozilla::ErrorResult& aError);
   nsScreen* Screen();
+  bool HasScreen() const { return !!mScreen; }
   void MoveTo(int32_t aXPos, int32_t aYPos,
               mozilla::dom::CallerType aCallerType,
               mozilla::ErrorResult& aError);
@@ -959,8 +965,15 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
   // https://whatpr.org/html/4734/structured-data.html#cross-origin-isolated
   bool CrossOriginIsolated() const override;
+  bool OriginAgentCluster() const;
 
   mozilla::dom::WebTaskScheduler* Scheduler();
+  void SetWebTaskSchedulingState(
+      mozilla::dom::WebTaskSchedulingState* aState) override;
+  mozilla::dom::WebTaskSchedulingState* GetWebTaskSchedulingState()
+      const override {
+    return mWebTaskSchedulingState;
+  }
 
  protected:
   // Web IDL helpers
@@ -1031,7 +1044,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   template <typename Method, typename... Args>
   mozilla::CallState CallOnInProcessDescendants(Method aMethod,
                                                 Args&&... aArgs) {
-    MOZ_ASSERT(IsCurrentInnerWindow());
     return CallOnInProcessDescendantsInternal(GetBrowsingContext(), false,
                                               aMethod, aArgs...);
   }
@@ -1069,7 +1081,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
       JSContext* aCx,
       const mozilla::dom::FunctionOrTrustedScriptOrString& aHandler,
       int32_t aTimeout, const mozilla::dom::Sequence<JS::Value>& aArguments,
-      bool aIsInterval, mozilla::ErrorResult& aError);
+      bool aIsInterval, nsIPrincipal* aSubjectPrincipal,
+      mozilla::ErrorResult& aError);
 
   // Return true if |aTimeout| was cleared while its handler ran.
   MOZ_CAN_RUN_SCRIPT
@@ -1167,7 +1180,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   friend class nsPIDOMWindowOuter;
 
   bool IsBackgroundInternal() const override;
-  bool IsPlayingAudio() override;
 
   // NOTE: Chrome Only
   void DisconnectAndClearGroupMessageManagers() {
@@ -1205,6 +1217,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
 
  public:
   static uint32_t GetShortcutsPermission(nsIPrincipal* aPrincipal);
+  bool IsPlayingAudio() override;
 
   // Dispatch a runnable related to the global.
   nsresult Dispatch(already_AddRefed<nsIRunnable>&& aRunnable) const final;
@@ -1277,6 +1290,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   RefPtr<mozilla::dom::ContentMediaController> mContentMediaController;
 
   RefPtr<mozilla::dom::WebTaskSchedulerMainThread> mWebTaskScheduler;
+  RefPtr<mozilla::dom::WebTaskSchedulingState> mWebTaskSchedulingState;
 
   RefPtr<mozilla::dom::TrustedTypePolicyFactory> mTrustedTypePolicyFactory;
 
@@ -1290,7 +1304,7 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   // Represents whether the inner window's page has had a slow script notice.
   // Only used by inner windows; will always be false for outer windows.
   // This is used to implement Telemetry measures such as
-  // SLOW_SCRIPT_PAGE_COUNT.
+  // SLOW_SCRIPT_PAGE_COUNT (glean::dom::slow_script_page_count).
   bool mHasHadSlowScript : 1;
 
   // Fast way to tell if this is a chrome window (without having to QI).

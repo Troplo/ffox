@@ -1594,9 +1594,8 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
     // the download is in progress we set that flag so that timeout counter
     // measures do not kick in.
     nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
-    bool isPrivateWin = loadInfo->GetOriginAttributes().IsPrivateBrowsing();
-    if (nsHTTPSOnlyUtils::IsHttpsOnlyModeEnabled(isPrivateWin) ||
-        nsHTTPSOnlyUtils::IsHttpsFirstModeEnabled(isPrivateWin)) {
+    if (nsHTTPSOnlyUtils::GetUpgradeMode(loadInfo) !=
+        nsHTTPSOnlyUtils::NO_UPGRADE_MODE) {
       uint32_t httpsOnlyStatus = loadInfo->GetHttpsOnlyStatus();
       httpsOnlyStatus |= nsILoadInfo::HTTPS_ONLY_DOWNLOAD_IN_PROGRESS;
       loadInfo->SetHttpsOnlyStatus(httpsOnlyStatus);
@@ -3277,7 +3276,7 @@ bool nsExternalHelperAppService::GetFileNameFromChannel(nsIChannel* aChannel,
     nsAutoCString query;
 
     // We only care about the query for HTTP and HTTPS URLs
-    if (url->SchemeIs("http") || url->SchemeIs("https")) {
+    if (net::SchemeIsHttpOrHttps(url)) {
       url->GetQuery(query);
     }
 
@@ -3767,6 +3766,22 @@ nsExternalHelperAppService::ShouldModifyExtension(nsIMIMEInfo* aMimeInfo,
   nsAutoCString MIMEType;
   if (!aMimeInfo || NS_FAILED(aMimeInfo->GetMIMEType(MIMEType))) {
     return ModifyExtension_Append;
+  }
+
+  // Special cases where we want to keep file extensions if they're common
+  // for a given MIME type to avoid surprising users with a changed extension.
+  static constexpr std::pair<nsLiteralCString, nsLiteralCString>
+      ignoreMimeExtPairs[] = {
+          {"video/3gpp"_ns, "mp4"_ns},   // bug 1749294
+          {"audio/x-wav"_ns, "mp2"_ns},  // bug 1805365
+      };
+
+  nsAutoCString fileExtLowerCase(aFileExt);
+  ToLowerCase(fileExtLowerCase);
+  for (const auto& [mime, ext] : ignoreMimeExtPairs) {
+    if (MIMEType.Equals(mime) && fileExtLowerCase.Equals(ext)) {
+      return ModifyExtension_Ignore;
+    }
   }
 
   // Determine whether the extensions should be appended or replaced depending

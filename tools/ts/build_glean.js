@@ -4,18 +4,19 @@
 "use strict";
 
 /**
- * Build:   <srcdir>/tools/@types/glean/<path>.d.ts,
- * update:  <srcdir>/tools/@types/lib.gecko.glean.d.ts,
+ * Build:   <srcdir>/tools/@types/generated/lib.gecko.glean.d.ts,
  *
- * from:    <srcdir>/<path>/metrics.yaml.
+ * from:    all glean sources referenced in
+ +          <srcdir>/toolkit/components/glean/metrics_index.py.
  */
 
 const fs = require("fs");
 const YAML = require("yaml");
+const path = require("path");
 
 const HEADER = `/**
  * NOTE: Do not modify this file by hand.
- * Content was generated from source metrics.yaml files.
+ * Content was generated from source glean .yaml files.
  * If you're updating some of the sources, see README for instructions.
  */
 `;
@@ -30,12 +31,15 @@ const TYPES = {
   string_list: "GleanStringList",
   timespan: "GleanTimespan",
   timing_distribution: "GleanTimingDistribution",
+  labeled_timing_distribution: "Record<string, GleanTimingDistribution>",
   memory_distribution: "GleanMemoryDistribution",
+  labeled_memory_distribution: "Record<string, GleanMemoryDistribution>",
   uuid: "GleanUuid",
   url: "GleanUrl",
   datetime: "GleanDatetime",
   event: "GleanEvent",
   custom_distribution: "GleanCustomDistribution",
+  labeled_custom_distribution: "Record<string, GleanCustomDistribution>",
   quantity: "GleanQuantity",
   labeled_quantity: "Record<string, GleanQuantity>",
   rate: "GleanRate",
@@ -43,12 +47,14 @@ const TYPES = {
   object: "GleanObject",
 };
 
+const SCHEMA = "moz://mozilla.org/schemas/glean";
+
 function style(str, capital) {
   return capital ? str.charAt(0).toUpperCase() + str.slice(1) : str;
 }
 
 function camelCase(id) {
-  return id.split(/_|\./).map(style).join("");
+  return id.split(/[_.-]/).map(style).join("");
 }
 
 // Produce webidl types based on Glean metrics.
@@ -73,28 +79,54 @@ function emitGlean(yamlDoc) {
   return lines.join("\n");
 }
 
-// Build target .d.ts and update the Glean lib.
-async function main(src_dir, path, types_dir) {
-  if (!path.endsWith(".yaml")) {
-    path += "/metrics.yaml";
+// Produce webidl types based on Glean pings.
+function emitGleanPings(yamlDoc) {
+  let lines = [];
+  lines.push("\ninterface GleanPingsImpl {");
+
+  for (let [name, ping] of Object.entries(yamlDoc)) {
+    if (!name.startsWith("$")) {
+      if (!ping.reasons) {
+        lines.push(`  ${camelCase(name)}: nsIGleanPingNoReason;`);
+      } else {
+        let rtype = Object.keys(ping.reasons)
+          .map(r => `"${r}"`)
+          .join("|");
+        lines.push(`  ${camelCase(name)}: nsIGleanPingWithReason<${rtype}>;`);
+      }
+    }
+  }
+  lines.push("}\n");
+  return lines.join("\n");
+}
+
+// Build lib.gecko.glean.d.ts.
+async function main(src_dir, typelib_dir, ...paths) {
+  let lib = path.join(typelib_dir, "lib.gecko.glean.d.ts");
+
+  let metrics = {};
+  let pings = {};
+
+  for (let gleanPath of paths) {
+    console.log(`[INFO] ${gleanPath}`);
+    let yaml = fs.readFileSync(`${src_dir}/${gleanPath}`, "utf8");
+    let parsed = YAML.parse(yaml, { merge: true, schema: "failsafe" });
+
+    if (parsed.$schema === `${SCHEMA}/metrics/2-0-0`) {
+      for (let [key, val] of Object.entries(parsed)) {
+        if (typeof val === "object") {
+          Object.assign((metrics[key] ??= {}), val);
+        }
+      }
+    } else if (parsed.$schema === `${SCHEMA}/pings/2-0-0`) {
+      Object.assign(pings, parsed);
+    } else {
+      throw new Error(`Unknown Glean schema: ${parsed.$schema}`);
+    }
   }
 
-  let glean = `${src_dir}/${types_dir}/glean/`;
-  let lib = `${src_dir}/${types_dir}/lib.gecko.glean.d.ts`;
-  let dir = path.replaceAll("/", "_").replace(/_*(metrics.yaml)?$/, "");
-
-  let target = `${glean}/${dir}.d.ts`;
-  let yaml = fs.readFileSync(`${src_dir}/${path}`, "utf8");
-  let dts = emitGlean(YAML.parse(yaml, { merge: true, schema: "failsafe" }));
-
-  console.log(`[INFO] ${target} (${dts.length.toLocaleString()} bytes)`);
-  fs.writeFileSync(target, dts);
-
-  let files = fs.readdirSync(glean).sort();
-  let refs = files.map(f => `/// <reference types="./glean/${f}" />`);
-  let all = `${HEADER}\n${refs.join("\n")}\n`;
-
-  console.log(`[INFO] ${lib} (${all.length.toLocaleString()} bytes)`);
+  let all = emitGlean(metrics) + emitGleanPings(pings);
+  console.log(`[WARN] ${lib} (${all.length.toLocaleString()} bytes)`);
   fs.writeFileSync(lib, all);
 }
 

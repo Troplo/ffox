@@ -1,4 +1,6 @@
 {
+  "extends": "./generated/tspaths.json",
+
   "compilerOptions": {
     "noEmit": true,
     "target": "es2024",

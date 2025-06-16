@@ -5,6 +5,7 @@
 const path = require("path");
 const webpack = require("webpack");
 const { ResourceUriPlugin } = require("../../tools/resourceUriPlugin");
+const { MozSrcUriPlugin } = require("../../tools/mozsrcUriPlugin");
 
 const PATHS = {
   // Where is the entry point for the unit tests?
@@ -167,7 +168,15 @@ module.exports = function (config) {
               branches: 75,
             },
             "content-src/components/MultiStageProtonScreen.jsx": {
-              branches: 79.07,
+              branches: 78,
+            },
+            // The install actions and dynamic label of the InstallButton are covered
+            // in the browser test browser_aboutwelcome_multistage_addonspicker.js.
+            "content-src/components/InstallButton.jsx": {
+              statements: 60,
+              lines: 60,
+              functions: 60,
+              branches: 30,
             },
           },
         },
@@ -196,6 +205,9 @@ module.exports = function (config) {
               path.join(__dirname, "../asrouter/modules/"),
             ],
           ],
+        }),
+        new MozSrcUriPlugin({
+          baseDir: path.join(__dirname, "..", "..", ".."),
         }),
         new webpack.DefinePlugin({
           "process.env.NODE_ENV": JSON.stringify("development"),

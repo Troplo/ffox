@@ -14,7 +14,7 @@ import org.mozilla.fenix.browser.StandardSnackbarError
 import org.mozilla.fenix.browser.browsingmode.BrowsingMode
 import org.mozilla.fenix.components.appstate.readerview.ReaderViewState
 import org.mozilla.fenix.components.appstate.recommendations.ContentRecommendationsState
-import org.mozilla.fenix.components.appstate.shopping.ShoppingState
+import org.mozilla.fenix.components.appstate.setup.checklist.SetupChecklistState
 import org.mozilla.fenix.components.appstate.snackbar.SnackbarState
 import org.mozilla.fenix.components.appstate.webcompat.WebCompatState
 import org.mozilla.fenix.home.HomeFragment
@@ -56,7 +56,6 @@ import org.mozilla.fenix.wallpapers.WallpaperState
  * @property wallpaperState The [WallpaperState] to display in the [HomeFragment].
  * @property standardSnackbarError A snackbar error message to display.
  * @property readerViewState The [ReaderViewState] to display.
- * @property shoppingState Holds state for shopping feature that's required to live the lifetime of a session.
  * @property snackbarState The [SnackbarState] to display.
  * @property showFindInPage Whether or not to show the find in page feature.
  * @property crashState State related to the crash reporter.
@@ -64,6 +63,9 @@ import org.mozilla.fenix.wallpapers.WallpaperState
  * display an undo snackbar message relevant to the browsing mode. If null, no snackbar is shown.
  * @property wasNativeDefaultBrowserPromptShown Whether the native default browser prompt was shown to the user.
  * @property webCompatState The [WebCompatState] when the feature was last used.
+ * @property setupChecklistState Optional [SetupChecklistState] for the Setup Checklist feature.
+ * @property isPrivateScreenLocked Whether the private browsing mode is currently locked behind
+ * authentication.
  */
 data class AppState(
     val isForeground: Boolean = true,
@@ -88,11 +90,12 @@ data class AppState(
     val wallpaperState: WallpaperState = WallpaperState.default,
     val standardSnackbarError: StandardSnackbarError? = null,
     val readerViewState: ReaderViewState = ReaderViewState.None,
-    val shoppingState: ShoppingState = ShoppingState(),
     val snackbarState: SnackbarState = SnackbarState.None,
     val showFindInPage: Boolean = false,
     val crashState: CrashState = CrashState.Idle,
     val wasLastTabClosedPrivate: Boolean? = null,
     val wasNativeDefaultBrowserPromptShown: Boolean = false,
     val webCompatState: WebCompatState? = null,
+    val setupChecklistState: SetupChecklistState? = null,
+    val isPrivateScreenLocked: Boolean = false,
 ) : State

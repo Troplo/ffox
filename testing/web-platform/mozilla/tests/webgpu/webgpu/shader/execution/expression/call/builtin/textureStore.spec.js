@@ -13,8 +13,12 @@ Note: An out-of-bounds access occurs if:
 If an out-of-bounds access occurs, the built-in function should not be executed.
 `;import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
 import { unreachable, iterRange, range } from '../../../../../../common/util/util.js';
-import { kTextureFormatInfo } from '../../../../../format_info.js';
-import { AllFeaturesMaxLimitsGPUTest, TextureTestMixin } from '../../../../../gpu_test.js';
+import {
+  isTextureFormatPossiblyStorageReadWritable,
+  kPossibleStorageTextureFormats } from
+'../../../../../format_info.js';
+import { AllFeaturesMaxLimitsGPUTest } from '../../../../../gpu_test.js';
+import * as ttu from '../../../../../texture_test_utils.js';
 import {
   kFloat32Format,
   kFloat16Format,
@@ -24,12 +28,13 @@ import {
 '../../../../../util/conversion.js';
 import { align, clamp } from '../../../../../util/math.js';
 import { getTextureDimensionFromView, virtualMipSize } from '../../../../../util/texture/base.js';
-import { TexelFormats } from '../../../../types.js';
+
+import { getTextureFormatTypeInfo } from './texture_utils.js';
 
 const kDims = ['1d', '2d', '3d'];
 const kViewDimensions = ['1d', '2d', '2d-array', '3d'];
 
-export const g = makeTestGroup(TextureTestMixin(AllFeaturesMaxLimitsGPUTest));
+export const g = makeTestGroup(AllFeaturesMaxLimitsGPUTest);
 
 // We require a few values that are out of range for a given type
 // so we can check clamping behavior.
@@ -82,28 +87,22 @@ desc(
 ).
 params((u) =>
 u.
-combineWithParams([...TexelFormats, { format: 'bgra8unorm', _shaderType: 'f32' }]).
+combine('format', kPossibleStorageTextureFormats).
 combine('viewDimension', kViewDimensions)
 // Note: We can't use writable storage textures in a vertex stage.
 .combine('stage', ['compute', 'fragment']).
 combine('access', ['write', 'read_write']).
 unless(
-  (t) =>
-  t.access === 'read_write' &&
-  !kTextureFormatInfo[t.format].color?.readWriteStorage
+  (t) => t.access === 'read_write' && !isTextureFormatPossiblyStorageReadWritable(t.format)
 ).
 combine('mipLevel', [0, 1, 2]).
 unless((t) => t.viewDimension === '1d' && t.mipLevel !== 0)
 ).
-beforeAllSubcases((t) => {
-  if (t.params.format === 'bgra8unorm') {
-    t.selectDeviceOrSkipTestCase('bgra8unorm-storage');
-  } else {
-    t.skipIfTextureFormatNotUsableAsStorageTexture(t.params.format);
-  }
-}).
 fn((t) => {
-  const { format, stage, access, viewDimension, _shaderType, mipLevel } = t.params;
+  const { format, stage, access, viewDimension, mipLevel } = t.params;
+  t.skipIfTextureFormatNotUsableAsReadWriteStorageTexture(format);
+
+  const { componentType } = getTextureFormatTypeInfo(format);
   const values = inputArray(format);
 
   t.skipIf(
@@ -130,7 +129,7 @@ fn setValue(gid: vec3u) {
     range[(ndx + 2) % ${values.length}],
     range[(ndx + 3) % ${values.length}],
   );
-  var val = vec4<${_shaderType}>(vecVal);
+  var val = vec4<${componentType}>(vecVal);
   let coord = gid.${swizzleWGSL};
   textureStore(tex, coord${layerWGSL}, val);
 }
@@ -264,7 +263,7 @@ struct VOut {
       break;
   }
 
-  const buffer = t.copyWholeTextureToNewBufferSimple(texture, mipLevel);
+  const buffer = ttu.copyWholeTextureToNewBufferSimple(t, texture, mipLevel);
   const u32sPerTexel = bytesPerTexel / 4;
   const bytesPerRow = align(testMipLevelSize[0] * bytesPerTexel, 256);
   const texelsPerRow = bytesPerRow / bytesPerTexel;
@@ -364,10 +363,8 @@ struct VOut {
 
 g.test('bgra8unorm_swizzle').
 desc('Test bgra8unorm swizzling').
-beforeAllSubcases((t) => {
-  t.selectDeviceOrSkipTestCase('bgra8unorm-storage');
-}).
 fn((t) => {
+  t.skipIfDeviceDoesNotHaveFeature('bgra8unorm-storage');
   const values = [
   { r: -1.1, g: 0.6, b: 0.4, a: 1 },
   { r: 1.1, g: 0.6, b: 0.4, a: 1 },
@@ -433,7 +430,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
   pass.end();
   t.queue.submit([encoder.finish()]);
 
-  const buffer = t.copyWholeTextureToNewBufferSimple(texture, 0);
+  const buffer = ttu.copyWholeTextureToNewBufferSimple(t, texture, 0);
   const expected = new Uint32Array([
   ...iterRange(numTexels, (x) => {
     const { r, g, b, a } = values[x];
@@ -680,7 +677,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
   t.queue.submit([encoder.finish()]);
 
   for (let m = 0; m < t.params.mipCount; m++) {
-    const buffer = t.copyWholeTextureToNewBufferSimple(texture, m);
+    const buffer = ttu.copyWholeTextureToNewBufferSimple(t, texture, m);
     if (m === t.params.mip) {
       const expectedOutput = new Uint32Array([
       ...iterRange(view_texels, (x) => {
@@ -821,7 +818,7 @@ fn main(@builtin(global_invocation_id) gid : vec3u) {
   pass.end();
   t.queue.submit([encoder.finish()]);
 
-  const buffer = t.copyWholeTextureToNewBufferSimple(texture, 0);
+  const buffer = ttu.copyWholeTextureToNewBufferSimple(t, texture, 0);
   const expectedOutput = new Uint32Array([
   ...iterRange(num_texels, (x) => {
     const baseOffset = base_texels * t.params.baseLevel;

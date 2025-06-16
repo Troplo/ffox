@@ -12,10 +12,14 @@ add_task(async function () {
 
   const dbg = await initDebugger("doc-scripts.html");
 
+  await SpecialPowers.spawn(gBrowser.selectedBrowser, [], async function () {
+    // Register a global event listener to cover listeners set to DOM Element as well as on the global
+    // This may regress the DOM Events panel to show more than one entry for the click event.
+    content.eval(`window.onclick = () => {};`);
+  });
+
   info("Force the log method to be the debugger sidebar");
   await toggleJsTracerMenuItem(dbg, "#jstracer-menu-item-debugger-sidebar");
-  info("Also enable values recording");
-  await toggleJsTracerMenuItem(dbg, "#jstracer-menu-item-log-values");
 
   info("Enable the tracing");
   await toggleJsTracer(dbg.toolbox);
@@ -26,12 +30,34 @@ add_task(async function () {
     "The tracer sidebar is automatically shown on start"
   );
 
+  const argumentSearchInput = findElementWithSelector(
+    dbg,
+    `#tracer-tab-panel .call-tree-container input`
+  );
+  is(
+    argumentSearchInput.disabled,
+    true,
+    "The input to search by values is disabled"
+  );
+
+  info("Toggle off and on in order to record with values");
+  await toggleJsTracer(dbg.toolbox);
+  info("Enable values recording");
+  await toggleJsTracerMenuItem(dbg, "#jstracer-menu-item-log-values");
+  await toggleJsTracer(dbg.toolbox);
+
   const topLevelThreadActorID =
     dbg.toolbox.commands.targetCommand.targetFront.threadFront.actorID;
   info("Wait for tracing to be enabled");
   await waitForState(dbg, () => {
     return dbg.selectors.getIsThreadCurrentlyTracing(topLevelThreadActorID);
   });
+
+  is(
+    argumentSearchInput.disabled,
+    false,
+    "The input to search by values is no longer disabled"
+  );
 
   let tracerMessage = findElementWithSelector(
     dbg,
@@ -58,12 +84,27 @@ add_task(async function () {
   is(traces[0].textContent, "λ main simple1.js:1:16");
   is(traces[1].textContent, "λ foo simple2.js:1:12");
   is(traces[2].textContent, "λ bar simple2.js:3:4");
+  ok(
+    !findElement(dbg, "tracedLine"),
+    "Before selecting any trace, no line is highlighted in CodeMirror"
+  );
 
   info("Select the trace for the call to `foo`");
   EventUtils.synthesizeMouseAtCenter(traces[1], {}, dbg.win);
 
-  let focusedTrace = tracerTree.querySelector(".tree-node.focused .trace-line");
+  let focusedTrace = await waitFor(
+    () => tracerTree.querySelector(".tree-node.focused .trace-line"),
+    "Wait for the line to be focused in the tracer panel"
+  );
   is(focusedTrace, traces[1], "The clicked trace is now focused");
+  await waitFor(
+    () => findElement(dbg, "tracedLine"),
+    "Wait for the traced line to be highlighted in CodeMirror"
+  );
+  ok(
+    findElement(dbg, "tracedLine"),
+    "When a trace is selected, the line is highlighted in CodeMirror"
+  );
 
   // Naive sanity checks for inlines previews
   const inlinePreviews = [
@@ -134,7 +175,7 @@ add_task(async function () {
     }
   );
   await waitForPaused(dbg);
-  await waitForSelectedLocation(dbg, 1, 0);
+  await waitForSelectedLocation(dbg, 1, 1);
 
   focusedPausedFrame = findElementWithSelector(dbg, ".frames .frame.selected");
   ok(
@@ -148,7 +189,7 @@ add_task(async function () {
   info("Re select the tracer frame while being paused");
   EventUtils.synthesizeMouseAtCenter(traces[1], {}, dbg.win);
 
-  await waitForSelectedLocation(dbg, 1, 12);
+  await waitForSelectedLocation(dbg, 1, 13);
   focusedPausedFrame = findElementWithSelector(dbg, ".frames .frame.selected");
   ok(
     !focusedPausedFrame,
@@ -162,9 +203,22 @@ add_task(async function () {
     !!highlightedPausedFrame,
     "But it is still highlighted as inactive with a grey background"
   );
+  ok(
+    findElement(dbg, "tracedLine"),
+    "When a trace is selected, while being paused, the line is highlighted as traced in CodeMirror"
+  );
+  ok(
+    !findElement(dbg, "pausedLine"),
+    "The traced line is not highlighted as paused"
+  );
 
   await resume(dbg);
   await onResumed;
+
+  ok(
+    findElement(dbg, "tracedLine"),
+    "After resuming, the traced line is still highlighted in CodeMirror"
+  );
 
   // Trigger a click in the content page to verify we do trace DOM events
   BrowserTestUtils.synthesizeMouseAtCenter(
@@ -173,21 +227,25 @@ add_task(async function () {
     gBrowser.selectedBrowser
   );
 
-  const clickTrace = await waitFor(() =>
-    tracerTree.querySelector(".tracer-dom-event")
-  );
-  is(clickTrace.textContent, "DOM | node.click");
-  is(
-    tracerTree.querySelectorAll(".trace-line").length,
-    6,
-    "The click event adds two elements in the tree. The DOM Event and its top frame"
-  );
+  const [nodeClickTrace, globalClickTrace] = await waitFor(() => {
+    const elts = tracerTree.querySelectorAll(".tracer-dom-event");
+    if (elts.length == 2) {
+      return elts;
+    }
+    return false;
+  });
+  // This is the listener set on the <button> element
+  is(nodeClickTrace.textContent, "DOM | node.click");
+  // This is the listener set on the window object
+  is(globalClickTrace.textContent, "DOM | global.click");
 
   await BrowserTestUtils.synthesizeKey("x", {}, gBrowser.selectedBrowser);
   const keyTrace = await waitFor(() => {
+    // Scroll to bottom to ensure rendering the last elements (otherwise they are not because of VirtualizedTree)
+    tracerTree.scrollTop = tracerTree.scrollHeight;
     const elts = tracerTree.querySelectorAll(".tracer-dom-event");
-    if (elts.length == 2) {
-      return elts[1];
+    if (elts.length == 3) {
+      return elts[2];
     }
     return false;
   });
@@ -251,7 +309,9 @@ add_task(async function () {
     dbg,
     "#tracer-tab-panel #tracer-events-tab"
   );
-  eventListToggleButton.click();
+  // Use synthesizeMouseAtCenter as calling click() method somehow triggers mouse over
+  // on the event categories...
+  EventUtils.synthesizeMouseAtCenter(eventListToggleButton, {}, dbg.win);
 
   let domEventCategories = findAllElementsWithSelector(
     dbg,
@@ -260,6 +320,31 @@ add_task(async function () {
   is(domEventCategories.length, 2);
   is(domEventCategories[0].textContent, "Keyboard");
   is(domEventCategories[1].textContent, "Mouse");
+
+  info("Expand the Mouse category");
+  domEventCategories[1]
+    .closest(".event-listener-header")
+    .querySelector(".event-listener-expand")
+    .click();
+  const clickEventName = await waitFor(() => {
+    const eventNames = domEventCategories[1]
+      .closest(".event-listener-group")
+      .querySelectorAll(".event-listener-name");
+    if (eventNames.length == 1) {
+      return eventNames[0];
+    }
+    return false;
+  }, "There is only one mouse event");
+  is(
+    clickEventName.textContent,
+    "click",
+    "and that one mouse event is 'click'"
+  );
+  info("Fold the Mouse category");
+  domEventCategories[1]
+    .closest(".event-listener-header")
+    .querySelector(".event-listener-expand")
+    .click();
 
   // Test event highlighting on mouse over
   is(
@@ -280,12 +365,13 @@ add_task(async function () {
     );
   }, "The setTimeout event is highlighted in the timeline");
 
-  // Before toggling some DOM events, assert that the two events are displayed in the timeline
-  is(findAllElementsWithSelector(dbg, ".tracer-slider-event").length, 2);
-  info("Toggle off the Mouse and then the Keyboard events");
+  // Before toggling some DOM events, assert that the three events are displayed in the timeline
+  // (node and global click, and node keypress)
+  is(findAllElementsWithSelector(dbg, ".tracer-slider-event").length, 3);
+  info("Toggle off the Keyboard and then the Mouse events");
   domEventCategories[0].click();
   await waitFor(
-    () => findAllElementsWithSelector(dbg, ".tracer-slider-event").length == 1
+    () => findAllElementsWithSelector(dbg, ".tracer-slider-event").length == 2
   );
   domEventCategories[1].click();
   // Now that all events are disabled, there is no more trace displayed in the timeline

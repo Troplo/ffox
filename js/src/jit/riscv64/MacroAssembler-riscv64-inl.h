@@ -506,12 +506,26 @@ void MacroAssembler::branch16(Condition cond, const Address& lhs, Imm32 rhs,
   }
 }
 void MacroAssembler::branch32(Condition cond, Register lhs, Register rhs,
-                              Label* label) {
+                              Label* label, LhsHighBitsAreClean clean) {
+  if (clean == LhsHighBitsAreClean::No) {
+    UseScratchRegisterScope temps(this);
+    Register scratch = temps.Acquire();
+    slliw(scratch, lhs, 0);
+    ma_b(scratch, rhs, label, cond);
+    return;
+  }
   ma_b(lhs, rhs, label, cond);
 }
 
 void MacroAssembler::branch32(Condition cond, Register lhs, Imm32 imm,
-                              Label* label) {
+                              Label* label, LhsHighBitsAreClean clean) {
+  if (clean == LhsHighBitsAreClean::No) {
+    UseScratchRegisterScope temps(this);
+    Register scratch = temps.Acquire();
+    slliw(scratch, lhs, 0);
+    ma_b(scratch, imm, label, cond);
+    return;
+  }
   ma_b(lhs, imm, label, cond);
 }
 
@@ -2068,30 +2082,31 @@ void MacroAssembler::sqrtFloat32(FloatRegister src, FloatRegister dest) {
   fsqrt_s(dest, src);
 }
 
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat16(
-    FloatRegister src, const Address& dest, Register) {
+FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
+                                                const Address& dest, Register) {
   MOZ_CRASH("Not supported for this target");
 }
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat16(
-    FloatRegister src, const BaseIndex& dest, Register) {
+FaultingCodeOffset MacroAssembler::storeFloat16(FloatRegister src,
+                                                const BaseIndex& dest,
+                                                Register) {
   MOZ_CRASH("Not supported for this target");
 }
 
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat32(
-    FloatRegister src, const Address& addr) {
+FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
+                                                const Address& addr) {
   return ma_fst_s(src, addr);
 }
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedFloat32(
-    FloatRegister src, const BaseIndex& addr) {
+FaultingCodeOffset MacroAssembler::storeFloat32(FloatRegister src,
+                                                const BaseIndex& addr) {
   return ma_fst_s(src, addr);
 }
 
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedDouble(
-    FloatRegister src, const Address& addr) {
+FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
+                                               const Address& addr) {
   return ma_fst_d(src, addr);
 }
-FaultingCodeOffset MacroAssembler::storeUncanonicalizedDouble(
-    FloatRegister src, const BaseIndex& addr) {
+FaultingCodeOffset MacroAssembler::storeDouble(FloatRegister src,
+                                               const BaseIndex& addr) {
   return ma_fst_d(src, addr);
 }
 void MacroAssembler::sub32(Register src, Register dest) {

@@ -11,10 +11,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
-import android.net.Uri
 import android.os.SystemClock
 import android.provider.Browser.EXTRA_APPLICATION_ID
 import androidx.annotation.VisibleForTesting
+import androidx.core.net.toUri
 import mozilla.components.support.base.log.logger.Logger
 import mozilla.components.support.ktx.android.content.pm.isPackageInstalled
 import mozilla.components.support.ktx.android.net.isHttpOrHttps
@@ -71,14 +71,6 @@ class AppLinksUseCases(
         }
     }
 
-    /**
-     * Update launchInApp for this instance of AppLinksUseCases
-     * @param launchInApp the new value of launchInApp
-     */
-    fun updateLaunchInApp(launchInApp: () -> Boolean) {
-        this.launchInApp = launchInApp
-    }
-
     private fun findDefaultActivity(intent: Intent): ResolveInfo? {
         return context.packageManager.resolveActivityCompat(intent, PackageManager.MATCH_DEFAULT_ONLY)
     }
@@ -111,7 +103,7 @@ class AppLinksUseCases(
 
             val redirectData = createBrowsableIntents(url)
             val isAppIntentHttpOrHttps = redirectData.appIntent?.data?.isHttpOrHttps ?: false
-            val isEngineSupportedScheme = ENGINE_SUPPORTED_SCHEMES.contains(Uri.parse(url).scheme)
+            val isEngineSupportedScheme = ENGINE_SUPPORTED_SCHEMES.contains(url.toUri().scheme)
             val isBrowserRedirect = redirectData.resolveInfo?.activityInfo?.packageName?.let { packageName ->
                 installedBrowsers.isInstalled(packageName)
             } ?: false
@@ -122,8 +114,8 @@ class AppLinksUseCases(
 
             // Only set fallback URL if url is not a Google PlayStore URL
             // The reason here is we already handled that case with the market place URL
-            val fallbackUrl = redirectData.fallbackIntent?.data?.takeIf {
-                it.isHttpOrHttps && (!isPlayStoreURL(it.toString()) || redirectData.resolveInfo == null)
+            val fallbackUrl = redirectData.fallbackUrl?.takeIf {
+                !isPlayStoreURL(it) || redirectData.resolveInfo == null
             }?.toString()
 
             val appIntent = when {
@@ -135,7 +127,13 @@ class AppLinksUseCases(
             }
 
             // no need to check marketplace intent since it is only set if a package is set in the intent
-            val appLinkRedirect = AppLinkRedirect(appIntent, appName, fallbackUrl, redirectData.marketplaceIntent)
+            val appLinkRedirect = AppLinkRedirect(
+                appIntent = appIntent,
+                appName = appName,
+                fallbackUrl = fallbackUrl,
+                marketplaceIntent = redirectData.marketplaceIntent,
+            )
+
             redirectCache = AppLinkRedirectCache(currentTimeStamp, urlHash, appLinkRedirect)
             return appLinkRedirect
         }
@@ -148,9 +146,6 @@ class AppLinksUseCases(
 
         private fun createBrowsableIntents(url: String): RedirectData {
             val intent = safeParseUri(url, Intent.URI_INTENT_SCHEME)
-            val fallbackIntent = intent?.getStringExtra(EXTRA_BROWSER_FALLBACK_URL)?.let {
-                safeParseUri(it, 0)
-            }
 
             val marketplaceIntent = intent?.`package`?.let {
                 if (includeInstallAppFallback &&
@@ -203,7 +198,12 @@ class AppLinksUseCases(
                 }
             }
 
-            return RedirectData(appIntent, fallbackIntent, marketplaceIntent, resolveInfo)
+            return RedirectData(
+                appIntent = appIntent,
+                fallbackUrl = null,
+                marketplaceIntent = marketplaceIntent,
+                resolveInfo = resolveInfo,
+            )
         }
 
         private fun isPlayStoreURL(url: String): Boolean {
@@ -298,7 +298,7 @@ class AppLinksUseCases(
     }
     private data class RedirectData(
         val appIntent: Intent? = null,
-        val fallbackIntent: Intent? = null,
+        val fallbackUrl: String? = null,
         val marketplaceIntent: Intent? = null,
         val resolveInfo: ResolveInfo? = null,
     )

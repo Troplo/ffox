@@ -225,6 +225,11 @@ void NetworkConnectivityService::PerformChecks() {
     }
   }
 
+  if (StaticPrefs::network_connectivity_service_wait_for_idle_startup() &&
+      !mIdleStartupDone) {
+    return;
+  }
+
   RecheckDNS();
   RecheckIPConnectivity();
 }
@@ -438,6 +443,7 @@ NetworkConnectivityService::Observe(nsISupports* aSubject, const char* aTopic,
                   .Equals(aData)) {
     PerformChecks();
   } else if (!strcmp(aTopic, "browser-idle-startup-tasks-finished")) {
+    mIdleStartupDone = true;
     PerformChecks();
   }
 
@@ -581,9 +587,10 @@ NetworkConnectivityService::OnStopRequest(nsIRequest* aRequest,
     mIPv4Channel = nullptr;
 
     if (mIPv4 == nsINetworkConnectivityService::OK) {
-      Telemetry::AccumulateCategorical(
-          mHasNetworkId ? Telemetry::LABELS_NETWORK_ID_ONLINE::present
-                        : Telemetry::LABELS_NETWORK_ID_ONLINE::absent);
+      glean::network::id_online
+          .EnumGet(mHasNetworkId ? glean::network::IdOnlineLabel::ePresent
+                                 : glean::network::IdOnlineLabel::eAbsent)
+          .Add();
       LOG(("mHasNetworkId : %d\n", mHasNetworkId));
     }
   } else if (aRequest == mIPv6Channel) {

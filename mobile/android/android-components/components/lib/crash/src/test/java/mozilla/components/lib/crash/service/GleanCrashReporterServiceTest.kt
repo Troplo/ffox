@@ -12,6 +12,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import mozilla.components.concept.base.crash.Breadcrumb
 import mozilla.components.lib.crash.Crash
@@ -91,7 +92,8 @@ class GleanCrashReporterServiceTest {
                 0,
                 "",
                 "",
-                Crash.NativeCodeCrash.PROCESS_TYPE_MAIN,
+                Crash.NativeCodeCrash.PROCESS_VISIBILITY_MAIN,
+                processType = "main",
                 breadcrumbs = arrayListOf(),
                 remoteType = null,
             ),
@@ -99,7 +101,8 @@ class GleanCrashReporterServiceTest {
                 0,
                 "",
                 "",
-                Crash.NativeCodeCrash.PROCESS_TYPE_FOREGROUND_CHILD,
+                Crash.NativeCodeCrash.PROCESS_VISIBILITY_FOREGROUND_CHILD,
+                processType = "content",
                 breadcrumbs = arrayListOf(),
                 remoteType = "web",
             ),
@@ -107,7 +110,8 @@ class GleanCrashReporterServiceTest {
                 0,
                 "",
                 "",
-                Crash.NativeCodeCrash.PROCESS_TYPE_BACKGROUND_CHILD,
+                Crash.NativeCodeCrash.PROCESS_VISIBILITY_BACKGROUND_CHILD,
+                processType = "utility",
                 breadcrumbs = arrayListOf(),
                 remoteType = null,
             ),
@@ -198,7 +202,8 @@ class GleanCrashReporterServiceTest {
                 0,
                 "",
                 "",
-                Crash.NativeCodeCrash.PROCESS_TYPE_MAIN,
+                Crash.NativeCodeCrash.PROCESS_VISIBILITY_MAIN,
+                processType = "main",
                 breadcrumbs = arrayListOf(),
                 remoteType = null,
             )
@@ -206,7 +211,8 @@ class GleanCrashReporterServiceTest {
                 0,
                 "",
                 "",
-                Crash.NativeCodeCrash.PROCESS_TYPE_FOREGROUND_CHILD,
+                Crash.NativeCodeCrash.PROCESS_VISIBILITY_FOREGROUND_CHILD,
+                processType = "content",
                 breadcrumbs = arrayListOf(),
                 remoteType = "web",
             )
@@ -214,7 +220,8 @@ class GleanCrashReporterServiceTest {
                 0,
                 "",
                 "",
-                Crash.NativeCodeCrash.PROCESS_TYPE_BACKGROUND_CHILD,
+                Crash.NativeCodeCrash.PROCESS_VISIBILITY_BACKGROUND_CHILD,
+                processType = "utility",
                 breadcrumbs = arrayListOf(),
                 remoteType = null,
             )
@@ -222,7 +229,8 @@ class GleanCrashReporterServiceTest {
                 0,
                 "",
                 "",
-                Crash.NativeCodeCrash.PROCESS_TYPE_BACKGROUND_CHILD,
+                Crash.NativeCodeCrash.PROCESS_VISIBILITY_BACKGROUND_CHILD,
+                processType = "content",
                 breadcrumbs = arrayListOf(),
                 remoteType = "extension",
             )
@@ -405,7 +413,8 @@ class GleanCrashReporterServiceTest {
             12340000,
             "",
             "",
-            Crash.NativeCodeCrash.PROCESS_TYPE_MAIN,
+            Crash.NativeCodeCrash.PROCESS_VISIBILITY_MAIN,
+            processType = "main",
             breadcrumbs = arrayListOf(),
             remoteType = null,
         )
@@ -456,7 +465,8 @@ class GleanCrashReporterServiceTest {
             12340000,
             null,
             null,
-            Crash.NativeCodeCrash.PROCESS_TYPE_MAIN,
+            Crash.NativeCodeCrash.PROCESS_VISIBILITY_MAIN,
+            processType = "main",
             breadcrumbs = arrayListOf(
                 Breadcrumb(
                     message = "Breadcrumb-1",
@@ -639,10 +649,11 @@ class GleanCrashReporterServiceTest {
                 "Version": "123.0.0",
                 "StartupCrash": "1",
                 "TotalPhysicalMemory": 100,
-                "ExperimentalFeatures": "expa,expb",
                 "AsyncShutdownTimeout": "{\"phase\":\"abcd\",\"conditions\":[{\"foo\":\"bar\"}],\"brokenAddBlockers\":[\"foo\"]}",
                 "QuotaManagerShutdownTimeout": "line1\nline2\nline3",
-                "StackTraces": $stackTracesAnnotation
+                "StackTraces": $stackTracesAnnotation,
+                "JSLargeAllocationFailure": "reporting",
+                "JSOutOfMemory": "recovered"
             }
             """.trimIndent(),
         )
@@ -651,7 +662,8 @@ class GleanCrashReporterServiceTest {
             12340000,
             "",
             extrasFile.path,
-            Crash.NativeCodeCrash.PROCESS_TYPE_MAIN,
+            Crash.NativeCodeCrash.PROCESS_VISIBILITY_MAIN,
+            processType = "main",
             breadcrumbs = arrayListOf(),
             remoteType = null,
         )
@@ -677,10 +689,8 @@ class GleanCrashReporterServiceTest {
                 assertEquals("beta", GleanCrash.appChannel.testGetValue())
                 assertEquals("123.0.0", GleanCrash.appDisplayVersion.testGetValue())
                 assertEquals(100L, GleanMemory.totalPhysical.testGetValue())
-                assertEquals(
-                    listOf("expa", "expb"),
-                    GleanEnvironment.experimentalFeatures.testGetValue(),
-                )
+                assertEquals("reporting", GleanMemory.jsLargeAllocationFailure.testGetValue())
+                assertEquals("recovered", GleanMemory.jsOutOfMemory.testGetValue())
                 assertEquals(
                     JsonObject(
                         mapOf(
@@ -719,7 +729,7 @@ class GleanCrashReporterServiceTest {
 
         val crash = Crash.UncaughtExceptionCrash(
             12340000,
-            RuntimeException("Test"),
+            RuntimeException("Test", java.io.IOException("IO")),
             arrayListOf(),
         )
 
@@ -753,8 +763,31 @@ class GleanCrashReporterServiceTest {
                 assertEquals("java_exception", GleanCrash.cause.testGetValue())
                 val exc = GleanCrash.javaException.testGetValue()
                 assertNotNull(exc)
-                assertNotNull(exc?.jsonObject?.get("messages"))
-                assertNotNull(exc?.jsonObject?.get("stack"))
+                val throwables = exc?.jsonObject?.get("throwables")
+                assertNotNull(throwables)
+                throwables?.jsonArray?.let { arr ->
+                    assertEquals(2, arr.size)
+                    val first = arr.get(0).jsonObject.toMutableMap()
+                    assertNotNull(first.remove("stack"))
+                    assertEquals(
+                        JsonObject(
+                            mapOf(
+                                "typeName" to JsonPrimitive("java.lang.RuntimeException"),
+                                "message" to JsonPrimitive("Test"),
+                            ),
+                        ),
+                        first,
+                    )
+                    assertEquals(
+                        JsonObject(
+                            mapOf(
+                                "typeName" to JsonPrimitive("java.io.IOException"),
+                                "message" to JsonPrimitive("IO"),
+                            ),
+                        ),
+                        arr.get(1),
+                    )
+                }
                 pingReceived = true
             }
 

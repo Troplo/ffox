@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,9 +30,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import mozilla.components.compose.base.Divider
-import mozilla.components.compose.base.annotation.LightDarkPreview
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.list.IconListItem
 import org.mozilla.fenix.compose.list.ImageListItem
@@ -49,6 +50,8 @@ private val ROUNDED_CORNER_SHAPE = RoundedCornerShape(4.dp)
  *
  * @param label The label in the menu item.
  * @param beforeIconPainter [Painter] used to display an [Icon] before the list item.
+ * @param modifier [Modifier] to be applied to the layout.
+ * @param labelModifier [Modifier] to be applied to the label.
  * @param beforeIconDescription Content description of the icon.
  * @param description An optional description text below the label.
  * @param state The state of the menu item to display.
@@ -58,15 +61,16 @@ private val ROUNDED_CORNER_SHAPE = RoundedCornerShape(4.dp)
  * at the end.
  * @param afterIconPainter [Painter] used to display an [IconButton] after the list item.
  * @param afterIconDescription Content description of the icon.
- * @param modifier [Modifier] to be applied to the layout.
- * @param labelModifier [Modifier] to be applied to the label.
  * @param onAfterIconClick Invoked when the user clicks on the icon. An [IconButton] will be
  * displayed if this is provided. Otherwise, an [Icon] will be displayed.
+ * @param afterContent Optional Composable for adding UI to the end of the list item.
  */
 @Composable
 internal fun MenuItem(
     label: String,
     beforeIconPainter: Painter,
+    modifier: Modifier = Modifier,
+    labelModifier: Modifier = Modifier,
     beforeIconDescription: String? = null,
     description: String? = null,
     state: MenuItemState = MenuItemState.ENABLED,
@@ -75,9 +79,8 @@ internal fun MenuItem(
     showDivider: Boolean = false,
     afterIconPainter: Painter? = null,
     afterIconDescription: String? = null,
-    modifier: Modifier = Modifier,
-    labelModifier: Modifier = Modifier,
     onAfterIconClick: (() -> Unit)? = null,
+    afterContent: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val labelTextColor = getLabelTextColor(state = state)
     val descriptionTextColor = getDescriptionTextColor(state = descriptionState)
@@ -121,6 +124,7 @@ internal fun MenuItem(
         afterIconDescription = afterIconDescription,
         afterIconTint = iconTint,
         onAfterIconClick = onAfterIconClick,
+        afterListAction = afterContent,
     )
 }
 
@@ -264,7 +268,7 @@ private fun getIconTint(state: MenuItemState): Color {
     }
 }
 
-@LightDarkPreview
+@PreviewLightDark
 @Composable
 private fun WebExtensionMenuItemPreview() {
     FirefoxTheme {
@@ -285,7 +289,7 @@ private fun WebExtensionMenuItemPreview() {
     }
 }
 
-@LightDarkPreview
+@PreviewLightDark
 @Composable
 private fun MenuItemPreview() {
     FirefoxTheme {

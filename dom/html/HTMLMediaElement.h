@@ -110,6 +110,25 @@ enum class StreamCaptureBehavior : uint8_t {
   FINISH_WHEN_ENDED
 };
 
+/**
+ * Possible values of the 'preload' attribute.
+ */
+enum MediaPreloadAttrValue : uint8_t {
+  PRELOAD_ATTR_NONE,      // set to "none"
+  PRELOAD_ATTR_METADATA,  // set to "metadata"
+  PRELOAD_ATTR_AUTO       // set to "auto"
+};
+
+// Mappings from 'preload' attribute strings to an enumeration.
+static const nsAttrValue::EnumTableEntry kPreloadTable[] = {
+    {"none", MediaPreloadAttrValue::PRELOAD_ATTR_NONE},
+    {"metadata", MediaPreloadAttrValue::PRELOAD_ATTR_METADATA},
+    {"auto", MediaPreloadAttrValue::PRELOAD_ATTR_AUTO},
+};
+
+static constexpr const nsAttrValue::EnumTableEntry* kPreloadDefaultType =
+    &kPreloadTable[std::size(kPreloadTable) - 1];
+
 class HTMLMediaElement : public nsGenericHTMLElement,
                          public MediaDecoderOwner,
                          public PrincipalChangeObserver<MediaStreamTrack>,
@@ -310,9 +329,11 @@ class HTMLMediaElement : public nsGenericHTMLElement,
       VideoFrameContainer* aContainer,
       const PrincipalHandle& aNewPrincipalHandle) override;
 
-  // Dispatch events
-  void DispatchAsyncEvent(const nsAString& aName) final;
-  void DispatchAsyncEvent(RefPtr<nsMediaEventRunner> aRunner);
+  // Queue a media element task to fire an event targeted at the media element.
+  void QueueEvent(const nsAString& aName) final;
+  // Queue a media element task.
+  // The task is blocked while the document is in B/F cache.
+  void QueueTask(RefPtr<nsMediaEventRunner> aRunner);
 
   // Triggers a recomputation of readyState.
   void UpdateReadyState() override {
@@ -519,7 +540,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
       nsGkAtoms::none->ToString(aValue);
       return;
     }
-    GetEnumAttr(nsGkAtoms::preload, nullptr, aValue);
+    GetEnumAttr(nsGkAtoms::preload, kPreloadDefaultType->tag, aValue);
   }
   void SetPreload(const nsAString& aValue, ErrorResult& aRv) {
     if (mSrcAttrStream) {
@@ -1077,8 +1098,7 @@ class HTMLMediaElement : public nsGenericHTMLElement,
    * state to NETWORK_NO_SOURCE, and sends error event with code
    * MEDIA_ERR_SRC_NOT_SUPPORTED.
    */
-  void NoSupportedMediaSourceError(
-      const nsACString& aErrorDetails = nsCString());
+  void NoSupportedMediaSourceError(const nsACString& aErrorDetails);
 
   /**
    * Per spec, Failed with elements: Queue a task, using the DOM manipulation
@@ -1163,16 +1183,6 @@ class HTMLMediaElement : public nsGenericHTMLElement,
    * Called when "xpcom-shutdown" event is received.
    */
   void NotifyShutdownEvent();
-
-  /**
-   * Possible values of the 'preload' attribute.
-   */
-  enum PreloadAttrValue : uint8_t {
-    PRELOAD_ATTR_EMPTY,     // set to ""
-    PRELOAD_ATTR_NONE,      // set to "none"
-    PRELOAD_ATTR_METADATA,  // set to "metadata"
-    PRELOAD_ATTR_AUTO       // set to "auto"
-  };
 
   /**
    * The preloading action to perform. These dictate how we react to the
@@ -1324,7 +1334,8 @@ class HTMLMediaElement : public nsGenericHTMLElement,
 
   using nsGenericHTMLElement::DispatchEvent;
   // For nsAsyncEventRunner.
-  nsresult DispatchEvent(const nsAString& aName);
+  // The event is blocked while the document is in B/F cache.
+  MOZ_CAN_RUN_SCRIPT nsresult FireEvent(const nsAString& aName);
 
   already_AddRefed<nsMediaEventRunner> GetEventRunner(
       const nsAString& aName, EventFlag aFlag = EventFlag::eNone);

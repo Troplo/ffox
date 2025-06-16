@@ -14,15 +14,15 @@ add_task(async function () {
   await addBreakpoint(dbg, longSrc, 66);
   invokeInTab("testModel");
   await waitForPaused(dbg, "long.js");
-  // Some spurious scroll may happen late related to text content *and* late fetching of symbols
+  // Some spurious scroll may happen late related to text content
   await waitForScrolling(dbg);
 
   ok(isScrolledPositionVisible(dbg, 66), "The paused line is visible");
 
   info("1. adding a breakpoint should not scroll the editor");
-  await scrollEditorIntoView(dbg, 0, 0);
+  await scrollEditorIntoView(dbg, 1, 0);
   await addBreakpoint(dbg, longSrc, 11);
-  ok(isScrolledPositionVisible(dbg, 0), "scroll position");
+  ok(isScrolledPositionVisible(dbg, 1), "scroll position");
 
   info("2. searching should jump to the match");
   pressKey(dbg, "fileSearch");
@@ -35,9 +35,7 @@ add_task(async function () {
   is(
     getSearchSelection(dbg).line,
     26,
-    `The line of first check occurence in long.js is selected (this is ${
-      isCm6Enabled ? "one" : "zero"
-    }-based)`
+    "The line of first check occurence in long.js is selected (this is one-based)"
   );
   // The column is the end of "check", so after 'k'
   is(

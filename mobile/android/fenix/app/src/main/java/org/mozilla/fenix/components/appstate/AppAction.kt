@@ -19,7 +19,7 @@ import mozilla.components.service.pocket.PocketStory.SponsoredContent
 import org.mozilla.fenix.browser.StandardSnackbarError
 import org.mozilla.fenix.browser.browsingmode.BrowsingMode
 import org.mozilla.fenix.components.AppStore
-import org.mozilla.fenix.components.appstate.shopping.ShoppingState
+import org.mozilla.fenix.components.appstate.setup.checklist.ChecklistItem
 import org.mozilla.fenix.components.appstate.webcompat.WebCompatState
 import org.mozilla.fenix.home.bookmarks.Bookmark
 import org.mozilla.fenix.home.pocket.PocketImpression
@@ -142,6 +142,20 @@ sealed class AppAction : Action {
      * Action dispatched when the current site's data has been cleared.
      */
     data object SiteDataCleared : AppAction()
+
+    /**
+     * Action dispatched when the current tab has been closed.
+     *
+     * @property isPrivate Whether the closed tab was private or not.
+     */
+    data class CurrentTabClosed(
+        val isPrivate: Boolean,
+    ) : AppAction()
+
+    /**
+     * Action dispatched when an URL has been copied to the clipboard.
+     */
+    data object URLCopiedToClipboard : AppAction()
 
     /**
      * Action dispatched when open in firefox action is selected from custom tab.
@@ -290,48 +304,6 @@ sealed class AppAction : Action {
     data class UpdateStandardSnackbarErrorAction(
         val standardSnackbarError: StandardSnackbarError?,
     ) : AppAction()
-
-    /**
-     * [AppAction]s related to shopping sheet state.
-     */
-    sealed class ShoppingAction : AppAction() {
-
-        /**
-         * [ShoppingAction] used to update the expansion state of the shopping sheet.
-         */
-        data class ShoppingSheetStateUpdated(val expanded: Boolean) : ShoppingAction()
-
-        /**
-         * [ShoppingAction] used to update the expansion state of the highlights card.
-         */
-        data class HighlightsCardExpanded(
-            val productPageUrl: String,
-            val expanded: Boolean,
-        ) : ShoppingAction()
-
-        /**
-         * [ShoppingAction] used to update the expansion state of the info card.
-         */
-        data class InfoCardExpanded(
-            val productPageUrl: String,
-            val expanded: Boolean,
-        ) : ShoppingAction()
-
-        /**
-         * [ShoppingAction] used to update the expansion state of the settings card.
-         */
-        data class SettingsCardExpanded(
-            val productPageUrl: String,
-            val expanded: Boolean,
-        ) : ShoppingAction()
-
-        /**
-         * [ShoppingAction] used to update the recorded product recommendation impressions set.
-         */
-        data class ProductRecommendationImpression(
-            val key: ShoppingState.ProductRecommendationImpressionKey,
-        ) : ShoppingAction()
-    }
 
     /**
      * [AppAction]s related to the tab strip.
@@ -513,6 +485,19 @@ sealed class AppAction : Action {
     }
 
     /**
+     * [AppAction]s related to the private‐browsing lock feature.
+     */
+    sealed class PrivateBrowsingLockAction : AppAction() {
+
+        /**
+         * Dispatched when the private-browsing lock state should be updated.
+         *
+         * @property isLocked whether the feature should be locked.
+         */
+        data class UpdatePrivateBrowsingLock(val isLocked: Boolean) : PrivateBrowsingLockAction()
+    }
+
+    /**
      * [AppAction]s related to the content recommendations feature.
      */
     sealed class ContentRecommendationsAction : AppAction() {
@@ -620,5 +605,36 @@ sealed class AppAction : Action {
          * Dispatched when the WebCompat reporter has been submitted successfully.
          */
         data object WebCompatReportSent : WebCompatAction()
+    }
+
+    /**
+     * [AppAction]s related to the Setup Checklist feature.
+     */
+    sealed class SetupChecklistAction : AppAction() {
+        /**
+         * When the setup checklist feature is initialised.
+         */
+        data object Init : SetupChecklistAction()
+
+        /**
+         * When the setup checklist is closed.
+         */
+        data object Closed : SetupChecklistAction()
+
+        /**
+         * When a setup checklist item is clicked.
+         */
+        data class ChecklistItemClicked(val item: ChecklistItem) : SetupChecklistAction()
+
+        /**
+         * When a checklist task preference is updated.
+         *
+         * @property taskType The type of task whose preference was updated.
+         * @property prefValue The new value of the preference.
+         */
+        data class TaskPreferenceUpdated(
+            val taskType: ChecklistItem.Task.Type,
+            val prefValue: Boolean,
+        ) : SetupChecklistAction()
     }
 }

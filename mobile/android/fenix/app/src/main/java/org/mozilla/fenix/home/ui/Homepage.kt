@@ -4,6 +4,7 @@
 
 package org.mozilla.fenix.home.ui
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,24 +12,37 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import mozilla.components.compose.base.button.TertiaryButton
 import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.fenix.GleanMetrics.History
+import org.mozilla.fenix.GleanMetrics.HomeBookmarks
 import org.mozilla.fenix.GleanMetrics.RecentlyVisitedHomepage
 import org.mozilla.fenix.R
+import org.mozilla.fenix.components.appstate.setup.checklist.SetupChecklistState
 import org.mozilla.fenix.compose.MessageCard
-import org.mozilla.fenix.compose.button.TertiaryButton
 import org.mozilla.fenix.compose.home.HomeSectionHeader
 import org.mozilla.fenix.home.bookmarks.Bookmark
 import org.mozilla.fenix.home.bookmarks.interactor.BookmarksInteractor
@@ -55,31 +69,45 @@ import org.mozilla.fenix.home.sessioncontrol.CustomizeHomeIteractor
 import org.mozilla.fenix.home.sessioncontrol.MessageCardInteractor
 import org.mozilla.fenix.home.sessioncontrol.viewholders.FeltPrivacyModeInfoCard
 import org.mozilla.fenix.home.sessioncontrol.viewholders.PrivateBrowsingDescription
+import org.mozilla.fenix.home.setup.ui.SetupChecklist
 import org.mozilla.fenix.home.store.HomepageState
 import org.mozilla.fenix.home.store.NimbusMessageState
 import org.mozilla.fenix.home.topsites.TopSiteColors
 import org.mozilla.fenix.home.topsites.TopSites
+import org.mozilla.fenix.home.ui.HomepageTestTag.HOMEPAGE
 import org.mozilla.fenix.theme.FirefoxTheme
 import org.mozilla.fenix.theme.Theme
+import org.mozilla.fenix.utils.isLargeScreenSize
 import org.mozilla.fenix.wallpapers.WallpaperState
+
+private const val MIDDLE_SEARCH_SCROLL_THRESHOLD_PX = 10
 
 /**
  * Top level composable for the homepage.
  *
  * @param state State representing the homepage.
  * @param interactor for interactions with the homepage UI.
+ * @param onMiddleSearchBarVisibilityChanged Invoked when the middle search is shown/hidden.
  * @param onTopSitesItemBound Invoked during the composition of a top site item.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Suppress("LongMethod")
 @Composable
 internal fun Homepage(
     state: HomepageState,
     interactor: HomepageInteractor,
+    onMiddleSearchBarVisibilityChanged: (isVisible: Boolean) -> Unit,
     onTopSitesItemBound: () -> Unit,
 ) {
+    val scrollState = rememberScrollState()
+
     Column(
         modifier = Modifier
-            .verticalScroll(rememberScrollState()),
+            .semantics {
+                testTagsAsResourceId = true
+                testTag = HOMEPAGE
+            }
+            .verticalScroll(scrollState),
     ) {
         HomepageHeader(
             browsingMode = state.browsingMode,
@@ -118,6 +146,29 @@ internal fun Homepage(
                             onTopSitesItemBound = onTopSitesItemBound,
                         )
                     }
+
+                    if (searchBarEnabled) {
+                        val atTopOfList by remember {
+                            derivedStateOf {
+                                scrollState.value < MIDDLE_SEARCH_SCROLL_THRESHOLD_PX
+                            }
+                        }
+
+                        LaunchedEffect(atTopOfList) {
+                            onMiddleSearchBarVisibilityChanged(atTopOfList)
+                        }
+
+                            val alpha by animateFloatAsState(
+                                targetValue = if (showSearchBar && atTopOfList) 1f else 0f,
+                            )
+
+                            SearchBar(
+                                modifier = Modifier.graphicsLayer { this.alpha = alpha },
+                                onClick = interactor::onNavigateSearch,
+                            )
+                        }
+
+                    MaybeAddSetupChecklist(setupChecklistState, interactor)
 
                     if (showRecentTabs) {
                         RecentTabsSection(
@@ -191,6 +242,20 @@ internal fun Homepage(
 }
 
 @Composable
+private fun MaybeAddSetupChecklist(
+    setupChecklistState: SetupChecklistState?,
+    interactor: HomepageInteractor,
+) {
+    val isTabletDevice = LocalContext.current.isLargeScreenSize()
+    if (!isTabletDevice && setupChecklistState != null && setupChecklistState.isVisible) {
+        SetupChecklist(
+            setupChecklistState = setupChecklistState,
+            interactor = interactor,
+        )
+    }
+}
+
+@Composable
 private fun NimbusMessageCardSection(
     nimbusMessage: NimbusMessageState,
     interactor: MessageCardInteractor,
@@ -242,6 +307,10 @@ private fun BookmarksSection(
     cardBackgroundColor: Color,
     interactor: BookmarksInteractor,
 ) {
+    LaunchedEffect(Unit) {
+        HomeBookmarks.shown.record(NoExtras())
+    }
+
     Spacer(modifier = Modifier.height(40.dp))
 
     HomeSectionHeader(
@@ -369,11 +438,12 @@ private fun CollectionsSection(
 
 @Composable
 private fun CustomizeHomeButton(buttonBackgroundColor: Color, interactor: CustomizeHomeIteractor) {
-    Spacer(modifier = Modifier.height(68.dp))
+    Spacer(modifier = Modifier.height(24.dp))
 
     TertiaryButton(
         text = stringResource(R.string.browser_menu_customize_home_1),
         modifier = Modifier
+            .heightIn(min = 48.dp)
             .padding(horizontal = dimensionResource(R.dimen.home_item_horizontal_margin))
             .fillMaxWidth(),
         backgroundColor = buttonBackgroundColor,
@@ -385,32 +455,42 @@ private fun CustomizeHomeButton(buttonBackgroundColor: Color, interactor: Custom
 @PreviewLightDark
 private fun HomepagePreview() {
     FirefoxTheme {
-        Homepage(
-            HomepageState.Normal(
-                nimbusMessage = FakeHomepagePreview.nimbusMessageState(),
-                topSites = FakeHomepagePreview.topSites(),
-                recentTabs = FakeHomepagePreview.recentTabs(),
-                syncedTab = FakeHomepagePreview.recentSyncedTab(),
-                bookmarks = FakeHomepagePreview.bookmarks(),
-                recentlyVisited = FakeHomepagePreview.recentHistory(),
-                collectionsState = FakeHomepagePreview.collectionsPlaceholder(),
-                pocketState = FakeHomepagePreview.pocketState(),
-                showTopSites = true,
-                showRecentTabs = true,
-                showRecentSyncedTab = true,
-                showBookmarks = true,
-                showRecentlyVisited = true,
-                showPocketStories = true,
-                topSiteColors = TopSiteColors.colors(),
-                cardBackgroundColor = WallpaperState.default.cardBackgroundColor,
-                buttonTextColor = WallpaperState.default.buttonTextColor,
-                buttonBackgroundColor = WallpaperState.default.buttonBackgroundColor,
-                customizeHomeButtonBackgroundColor = FirefoxTheme.colors.actionTertiary,
-                bottomSpacerHeight = 188.dp,
-            ),
-            interactor = FakeHomepagePreview.homepageInteractor,
-            onTopSitesItemBound = {},
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(color = FirefoxTheme.colors.layer1),
+        ) {
+            Homepage(
+                HomepageState.Normal(
+                    nimbusMessage = FakeHomepagePreview.nimbusMessageState(),
+                    topSites = FakeHomepagePreview.topSites(),
+                    recentTabs = FakeHomepagePreview.recentTabs(),
+                    syncedTab = FakeHomepagePreview.recentSyncedTab(),
+                    bookmarks = FakeHomepagePreview.bookmarks(),
+                    recentlyVisited = FakeHomepagePreview.recentHistory(),
+                    collectionsState = FakeHomepagePreview.collectionsPlaceholder(),
+                    pocketState = FakeHomepagePreview.pocketState(),
+                    showTopSites = true,
+                    showRecentTabs = true,
+                    showRecentSyncedTab = true,
+                    showBookmarks = true,
+                    showRecentlyVisited = true,
+                    showPocketStories = true,
+                    searchBarEnabled = false,
+                    showSearchBar = true,
+                    setupChecklistState = null,
+                    topSiteColors = TopSiteColors.colors(),
+                    cardBackgroundColor = WallpaperState.default.cardBackgroundColor,
+                    buttonTextColor = WallpaperState.default.buttonTextColor,
+                    buttonBackgroundColor = WallpaperState.default.buttonBackgroundColor,
+                    customizeHomeButtonBackgroundColor = FirefoxTheme.colors.actionTertiary,
+                    bottomSpacerHeight = 188.dp,
+                ),
+                interactor = FakeHomepagePreview.homepageInteractor,
+                onTopSitesItemBound = {},
+                onMiddleSearchBarVisibilityChanged = {},
+            )
+        }
     }
 }
 
@@ -434,6 +514,9 @@ private fun HomepagePreviewCollections() {
                 showBookmarks = false,
                 showRecentlyVisited = true,
                 showPocketStories = true,
+                searchBarEnabled = false,
+                showSearchBar = true,
+                setupChecklistState = null,
                 topSiteColors = TopSiteColors.colors(),
                 cardBackgroundColor = WallpaperState.default.cardBackgroundColor,
                 buttonTextColor = WallpaperState.default.buttonTextColor,
@@ -443,6 +526,7 @@ private fun HomepagePreviewCollections() {
             ),
             interactor = FakeHomepagePreview.homepageInteractor,
             onTopSitesItemBound = {},
+            onMiddleSearchBarVisibilityChanged = {},
         )
     }
 }
@@ -463,6 +547,7 @@ private fun PrivateHomepagePreview() {
                 ),
                 interactor = FakeHomepagePreview.homepageInteractor,
                 onTopSitesItemBound = {},
+                onMiddleSearchBarVisibilityChanged = {},
             )
         }
     }

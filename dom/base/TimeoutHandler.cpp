@@ -89,7 +89,7 @@ CallbackTimeoutHandler::CallbackTimeoutHandler(
     JSContext* aCx, nsIGlobalObject* aGlobal, Function* aFunction,
     nsTArray<JS::Heap<JS::Value>>&& aArguments)
     : TimeoutHandler(aCx), mGlobal(aGlobal), mFunction(aFunction) {
-  mozilla::HoldJSObjects(this);
+  mozilla::HoldJSObjectsWithKey(this);
   mArgs = std::move(aArguments);
 }
 
@@ -149,7 +149,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(CallbackTimeoutHandler)
 
 void CallbackTimeoutHandler::ReleaseJSObjects() {
   mArgs.Clear();
-  mozilla::DropJSObjects(this);
+  mozilla::DropJSObjectsWithKey(this);
 }
 
 bool CallbackTimeoutHandler::Call(const char* aExecutionReason) {
@@ -165,5 +165,34 @@ void CallbackTimeoutHandler::MarkForCC() { mFunction->MarkForCC(); }
 void CallbackTimeoutHandler::GetDescription(nsACString& aOutString) {
   mFunction->GetDescription(aOutString);
 }
+
+//-----------------------------------------------------------------------------
+// DelayedJSDispatchableHandler
+//-----------------------------------------------------------------------------
+
+MOZ_CAN_RUN_SCRIPT bool DelayedJSDispatchableHandler::Call(
+    const char* /* unused */) {
+  MOZ_ASSERT(mDispatchable);
+
+  // We get the cx in whatever state, as if we have already shutdown
+  // then the notify task will already be cleared.
+  JSContext* cx = danger::GetJSContext();
+
+  JS::Dispatchable::Run(cx, std::move(mDispatchable),
+                        JS::Dispatchable::NotShuttingDown);
+  return true;
+}
+
+DelayedJSDispatchableHandler::~DelayedJSDispatchableHandler() {
+  if (mDispatchable) {
+    // If we shutdown with the DelayedJSDispatchableHandler still holding
+    // the reference to mDispatchable, release it to the engine for cleanup.
+    // In the case of WaitAsyncTimeoutTask, this will clear the task, and
+    // delete itself.
+    JS::Dispatchable::ReleaseFailedTask(std::move(mDispatchable));
+  }
+}
+
+NS_IMPL_ISUPPORTS(DelayedJSDispatchableHandler, nsISupports)
 
 }  // namespace mozilla::dom

@@ -4,9 +4,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "Let's assume the use of `unwrap` was checked when the use of `unsafe` was reviewed."
+)]
+
 use std::{
     cmp::min,
-    fmt, mem,
+    fmt::{self, Display, Formatter},
+    mem,
     ops::Deref,
     os::raw::{c_uint, c_void},
     pin::Pin,
@@ -66,7 +72,7 @@ impl Record {
 }
 
 impl fmt::Debug for Record {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
             "Record {:?}:{:?} {}",
@@ -95,10 +101,17 @@ impl RecordList {
         len: c_uint,
         arg: *mut c_void,
     ) -> ssl::SECStatus {
-        let records = arg.cast::<Self>().as_mut().unwrap();
-
+        let Ok(epoch) = Epoch::try_from(epoch) else {
+            return ssl::SECFailure;
+        };
+        let Ok(ct) = ContentType::try_from(ct) else {
+            return ssl::SECFailure;
+        };
+        let Some(records) = arg.cast::<Self>().as_mut() else {
+            return ssl::SECFailure;
+        };
         let slice = null_safe_slice(data, len);
-        records.append(epoch, ContentType::try_from(ct).unwrap(), slice);
+        records.append(epoch, ct, slice);
         ssl::SECSuccess
     }
 
@@ -114,7 +127,6 @@ impl RecordList {
 
 impl Deref for RecordList {
     type Target = Vec<Record>;
-    #[must_use]
     fn deref(&self) -> &Vec<Record> {
         &self.records
     }
@@ -132,7 +144,6 @@ impl Iterator for RecordListIter {
 impl IntoIterator for RecordList {
     type Item = Record;
     type IntoIter = RecordListIter;
-    #[must_use]
     fn into_iter(self) -> Self::IntoIter {
         RecordListIter(self.records.into_iter())
     }
@@ -175,7 +186,10 @@ impl AgentIoInput {
             return Err(Error::NoDataAvailable);
         }
 
-        #[allow(clippy::disallowed_methods)] // We just checked if this was empty.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "We just checked if this was empty."
+        )]
         let src = unsafe { std::slice::from_raw_parts(self.input, amount) };
         qtrace!("[{self}] read {}", hex(src));
         let dst = unsafe { std::slice::from_raw_parts_mut(buf, amount) };
@@ -192,8 +206,8 @@ impl AgentIoInput {
     }
 }
 
-impl ::std::fmt::Display for AgentIoInput {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for AgentIoInput {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "AgentIoInput {:p}", self.input)
     }
 }
@@ -240,8 +254,8 @@ impl AgentIo {
     }
 }
 
-impl ::std::fmt::Display for AgentIo {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for AgentIo {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "AgentIo")
     }
 }
@@ -329,10 +343,14 @@ unsafe extern "C" fn agent_available64(mut fd: PrFd) -> prio::PRInt64 {
         .unwrap_or_else(|_| PR_FAILURE.into())
 }
 
-#[allow(clippy::cast_possible_truncation)]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "Cast is safe because prio::PR_AF_INET is 2."
+)]
 unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrStatus {
-    let a = addr.as_mut().unwrap();
-    // Cast is safe because prio::PR_AF_INET is 2
+    let Some(a) = addr.as_mut() else {
+        return PR_FAILURE;
+    };
     a.inet.family = prio::PR_AF_INET as prio::PRUint16;
     a.inet.port = 0;
     a.inet.ip = 0;
@@ -340,10 +358,11 @@ unsafe extern "C" fn agent_getname(_fd: PrFd, addr: *mut prio::PRNetAddr) -> PrS
 }
 
 unsafe extern "C" fn agent_getsockopt(_fd: PrFd, opt: *mut prio::PRSocketOptionData) -> PrStatus {
-    let o = opt.as_mut().unwrap();
-    if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
-        o.value.non_blocking = 1;
-        return PR_SUCCESS;
+    if let Some(o) = opt.as_mut() {
+        if o.option == prio::PRSockOption::PR_SockOpt_Nonblocking {
+            o.value.non_blocking = 1;
+            return PR_SUCCESS;
+        }
     }
     PR_FAILURE
 }

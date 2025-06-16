@@ -46,6 +46,7 @@ function _url(path) {
   return URL_COM_PREFIX + DIR_PATH + path;
 }
 
+const BLANK_PAGE_URL = _url("translations-tester-blank.html");
 const SPANISH_PAGE_URL = _url("translations-tester-es.html");
 const SPANISH_PAGE_URL_2 = _url("translations-tester-es-2.html");
 const SPANISH_PAGE_SHORT_URL = _url("translations-tester-es-short.html");
@@ -170,6 +171,8 @@ async function openAboutTranslations({
     translationInfo: "#translation-info",
     translationResultsPlaceholder: "#translation-results-placeholder",
     noSupportMessage: "[data-l10n-id='about-translations-no-support']",
+    languageLoadErrorMessage:
+      "[data-l10n-id='about-translations-language-load-error']",
   };
 
   // Start the tab at a blank page.
@@ -357,7 +360,7 @@ function createMockedTranslatorPort(transformNode = upperCaseNode, delay = 0) {
       await TestUtils.waitForTick();
 
       switch (message.type) {
-        case "TranslationsPort:GetEngineStatusRequest":
+        case "TranslationsPort:GetEngineStatusRequest": {
           mockedPort.onmessage({
             data: {
               type: "TranslationsPort:GetEngineStatusResponse",
@@ -365,6 +368,33 @@ function createMockedTranslatorPort(transformNode = upperCaseNode, delay = 0) {
             },
           });
           break;
+        }
+        case "TranslationsPort:Passthrough": {
+          const { translationId } = message;
+
+          mockedPort.onmessage({
+            data: {
+              type: "TranslationsPort:TranslationResponse",
+              translationId,
+              targetText: null,
+            },
+          });
+
+          break;
+        }
+        case "TranslationsPort:CachedTranslation": {
+          const { cachedTranslation, translationId } = message;
+
+          mockedPort.onmessage({
+            data: {
+              type: "TranslationsPort:TranslationResponse",
+              translationId,
+              targetText: cachedTranslation,
+            },
+          });
+
+          break;
+        }
         case "TranslationsPort:TranslationRequest": {
           const { translationId, sourceText } = message;
 
@@ -380,6 +410,10 @@ function createMockedTranslatorPort(transformNode = upperCaseNode, delay = 0) {
               translationId,
             },
           });
+          break;
+        }
+        default: {
+          throw new Error("Unexpected mock translator message:", message.type);
         }
       }
     },
@@ -404,28 +438,67 @@ function createControlledTranslatorPort() {
   const parser = new DOMParser();
 
   const canceledTranslations = new Set();
-  let resolvers = Promise.withResolvers();
-  let translationCount = 0;
 
-  async function resolveRequests() {
-    info("Resolving all pending translation requests");
-    await TestUtils.waitForTick();
-    resolvers.resolve();
-    resolvers = Promise.withResolvers();
-    await TestUtils.waitForTick();
-    const count = translationCount;
-    translationCount = 0;
-    return count;
+  let resolvers = [];
+
+  let engineStatusCount = 0;
+  let cancelCount = 0;
+  let passthroughCount = 0;
+  let cachedCount = 0;
+  let requestCount = 0;
+
+  function resolveRequests() {
+    const resolvedCount = resolvers.length;
+
+    let resolver = resolvers.pop();
+    while (resolver) {
+      let { translationId, resolve, debugText } = resolver;
+      info(`Resolving promise for request (id:${translationId}): ${debugText}`);
+      resolve();
+
+      resolver = resolvers.pop();
+    }
+
+    return resolvedCount;
+  }
+
+  function resetPortData() {
+    if (resolveRequests() > 0) {
+      throw new Error(
+        "Attempt to collect port data with pending translation requests."
+      );
+    }
+
+    engineStatusCount = 0;
+    cancelCount = 0;
+    passthroughCount = 0;
+    cachedCount = 0;
+    requestCount = 0;
+  }
+
+  function collectPortData(resetCounters = true) {
+    info("Collecting data from port messages");
+    const portData = {
+      engineStatusCount,
+      cancelCount,
+      passthroughCount,
+      cachedCount,
+      requestCount,
+    };
+
+    if (resetCounters) {
+      resetPortData();
+    }
+
+    return portData;
   }
 
   const mockedTranslatorPort = {
     async postMessage(message) {
       switch (message.type) {
-        case "TranslationsPort:CancelSingleTranslation":
-          info("Canceling translation id:" + message.translationId);
-          canceledTranslations.add(message.translationId);
-          break;
-        case "TranslationsPort:GetEngineStatusRequest":
+        case "TranslationsPort:GetEngineStatusRequest": {
+          engineStatusCount++;
+
           mockedTranslatorPort.onmessage({
             data: {
               type: "TranslationsPort:GetEngineStatusResponse",
@@ -433,7 +506,88 @@ function createControlledTranslatorPort() {
             },
           });
           break;
+        }
+        case "TranslationsPort:CancelSingleTranslation": {
+          cancelCount++;
+
+          info("Canceling translation id:" + message.translationId);
+          canceledTranslations.add(message.translationId);
+          break;
+        }
+        case "TranslationsPort:Passthrough": {
+          passthroughCount++;
+
+          const { translationId } = message;
+
+          // Create a short debug version of the text.
+          let debugText = null;
+
+          info(
+            `Translation requested for (id:${translationId}): "${debugText}"`
+          );
+
+          const { promise, resolve } = Promise.withResolvers();
+
+          resolvers.push({ translationId, resolve, debugText });
+
+          info(
+            `Waiting for promise for (id:${translationId}) to resolve: "${debugText}`
+          );
+
+          await promise;
+
+          info(`Promise for (id:${translationId}) resolved: "${debugText}`);
+
+          mockedTranslatorPort.onmessage({
+            data: {
+              type: "TranslationsPort:TranslationResponse",
+              translationId,
+              targetText: null,
+            },
+          });
+
+          break;
+        }
+        case "TranslationsPort:CachedTranslation": {
+          cachedCount++;
+
+          const { cachedTranslation, translationId } = message;
+
+          // Create a short debug version of the text.
+          let debugText = cachedTranslation.trim().replaceAll("\n", "");
+          if (debugText.length > 50) {
+            debugText = debugText.slice(0, 50) + "...";
+          }
+
+          info(
+            `Translation requested for (id:${translationId}): "${debugText}"`
+          );
+
+          const { promise, resolve } = Promise.withResolvers();
+
+          resolvers.push({ translationId, resolve, debugText });
+
+          info(
+            `Waiting for promise for (id:${translationId}) to resolve: "${debugText}`
+          );
+
+          await promise;
+
+          info(`Promise for (id:${translationId}) resolved: "${debugText}`);
+
+          mockedTranslatorPort.onmessage({
+            data: {
+              type: "TranslationsPort:TranslationResponse",
+              translationId,
+              targetText: cachedTranslation,
+            },
+          });
+
+          break;
+        }
         case "TranslationsPort:TranslationRequest": {
+          requestCount++;
+
           const { translationId, sourceText } = message;
 
           // Create a short debug version of the text.
@@ -443,21 +597,31 @@ function createControlledTranslatorPort() {
           }
 
           info(
-            `Translation requested (id:${message.translationId}) "${debugText}"`
+            `Translation requested for (id:${translationId}): "${debugText}"`
           );
-          await resolvers.promise;
+
+          const { promise, resolve } = Promise.withResolvers();
+
+          resolvers.push({ translationId, resolve, debugText });
+
+          info(
+            `Waiting for promise for (id:${translationId}) to resolve: "${debugText}`
+          );
+
+          await promise;
+
+          info(`Promise for (id:${translationId}) resolved: "${debugText}`);
 
           if (canceledTranslations.has(translationId)) {
-            info("Cancelled translation id:" + translationId);
+            info(`Cancelled translation for request (id:${translationId})`);
           } else {
-            info(
-              "Translation completed, responding id:" + message.translationId
-            );
-            translationCount++;
+            info(`Translation completed for request (id:${translationId})`);
+
             const translatedDoc = parser.parseFromString(
               sourceText,
               "text/html"
             );
+
             diacriticizeNode(translatedDoc.body);
             const targetText =
               translatedDoc.body.innerHTML.trim() + ` (id:${translationId})`;
@@ -476,7 +640,7 @@ function createControlledTranslatorPort() {
     },
   };
 
-  return { mockedTranslatorPort, resolveRequests };
+  return { mockedTranslatorPort, resolveRequests, collectPortData };
 }
 
 /**
@@ -510,9 +674,11 @@ async function createTranslationsDoc(html, options) {
   // <body> will not be "display: inline".
   document.body.style.display = "block";
 
+  let translationsDoc = null;
+
   const translate = () => {
     info("Creating the TranslationsDocument.");
-    return new TranslationsDocument(
+    translationsDoc = new TranslationsDocument(
       document,
       "en",
       "EN",
@@ -522,34 +688,178 @@ async function createTranslationsDoc(html, options) {
         throw new Error("Cannot request a new port");
       },
       options?.mockedReportVisibleChange ?? (() => {}),
-      performance.now(),
-      () => performance.now(),
-      new LRUCache()
+      new LRUCache(),
+      false
     );
+
+    translationsDoc.simulateIntersectionObservationForNonPendingNodes();
+    return translationsDoc;
   };
 
   /**
-   * Test utility to check that the document matches the expected markup
+   * Converts a string of expected HTML output into a regex that we can
+   * use to match the actual HTML output.
+   *
+   * The expected HTML string may use double curly braces to escape a
+   * {{ regex literal }} within the HTML itself, which will be preserved
+   * in the final expression.
+   *
+   * For example, converts the HTML string:
+   * `
+   * <div>
+   *   M̅u̅t̅a̅t̅i̅o̅n̅ 5 o̅n̅ e̅l̅e̅m̅e̅n̅t̅ (id:{{ [1-5] }})
+   * </div>
+   * `
+   *
+   * Into the following regex:
+   *
+   * /^\s*<div>\s*M̅u̅t̅a̅t̅i̅o̅n̅ 5 o̅n̅ e̅l̅e̅m̅e̅n̅t̅ \(id:[1-5]\)\s*<\/div>\s*$/su
+   *
+   * Which allows us to match the actual HTML to the expected HTML
+   * regardless of whether the translation id was 1, 2, 3, 4, or 5.
+   *
+   * @param {string} html
+   * @returns {RegExp}
+   */
+  function expectedHtmlToRegex(html) {
+    // All characters that will need to be escaped with a backslash in the
+    // final regex if they are contained within the HTML string.
+    const ESCAPABLE_CHARACTERS = /[.*+?^${}()|[\]\\]/g;
+
+    // Our own escape syntax to signify a {{ regex literal }} within the
+    // HTML string that should be preserved in its original form.
+    const REGEX_LITERAL = /\{\{(.*?)\}\}/gsu;
+
+    // The same matcher as above, after escaping the curly braces with backslash.
+    const ESCAPED_REGEX_LITERAL = /\\\{\\\{.*?\\\}\\\}/su;
+
+    // Collect all regex literals that were escaped by using {{ literal }}
+    // syntax into a single array. We will place them back in at the end.
+    const regexLiterals = [...html.matchAll(REGEX_LITERAL)].map(
+      match => match[1]
+    );
+
+    let pattern = html
+      // Escape each character that needs it with a backslash.
+      .replaceAll(ESCAPABLE_CHARACTERS, "\\$&")
+      // Add a 0+ blank space matcher \s* before each opening angle bracket <
+      .replaceAll(/\s*</g, "\\s*<")
+      // Add a 0+ blank space matcher \s* after each closing angle bracket >
+      .replaceAll(/>\s*/g, ">\\s*")
+      // Collapse more than one blank space into a 1+ matcher
+      .replaceAll(/\s\s+/g, "\\s+")
+      // Replace a 1+ blank space matcher at the beginning with a 0+ matcher.
+      .replace(/^\\s\+/, "\\s*")
+      // Replace a 1+ blank space matcher at the end with a 0+ matcher.
+      .replace(/\\s\+$/, "\\s*");
+
+    // Go back through and replace each {{ regex literal }} that we preserved
+    // at the start with its captured content.
+    for (const regexLiteral of regexLiterals) {
+      pattern = pattern.replace(ESCAPED_REGEX_LITERAL, regexLiteral.trim());
+    }
+
+    return new RegExp(`^${pattern}$`, "su");
+  }
+
+  /**
+   * Test utility to check that the document matches the expected markup.
+   * If `html` is a string, the prettified innerHTML must match exactly.
+   * If `html` is a RegExp, the prettified innerHTML must satisfy the
+   * regular expression.
    *
    * @param {string} message
-   * @param {string} html
+   * @param {string} expectedHtml
+   * @param {Document} [sourceDoc]
+   * @param {() => void} [resolveRequests]
    */
-  async function htmlMatches(message, html, element = document.body) {
-    const expected = naivelyPrettify(html);
+  async function htmlMatches(
+    message,
+    expectedHtml,
+    sourceDoc = document,
+    resolveRequests
+  ) {
+    const prettyHtml = naivelyPrettify(expectedHtml);
+    const expected = expectedHtmlToRegex(expectedHtml);
+
+    let didSimulateIntersectionObservation = false;
+
     try {
-      await waitForCondition(
-        () => naivelyPrettify(element.innerHTML) === expected,
-        "Waiting for HTML to match."
-      );
+      await waitForCondition(async () => {
+        await waitForCondition(
+          () => !translationsDoc.hasPendingCallbackOnEventLoop()
+        );
+
+        while (
+          translationsDoc.hasPendingCallbackOnEventLoop() ||
+          translationsDoc.hasPendingTranslationRequests()
+        ) {
+          if (resolveRequests) {
+            // Since resolveRequests is defined, we must manually resolve
+            // them as the scheduler sends them until all are fulfilled.
+            await waitForCondition(
+              () =>
+                resolveRequests() ||
+                (!translationsDoc.hasPendingCallbackOnEventLoop() &&
+                  !translationsDoc.hasPendingTranslationRequests()),
+              "Manually resolving requests as they come in..."
+            );
+          } else {
+            // Since resolveRequests is not defined, requests will resolve
+            // automatically when the scheduler sends them. We simply have
+            // to wait until they are all fulfilled.
+            await waitForCondition(
+              () =>
+                !translationsDoc.hasPendingCallbackOnEventLoop() &&
+                !translationsDoc.hasPendingTranslationRequests(),
+              "Waiting for all requests to come in..."
+            );
+          }
+        }
+
+        await waitForCondition(
+          () => !translationsDoc.hasPendingCallbackOnEventLoop()
+        );
+
+        const actualHtml = naivelyPrettify(sourceDoc.body.innerHTML);
+        const htmlMatches = expected.test(actualHtml);
+
+        if (!htmlMatches && !didSimulateIntersectionObservation) {
+          // If all of the requests have been resolved, and the HTML doesn't match,
+          // then it may be because the request was never sent to the scheduler,
+          // so we need to manually simulate intersection observation.
+          //
+          // This is a valid case, and not a bug. For example, if an attribute is mutated,
+          // then it will not be scheduled for translation until it is observed.
+          // However, we should never have to do this more than one time.
+          didSimulateIntersectionObservation = true;
+          translationsDoc.simulateIntersectionObservationForNonPendingNodes();
+        }
+
+        if (htmlMatches) {
+          await waitForCondition(
+            () =>
+              !translationsDoc.hasPendingCallbackOnEventLoop() &&
+              !translationsDoc.hasPendingTranslationRequests() &&
+              !translationsDoc.isObservingAnyElementForContentIntersection() &&
+              !translationsDoc.isObservingAnyElementForAttributeIntersection(),
+            "Ensuring that the entire document is translated."
+          );
+        }
+
+        return htmlMatches;
+      }, "Waiting for HTML to match.");
       ok(true, message);
     } catch (error) {
       console.error(error);
 
       // Provide a nice error message.
-      const actual = naivelyPrettify(element.innerHTML);
+      const actual = naivelyPrettify(sourceDoc.body.innerHTML);
       ok(
         false,
-        `${message}\n\nExpected HTML:\n\n${expected}\n\nActual HTML:\n\n${actual}\n\n`
+        `${message}\n\nExpected HTML:\n\n${
+          prettyHtml
+        }\n\nActual HTML:\n\n${actual}\n\n${String(error)}`
       );
     }
   }
@@ -649,8 +959,8 @@ function createdReorderingMockedTranslatorPort() {
 /**
  * @returns {import("../../actors/TranslationsParent.sys.mjs").TranslationsParent}
  */
-function getTranslationsParent() {
-  return TranslationsParent.getTranslationsActor(gBrowser.selectedBrowser);
+function getTranslationsParent(win = window) {
+  return TranslationsParent.getTranslationsActor(win.gBrowser.selectedBrowser);
 }
 
 /**
@@ -1015,6 +1325,27 @@ class MockedA11yUtils {
   }
 }
 
+/**
+ * Ensures that the window size is within 50px of the given dimensions.
+ *
+ * @param {WindowProxy} win
+ * @param {number} width
+ * @param {number} height
+ *
+ * @returns {Promise<void>}
+ */
+async function ensureWindowSize(win, width, height) {
+  if (win.outerWidth < width + 50 && win.outerHeight < height + 50) {
+    return;
+  }
+
+  const resizePromise = BrowserTestUtils.waitForEvent(win, "resize");
+
+  win.resizeTo(width, height);
+
+  await resizePromise;
+}
+
 async function loadTestPage({
   languagePairs,
   endToEndTest = false,
@@ -1026,6 +1357,7 @@ async function loadTestPage({
   systemLocales = ["en"],
   appLocales,
   webLanguages,
+  contentEagerMode = false,
   win = window,
 }) {
   info(`Loading test page starting at url: ${page}`);
@@ -1039,6 +1371,8 @@ async function loadTestPage({
   const restoreA11yUtils = MockedA11yUtils.mockForWindow(win);
 
   if (isFirstTimeSetup) {
+    await ensureWindowSize(win, 1000, 600);
+
     // Ensure no engine is being carried over from a previous test.
     await EngineProcess.destroyTranslationsEngine();
 
@@ -1048,7 +1382,6 @@ async function loadTestPage({
         // Enabled by default.
         ["browser.translations.enable", true],
         ["browser.translations.logLevel", "All"],
-        ["browser.translations.panelShown", true],
         ["browser.translations.automaticallyPopup", true],
         ["browser.translations.alwaysTranslateLanguages", ""],
         ["browser.translations.neverTranslateLanguages", ""],
@@ -1106,6 +1439,23 @@ async function loadTestPage({
     BLANK_PAGE,
     true // waitForLoad
   );
+
+  if (contentEagerMode) {
+    info("Triggering content-eager translations mode by opening the find bar.");
+    await openFindBar(tab);
+
+    // We cannot access the TranslationsParent actor on BLANK_PAGE because the
+    // data scheme is disallowed for the TranslationsParent actor, so we will load
+    // our blank https:// page to ensure that the actor has registered its findBar.
+    BrowserTestUtils.startLoadingURIString(tab.linkedBrowser, BLANK_PAGE_URL);
+    await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
+
+    const actor = getTranslationsParent(win);
+    await waitForCondition(
+      () => actor.findBar,
+      "Waiting for the TranslationsParent actor to register its findBar"
+    );
+  }
 
   BrowserTestUtils.startLoadingURIString(tab.linkedBrowser, page);
   await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
@@ -1230,26 +1580,21 @@ async function loadTestPage({
      * @returns {Promise<void>}
      */
     runInPage(callback, data = {}) {
-      // ContentTask.spawn runs the `Function.prototype.toString` on this function in
-      // order to send it into the content process. The following function is doing its
-      // own string manipulation in order to load in the TranslationsTest module.
-      const fn = new Function(/* js */ `
-        const TranslationsTest = ChromeUtils.importESModule(
-          "chrome://mochitests/content/browser/toolkit/components/translations/tests/browser/translations-test.mjs"
-        );
-
-        // Pass in the values that get injected by the task runner.
-        TranslationsTest.setup({Assert, ContentTaskUtils, content});
-
-        const data = ${JSON.stringify(data)};
-
-        return (${callback.toString()})(TranslationsTest, data);
-      `);
-
       return ContentTask.spawn(
         tab.linkedBrowser,
-        {}, // Data to inject.
-        fn
+        { contentData: data, callbackSource: callback.toString() }, // Data to inject.
+        function ({ contentData, callbackSource }) {
+          const TranslationsTest = ChromeUtils.importESModule(
+            "chrome://mochitests/content/browser/toolkit/components/translations/tests/browser/translations-test.mjs"
+          );
+
+          // Pass in the values that get injected by the task runner.
+          TranslationsTest.setup({ Assert, ContentTaskUtils, content });
+
+          // eslint-disable-next-line no-eval
+          let contentCallback = eval(`(${callbackSource})`);
+          return contentCallback(TranslationsTest, contentData);
+        }
       );
     },
   };
@@ -1277,6 +1622,46 @@ async function captureTranslationsError(callback) {
 }
 
 /**
+ * Opens the FindBar in the given tab for the current window.
+ */
+async function openFindBar(tab, win = window) {
+  info("Opening the find bar in the current tab.");
+  const findBar = await win.gBrowser.getFindBar(tab);
+  const { promise, resolve } = Promise.withResolvers();
+
+  findBar.addEventListener(
+    "findbaropen",
+    () => {
+      resolve();
+    },
+    { once: true }
+  );
+
+  findBar.open();
+  await promise;
+}
+
+/**
+ * Opens the FindBar in the given tab for the current window.
+ */
+async function closeFindBar(tab, win = window) {
+  info("Closing the find bar in the current tab.");
+  const findBar = await win.gBrowser.getFindBar(tab);
+  const { promise, resolve } = Promise.withResolvers();
+
+  findBar.addEventListener(
+    "findbarclose",
+    () => {
+      resolve();
+    },
+    { once: true }
+  );
+
+  findBar.close();
+  await promise;
+}
+
+/**
  * Load a test page and run
  *
  * @param {object} options - The options for `loadTestPage` plus a `runInPage` function.
@@ -1292,6 +1677,7 @@ async function autoTranslatePage(options) {
     ],
     ...otherOptions,
   });
+
   await runInPage(options.runInPage);
   await cleanup();
 }
@@ -1400,26 +1786,40 @@ function createAttachmentMock(
 }
 
 /**
- * The count of records per mocked language pair in Remote Settings.
+ * The count of records per mocked language pair in Remote Settings utilizing a shared-vocab config.
  */
-const RECORDS_PER_LANGUAGE_PAIR = 3;
+const RECORDS_PER_LANGUAGE_PAIR_SHARED_VOCAB = 3;
+
+/**
+ * The count of records per mocked language pair in Remote Settings utilizing a split-vocab config.
+ */
+const RECORDS_PER_LANGUAGE_PAIR_SPLIT_VOCAB = 4;
 
 /**
  * The count of files that are downloaded for a mocked language pair in Remote Settings.
  */
-function downloadedFilesPerLanguagePair() {
+function downloadedFilesPerLanguagePair(splitVocab = false) {
+  const expectedRecords = splitVocab
+    ? RECORDS_PER_LANGUAGE_PAIR_SPLIT_VOCAB
+    : RECORDS_PER_LANGUAGE_PAIR_SHARED_VOCAB;
+
   return Services.prefs.getBoolPref(USE_LEXICAL_SHORTLIST_PREF)
-    ? RECORDS_PER_LANGUAGE_PAIR
-    : RECORDS_PER_LANGUAGE_PAIR - 1;
+    ? expectedRecords
+    : expectedRecords - 1;
 }
 
-function createRecordsForLanguagePair(fromLang, toLang) {
+function createRecordsForLanguagePair(fromLang, toLang, splitVocab = false) {
   const records = [];
   const lang = fromLang + toLang;
   const models = [
     { fileType: "model", name: `model.${lang}.intgemm.alphas.bin` },
-    { fileType: "vocab", name: `vocab.${lang}.spm` },
     { fileType: "lex", name: `lex.50.50.${lang}.s2t.bin` },
+    ...(splitVocab
+      ? [
+          { fileType: "srcvocab", name: `srcvocab.${lang}.spm` },
+          { fileType: "trgvocab", name: `trgvocab.${lang}.spm` },
+        ]
+      : [{ fileType: "vocab", name: `vocab.${lang}.spm` }]),
   ];
 
   const attachment = {
@@ -1431,9 +1831,15 @@ function createRecordsForLanguagePair(fromLang, toLang) {
     isDownloaded: false,
   };
 
-  if (models.length !== RECORDS_PER_LANGUAGE_PAIR) {
-    throw new Error("Files per language pair was wrong.");
-  }
+  const expectedLength = splitVocab
+    ? RECORDS_PER_LANGUAGE_PAIR_SPLIT_VOCAB
+    : RECORDS_PER_LANGUAGE_PAIR_SHARED_VOCAB;
+
+  is(
+    models.length,
+    expectedLength,
+    "The number of records per language pair should match the expected length."
+  );
 
   for (const { fileType, name } of models) {
     records.push({

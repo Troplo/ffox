@@ -62,11 +62,12 @@ pub fn expand_object(input: DeriveInput, options: DeriveOptions) -> syn::Result<
 
     Ok(quote! {
         #[doc(hidden)]
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub unsafe extern "C" fn #clone_fn_ident(
             ptr: *const ::std::ffi::c_void,
             call_status: &mut ::uniffi::RustCallStatus
         ) -> *const ::std::ffi::c_void {
+            ::uniffi::deps::trace!("clone: {} ({:?})", #name, ptr);
             ::uniffi::rust_call(call_status, || {
                 unsafe { ::std::sync::Arc::increment_strong_count(ptr) };
                 ::std::result::Result::Ok(ptr)
@@ -74,11 +75,12 @@ pub fn expand_object(input: DeriveInput, options: DeriveOptions) -> syn::Result<
         }
 
         #[doc(hidden)]
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub unsafe extern "C" fn #free_fn_ident(
             ptr: *const ::std::ffi::c_void,
             call_status: &mut ::uniffi::RustCallStatus
         ) {
+            ::uniffi::deps::trace!("free: {} ({:?})", #name, ptr);
             ::uniffi::rust_call(call_status, || {
                 assert!(!ptr.is_null());
                 let ptr = ptr.cast::<#ident>();
@@ -92,6 +94,19 @@ pub fn expand_object(input: DeriveInput, options: DeriveOptions) -> syn::Result<
         #interface_impl
         #meta_static_var
     })
+}
+
+fn wasm_single_threaded_annotation() -> TokenStream {
+    #[cfg(feature = "wasm-unstable-single-threaded")]
+    {
+        quote! {
+            #[cfg(not(target_arch = "wasm32"))]
+        }
+    }
+    #[cfg(not(feature = "wasm-unstable-single-threaded"))]
+    {
+        TokenStream::default()
+    }
 }
 
 fn interface_impl(object: &ObjectItem, options: &DeriveOptions) -> TokenStream {
@@ -113,12 +128,14 @@ fn interface_impl(object: &ObjectItem, options: &DeriveOptions) -> TokenStream {
     let lower_return_type_arc = ffiops::lower_return_type(&arc_self_type);
     let lower_return_arc = ffiops::lower_return(&arc_self_type);
     let lower_error_arc = ffiops::lower_error(&arc_self_type);
+    let single_threaded_annotation = wasm_single_threaded_annotation();
 
     quote! {
         // All Object structs must be `Sync + Send`. The generated scaffolding will fail to compile
         // if they are not, but unfortunately it fails with an unactionably obscure error message.
         // By asserting the requirement explicitly, we help Rust produce a more scrutable error message
         // and thus help the user debug why the requirement isn't being met.
+        #single_threaded_annotation
         ::uniffi::deps::static_assertions::assert_impl_all!(
             #ident: ::core::marker::Sync, ::core::marker::Send
         );
@@ -144,11 +161,14 @@ fn interface_impl(object: &ObjectItem, options: &DeriveOptions) -> TokenStream {
             /// call the destructor function specific to the type `T`. Calling the destructor
             /// function for other types may lead to undefined behaviour.
             fn lower(obj: ::std::sync::Arc<Self>) -> Self::FfiType {
-                ::std::sync::Arc::into_raw(obj) as Self::FfiType
+                let ptr = ::std::sync::Arc::into_raw(obj) as Self::FfiType;
+                ::uniffi::deps::trace!("lower: {} ({:?})", #name, ptr);
+                ptr
             }
 
             /// When lifting, we receive an owned `Arc` that the foreign language code cloned.
             fn try_lift(v: Self::FfiType) -> ::uniffi::Result<::std::sync::Arc<Self>> {
+                ::uniffi::deps::trace!("lift: {} ({:?})", #name, v);
                 let v = v as *const #ident;
                 ::std::result::Result::Ok(unsafe { ::std::sync::Arc::<Self>::from_raw(v) })
             }

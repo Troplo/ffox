@@ -308,8 +308,8 @@ bool WorkerGlobalScopeBase::RunTimeoutHandler(mozilla::dom::Timeout* aTimeout) {
   Timeout* last_running_timeout = mTimeoutManager->BeginRunningTimeout(timeout);
   timeout->mRunning = true;
 
-  uint32_t nestingLevel = mTimeoutManager->GetNestingLevel();
-  mTimeoutManager->SetNestingLevel(timeout->mNestingLevel);
+  uint32_t nestingLevel = mTimeoutManager->GetNestingLevelForWorker();
+  mTimeoutManager->SetNestingLevelForWorker(timeout->mNestingLevel);
 
   const char* reason = workerinternals::GetTimeoutReasonString(timeout);
 
@@ -343,7 +343,7 @@ bool WorkerGlobalScopeBase::RunTimeoutHandler(mozilla::dom::Timeout* aTimeout) {
   // point anyway, and the script context should have already reported
   // the script error in the usual way - so we just drop it.
 
-  mTimeoutManager->SetNestingLevel(nestingLevel);
+  mTimeoutManager->SetNestingLevelForWorker(nestingLevel);
 
   mTimeoutManager->EndRunningTimeout(last_running_timeout);
   timeout->mRunning = false;
@@ -507,6 +507,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(WorkerGlobalScope,
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCrypto)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPerformance)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebTaskScheduler)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWebTaskSchedulingState)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTrustedTypePolicyFactory)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLocation)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNavigator)
@@ -524,6 +525,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(WorkerGlobalScope,
     tmp->mWebTaskScheduler->Disconnect();
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebTaskScheduler)
   }
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWebTaskSchedulingState)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTrustedTypePolicyFactory)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mLocation)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mNavigator)
@@ -666,7 +668,7 @@ void WorkerGlobalScope::ImportScripts(
       const nsAString* compliantString =
           TrustedTypeUtils::GetTrustedTypesCompliantString(
               scriptURL, sink, kTrustedTypesOnlySinkGroup, *pinnedGlobal,
-              compliantStringHolder, aRv);
+              nullptr, compliantStringHolder, aRv);
       if (aRv.Failed()) {
         return;
       }
@@ -692,8 +694,9 @@ void WorkerGlobalScope::ImportScripts(
 int32_t WorkerGlobalScope::SetTimeout(
     JSContext* aCx, const FunctionOrTrustedScriptOrString& aHandler,
     const int32_t aTimeout, const Sequence<JS::Value>& aArguments,
-    ErrorResult& aRv) {
-  return SetTimeoutOrInterval(aCx, aHandler, aTimeout, aArguments, false, aRv);
+    nsIPrincipal* aSubjectPrincipal, ErrorResult& aRv) {
+  return SetTimeoutOrInterval(aCx, aHandler, aTimeout, aArguments, false,
+                              aSubjectPrincipal, aRv);
 }
 
 void WorkerGlobalScope::ClearTimeout(int32_t aHandle) {
@@ -707,8 +710,9 @@ void WorkerGlobalScope::ClearTimeout(int32_t aHandle) {
 int32_t WorkerGlobalScope::SetInterval(
     JSContext* aCx, const FunctionOrTrustedScriptOrString& aHandler,
     const int32_t aTimeout, const Sequence<JS::Value>& aArguments,
-    ErrorResult& aRv) {
-  return SetTimeoutOrInterval(aCx, aHandler, aTimeout, aArguments, true, aRv);
+    nsIPrincipal* aSubjectPrincipal, ErrorResult& aRv) {
+  return SetTimeoutOrInterval(aCx, aHandler, aTimeout, aArguments, true,
+                              aSubjectPrincipal, aRv);
 }
 
 void WorkerGlobalScope::ClearInterval(int32_t aHandle) {
@@ -722,7 +726,7 @@ void WorkerGlobalScope::ClearInterval(int32_t aHandle) {
 int32_t WorkerGlobalScope::SetTimeoutOrInterval(
     JSContext* aCx, const FunctionOrTrustedScriptOrString& aHandler,
     const int32_t aTimeout, const Sequence<JS::Value>& aArguments,
-    bool aIsInterval, ErrorResult& aRv) {
+    bool aIsInterval, nsIPrincipal* aSubjectPrincipal, ErrorResult& aRv) {
   AssertIsOnWorkerThread();
 
   DebuggerNotificationDispatch(
@@ -749,8 +753,8 @@ int32_t WorkerGlobalScope::SetTimeoutOrInterval(
   const nsAString* compliantString =
       TrustedTypeUtils::GetTrustedTypesCompliantString(
           aHandler, aIsInterval ? sinkSetInterval : sinkSetTimeout,
-          kTrustedTypesOnlySinkGroup, *pinnedGlobal, compliantStringHolder,
-          aRv);
+          kTrustedTypesOnlySinkGroup, *pinnedGlobal, aSubjectPrincipal,
+          compliantStringHolder, aRv);
   if (aRv.Failed()) {
     return 0;
   }
@@ -767,6 +771,13 @@ int32_t WorkerGlobalScope::SetTimeoutOrInterval(
 
   return mWorkerPrivate->SetTimeout(aCx, handler, aTimeout, aIsInterval,
                                     Timeout::Reason::eTimeoutOrInterval, aRv);
+}
+
+bool WorkerGlobalScope::HasScheduledNormalOrHighPriorityWebTasks() const {
+  if (!mWebTaskScheduler) {
+    return false;
+  }
+  return mWebTaskScheduler->HasScheduledNormalOrHighPriorityWebTasks();
 }
 
 void WorkerGlobalScope::GetOrigin(nsAString& aOrigin) const {
@@ -890,6 +901,11 @@ WebTaskScheduler* WorkerGlobalScope::Scheduler() {
 
 WebTaskScheduler* WorkerGlobalScope::GetExistingScheduler() const {
   return mWebTaskScheduler;
+}
+
+inline void WorkerGlobalScope::SetWebTaskSchedulingState(
+    WebTaskSchedulingState* aState) {
+  mWebTaskSchedulingState = aState;
 }
 
 already_AddRefed<Promise> WorkerGlobalScope::CreateImageBitmap(

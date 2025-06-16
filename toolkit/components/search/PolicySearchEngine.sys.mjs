@@ -4,7 +4,7 @@
 
 /* eslint no-shadow: error, mozilla/no-aArgs: error */
 
-import { SearchEngine } from "resource://gre/modules/SearchEngine.sys.mjs";
+import { SearchEngine } from "moz-src:///toolkit/components/search/SearchEngine.sys.mjs";
 
 /**
  * PolicySearchEngine represents a search engine defined by an enterprise
@@ -34,7 +34,6 @@ export class PolicySearchEngine extends SearchEngine {
     // Map the data to look like a WebExtension manifest, as that is what
     // _initWithDetails requires.
     let details = {
-      description: options.details.Description,
       iconURL: options.details.IconURL ? options.details.IconURL.href : null,
       name: options.details.Name,
       // If the encoding is not specified or is falsy, we will fall back to

@@ -10,11 +10,11 @@ add_task(async function () {
   const dbg = await initDebugger("doc-minified.html", "math.min.js");
 
   await selectSource(dbg, "math.min.js");
-  await addBreakpoint(dbg, "math.min.js", 2);
+  await addBreakpoint(dbg, "math.min.js", 3);
 
   invokeInTab("arithmetic");
   await waitForPaused(dbg, "math.min.js");
-  assertPausedAtSourceAndLine(dbg, findSource(dbg, "math.min.js").id, 2);
+  await assertPausedAtSourceAndLine(dbg, findSource(dbg, "math.min.js").id, 3);
 
   clickElement(dbg, "prettyPrintButton");
   await waitForSelectedSource(dbg, "math.min.js:formatted");
@@ -22,7 +22,7 @@ add_task(async function () {
     dbg,
     () => dbg.selectors.getSelectedFrame().location.line == 18
   );
-  assertPausedAtSourceAndLine(
+  await assertPausedAtSourceAndLine(
     dbg,
     findSource(dbg, "math.min.js:formatted").id,
     18

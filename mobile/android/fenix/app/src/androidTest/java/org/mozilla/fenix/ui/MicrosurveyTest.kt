@@ -13,6 +13,7 @@ import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.TestAssetHelper
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.navigationToolbar
 import org.mozilla.fenix.ui.robots.surveyScreen
 
@@ -23,10 +24,11 @@ class MicrosurveyTest : TestSetup() {
             HomeActivityIntentTestRule(
                 skipOnboarding = true,
                 isMicrosurveyEnabled = true,
-                isNavigationBarCFREnabled = false,
-                isNavigationToolbarEnabled = true,
             ),
         ) { it.activity }
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2809354
     @SmokeTest
@@ -36,7 +38,8 @@ class MicrosurveyTest : TestSetup() {
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.url) {
-        }.clickShareButtonFromRedesignedToolbar {
+        }.openThreeDotMenu {
+        }.clickShareButton {
         }.clickPrintButton {
             mDevice.waitForIdle()
             mDevice.pressBack()
@@ -58,7 +61,8 @@ class MicrosurveyTest : TestSetup() {
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage1.url) {
-        }.clickShareButtonFromRedesignedToolbar {
+        }.openThreeDotMenu {
+        }.clickShareButton {
         }.clickPrintButton {
             mDevice.waitForIdle()
             mDevice.pressBack()
@@ -85,7 +89,8 @@ class MicrosurveyTest : TestSetup() {
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.url) {
-        }.clickShareButtonFromRedesignedToolbar {
+        }.openThreeDotMenu {
+        }.clickShareButton {
         }.clickPrintButton {
             mDevice.waitForIdle()
             mDevice.pressBack()

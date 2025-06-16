@@ -5,7 +5,7 @@
 package org.mozilla.fenix.components
 
 import android.content.Context
-import android.net.Uri
+import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -13,7 +13,6 @@ import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.feature.accounts.FirefoxAccountsAuthFeature
 import mozilla.components.feature.app.links.AppLinksInterceptor
 import mozilla.components.service.fxa.manager.FxaAccountManager
-import org.mozilla.fenix.R
 import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.perf.lazyMonitored
 import org.mozilla.fenix.settings.SupportUtils
@@ -30,7 +29,7 @@ class Services(
         FirefoxAccountsAuthFeature(accountManager, FxaServer.REDIRECT_URL) { context, authUrl ->
             var url = authUrl
             if (context.settings().useReactFxAServer) {
-                url = Uri.parse(url)
+                url = url.toUri()
                     .buildUpon()
                     .appendQueryParameter("forceExperiment", "generalizedReactApp")
                     .appendQueryParameter("forceExperimentGroup", "react")
@@ -47,15 +46,8 @@ class Services(
     val appLinksInterceptor by lazyMonitored {
         AppLinksInterceptor(
             context = context,
-            interceptLinkClicks = true,
-            showCheckbox = true,
             launchInApp = { context.settings().shouldOpenLinksInApp() },
-            shouldPrompt = { context.settings().shouldPromptOpenLinksInApp() },
-            checkboxCheckedAction = {
-                context.settings().openLinksInExternalApp =
-                    context.getString(R.string.pref_key_open_links_in_apps_always)
-            },
-            launchFromInterceptor = true,
+            launchFromInterceptor = false,
             store = store,
         )
     }

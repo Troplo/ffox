@@ -107,8 +107,6 @@
   <string name="tab_drawer_fab_sync">Mag sync</string>
   <!-- Postfix for private WebApp titles. %1$s is the name of the app (for example "Firefox"). -->
   <string name="pwa_site_controls_title_private">%1$s (Private Mode)</string>
-  <!-- Text for the button to remove a single download item -->
-  <string name="download_delete_item_1">Ginkuha</string>
   <!-- Bookmark overflow menu share button -->
   <string name="bookmark_menu_share_button">Ambit</string>
   <!-- Bookmark overflow menu save button -->

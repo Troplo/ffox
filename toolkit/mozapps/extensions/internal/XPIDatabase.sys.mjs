@@ -33,61 +33,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ExtensionPermissions: "resource://gre/modules/ExtensionPermissions.sys.mjs",
 });
 
-// WARNING: BuiltInThemes.sys.mjs may be provided by the host application (e.g.
-// Firefox), or it might not exist at all. Use with caution, as we don't
-// want things to completely fail if that module can't be loaded.
-ChromeUtils.defineLazyGetter(lazy, "BuiltInThemes", () => {
-  try {
-    let { BuiltInThemes } = ChromeUtils.importESModule(
-      "resource:///modules/BuiltInThemes.sys.mjs"
-    );
-    return BuiltInThemes;
-  } catch (e) {
-    Cu.reportError(`Unable to load BuiltInThemes.sys.mjs: ${e}`);
-  }
-  return undefined;
-});
-
-// A set of helpers to account from a single place that in some builds
-// (e.g. GeckoView and Thunderbird) the BuiltInThemes module may either
-// not be bundled at all or not be exposing the same methods provided
-// by the module as defined in Firefox Desktop.
-export const BuiltInThemesHelpers = {
-  getLocalizedColorwayGroupName(addonId) {
-    return lazy.BuiltInThemes?.getLocalizedColorwayGroupName?.(addonId);
-  },
-
-  getLocalizedColorwayDescription(addonId) {
-    return lazy.BuiltInThemes?.getLocalizedColorwayGroupDescription?.(addonId);
-  },
-
-  isActiveTheme(addonId) {
-    return lazy.BuiltInThemes?.isActiveTheme?.(addonId);
-  },
-
-  isRetainedExpiredTheme(addonId) {
-    return lazy.BuiltInThemes?.isRetainedExpiredTheme?.(addonId);
-  },
-
-  themeIsExpired(addonId) {
-    return lazy.BuiltInThemes?.themeIsExpired?.(addonId);
-  },
-
-  // Helper function called form XPInstall.sys.mjs to remove from the retained
-  // themes list the built-in colorways theme that have been migrated to a non
-  // built-in.
-  unretainMigratedColorwayTheme(addonId) {
-    lazy.BuiltInThemes?.unretainMigratedColorwayTheme?.(addonId);
-  },
-};
-
-XPCOMUtils.defineLazyPreferenceGetter(
-  BuiltInThemesHelpers,
-  "isColorwayMigrationEnabled",
-  "browser.theme.colorway-migration",
-  false
-);
-
 // A temporary hidden pref just meant to be used as a last resort, in case
 // we need to force-disable the "per-addon quarantined domains user controls"
 // feature during the beta cycle, e.g. if unexpected issues are caught late and
@@ -129,7 +74,7 @@ const PREF_XPI_SIGNATURES_DEV_ROOT = "xpinstall.signatures.dev-root";
 const TOOLKIT_ID = "toolkit@mozilla.org";
 
 const KEY_APP_SYSTEM_ADDONS = "app-system-addons";
-const KEY_APP_SYSTEM_DEFAULTS = "app-system-defaults";
+const KEY_APP_SYSTEM_BUILTINS = "app-builtin-addons";
 const KEY_APP_SYSTEM_PROFILE = "app-system-profile";
 const KEY_APP_BUILTINS = "app-builtin";
 const KEY_APP_SYSTEM_LOCAL = "app-system-local";
@@ -215,8 +160,6 @@ const SIGNED_TYPES = new Set(["extension", "locale", "theme"]);
 
 // Time to wait before async save of XPI JSON database, in milliseconds
 const ASYNC_SAVE_DELAY_MS = 20;
-
-const l10n = new Localization(["browser/appExtensionFields.ftl"], true);
 
 /**
  * Schedules an idle task, and returns a promise which resolves to an
@@ -305,8 +248,6 @@ const wrapperMap = new WeakMap();
 let addonFor = wrapper => wrapperMap.get(wrapper);
 
 const EMPTY_ARRAY = Object.freeze([]);
-
-let AddonWrapper;
 
 /**
  * The AddonInternal is an internal only representation of add-ons. It
@@ -517,7 +458,7 @@ export class AddonInternal {
         // System add-ons must be signed by the system key.
         return this.signedState == lazy.AddonManager.SIGNEDSTATE_SYSTEM;
 
-      case KEY_APP_SYSTEM_DEFAULTS:
+      case KEY_APP_SYSTEM_BUILTINS:
       case KEY_APP_BUILTINS:
       case KEY_APP_TEMPORARY:
         // Temporary and built-in add-ons do not require signing.
@@ -890,21 +831,6 @@ export class AddonInternal {
       if (!isSystem && !this.location.isLinkedAddon(this.id)) {
         permissions |= lazy.AddonManager.PERM_CAN_UPGRADE;
       }
-      // Allow active and retained colorways builtin themes to be updated to
-      // the same theme hosted on AMO (the PERM_CAN_UPGRADE permission will
-      // ensure we will be asking AMO for an update, then the AMO addon xpi
-      // will be installed in the profile location, overridden in the
-      // `createUpdate` defined in `XPIInstall.sys.mjs` and called from
-      // `UpdateChecker` `onUpdateCheckComplete` method).
-      if (
-        this.isBuiltinColorwayTheme &&
-        BuiltInThemesHelpers.isColorwayMigrationEnabled &&
-        BuiltInThemesHelpers.themeIsExpired(this.id) &&
-        (BuiltInThemesHelpers.isActiveTheme(this.id) ||
-          BuiltInThemesHelpers.isRetainedExpiredTheme(this.id))
-      ) {
-        permissions |= lazy.AddonManager.PERM_CAN_UPGRADE;
-      }
     }
 
     // We allow uninstall of legacy sideloaded extensions, even when in locked locations,
@@ -954,7 +880,7 @@ export class AddonInternal {
  * @param {AddonInternal} aAddon
  *        The add-on object to wrap.
  */
-AddonWrapper = class {
+export class AddonWrapper {
   constructor(aAddon) {
     wrapperMap.set(this, aAddon);
   }
@@ -1237,6 +1163,11 @@ AddonWrapper = class {
     return lazy.AddonManager.SCOPE_PROFILE;
   }
 
+  get locationName() {
+    let addon = addonFor(this);
+    return addon.location.name;
+  }
+
   get pendingOperations() {
     let addon = addonFor(this);
     let pending = 0;
@@ -1441,6 +1372,8 @@ AddonWrapper = class {
   /**
    * Returns true if the addon is configured to be installed
    * by enterprise policy.
+   *
+   * Should be kept in sync with Extension.sys.mjs
    */
   get isInstalledByEnterprisePolicy() {
     const policySettings = Services.policies?.getExtensionSettings(this.id);
@@ -1483,6 +1416,9 @@ AddonWrapper = class {
     let perms = {
       origins: required.origins.concat(requested?.origins ?? []),
       permissions: required.permissions.concat(requested?.permissions ?? []),
+      data_collection: required.data_collection.concat(
+        requested?.data_collection ?? []
+      ),
     };
     return perms;
   }
@@ -1589,7 +1525,7 @@ AddonWrapper = class {
     }
     return url;
   }
-};
+}
 
 function chooseValue(aAddon, aObj, aProp) {
   let repositoryAddon = aAddon._repositoryAddon;
@@ -1725,53 +1661,23 @@ const updatedAddonFluentIds = new Map([
     ) {
       // Built-in themes are localized with Fluent instead of the WebExtension API.
       let addonIdPrefix = addon.id.replace("@mozilla.org", "");
-      const colorwaySuffix = "colorway";
-      if (addonIdPrefix.endsWith(colorwaySuffix)) {
-        // FIXME: Depending on BuiltInThemes here is sort of a hack. Bug 1733466
-        // would provide a more generalized way of doing this.
-        if (aProp == "description") {
-          return BuiltInThemesHelpers.getLocalizedColorwayDescription(addon.id);
-        }
-        // Colorway collections are usually divided into and presented as
-        // "groups". A group either contains closely related colorways, e.g.
-        // stemming from the same base color but with different intensities, or
-        // if the current collection doesn't have intensities, each colorway is
-        // their own group. Colorway names combine the group name with an
-        // intensity. Their ids have the format
-        // {colorwayGroup}-{intensity}-colorway@mozilla.org or
-        // {colorwayGroupName}-colorway@mozilla.org). L10n for colorway group
-        // names is optional and falls back on the unlocalized name from the
-        // theme's manifest. The intensity part, if present, must be localized.
-        let localizedColorwayGroupName =
-          BuiltInThemesHelpers.getLocalizedColorwayGroupName(addon.id);
-        let [colorwayGroupName, intensity] = addonIdPrefix.split("-", 2);
-        if (intensity == colorwaySuffix) {
-          // This theme doesn't have an intensity.
-          return localizedColorwayGroupName || addon.defaultLocale.name;
-        }
-        // We're not using toLocaleUpperCase because these color names are
-        // always in English.
-        colorwayGroupName =
-          localizedColorwayGroupName ||
-          colorwayGroupName[0].toUpperCase() + colorwayGroupName.slice(1);
-        let defaultFluentId = `extension-colorways-${intensity}-name`;
-        let fluentId =
-          updatedAddonFluentIds.get(defaultFluentId) || defaultFluentId;
-        [formattedMessage] = l10n.formatMessagesSync([
-          {
-            id: fluentId,
-            args: {
-              "colorway-name": colorwayGroupName,
-            },
-          },
-        ]);
-      } else {
-        let defaultFluentId = `extension-${addonIdPrefix}-${aProp}`;
-        let fluentId =
-          updatedAddonFluentIds.get(defaultFluentId) || defaultFluentId;
+      let defaultFluentId = `extension-${addonIdPrefix}-${aProp}`;
+      let fluentId =
+        updatedAddonFluentIds.get(defaultFluentId) || defaultFluentId;
+      try {
+        const l10n = new Localization(["browser/appExtensionFields.ftl"], true);
         [formattedMessage] = l10n.formatMessagesSync([{ id: fluentId }]);
+      } catch (e) {
+        // Log a warning when no fluent string was found, but fallback to the value set
+        // in the manifest field or values got from AMO and stored in the AddonRepository.
+        logger.warn(
+          `Failed to format fluent localized string for "${addon.id}" AddonWrapper property ${aProp}`,
+          e
+        );
       }
+    }
 
+    if (formattedMessage) {
       return formattedMessage.value;
     }
 
@@ -2471,7 +2377,20 @@ export const XPIDatabase = {
    * @returns {Promise<Array<AddonInternal>>}
    */
   getAddonsInLocation(aLocation) {
-    return this.getAddonList(aAddon => aAddon.location.name == aLocation);
+    return this.getAddonsInLocations([aLocation]);
+  },
+
+  /**
+   * Asynchronously get all the add-ons in an array of install locations.
+   *
+   * @param {Array<string>} aLocations
+   *        The name of the install location
+   * @returns {Promise<Array<AddonInternal>>}
+   */
+  getAddonsInLocations(aLocations) {
+    return this.getAddonList(aAddon =>
+      aLocations.includes(aAddon.location.name)
+    );
   },
 
   /**
@@ -3243,24 +3162,27 @@ export const XPIDatabaseReconcile = {
    *
    * @param {Map<String, AddonInternal>} addonMap
    *        The add-on map to flatten.
-   * @param {string?} [hideLocation]
-   *        An optional location from which to hide any add-ons.
+   * @param {function(string, string): boolean} [hideAddonCb]
+   *        An optional callback used to determine if any of the addons
+   *        in addonMap should be hidden based on their location name and
+   *        addon id (e.g. system addons that are determined to be invalid
+   *        by XPIDatabaseReconcile.processFileChanges are disabled through
+   *        this callback).
    * @returns {Map<string, AddonInternal>}
    */
-  flattenByID(addonMap, hideLocation) {
+  flattenByID(addonMap, hideAddonCb) {
     let map = new Map();
 
     for (let loc of XPIExports.XPIInternal.XPIStates.locations()) {
-      if (loc.name == hideLocation) {
-        continue;
-      }
-
       let locationMap = addonMap.get(loc.name);
       if (!locationMap) {
         continue;
       }
 
       for (let [id, addon] of locationMap) {
+        if (hideAddonCb?.(loc.name, id)) {
+          continue;
+        }
         if (!map.has(id)) {
           map.set(id, addon);
         }
@@ -3375,7 +3297,21 @@ export const XPIDatabaseReconcile = {
 
       // Remove the invalid add-on from the install location if the install
       // location isn't locked
-      if (aLocation.isLinkedAddon(aId)) {
+      if (
+        aLocation.name === KEY_APP_BUILTINS ||
+        aLocation.name === KEY_APP_SYSTEM_BUILTINS
+      ) {
+        // If a builtin has been removed from the build, we need to remove it from our
+        // data sets.  We cannot use location.isBuiltin since the system addon locations
+        // mix it up.
+        // NOTE: for the add-ons installed in KEY_APP_SYSTEM_BUILTINS, this logic ensures
+        // that we don't keep them as userDisabled in the add-on DB  when loading the
+        // manifest fails. Otherwise, they would stay userDisabled even when the application
+        // is updated and an updated manifest loads successfully for the new system built-in
+        // add-on version (test_system_reset.js covers this corner case).
+        XPIDatabase.removeAddonMetadata(aAddonState);
+        aLocation.removeAddon(aId);
+      } else if (aLocation.isLinkedAddon(aId)) {
         logger.warn("Not uninstalling invalid item because it is a proxy file");
       } else if (aLocation.locked) {
         logger.warn(
@@ -3383,12 +3319,6 @@ export const XPIDatabaseReconcile = {
         );
       } else if (unsigned && !isNewInstall) {
         logger.warn("Not uninstalling existing unsigned add-on");
-      } else if (aLocation.name == KEY_APP_BUILTINS) {
-        // If a builtin has been removed from the build, we need to remove it from our
-        // data sets.  We cannot use location.isBuiltin since the system addon locations
-        // mix it up.
-        XPIDatabase.removeAddonMetadata(aAddonState);
-        aLocation.removeAddon(aId);
       } else {
         aLocation.installer.uninstallAddon(aId);
       }
@@ -3662,8 +3592,8 @@ export const XPIDatabaseReconcile = {
   isAppBundledLocation(location) {
     return (
       location.name == KEY_APP_GLOBAL ||
-      location.name == KEY_APP_SYSTEM_DEFAULTS ||
-      location.name == KEY_APP_BUILTINS
+      location.name == KEY_APP_BUILTINS ||
+      location.name == KEY_APP_SYSTEM_BUILTINS
     );
   },
 
@@ -3677,8 +3607,8 @@ export const XPIDatabaseReconcile = {
    */
   isSystemAddonLocation(location) {
     return (
-      location.name === KEY_APP_SYSTEM_DEFAULTS ||
-      location.name === KEY_APP_SYSTEM_ADDONS
+      location.name === KEY_APP_SYSTEM_ADDONS ||
+      location.name === KEY_APP_SYSTEM_BUILTINS
     );
   },
 
@@ -3723,7 +3653,13 @@ export const XPIDatabaseReconcile = {
     if (
       newAddon ||
       oldAddon.updateDate != xpiState.mtime ||
-      (aUpdateCompatibility && this.isAppBundledLocation(installLocation))
+      (aUpdateCompatibility && this.isAppBundledLocation(installLocation)) ||
+      // update addon metadata if the addon in bundled into
+      // the omni jar and version or the resource URI pointing
+      // to the extension assets has changed.
+      (installLocation.name === KEY_APP_SYSTEM_BUILTINS &&
+        (oldAddon.version != xpiState.version ||
+          oldAddon.rootURI != xpiState.rootURI))
     ) {
       newAddon = this.updateMetadata(
         installLocation,
@@ -3861,26 +3797,31 @@ export const XPIDatabaseReconcile = {
     }
 
     // Validate the updated system add-ons
-    let hideLocation;
+    let hideAddonCb;
     {
       let systemAddonLocation = XPIExports.XPIInternal.XPIStates.getLocation(
         KEY_APP_SYSTEM_ADDONS
       );
       let addons = currentAddons.get(systemAddonLocation.name);
-
-      if (!systemAddonLocation.installer.isValid(addons)) {
-        // Hide the system add-on updates if any are invalid.
+      let invalidAddonIds =
+        systemAddonLocation.installer.getInvalidAddonIds(addons);
+      if (invalidAddonIds?.length) {
         logger.info(
-          "One or more updated system add-ons invalid, falling back to defaults."
+          `Detected invalid system-signed addons to be disabled: ${invalidAddonIds.join(", ")}`
         );
-        hideLocation = systemAddonLocation.name;
+        // Set the callback passed to flattenByID, this callback
+        // should return true if both the location name and addon id
+        // match one that should be disabled.
+        hideAddonCb = (locName, addonId) =>
+          locName === systemAddonLocation.name &&
+          invalidAddonIds?.includes(addonId);
       }
     }
 
     // Apply startup changes to any currently-visible add-ons, and
     // uninstall any which were previously visible, but aren't anymore.
     let previousVisible = this.getVisibleAddons(previousAddons);
-    let currentVisible = this.flattenByID(currentAddons, hideLocation);
+    let currentVisible = this.flattenByID(currentAddons, hideAddonCb);
 
     for (let addon of XPIDatabase.orphanedAddons.splice(0)) {
       if (addon.visible) {
@@ -3907,7 +3848,10 @@ export const XPIDatabaseReconcile = {
 
     for (let [id, addon] of previousVisible) {
       if (addon.location) {
-        if (addon.location.name == KEY_APP_BUILTINS) {
+        if (
+          addon.location.name === KEY_APP_BUILTINS ||
+          addon.location.name === KEY_APP_SYSTEM_BUILTINS
+        ) {
           continue;
         }
         XPIExports.XPIInternal.BootstrapScope.get(addon).uninstall();

@@ -60,9 +60,6 @@ class JS_PUBLIC_API JSObject;
   _(GC_TIME_BETWEEN_S, TimeDuration_S)          \
   _(GC_TIME_BETWEEN_SLICES_MS, TimeDuration_MS) \
   _(GC_SLICE_COUNT, QuantityDistribution)       \
-  _(DESERIALIZE_BYTES, MemoryDistribution)      \
-  _(DESERIALIZE_ITEMS, QuantityDistribution)    \
-  _(DESERIALIZE_US, TimeDuration_US)            \
   _(GC_EFFECTIVENESS, MemoryDistribution)       \
   _(GC_PARALLEL_MARK, Boolean)                  \
   _(GC_PARALLEL_MARK_SPEEDUP, Integer)          \
@@ -75,7 +72,10 @@ class JS_PUBLIC_API JSObject;
  * However, unlike the legacy list, each glean metric must be manually added
  * to the switch statement in AccumulateTelemetryCallback().
  */
-#define FOR_EACH_JS_GLEAN_METRIC(_) _(ION_COMPILE_TIME, TimeDuration_US)
+#define FOR_EACH_JS_GLEAN_METRIC(_)    \
+  _(ION_COMPILE_TIME, TimeDuration_US) \
+  _(GC_GLEAN_SLOW_PHASE, Enumeration)  \
+  _(GC_GLEAN_SLOW_TASK, Enumeration)
 
 #define FOR_EACH_JS_METRIC(_)  \
   FOR_EACH_JS_LEGACY_METRIC(_) \
@@ -104,6 +104,7 @@ extern JS_PUBLIC_API void JS_SetAccumulateTelemetryCallback(
   _(THENABLE_USE, ThenableUse)                                   \
   _(THENABLE_USE_PROTO, ThenableUseProto)                        \
   _(THENABLE_USE_STANDARD_PROTO, ThenableUseStandardProto)       \
+  _(THENABLE_USE_OBJECT_PROTO, ThenableUseObjectProto)           \
   _(LEGACY_LANG_SUBTAG, LegacyLangSubtag)                        \
   _(IC_STUB_TOO_LARGE, ICStubTooLarge)                           \
   _(IC_STUB_OOM, ICStubOOM)                                      \
@@ -113,7 +114,10 @@ extern JS_PUBLIC_API void JS_SetAccumulateTelemetryCallback(
   _(ERRORSTACK_SETTER_NONSTRING, ErrorStackSetterNonString)      \
   _(ERRORSTACK_SETTER_NO_ERRORDATA, ErrorStackSetterNoErrorData) \
   _(DATEPARSE, DateParse)                                        \
-  _(DATEPARSE_IMPL_DEF, DateParseImplDef)
+  _(DATEPARSE_IMPL_DEF, DateParseImplDef)                        \
+  _(OPTIMIZE_ARRAY_SPECIES_FUSE, OptimizeArraySpeciesFuse)       \
+  _(OPTIMIZE_PROMISE_LOOKUP_FUSE, OptimizePromiseLookupFuse)     \
+  _(REGEXP_SYMBOL_PROTOCOL_ON_PRIMITIVE, RegExpSymbolProtocolOnPrimitive)
 
 /*
  * Use counter names passed to the accumulate use counter callback.

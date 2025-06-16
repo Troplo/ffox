@@ -13,7 +13,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ContentRelevancyManager:
     "resource://gre/modules/ContentRelevancyManager.sys.mjs",
   QuickSuggest: "resource:///modules/QuickSuggest.sys.mjs",
-  SearchUtils: "resource://gre/modules/SearchUtils.sys.mjs",
+  SearchUtils: "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.sys.mjs",
   UrlbarProviderSearchSuggestions:
     "resource:///modules/UrlbarProviderSearchSuggestions.sys.mjs",
@@ -39,9 +39,7 @@ class ProviderQuickSuggest extends UrlbarProvider {
   }
 
   /**
-   * The type of the provider.
-   *
-   * @returns {UrlbarUtils.PROVIDER_TYPE}
+   * @returns {Values<typeof UrlbarUtils.PROVIDER_TYPE>}
    */
   get type() {
     return UrlbarUtils.PROVIDER_TYPE.NETWORK;
@@ -63,9 +61,8 @@ class ProviderQuickSuggest extends UrlbarProvider {
    * with this provider, to save on resources.
    *
    * @param {UrlbarQueryContext} queryContext The query context object
-   * @returns {boolean} Whether this provider should be invoked for the search.
    */
-  isActive(queryContext) {
+  async isActive(queryContext) {
     // If the sources don't include search or the user used a restriction
     // character other than search, don't allow any suggestions.
     if (
@@ -265,7 +262,7 @@ class ProviderQuickSuggest extends UrlbarProvider {
     let { result } = details;
 
     // Delegate to the result's feature if there is one.
-    let feature = lazy.QuickSuggest.getFeatureByResult(details.result);
+    let feature = lazy.QuickSuggest.getFeatureByResult(result);
     if (feature) {
       feature.onEngagement(
         queryContext,
@@ -280,7 +277,8 @@ class ProviderQuickSuggest extends UrlbarProvider {
     // supported for results without features. Dismissal is the only one we need
     // to handle here since urlbar handles the others.
     if (details.selType == "dismiss" && result.payload.isBlockable) {
-      lazy.QuickSuggest.blockedSuggestions.add(result.payload.url);
+      // `dismissResult()` is async but there's no need to await it here.
+      lazy.QuickSuggest.dismissResult(result);
       controller.removeResult(result);
     }
   }
@@ -359,6 +357,10 @@ class ProviderQuickSuggest extends UrlbarProvider {
     result.payload.isSponsored = feature
       ? feature.isSuggestionSponsored(suggestion)
       : !!suggestion.is_sponsored;
+    if (suggestion.source == "rust") {
+      // `suggestionObject` is passed back into the Rust component on dismissal.
+      result.payload.suggestionObject = suggestion;
+    }
 
     // Handle icons here so each feature doesn't have to do it, but use `||=` to
     // let them do it if they need to.
@@ -380,7 +382,7 @@ class ProviderQuickSuggest extends UrlbarProvider {
           );
         } else if (
           lazy.UrlbarPrefs.get("showSearchSuggestionsFirst") &&
-          lazy.UrlbarProviderSearchSuggestions.isActive(queryContext) &&
+          (await lazy.UrlbarProviderSearchSuggestions.isActive(queryContext)) &&
           lazy.UrlbarSearchUtils.getDefaultEngine(
             queryContext.isPrivate
           ).supportsResponseType(lazy.SearchUtils.URL_TYPE.SUGGEST_JSON)
@@ -429,6 +431,8 @@ class ProviderQuickSuggest extends UrlbarProvider {
     // Note that Merino uses snake_case keys.
     let payload = {
       url: suggestion.url,
+      originalUrl: suggestion.original_url,
+      dismissalKey: suggestion.dismissal_key,
       isBlockable: true,
       isManageable: true,
     };
@@ -514,10 +518,7 @@ class ProviderQuickSuggest extends UrlbarProvider {
 
     let score;
     try {
-      score = await lazy.ContentRelevancyManager.score(
-        suggestion.categories,
-        true // adjustment needed b/c Merino uses the original encoding
-      );
+      score = await lazy.ContentRelevancyManager.score(suggestion.categories);
     } catch (error) {
       Glean.suggestRelevance.status.failure.add(1);
       this.logger.error("Error updating suggestion score", error);
@@ -538,7 +539,7 @@ class ProviderQuickSuggest extends UrlbarProvider {
    *
    * @param {UrlbarResult} result
    *   The result to check.
-   * @returns {boolean}
+   * @returns {Promise<boolean>}
    *   Whether the result can be added.
    */
   async #canAddResult(result) {
@@ -565,9 +566,9 @@ class ProviderQuickSuggest extends UrlbarProvider {
       return false;
     }
 
-    // Discard the result if its URL is blocked.
-    if (await lazy.QuickSuggest.blockedSuggestions.isResultBlocked(result)) {
-      this.logger.debug("Suggestion blocked, not adding suggestion");
+    // Discard the result if it was dismissed.
+    if (await lazy.QuickSuggest.isResultDismissed(result)) {
+      this.logger.debug("Suggestion dismissed, not adding it");
       return false;
     }
 

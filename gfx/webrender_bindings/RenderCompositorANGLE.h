@@ -28,6 +28,10 @@ namespace gl {
 class GLLibraryEGL;
 }  // namespace gl
 
+namespace layers {
+class FenceD3D11;
+}  // namespace layers
+
 namespace wr {
 
 class DCLayerTree;
@@ -79,6 +83,8 @@ class RenderCompositorANGLE final : public RenderCompositor {
 
   bool ShouldUseNativeCompositor() override;
 
+  bool ShouldUseLayerCompositor() override;
+
   // Interface for wr::Compositor
   void CompositorBeginFrame() override;
   void CompositorEndFrame() override;
@@ -103,8 +109,11 @@ class RenderCompositorANGLE final : public RenderCompositor {
   void AddSurface(wr::NativeSurfaceId aId,
                   const wr::CompositorSurfaceTransform& aTransform,
                   wr::DeviceIntRect aClipRect,
-                  wr::ImageRendering aImageRendering) override;
+                  wr::ImageRendering aImageRendering,
+                  wr::DeviceIntRect aRoundedClipRect,
+                  wr::ClipRadius aClipRadius) override;
   void EnableNativeCompositor(bool aEnable) override;
+  bool EnableAsyncScreenshot() override;
   void GetCompositorCapabilities(CompositorCapabilities* aCaps) override;
   void GetWindowProperties(WindowProperties* aProperties) override;
 
@@ -113,6 +122,8 @@ class RenderCompositorANGLE final : public RenderCompositor {
   bool RequestFullRender() override;
   uint32_t GetMaxPartialPresentRects() override;
 
+  RefPtr<layers::Fence> GetAndResetReleaseFence() override;
+
   bool MaybeReadback(const gfx::IntSize& aReadbackSize,
                      const wr::ImageFormat& aReadbackFormat,
                      const Range<uint8_t>& aReadbackBuffer,
@@ -120,6 +131,7 @@ class RenderCompositorANGLE final : public RenderCompositor {
 
  protected:
   bool UseCompositor() const;
+  bool UseLayerCompositor() const;
   bool RecreateNonNativeCompositorSwapChain();
   void InitializeUsePartialPresent();
   void InsertGraphicsCommandsFinishedWaitQuery(
@@ -161,7 +173,6 @@ class RenderCompositorANGLE final : public RenderCompositor {
   RenderedFrameId mLastCompletedFrameId;
 
   Maybe<LayoutDeviceIntSize> mBufferSize;
-  bool mUseNativeCompositor = true;
   bool mUsePartialPresent = false;
   bool mFullRender = false;
   // Used to know a timing of disabling native compositor.
@@ -169,6 +180,7 @@ class RenderCompositorANGLE final : public RenderCompositor {
   bool mFirstPresent = true;
   // Wether we're currently using alpha.
   bool mSwapChainUsingAlpha = false;
+  RefPtr<layers::FenceD3D11> mFence;
 };
 
 }  // namespace wr

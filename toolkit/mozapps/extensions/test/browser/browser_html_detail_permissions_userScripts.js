@@ -13,7 +13,10 @@ AddonTestUtils.initMochitest(this);
 
 add_setup(async () => {
   await SpecialPowers.pushPrefEnv({
-    set: [["extensions.userScripts.mv3.enabled", true]],
+    set: [
+      ["extensions.userScripts.mv3.enabled", true],
+      ["extensions.dataCollectionPermissions.enabled", true],
+    ],
   });
 });
 
@@ -28,7 +31,7 @@ function loadUserScriptsExtension(addonId) {
     background() {
       browser.permissions.onAdded.addListener(perms => {
         browser.test.assertDeepEq(
-          { permissions: ["userScripts"], origins: [] },
+          { permissions: ["userScripts"], origins: [], data_collection: [] },
           perms,
           "permissions.onAdded for userScripts permission"
         );
@@ -37,7 +40,7 @@ function loadUserScriptsExtension(addonId) {
       });
       browser.permissions.onRemoved.addListener(perms => {
         browser.test.assertDeepEq(
-          { permissions: ["userScripts"], origins: [] },
+          { permissions: ["userScripts"], origins: [], data_collection: [] },
           perms,
           "permissions.onRemoved for userScripts permission"
         );

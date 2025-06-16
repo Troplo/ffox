@@ -7,9 +7,24 @@ test "$(whoami)" == 'root'
 # We do want to install recommended packages.
 sed -i /APT::Install-Recommends/d /etc/apt/apt.conf.d/99taskcluster
 
+apt-get update && apt-get install ubuntu-dbgsym-keyring
+
+cat > /etc/apt/sources.list.d/ddebs.list <<EOF
+deb http://ddebs.ubuntu.com noble main restricted universe multiverse
+deb http://ddebs.ubuntu.com noble-updates main restricted universe multiverse
+deb http://ddebs.ubuntu.com noble-proposed main restricted universe multiverse
+EOF
+
 # To speed up docker image build times as well as number of network/disk I/O
 # build a list of packages to be installed and call it in one go.
 apt_packages=()
+
+ARCH="${1:-amd64}"
+
+if [[ "$ARCH" == "amd64" ]]; then
+    apt_packages+=('g++-multilib')
+    apt_packages+=('gcc-multilib')
+fi
 
 apt_packages+=('autoconf2.13')
 apt_packages+=('bluez-cups')
@@ -28,8 +43,6 @@ apt_packages+=('fonts-stix')
 apt_packages+=('fonts-unfonts-core')
 apt_packages+=('fonts-unfonts-extra')
 apt_packages+=('fonts-vlgothic')
-apt_packages+=('g++-multilib')
-apt_packages+=('gcc-multilib')
 apt_packages+=('gir1.2-gnomebluetooth-3.0')
 apt_packages+=('gnome-icon-theme')
 apt_packages+=('gnome-keyring')
@@ -93,6 +106,9 @@ apt_packages+=('x11-xserver-utils')
 # Build a list of packages to install from the multiverse repo.
 apt_packages+=('ubuntu-restricted-extras')
 
+# libgallium debug symbols
+apt_packages+=('mesa-libgallium-dbgsym')
+
 # APT update takes very long on Ubuntu. Run it at the last possible minute.
 apt-get update
 
@@ -104,23 +120,26 @@ apt-get install --allow-downgrades "${apt_packages[@]}"
 # whale
 sed -i 's/org.gnome.SettingsDaemon.Power;//' /usr/share/gnome-session/sessions/ubuntu.session
 
-# Enable i386 packages
-dpkg --add-architecture i386
-apt-get update
+if [[ "$ARCH" == "amd64" ]]; then
+    # Enable i386 packages
+    dpkg --add-architecture i386
+    apt-get update
 
-# Make sure we have libraries for 32-bit tests
-apt_packages=()
-apt_packages+=('libavcodec-extra60:i386')
-apt_packages+=('libpulse0:i386')
-apt_packages+=('libxt6:i386')
-apt_packages+=('libxtst6:i386')
-apt_packages+=('libsecret-1-0:i386')
-apt_packages+=('libgtk-3-0:i386')
-apt_packages+=('libx11-xcb1:i386')
-apt_packages+=('libxcb1:i386')
-apt_packages+=('libasound2:i386')
+    # Make sure we have libraries for 32-bit tests
+    apt_packages=()
+    apt_packages+=('libavcodec-extra60:i386')
+    apt_packages+=('libpulse0:i386')
+    apt_packages+=('libxt6:i386')
+    apt_packages+=('libxtst6:i386')
+    apt_packages+=('libsecret-1-0:i386')
+    apt_packages+=('libgtk-3-0:i386')
+    apt_packages+=('libx11-xcb1:i386')
+    apt_packages+=('libxcb1:i386')
+    apt_packages+=('libasound2:i386')
 
-apt-get install --allow-downgrades "${apt_packages[@]}"
+    apt-get install --allow-downgrades "${apt_packages[@]}"
+fi
+
 rm -rf /var/lib/apt/lists/*
 
 # enable audiotestsrc plugin in pipewire config

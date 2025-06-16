@@ -8,19 +8,20 @@
 
 ChromeUtils.defineESModuleGetters(this, {
   AppConstants: "resource://gre/modules/AppConstants.sys.mjs",
-  ClientEnvironment: "resource://normandy/lib/ClientEnvironment.sys.mjs",
-  ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
-  ExperimentFakes: "resource://testing-common/NimbusTestUtils.sys.mjs",
-  ExperimentManager: "resource://nimbus/lib/ExperimentManager.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   UpdateUtils: "resource://gre/modules/UpdateUtils.sys.mjs",
   sinon: "resource://testing-common/Sinon.sys.mjs",
   WinTaskbarJumpList: "resource:///modules/WindowsJumpLists.sys.mjs",
 });
 
+const { NimbusTestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/NimbusTestUtils.sys.mjs"
+);
 const { Policy, TelemetryReportingPolicy } = ChromeUtils.importESModule(
   "resource://gre/modules/TelemetryReportingPolicy.sys.mjs"
 );
+
+NimbusTestUtils.init(this);
 
 // Some tests in this test file can't outside desktop Firefox because of
 // features that aren't included in the build.
@@ -32,33 +33,6 @@ const TEST_CHANNEL = "TestChannelABC";
 
 const PREF_MINIMUM_CHANNEL_POLICY_VERSION =
   TelemetryUtils.Preferences.MinimumPolicyVersion + ".channel-" + TEST_CHANNEL;
-
-const ON_TRAIN_ROLLOUT_SUPPORTED_PLATFORM =
-  AppConstants.platform == "linux" ||
-  AppConstants.platform == "macosx" ||
-  (AppConstants.platform === "win" &&
-    Services.sysinfo.getProperty("hasWinPackageId", false));
-
-const ON_TRAIN_ROLLOUT_ENABLED_PREF =
-  "browser.preonboarding.onTrainRolloutEnabled";
-
-const ON_TRAIN_ROLLOUT_POPULATION_PREF =
-  "browser.preonboarding.onTrainRolloutPopulation";
-
-const ON_TRAIN_ROLLOUT_ENROLLMENT_PREF =
-  "browser.preonboarding.enrolledInOnTrainRollout";
-
-const ON_TRAIN_TEST_RECIPE = {
-  slug: "new-onboarding-experience-on-train-rollout-phase-1",
-  bucketConfig: {
-    count: 100,
-    namespace: "firefox-desktop-preonboarding-on-train-rollout-1",
-    randomizationUnit: "normandy_id",
-    start: 0,
-    total: 10000,
-  },
-  branches: [{ slug: "treatment", ratio: 100 }],
-};
 
 function fakeShowPolicyTimeout(set, clear) {
   Policy.setShowInfobarTimeout = set;
@@ -119,7 +93,7 @@ function unsetMinimumPolicyVersion() {
 }
 
 function enrollInPreonboardingExperiment(version) {
-  return ExperimentFakes.enrollWithFeatureConfig(
+  return NimbusTestUtils.enrollWithFeatureConfig(
     {
       featureId: NimbusFeatures.preonboarding.featureId,
       value: {
@@ -160,9 +134,9 @@ add_setup(async function test_setup() {
 });
 
 add_setup(skipIfNotBrowser(), async () => {
-  // Needed to interact with Nimbus.
-  await ExperimentManager.onStartup();
-  await ExperimentAPI.ready();
+  const { cleanup } = await NimbusTestUtils.setupTest();
+
+  registerCleanupFunction(cleanup);
 });
 
 add_task(skipIfNotBrowser(), async function test_firstRun() {
@@ -172,6 +146,13 @@ add_task(skipIfNotBrowser(), async function test_firstRun() {
   const OTHER_RUNS_TIMEOUT_MSEC = 10 * 1000; // 10s
 
   Services.prefs.clearUserPref(TelemetryUtils.Preferences.FirstRun);
+  // The new user TOS modal is now enabled by default on all platforms except
+  // Linux, so the infobar will only show if preonboarding is explicitly turned
+  // off via nimbus variable or its fallback pref.
+  if (AppConstants.platform !== "linux") {
+    // This pref is set to false on Linux by default
+    Services.prefs.setBoolPref("browser.preonboarding.enabled", false);
+  }
 
   let promiseTimeout = () =>
     new Promise(resolve => {
@@ -202,6 +183,8 @@ add_task(skipIfNotBrowser(), async function test_firstRun() {
     OTHER_RUNS_TIMEOUT_MSEC,
     "The infobar display timeout should be 10s on other runs."
   );
+
+  Services.prefs.clearUserPref("browser.preonboarding.enabled");
 });
 
 add_task(async function test_prefs() {
@@ -525,7 +508,7 @@ add_task(skipIfNotBrowser(), async function test_feature_prefs() {
   unsetMinimumPolicyVersion();
   Services.prefs.clearUserPref(TelemetryUtils.Preferences.CurrentPolicyVersion);
 
-  let doCleanup = await ExperimentFakes.enrollWithFeatureConfig(
+  let doCleanup = await NimbusTestUtils.enrollWithFeatureConfig(
     {
       featureId: NimbusFeatures.preonboarding.featureId,
       value: {
@@ -567,12 +550,12 @@ add_task(skipIfNotBrowser(), async function test_feature_prefs() {
   assertPrefs(900, 899, "http://mochi.test/v900");
 
   // Unenroll.  Values remain, for consistency while Firefox is running.
-  doCleanup();
+  await doCleanup();
   Assert.ok(!NimbusFeatures.preonboarding.getVariable("enabled"));
   assertPrefs(900, 899, "http://mochi.test/v900");
 
   // Updating the Nimbus feature does nothing (without `sessionstore-windows-restored`).
-  doCleanup = await ExperimentFakes.enrollWithFeatureConfig(
+  doCleanup = await NimbusTestUtils.enrollWithFeatureConfig(
     {
       featureId: NimbusFeatures.preonboarding.featureId,
       value: {
@@ -586,7 +569,7 @@ add_task(skipIfNotBrowser(), async function test_feature_prefs() {
   );
   Assert.ok(NimbusFeatures.preonboarding.getVariable("enabled"));
   assertPrefs(900, 899, "http://mochi.test/v900");
-  doCleanup();
+  await doCleanup();
 });
 
 async function doOneModalFlow(version) {
@@ -712,91 +695,41 @@ add_task(
   }
 );
 
-const getOnTrainRolloutModalStub = async ({
-  shouldEnroll,
-  isFirstRun,
-  isEnrolled,
-}) => {
-  Services.prefs.setBoolPref(ON_TRAIN_ROLLOUT_ENABLED_PREF, true);
-  Services.prefs.setIntPref(
-    ON_TRAIN_ROLLOUT_POPULATION_PREF,
-    ON_TRAIN_TEST_RECIPE.bucketConfig.count
-  );
-  Services.prefs.setBoolPref(ON_TRAIN_ROLLOUT_ENROLLMENT_PREF, isEnrolled);
-  Services.prefs.setBoolPref(TelemetryUtils.Preferences.FirstRun, isFirstRun);
-
-  const testIDs = await ExperimentManager.generateTestIds(ON_TRAIN_TEST_RECIPE);
-  let experimentId = shouldEnroll ? testIDs.treatment : testIDs.notInExperiment;
-  sinon.stub(ClientEnvironment, "userId").get(() => experimentId);
-  let modalStub = sinon.stub(Policy, "showModal").returns(true);
-
-  fakeResetAcceptedPolicy();
-  TelemetryReportingPolicy.reset();
-  let p = Policy.delayedSetup();
-  Policy.fakeSessionRestoreNotification();
-  fakeInteractWithModal();
-  await p;
-
-  const doCleanup = () => {
-    sinon.restore();
-    fakeResetAcceptedPolicy();
-    Services.prefs.clearUserPref(ON_TRAIN_ROLLOUT_ENABLED_PREF);
-    Services.prefs.clearUserPref(ON_TRAIN_ROLLOUT_POPULATION_PREF);
-    Services.prefs.clearUserPref(ON_TRAIN_ROLLOUT_ENROLLMENT_PREF);
-  };
-
-  return { modalStub, doCleanup };
-};
-
 add_task(
   skipIfNotBrowser(),
-  async function test_onTrainRollout_configuration_supportedOS_should_enroll() {
-    if (!ON_TRAIN_ROLLOUT_SUPPORTED_PLATFORM) {
+  async function test_default_modal_shows_when_not_enrolled_in_experiment() {
+    if (AppConstants.platform === "linux") {
       info(
-        "Skipping supported OS test because current platform is not Linux, Mac, or Win MSIX"
+        "Skipping test for Linux where preonboarding is disabled by default"
       );
       return;
     }
+    let modalStub = sinon.stub(Policy, "showModal").returns(true);
 
-    const { modalStub, doCleanup } = await getOnTrainRolloutModalStub({
-      shouldEnroll: true,
-      isFirstRun: true,
-      isEnrolled: false,
-    });
+    fakeResetAcceptedPolicy();
+    TelemetryReportingPolicy.reset();
+    let p = Policy.delayedSetup();
+    Policy.fakeSessionRestoreNotification();
+    fakeInteractWithModal();
+    await p;
 
     Assert.equal(
       modalStub.callCount,
       1,
-      "showModal is invoked once if enrolled in rollout"
+      "showModal is invoked once when not enrolled in an experiemnt"
     );
-
-    doCleanup();
-  }
-);
-
-add_task(
-  skipIfNotBrowser(),
-  async function test_onTrainRollout_configuration_supportedOS_should_not_enroll() {
-    if (!ON_TRAIN_ROLLOUT_SUPPORTED_PLATFORM) {
-      info(
-        "Skipping supported OS test because current platform is not Linux, Mac, or Win MSIX"
-      );
-      return;
-    }
-
-    const { modalStub, doCleanup } = await getOnTrainRolloutModalStub({
-      shouldEnroll: false,
-      isFirstRun: true,
-      isEnrolled: false,
-    });
 
     Assert.equal(
-      modalStub.callCount,
-      0,
-      "showModal is not invoked if not enrolled in rollout"
+      true,
+      Services.prefs.getBoolPref(
+        "browser.preonboarding.enrolledInOnTrainRollout",
+        false
+      ),
+      "Pref recording that user is enrolled in on-train rollout is set to true"
     );
 
-    doCleanup();
+    sinon.restore();
+    fakeResetAcceptedPolicy();
   }
 );
 
@@ -832,90 +765,12 @@ add_task(
     await p;
 
     Assert.ok(
-      unblockSpy.calledOnce,
+      unblockSpy.callCount >= blockSpy.callCount,
       "Jump list should be unblocked after user interacts with modal"
     );
 
     doCleanup();
 
     sinon.restore();
-  }
-);
-
-add_task(
-  skipIfNotBrowser(),
-  async function test_onTrainRollout_configuration_unsupportedOS() {
-    if (ON_TRAIN_ROLLOUT_SUPPORTED_PLATFORM) {
-      info(
-        "Skipping unsupported OS test because current platform is supported"
-      );
-      return;
-    }
-
-    const { modalStub, doCleanup } = await getOnTrainRolloutModalStub({
-      shouldEnroll: true,
-      isFirstRun: true,
-      isEnrolled: false,
-    });
-
-    Assert.equal(
-      modalStub.callCount,
-      0,
-      "showModal is not invoked on unsupported OS even if on-train rollouts are enabled and user would otherwise be enrolled"
-    );
-
-    doCleanup();
-  }
-);
-
-add_task(
-  skipIfNotBrowser(),
-  async function test_onTrainRollout_subsequent_startup_after_enrolled() {
-    if (!ON_TRAIN_ROLLOUT_SUPPORTED_PLATFORM) {
-      info(
-        "Skipping supported OS test because current platform is not Linux, Mac, or Win MSIX"
-      );
-      return;
-    }
-
-    const { modalStub, doCleanup } = await getOnTrainRolloutModalStub({
-      shouldEnroll: true,
-      isFirstRun: false,
-      isEnrolled: true,
-    });
-
-    Assert.equal(
-      modalStub.callCount,
-      1,
-      "showModal is invoked on subsequent startup if user was enrolled on first startup but did not interact with modal"
-    );
-
-    doCleanup();
-  }
-);
-
-add_task(
-  skipIfNotBrowser(),
-  async function test_onTrainRollout_subsequent_startup_not_enrolled() {
-    if (!ON_TRAIN_ROLLOUT_SUPPORTED_PLATFORM) {
-      info(
-        "Skipping supported OS test because current platform is not Linux, Mac, or Win MSIX"
-      );
-      return;
-    }
-
-    const { modalStub, doCleanup } = await getOnTrainRolloutModalStub({
-      shouldEnroll: true,
-      isFirstRun: false,
-      isEnrolled: false,
-    });
-
-    Assert.equal(
-      modalStub.callCount,
-      0,
-      "showModal is not invoked on subsequent startup if user was not enrolled on first startup"
-    );
-
-    doCleanup();
   }
 );

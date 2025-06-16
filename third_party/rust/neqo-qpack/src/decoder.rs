@@ -4,6 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![allow(
+    clippy::module_name_repetitions,
+    reason = "<https://github.com/mozilla/neqo/issues/2284#issuecomment-2782711813>"
+)]
+
+use std::fmt::{self, Display, Formatter};
+
 use neqo_common::{qdebug, Header};
 use neqo_transport::{Connection, StreamId};
 
@@ -67,12 +74,9 @@ impl QPackDecoder {
         self.max_table_size
     }
 
-    /// # Panics
-    ///
-    /// If the number of blocked streams is too large.
     #[must_use]
-    pub fn get_blocked_streams(&self) -> u16 {
-        u16::try_from(self.max_blocked_streams).unwrap()
+    pub const fn get_blocked_streams(&self) -> usize {
+        self.max_blocked_streams
     }
 
     /// returns a list of unblocked streams
@@ -174,7 +178,6 @@ impl QPackDecoder {
     /// # Panics
     ///
     /// Never, but rust doesn't know that.
-    #[allow(clippy::map_err_ignore)]
     pub fn send(&mut self, conn: &mut Connection) -> Res<()> {
         // Encode increment instruction if needed.
         let increment = self.table.base() - self.acked_inserts;
@@ -184,7 +187,10 @@ impl QPackDecoder {
         }
         if !self.send_buf.is_empty() && self.local_stream_id.is_some() {
             let r = conn
-                .stream_send(self.local_stream_id.unwrap(), &self.send_buf[..])
+                .stream_send(
+                    self.local_stream_id.ok_or(Error::Internal)?,
+                    &self.send_buf[..],
+                )
                 .map_err(|_| Error::DecoderStream)?;
             qdebug!("[{self}] {r} bytes sent");
             self.send_buf.read(r);
@@ -269,8 +275,8 @@ impl QPackDecoder {
     }
 }
 
-impl ::std::fmt::Display for QPackDecoder {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for QPackDecoder {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "QPackDecoder {}", self.capacity())
     }
 }

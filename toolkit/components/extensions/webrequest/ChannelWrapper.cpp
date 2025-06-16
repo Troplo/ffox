@@ -66,6 +66,7 @@ static const ClassificationStruct classificationArray[] = {
     {CF::CLASSIFIED_CRYPTOMINING_CONTENT, MUC::Cryptomining_content},
     {CF::CLASSIFIED_EMAILTRACKING, MUC::Emailtracking},
     {CF::CLASSIFIED_EMAILTRACKING_CONTENT, MUC::Emailtracking_content},
+    {CF::CLASSIFIED_CONSENTMANAGER, MUC::Consentmanager},
     {CF::CLASSIFIED_TRACKING, MUC::Tracking},
     {CF::CLASSIFIED_TRACKING_AD, MUC::Tracking_ad},
     {CF::CLASSIFIED_TRACKING_ANALYTICS, MUC::Tracking_analytics},
@@ -863,8 +864,6 @@ MozContentPolicyType GetContentPolicyType(ExtContentPolicyType aType) {
       return MozContentPolicyType::Image;
     case ExtContentPolicy::TYPE_OBJECT:
       return MozContentPolicyType::Object;
-    case ExtContentPolicy::TYPE_OBJECT_SUBREQUEST:
-      return MozContentPolicyType::Object_subrequest;
     case ExtContentPolicy::TYPE_XMLHTTPREQUEST:
       return MozContentPolicyType::Xmlhttprequest;
     // TYPE_FETCH returns xmlhttprequest for cross-browser compatibility.

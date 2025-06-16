@@ -1,5 +1,5 @@
-commit ada06362dc400f272f1726988738cab2b6593baf
+commit 3316c0aaf676d657f5a6b33364fa7e579c78ac7f
 Author: André Bargull <andre.bargull@gmail.com>
-Date:   Tue Dec 17 17:09:14 2024 +0100
+Date:   Thu May 22 11:59:01 2025 +0200
 
-    Add linter for parseTestRecord
+    Test all combinations in temporal-plaindatetime-formatting-datetime-style

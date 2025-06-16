@@ -1358,18 +1358,682 @@ const BASE_MESSAGES = () => [
       delay: 1000,
       target: "fxa-toolbar-menu-button",
     },
-    skip_in_tests: "covered by browser_asrouter_toolbarbadge.js",
+    skip_in_tests: "it's covered by browser_asrouter_toolbarbadge.js",
     targeting:
       "source == 'newtab' && !hasAccessedFxAPanel && !usesFirefoxSync && isFxAEnabled && !isFxASignedIn",
     trigger: {
       id: "defaultBrowserCheck",
     },
   },
+  {
+    id: "INFOBAR_DEFAULT_AND_PIN_87",
+    groups: ["cfr"],
+    content: {
+      text: {
+        string_id: "default-browser-notification-message",
+      },
+      type: "global",
+      buttons: [
+        {
+          label: {
+            string_id: "default-browser-notification-button",
+          },
+          action: {
+            type: "PIN_AND_DEFAULT",
+          },
+          primary: true,
+          accessKey: "P",
+        },
+      ],
+      category: "cfrFeatures",
+      bucket_id: "INFOBAR_DEFAULT_AND_PIN_87",
+    },
+    trigger: {
+      id: "defaultBrowserCheck",
+    },
+    template: "infobar",
+    frequency: {
+      custom: [
+        {
+          cap: 1,
+          period: 3024000000,
+        },
+      ],
+      lifetime: 2,
+    },
+    targeting:
+      "(firefoxVersion >= 138 && source == 'startup' && !isDefaultBrowser && !'browser.shell.checkDefaultBrowser'|preferenceValue && currentDate|date - 'browser.shell.userDisabledDefaultCheck'|preferenceValue * 1000 >= 604800000 && isMajorUpgrade != true && platformName != 'linux' && ((currentDate|date - profileAgeCreated) / 604800000) >= 5 && !activeNotifications && 'browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features'|preferenceValue && ((currentDate|date - profileAgeCreated) / 604800000) < 15",
+  },
+  {
+    id: "FINISH_SETUP_BUTTON",
+    groups: [],
+    template: "bookmarks_bar_button",
+    skip_in_tests: "fails unrelated tests",
+    content: {
+      label: {
+        raw: "Finish setup",
+      },
+      logo: {
+        imageURL: "chrome://branding/content/about-logo.png",
+      },
+      action: {
+        type: "SET_PREF",
+        data: {
+          pref: {
+            name: "easyChecklist.open",
+            value: true,
+          },
+        },
+      },
+    },
+    priority: 1,
+    trigger: {
+      id: "defaultBrowserCheck",
+    },
+    targeting:
+      "source == 'startup' && ((currentDate|date - profileAgeCreated|date) / 86400000 <= 7) && localeLanguageCode == 'en'",
+  },
+  {
+    id: "FINISH_SETUP_CHECKLIST",
+    template: "feature_callout",
+    content: {
+      id: "FINISH_SETUP_CHECKLIST",
+      template: "multistage",
+      backdrop: "transparent",
+      transitions: false,
+      disableHistoryUpdates: true,
+      screens: [
+        {
+          id: "FINISH_SETUP_CHECKLIST",
+          anchors: [
+            {
+              selector: "#fxms-bmb-button",
+              panel_position: {
+                anchor_attachment: "bottomcenter",
+                callout_attachment: "topright",
+                offset_y: 4,
+              },
+              no_open_on_anchor: true,
+            },
+            {
+              selector: "#FINISH_SETUP_BUTTON",
+              panel_position: {
+                anchor_attachment: "bottomcenter",
+                callout_attachment: "topright",
+                offset_y: 4,
+              },
+              no_open_on_anchor: true,
+            },
+          ],
+          content: {
+            page_event_listeners: [
+              {
+                params: {
+                  type: "tourend",
+                },
+                action: {
+                  type: "SET_PREF",
+                  data: {
+                    pref: {
+                      name: "messaging-system-action.easyChecklist.open",
+                      value: "false",
+                    },
+                  },
+                },
+              },
+            ],
+            position: "callout",
+            title: {
+              string_id: "onboarding-checklist-title",
+              marginInline: "3px 40px",
+              fontWeight: "600",
+              fontSize: "16px",
+            },
+            title_logo: {
+              alignment: "top",
+              imageURL: "chrome://branding/content/about-logo.png",
+            },
+            action_checklist_subtitle: {
+              string_id: "onboarding-checklist-subtitle",
+            },
+            tiles: {
+              type: "action_checklist",
+              data: [
+                {
+                  id: "action-checklist-set-to-default",
+                  targeting: "isDefaultBrowserUncached",
+                  label: {
+                    string_id: "onboarding-checklist-set-default",
+                  },
+                  action: {
+                    type: "SET_DEFAULT_BROWSER",
+                  },
+                },
+                {
+                  id: "action-checklist-pin-to-taskbar",
+                  targeting: "!doesAppNeedPinUncached",
+                  label: {
+                    string_id: "onboarding-checklist-pin",
+                  },
+                  action: {
+                    type: "MULTI_ACTION",
+                    data: {
+                      actions: [
+                        {
+                          type: "PIN_FIREFOX_TO_TASKBAR",
+                        },
+                        {
+                          type: "PIN_FIREFOX_TO_START_MENU",
+                        },
+                      ],
+                    },
+                  },
+                },
+                {
+                  id: "action-checklist-import-data",
+                  targeting:
+                    "hasMigratedBookmarks || hasMigratedCSVPasswords || hasMigratedHistory || hasMigratedPasswords",
+                  label: {
+                    string_id: "onboarding-checklist-import",
+                  },
+                  action: {
+                    type: "SHOW_MIGRATION_WIZARD",
+                  },
+                  showExternalLinkIcon: true,
+                },
+                {
+                  id: "action-checklist-explore-extensions",
+                  targeting:
+                    "'messaging-system-action.hasOpenedExtensions'|preferenceValue || addonsInfo.hasInstalledAddons",
+                  label: {
+                    string_id: "onboarding-checklist-extension",
+                  },
+                  action: {
+                    type: "MULTI_ACTION",
+                    data: {
+                      actions: [
+                        {
+                          type: "SET_PREF",
+                          data: {
+                            pref: {
+                              name: "messaging-system-action.hasOpenedExtensions",
+                              value: "true",
+                            },
+                          },
+                        },
+                        {
+                          type: "OPEN_URL",
+                          data: {
+                            args: "https://addons.mozilla.org/en-US/firefox/collections/4757633/b4d5649fb087446aa05add5f0258c3/?page=1&collection_sort=-popularity",
+                            where: "current",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                  showExternalLinkIcon: true,
+                },
+                {
+                  id: "action-checklist-sign-in",
+                  targeting: "isFxASignedIn",
+                  label: {
+                    string_id: "onboarding-checklist-sign-up",
+                  },
+                  action: {
+                    type: "FXA_SIGNIN_FLOW",
+                    data: {
+                      entrypoint: "fx-onboarding-checklist",
+                      extraParams: {
+                        utm_content: "migration-onboarding",
+                        utm_source: "fx-new-device-sync",
+                        utm_medium: "firefox-desktop",
+                        utm_campaign: "migration",
+                      },
+                    },
+                  },
+                  showExternalLinkIcon: true,
+                },
+              ],
+            },
+            dismiss_button: {
+              action: {
+                type: "MULTI_ACTION",
+                dismiss: true,
+                data: {
+                  actions: [
+                    {
+                      type: "SET_PREF",
+                      data: {
+                        pref: {
+                          name: "easyChecklist.open",
+                          value: false,
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+    priority: 3,
+    targeting:
+      "'messaging-system-action.easyChecklist.open' | preferenceValue == true",
+    trigger: {
+      id: "preferenceObserver",
+      params: ["messaging-system-action.easyChecklist.open"],
+    },
+  },
+  {
+    id: "FINISH_SETUP_CHECKLIST",
+    template: "feature_callout",
+    content: {
+      id: "FINISH_SETUP_CHECKLIST",
+      template: "multistage",
+      backdrop: "transparent",
+      transitions: false,
+      disableHistoryUpdates: true,
+      screens: [
+        {
+          id: "FINISH_SETUP_CHECKLIST",
+          anchors: [
+            {
+              selector: "#fxms-bmb-button",
+              panel_position: {
+                anchor_attachment: "bottomcenter",
+                callout_attachment: "topright",
+                offset_y: 4,
+              },
+              no_open_on_anchor: true,
+            },
+            {
+              selector: "#FINISH_SETUP_BUTTON",
+              panel_position: {
+                anchor_attachment: "bottomcenter",
+                callout_attachment: "topright",
+                offset_y: 4,
+              },
+              no_open_on_anchor: true,
+            },
+            {
+              selector: "#PersonalToolbar",
+              panel_position: {
+                anchor_attachment: "bottomright",
+                callout_attachment: "topright",
+                offset_x: -24,
+                offset_y: 24,
+              },
+              no_open_on_anchor: true,
+              hide_arrow: true,
+            },
+          ],
+          content: {
+            page_event_listeners: [
+              {
+                params: {
+                  type: "tourend",
+                },
+                action: {
+                  type: "SET_PREF",
+                  data: {
+                    pref: {
+                      name: "messaging-system-action.easyChecklist.open",
+                      value: "false",
+                    },
+                  },
+                },
+              },
+            ],
+            position: "callout",
+            title: {
+              string_id: "onboarding-checklist-title",
+              marginInline: "3px 40px",
+              fontWeight: "600",
+              fontSize: "16px",
+            },
+            title_logo: {
+              alignment: "top",
+              imageURL: "chrome://branding/content/about-logo.png",
+            },
+            action_checklist_subtitle: {
+              string_id: "onboarding-checklist-subtitle",
+            },
+            tiles: {
+              type: "action_checklist",
+              data: [
+                {
+                  id: "action-checklist-set-to-default",
+                  targeting: "isDefaultBrowserUncached",
+                  label: {
+                    string_id: "onboarding-checklist-set-default",
+                  },
+                  action: {
+                    type: "SET_DEFAULT_BROWSER",
+                  },
+                },
+                {
+                  id: "action-checklist-pin-to-taskbar",
+                  targeting: "!doesAppNeedPinUncached",
+                  label: {
+                    string_id: "onboarding-checklist-pin",
+                  },
+                  action: {
+                    type: "MULTI_ACTION",
+                    data: {
+                      actions: [
+                        {
+                          type: "PIN_FIREFOX_TO_TASKBAR",
+                        },
+                        {
+                          type: "PIN_FIREFOX_TO_START_MENU",
+                        },
+                      ],
+                    },
+                  },
+                },
+                {
+                  id: "action-checklist-import-data",
+                  targeting:
+                    "hasMigratedBookmarks || hasMigratedCSVPasswords || hasMigratedHistory || hasMigratedPasswords",
+                  label: {
+                    string_id: "onboarding-checklist-import",
+                  },
+                  action: {
+                    type: "SHOW_MIGRATION_WIZARD",
+                  },
+                  showExternalLinkIcon: true,
+                },
+                {
+                  id: "action-checklist-explore-extensions",
+                  targeting:
+                    "'messaging-system-action.hasOpenedExtensions'|preferenceValue || addonsInfo.hasInstalledAddons",
+                  label: {
+                    string_id: "onboarding-checklist-extension",
+                  },
+                  action: {
+                    type: "MULTI_ACTION",
+                    data: {
+                      actions: [
+                        {
+                          type: "SET_PREF",
+                          data: {
+                            pref: {
+                              name: "messaging-system-action.hasOpenedExtensions",
+                              value: "true",
+                            },
+                          },
+                        },
+                        {
+                          type: "OPEN_URL",
+                          data: {
+                            args: "https://addons.mozilla.org/en-US/firefox/collections/4757633/b4d5649fb087446aa05add5f0258c3/?page=1&collection_sort=-popularity",
+                            where: "current",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                  showExternalLinkIcon: true,
+                },
+                {
+                  id: "action-checklist-sign-in",
+                  targeting: "isFxASignedIn",
+                  label: {
+                    string_id: "onboarding-checklist-sign-up",
+                  },
+                  action: {
+                    type: "FXA_SIGNIN_FLOW",
+                    data: {
+                      entrypoint: "fx-onboarding-checklist",
+                      extraParams: {
+                        utm_content: "migration-onboarding",
+                        utm_source: "fx-new-device-sync",
+                        utm_medium: "firefox-desktop",
+                        utm_campaign: "migration",
+                      },
+                    },
+                  },
+                  showExternalLinkIcon: true,
+                },
+              ],
+            },
+            dismiss_button: {
+              action: {
+                type: "MULTI_ACTION",
+                dismiss: true,
+                data: {
+                  actions: [
+                    {
+                      type: "SET_PREF",
+                      data: {
+                        pref: {
+                          name: "easyChecklist.open",
+                          value: false,
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+    priority: 3,
+    targeting:
+      "'messaging-system-action.easyChecklist.open' | preferenceValue == true",
+    trigger: {
+      id: "messagesLoaded",
+    },
+  },
+  {
+    id: "FINISH_SETUP_CHECKLIST_AUTO_OPEN",
+    template: "feature_callout",
+    skip_in_tests: "it fails unrelated tests",
+    content: {
+      id: "FINISH_SETUP_CHECKLIST_AUTO_OPEN",
+      template: "multistage",
+      backdrop: "transparent",
+      transitions: false,
+      disableHistoryUpdates: true,
+      screens: [
+        {
+          id: "FINISH_SETUP_CHECKLIST_AUTO_OPEN",
+          anchors: [
+            {
+              selector: "#fxms-bmb-button",
+              panel_position: {
+                anchor_attachment: "bottomcenter",
+                callout_attachment: "topright",
+                offset_y: 4,
+              },
+              no_open_on_anchor: true,
+            },
+            {
+              selector: "#FINISH_SETUP_BUTTON",
+              panel_position: {
+                anchor_attachment: "bottomcenter",
+                callout_attachment: "topright",
+                offset_y: 4,
+              },
+              no_open_on_anchor: true,
+            },
+          ],
+          content: {
+            page_event_listeners: [
+              {
+                params: {
+                  type: "tourend",
+                },
+                action: {
+                  type: "SET_PREF",
+                  data: {
+                    pref: {
+                      name: "messaging-system-action.easyChecklist.open",
+                      value: "false",
+                    },
+                  },
+                },
+              },
+            ],
+            position: "callout",
+            title: {
+              string_id: "onboarding-checklist-title",
+              marginInline: "3px 40px",
+              fontWeight: "600",
+              fontSize: "16px",
+            },
+            title_logo: {
+              alignment: "top",
+              imageURL: "chrome://branding/content/about-logo.png",
+            },
+            action_checklist_subtitle: {
+              string_id: "onboarding-checklist-subtitle",
+            },
+            tiles: {
+              type: "action_checklist",
+              data: [
+                {
+                  id: "action-checklist-set-to-default",
+                  targeting: "isDefaultBrowserUncached",
+                  label: {
+                    string_id: "onboarding-checklist-set-default",
+                  },
+                  action: {
+                    type: "SET_DEFAULT_BROWSER",
+                  },
+                },
+                {
+                  id: "action-checklist-pin-to-taskbar",
+                  targeting: "!doesAppNeedPinUncached",
+                  label: {
+                    string_id: "onboarding-checklist-pin",
+                  },
+                  action: {
+                    type: "MULTI_ACTION",
+                    data: {
+                      actions: [
+                        {
+                          type: "PIN_FIREFOX_TO_TASKBAR",
+                        },
+                        {
+                          type: "PIN_FIREFOX_TO_START_MENU",
+                        },
+                      ],
+                    },
+                  },
+                },
+                {
+                  id: "action-checklist-import-data",
+                  targeting:
+                    "hasMigratedBookmarks || hasMigratedCSVPasswords || hasMigratedHistory || hasMigratedPasswords",
+                  label: {
+                    string_id: "onboarding-checklist-import",
+                  },
+                  action: {
+                    type: "SHOW_MIGRATION_WIZARD",
+                  },
+                  showExternalLinkIcon: true,
+                },
+                {
+                  id: "action-checklist-explore-extensions",
+                  targeting:
+                    "'messaging-system-action.hasOpenedExtensions'|preferenceValue || addonsInfo.hasInstalledAddons",
+                  label: {
+                    string_id: "onboarding-checklist-extension",
+                  },
+                  action: {
+                    type: "MULTI_ACTION",
+                    data: {
+                      actions: [
+                        {
+                          type: "SET_PREF",
+                          data: {
+                            pref: {
+                              name: "messaging-system-action.hasOpenedExtensions",
+                              value: "true",
+                            },
+                          },
+                        },
+                        {
+                          type: "OPEN_URL",
+                          data: {
+                            args: "https://addons.mozilla.org/en-US/firefox/collections/4757633/b4d5649fb087446aa05add5f0258c3/?page=1&collection_sort=-popularity",
+                            where: "current",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                  showExternalLinkIcon: true,
+                },
+                {
+                  id: "action-checklist-sign-in",
+                  targeting: "isFxASignedIn",
+                  label: {
+                    string_id: "onboarding-checklist-sign-up",
+                  },
+                  action: {
+                    type: "FXA_SIGNIN_FLOW",
+                    data: {
+                      entrypoint: "fx-onboarding-checklist",
+                      extraParams: {
+                        utm_content: "migration-onboarding",
+                        utm_source: "fx-new-device-sync",
+                        utm_medium: "firefox-desktop",
+                        utm_campaign: "migration",
+                      },
+                    },
+                  },
+                  showExternalLinkIcon: true,
+                },
+              ],
+            },
+            dismiss_button: {
+              action: {
+                type: "MULTI_ACTION",
+                dismiss: true,
+                data: {
+                  actions: [
+                    {
+                      type: "SET_PREF",
+                      data: {
+                        pref: {
+                          name: "easyChecklist.open",
+                          value: false,
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+    priority: 3,
+    targeting: `tabsClosedCount > 4
+      && (!isDefaultBrowserUncached
+        || doesAppNeedPinUncached
+        || (!hasMigratedBookmarks || !hasMigratedCSVPasswords || !hasMigratedHistory || !hasMigratedPasswords)
+        || (!'messaging-system-action.hasOpenedExtensions'|preferenceValue && !addonsInfo.hasInstalledAddons)
+        || !isFxASignedIn)`,
+    frequency: {
+      lifetime: 1,
+    },
+    trigger: {
+      id: "nthTabClosed",
+    },
+  },
 ];
 
 const PREONBOARDING_MESSAGES = () => [
   {
-    id: "ON_TRAIN_ROLLOUT",
+    id: "NEW_USER_TOU_ONBOARDING",
     enabled: true,
     requireAction: true,
     currentPolicyVersion: 3,
@@ -1515,7 +2179,7 @@ const PREONBOARDING_MESSAGES = () => [
           ],
           primary_button: {
             label: {
-              string_id: "preonboarding-primary-cta",
+              string_id: "preonboarding-primary-cta-v2",
               marginBlock: "24px 0",
             },
             should_focus_button: true,

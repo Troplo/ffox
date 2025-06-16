@@ -25,11 +25,11 @@ Test Plan:
 * Source buffer and destination buffer are the same buffer
 `;import { makeTestGroup } from '../../../../../common/framework/test_group.js';
 import { kBufferUsages } from '../../../../capability_info.js';
-import { kResourceStates } from '../../../../gpu_test.js';
+import { kResourceStates, AllFeaturesMaxLimitsGPUTest } from '../../../../gpu_test.js';
 import { kMaxSafeMultipleOf8 } from '../../../../util/math.js';
-import { ValidationTest } from '../../validation_test.js';
+import * as vtu from '../../validation_test_utils.js';
 
-class F extends ValidationTest {
+class F extends AllFeaturesMaxLimitsGPUTest {
   TestCopyBufferToBuffer(options)
 
 
@@ -66,11 +66,11 @@ combine('dstBufferState', kResourceStates)
 ).
 fn((t) => {
   const { srcBufferState, dstBufferState } = t.params;
-  const srcBuffer = t.createBufferWithState(srcBufferState, {
+  const srcBuffer = vtu.createBufferWithState(t, srcBufferState, {
     size: 16,
     usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
   });
-  const dstBuffer = t.createBufferWithState(dstBufferState, {
+  const dstBuffer = vtu.createBufferWithState(t, dstBufferState, {
     size: 16,
     usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
   });
@@ -102,9 +102,7 @@ paramsSubcasesOnly([
 { srcMismatched: true, dstMismatched: false },
 { srcMismatched: false, dstMismatched: true }]
 ).
-beforeAllSubcases((t) => {
-  t.selectMismatchedDeviceOrSkipTestCase(undefined);
-}).
+beforeAllSubcases((t) => t.usesMismatchedDevice()).
 fn((t) => {
   const { srcMismatched, dstMismatched } = t.params;
 

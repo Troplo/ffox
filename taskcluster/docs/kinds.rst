@@ -11,6 +11,11 @@ users or automated tests.  This is more restrictive than most definitions of
 "build" in a Mozilla context: it does not include tasks that run build-like
 actions for static analysis or to produce instrumented artifacts.
 
+build-extensions
+----------------
+
+Builds Firefox extensions with `mach build`.
+
 build-fat-aar
 -------------
 
@@ -305,10 +310,6 @@ release-binary-transparency
 Binary transparency creates a publicly verifiable log of binary shas for downstream
 release auditing. https://wiki.mozilla.org/Security/Binary_Transparency
 
-release-flatpak-repackage
--------------------------
-Generate an installer using Flathub's Flatpak format.
-
 release-flatpak-push
 --------------------
 Pushes Flatpak repackage on Flathub
@@ -562,6 +563,10 @@ These repackage tasks take signed Firefox Linux binaries and puts them in Debian
 repackage-deb-l10n
 ------------------
 These repackage tasks take the signed langpacks (.xpi) binaries and puts them in Debian packages.
+
+repackage-rpm
+----------------
+These repackage tasks take signed Firefox Linux binaries and puts them in RPM packages.
 
 repackage-flatpak
 -----------------
@@ -862,6 +867,10 @@ beetmover-android-app
 ---------------------
 A beetmover task for android APKs and AABs.
 
+push-apks
+-----------
+Push Focus and Fenix APKs to the Samsung Galaxy Store.
+
 push-bundle
 -----------
 Push Focus and Fenix AABs to Google Play.
@@ -881,3 +890,15 @@ Generate instrumented apks used to generate Baseline Profile for Android apps.
 generate-baseline-profile-firebase
 ----------------------------------
 Run baseline profile generation for Android on Firebase TestLab.
+
+update
+------------
+Run tests to see if the executable can be updated to the latest release.
+
+run-macrobenchmark-firebase
+---------------------------
+Run Macrobenchmark for Android on Firebase TestLab.
+
+instrumented-build-macrobenchmark-apk
+-------------------------------------
+Generate instrumented apks used to run Macrobenchmark for Android apps.

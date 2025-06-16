@@ -111,9 +111,8 @@ pub fn set_crash_ping_metrics(
             user32_loaded_before: bool = "User32BeforeBlocklist"
         }
         environment {
-            experimental_features: (string_list ',') = "ExperimentalFeatures"
-            nimbus_enrollments: (string_list ',') = "NimbusEnrollments"
             headless_mode: bool = "HeadlessMode"
+            nimbus_enrollments: (string_list ',') = "NimbusEnrollments"
             uptime: seconds = "UptimeTS"
         }
         memory {
@@ -121,6 +120,8 @@ pub fn set_crash_ping_metrics(
             available_physical: quantity = "AvailablePhysicalMemory"
             available_swap: quantity = "AvailableSwapMemory"
             available_virtual: quantity = "AvailableVirtualMemory"
+            js_large_allocation_failure: str = "JSLargeAllocationFailure"
+            js_out_of_memory: str = "JSOutOfMemory"
             low_physical: quantity = "LowPhysicalMemoryEvents"
             oom_allocation_size: quantity = "OOMAllocationSize"
             purgeable_physical: quantity = "PurgeablePhysicalMemory"

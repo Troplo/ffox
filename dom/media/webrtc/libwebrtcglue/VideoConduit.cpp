@@ -386,7 +386,9 @@ WebrtcVideoConduit::Control::Control(const RefPtr<AbstractThread>& aCallThread)
       INIT_MIRROR(mRecvRtpRtcpConfig, Nothing()),
       INIT_MIRROR(mCodecMode, webrtc::VideoCodecMode::kRealtimeVideo),
       INIT_MIRROR(mFrameTransformerProxySend, nullptr),
-      INIT_MIRROR(mFrameTransformerProxyRecv, nullptr) {}
+      INIT_MIRROR(mFrameTransformerProxyRecv, nullptr),
+      INIT_MIRROR(mVideoDegradationPreference,
+                  webrtc::DegradationPreference::DISABLED) {}
 #undef INIT_MIRROR
 
 WebrtcVideoConduit::WebrtcVideoConduit(
@@ -469,6 +471,8 @@ void WebrtcVideoConduit::InitControl(VideoConduitControlInterface* aControl) {
           mControl.mFrameTransformerProxySend);
   CONNECT(aControl->CanonicalFrameTransformerProxyRecv(),
           mControl.mFrameTransformerProxyRecv);
+  CONNECT(aControl->CanonicalVideoDegradationPreference(),
+          mControl.mVideoDegradationPreference);
 }
 
 #undef CONNECT
@@ -502,12 +506,10 @@ void WebrtcVideoConduit::OnControlConfigChange() {
        rtpRtcpConfig != mControl.mConfiguredRecvRtpRtcpConfig)) {
     mControl.mConfiguredRecvCodecs = codecConfigList;
     mControl.mConfiguredRecvRtpRtcpConfig = rtpRtcpConfig;
-
     webrtc::VideoReceiveStreamInterface::Config::Rtp newRtp(
         mRecvStreamConfig.rtp);
     MOZ_ASSERT(newRtp == mRecvStreamConfig.rtp);
     newRtp.rtx_associated_payload_types.clear();
-    newRtp.rtx_ssrc = 0;
     newRtp.rtcp_mode = rtpRtcpConfig->GetRtcpMode();
     newRtp.nack.rtp_history_ms = 0;
     newRtp.remb = false;
@@ -516,7 +518,6 @@ void WebrtcVideoConduit::OnControlConfigChange() {
     newRtp.ulpfec_payload_type = kNullPayloadType;
     newRtp.red_payload_type = kNullPayloadType;
     bool use_fec = false;
-    bool configuredH264 = false;
     std::vector<webrtc::VideoReceiveStreamInterface::Decoder> recv_codecs;
 
     // Try Applying the codecs in the list
@@ -528,14 +529,6 @@ void WebrtcVideoConduit::OnControlConfigChange() {
         CSFLogError(LOGTAG, "Invalid recv codec config for %s decoder: %i",
                     codec_config.mName.c_str(), condError);
         continue;
-      }
-
-      if (codec_config.mName == kH264CodecName) {
-        // TODO(bug 1200768): We can only handle configuring one recv H264 codec
-        if (configuredH264) {
-          continue;
-        }
-        configuredH264 = true;
       }
 
       if (codec_config.mName == kUlpfecCodecName) {
@@ -616,6 +609,7 @@ void WebrtcVideoConduit::OnControlConfigChange() {
 
     if (mRecvStreamConfig.rtp != newRtp) {
       mRecvStreamConfig.rtp = newRtp;
+      remoteSsrcUpdateNeeded = true;
     }
   }
 
@@ -805,6 +799,7 @@ void WebrtcVideoConduit::OnControlConfigChange() {
         newRtp.payload_name = codecConfig->mName;
         newRtp.payload_type = codecConfig->mType;
         newRtp.rtcp_mode = rtpRtcpConfig->GetRtcpMode();
+        newRtp.extmap_allow_mixed = rtpRtcpConfig->GetExtmapAllowMixed();
         newRtp.max_packet_size = kVideoMtu;
         newRtp.rtx.payload_type = codecConfig->RtxPayloadTypeIsSet()
                                       ? codecConfig->mRTXPayloadType
@@ -845,6 +840,15 @@ void WebrtcVideoConduit::OnControlConfigChange() {
       }
     }
 
+    if (mControl.mConfiguredDegradationPreference !=
+        mControl.mVideoDegradationPreference) {
+      mControl.mConfiguredDegradationPreference =
+          mControl.mVideoDegradationPreference.Ref();
+      if (mSendStream) {
+        mSendStream->SetSource(mTrackSource, DegradationPreference());
+      }
+    }
+
     {
       const auto& mode = mControl.mCodecMode.Ref();
       MOZ_ASSERT(mode == webrtc::VideoCodecMode::kRealtimeVideo ||
@@ -858,6 +862,7 @@ void WebrtcVideoConduit::OnControlConfigChange() {
       if (contentType != mEncoderConfig.content_type) {
         encoderReconfigureNeeded = true;
         sendSourceUpdateNeeded = true;
+        mEncoderConfig.content_type = contentType;
       }
     }
 
@@ -1353,6 +1358,7 @@ RefPtr<GenericPromise> WebrtcVideoConduit::Shutdown() {
         mControl.mCodecMode.DisconnectIfConnected();
         mControl.mFrameTransformerProxySend.DisconnectIfConnected();
         mControl.mFrameTransformerProxyRecv.DisconnectIfConnected();
+        mControl.mVideoDegradationPreference.DisconnectIfConnected();
         mWatchManager.Shutdown();
 
         if (mTrackSource) {
@@ -1380,6 +1386,11 @@ webrtc::VideoCodecMode WebrtcVideoConduit::CodecMode() const {
 webrtc::DegradationPreference WebrtcVideoConduit::DegradationPreference()
     const {
   MOZ_ASSERT(mCallThread->IsOnCurrentThread());
+  if (mControl.mConfiguredDegradationPreference !=
+      webrtc::DegradationPreference::DISABLED) {
+    return mControl.mConfiguredDegradationPreference;
+  }
+
   if (mLockScaling || CodecMode() == webrtc::VideoCodecMode::kScreensharing) {
     return webrtc::DegradationPreference::MAINTAIN_RESOLUTION;
   }
@@ -1517,6 +1528,14 @@ void WebrtcVideoConduit::DeliverPacket(rtc::CopyOnWriteBuffer packet,
 void WebrtcVideoConduit::OnRtpReceived(webrtc::RtpPacketReceived&& aPacket,
                                        webrtc::RTPHeader&& aHeader) {
   MOZ_ASSERT(mCallThread->IsOnCurrentThread());
+
+  // We should only be handling packets on this conduit if we are set to receive them.
+  if (!mControl.mReceiving) {
+    // TODO: Create profiler marker for this and/or less noisy logging.
+    // CSFLogInfo(LOGTAG, "VideoConduit %p: Discarding packet SEQ# %u SSRC %u as not configured to receive.",
+    //   this, aPacket.SequenceNumber(), aHeader.ssrc);
+    return;
+  }
 
   mRemoteSendSSRC = aHeader.ssrc;
 

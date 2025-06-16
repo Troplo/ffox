@@ -4,9 +4,9 @@
 "use strict";
 
 const { DefaultBrowserCheck } = ChromeUtils.importESModule(
-  "resource:///modules/BrowserGlue.sys.mjs"
+  "moz-src:///browser/components/DefaultBrowserCheck.sys.mjs"
 );
-const { ExperimentFakes } = ChromeUtils.importESModule(
+const { NimbusTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/NimbusTestUtils.sys.mjs"
 );
 const { ExperimentAPI } = ChromeUtils.importESModule(
@@ -180,7 +180,7 @@ add_task(async function showDefaultPrompt() {
     .returns(true);
   const promptSpy = sb.spy(DefaultBrowserCheck, "prompt");
   await ExperimentAPI.ready();
-  let doExperimentCleanup = await ExperimentFakes.enrollWithFeatureConfig(
+  let doExperimentCleanup = await NimbusTestUtils.enrollWithFeatureConfig(
     {
       featureId: NimbusFeatures.setToDefaultPrompt.featureId,
       value: {
@@ -203,7 +203,7 @@ add_task(async function showDefaultPrompt() {
 
   await sb.restore();
 
-  doExperimentCleanup();
+  await doExperimentCleanup();
   await BrowserTestUtils.closeWindow(win2);
 });
 
@@ -222,16 +222,16 @@ add_task(async function promptStoresImpressionAndDisableTimestamps() {
   );
 
   const now = Math.floor(Date.now() / 1000);
-  const oneHourInMs = 60 * 60 * 1000;
+  const oneHourInS = 60 * 60;
 
   Assert.ok(
     impressionTimestamp &&
-      now - parseInt(impressionTimestamp, 10) <= oneHourInMs,
+      now - parseInt(impressionTimestamp, 10) <= oneHourInS,
     "Prompt impression timestamp is stored"
   );
 
   Assert.ok(
-    disabledTimestamp && now - parseInt(disabledTimestamp, 10) <= oneHourInMs,
+    disabledTimestamp && now - parseInt(disabledTimestamp, 10) <= oneHourInS,
     "Selecting checkbox stores timestamp of when user disabled the prompt"
   );
 });
@@ -247,7 +247,7 @@ add_task(async function showPromptStyleSpotlight() {
   const showSpotlightSpy = sandbox.spy(SpecialMessageActions, "handleAction");
 
   await ExperimentAPI.ready();
-  let doExperimentCleanup = await ExperimentFakes.enrollWithFeatureConfig(
+  let doExperimentCleanup = await NimbusTestUtils.enrollWithFeatureConfig(
     {
       featureId: NimbusFeatures.setToDefaultPrompt.featureId,
       value: {
@@ -276,7 +276,7 @@ add_task(async function showPromptStyleSpotlight() {
     "handleAction called with right args"
   );
 
-  doExperimentCleanup();
+  await doExperimentCleanup();
   await sandbox.restore();
   await BrowserTestUtils.closeWindow(win);
 });

@@ -125,6 +125,27 @@ test_update.html
 **Test updating.**
 
 
+dom/webgpu/tests/mochitest
+--------------------------
+Performance tests from the 'dom/webgpu/tests/mochitest' folder.
+
+test_queue_write_perf.html
+==========================
+
+:owner: Graphics Team
+:name: Queue Write
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:writeBuffer Time,unit:ms, name:writeTexture Time,unit:ms
+ --manifest perftest.toml
+ --manifest-flavor plain
+
+**Test the performance of Queue.writeBuffer and Queue.writeTexture**
+
+
 intl/benchmarks/test/xpcshell
 -----------------------------
 Performance tests running through XPCShell for Intl code
@@ -382,17 +403,71 @@ toolkit/components/ml/tests/browser
 -----------------------------------
 Performance tests running through Mochitest for ML Models
 
-browser_ml_autofill_perf.js
-===========================
+browser_ml_semantic_history_search_perf.js
+==========================================
 
 :owner: GenAI Team
-:name: ML Autofill Model
+:name: ML Semantic History Search
 :Default options:
 
 ::
 
  --perfherder
- --perfherder-metrics name:AUTOFILL-pipeline-ready-latency,unit:ms,shouldAlert:True, name:AUTOFILL-initialization-latency,unit:ms,shouldAlert:True, name:AUTOFILL-model-run-latency,unit:ms,shouldAlert:True, name:AUTOFILL-total-memory-usage,unit:MiB,shouldAlert:True, name:tokenSpeed,unit:tokens/s,shouldAlert:True,lowerIsBetter:False, name:charactersSpeed,unit:chars/s,shouldAlert:True,lowerIsBetter:False
+ --perfherder-metrics name:latency,unit:ms,shouldAlert:True, name:memory,unit:MB,shouldAlert:True
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Test for latency for ML Semantic Search History Feature**
+
+browser_ml_smart_tab_clustering_perf.js
+=======================================
+
+:owner: GenAI Team
+:name: ML Smart Tab Clustering
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:latency,unit:ms,shouldAlert:False, name:memory,unit:MiB,shouldAlert:False
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Testing Smart Tab Clustering**
+
+browser_ml_speecht5_tts.js
+==========================
+
+:owner: GenAI Team
+:name: ML Speech T5 TTS
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:latency,unit:ms,shouldAlert:False, name:memory,unit:MiB,shouldAlert:False
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Testing Speech T5 TTS**
+
+browser_ml_autofill_perf.js
+===========================
+
+:owner: GenAI Team
+:name: browser_ml_autofill_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:AUTOFILL-pipeline-ready-latency,unit:ms,shouldAlert:False, name:AUTOFILL-initialization-latency,unit:ms,shouldAlert:False, name:AUTOFILL-model-run-latency,unit:ms,shouldAlert:False, name:AUTOFILL-total-memory-usage,unit:MiB,shouldAlert:False, name:tokenSpeed,unit:tokens/s,shouldAlert:False,lowerIsBetter:False, name:charactersSpeed,unit:chars/s,shouldAlert:False,lowerIsBetter:False
  --verbose
  --manifest perftest.toml
  --manifest-flavor browser-chrome
@@ -400,17 +475,71 @@ browser_ml_autofill_perf.js
 
 **Template test for latency for ML Autofill model**
 
-browser_ml_smart_tab_perf.js
-============================
+browser_ml_engine_multi_perf.js
+===============================
 
 :owner: GenAI Team
-:name: ML Smart Tab Model
+:name: browser_ml_engine_multi_perf.js
 :Default options:
 
 ::
 
  --perfherder
- --perfherder-metrics name:latency,unit:ms,shouldAlert:True, name:memory,unit:MiB,shouldAlert:True, name:tokenSpeed,unit:tokens/s,shouldAlert:True,lowerIsBetter:False, name:charactersSpeed,unit:chars/s,shouldAlert:True,lowerIsBetter:False
+ --perfherder-metrics name:latency,unit:ms,shouldAlert:False, name:memory,unit:MiB,shouldAlert:False
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Testing model execution concurrently**
+
+browser_ml_engine_perf.js
+=========================
+
+:owner: GenAI Team
+:name: browser_ml_engine_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:latency,unit:ms,shouldAlert:False, name:memory,unit:MiB,shouldAlert:False, name:tokenSpeed,unit:tokens/s,shouldAlert:False,lowerIsBetter:False, name:charactersSpeed,unit:chars/s,shouldAlert:False,lowerIsBetter:False
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Template test for latency for ml models**
+
+browser_ml_llama_summarizer_perf.js
+===================================
+
+:owner: GenAI Team
+:name: browser_ml_llama_summarizer_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:latency,unit:ms,shouldAlert:False, name:memory,unit:MB,shouldAlert:False, name:tokenSpeed,unit:tokens/s,shouldAlert:False,lowerIsBetter:False, name:charactersSpeed,unit:chars/s,shouldAlert:False,lowerIsBetter:False
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Template test for latency for Summarizer model using Llama.cpp WASM**
+
+browser_ml_smart_tab_perf.js
+============================
+
+:owner: GenAI Team
+:name: browser_ml_smart_tab_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:latency,unit:ms,shouldAlert:False, name:memory,unit:MiB,shouldAlert:False, name:tokenSpeed,unit:tokens/s,shouldAlert:False,lowerIsBetter:False, name:charactersSpeed,unit:chars/s,shouldAlert:False,lowerIsBetter:False
  --verbose
  --manifest perftest.toml
  --manifest-flavor browser-chrome
@@ -422,7 +551,7 @@ browser_ml_suggest_feature_perf.js
 ==================================
 
 :owner: GenAI Team
-:name: ML Suggest Feature
+:name: browser_ml_suggest_feature_perf.js
 :Default options:
 
 ::
@@ -440,13 +569,13 @@ browser_ml_suggest_inference.js
 ===============================
 
 :owner: GenAI Team
-:name: ML Suggest Inference Model
+:name: browser_ml_suggest_inference.js
 :Default options:
 
 ::
 
  --perfherder
- --perfherder-metrics name:inference-pipeline-ready-latency,unit:ms,shouldAlert:True, name:inference-initialization-latency,unit:ms,shouldAlert:True, name:inference-model-run-latency,unit:ms,shouldAlert:True, name:inference-total-memory-usage,unit:ms,shouldAlert:True
+ --perfherder-metrics name:inference-pipeline-ready-latency,unit:ms,shouldAlert:False, name:inference-initialization-latency,unit:ms,shouldAlert:False, name:inference-model-run-latency,unit:ms,shouldAlert:False, name:inference-total-memory-usage,unit:ms,shouldAlert:False
  --verbose
  --manifest perftest.toml
  --manifest-flavor browser-chrome
@@ -458,7 +587,7 @@ browser_ml_summarizer_perf.js
 =============================
 
 :owner: GenAI Team
-:name: ML Summarizer Model
+:name: browser_ml_summarizer_perf.js
 :Default options:
 
 ::
@@ -472,41 +601,26 @@ browser_ml_summarizer_perf.js
 
 **Template test for latency for Summarizer model**
 
-browser_ml_engine_perf.js
-=========================
 
-:owner: GenAI Team
-:name: ML Test Model
-:Default options:
+toolkit/components/url-classifier/tests/performance
+---------------------------------------------------
+Performance tests for the URL Classifier
 
-::
-
- --perfherder
- --perfherder-metrics name:latency,unit:ms,shouldAlert:True, name:memory,unit:MiB,shouldAlert:True, name:tokenSpeed,unit:tokens/s,shouldAlert:True,lowerIsBetter:False, name:charactersSpeed,unit:chars/s,shouldAlert:True,lowerIsBetter:False
- --verbose
- --manifest perftest.toml
- --manifest-flavor browser-chrome
- --try-platform linux, mac, win
-
-**Template test for latency for ml models**
-
-browser_ml_engine_multi_perf.js
+perftest_exceptionListLookup.js
 ===============================
 
-:owner: GenAI Team
-:name: ML Test Multi Model
+:owner: Privacy Team
+:name: UrlClassifier.ExceptionListLookup
+:tags: url-classifier
 :Default options:
 
 ::
 
  --perfherder
- --perfherder-metrics name:latency,unit:ms,shouldAlert:True, name:memory,unit:MiB,shouldAlert:True
+ --perfherder-metrics name:UrlClassifier.ExceptionListLookup iterations,unit:iterations, name:UrlClassifier.ExceptionListLookup accumulatedTime,unit:ms, name:UrlClassifier.ExceptionListLookup perCallTime,unit:ms
  --verbose
- --manifest perftest.toml
- --manifest-flavor browser-chrome
- --try-platform linux, mac, win
 
-**Testing model execution concurrently**
+**Test the speed of nsIUrlClassifierExceptionList#matches.**
 
 
 If you have any questions, please see this `wiki page <https://wiki.mozilla.org/TestEngineering/Performance#Where_to_find_us>`_.

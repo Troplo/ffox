@@ -10,7 +10,7 @@ import { makeTestGroup } from '../../../../common/framework/test_group.js';
 import { getGPU } from '../../../../common/util/navigator_gpu.js';
 import { assert, assertReject, raceWithRejectOnTimeout } from '../../../../common/util/util.js';
 import {
-  getDefaultLimitsForAdapter,
+  getDefaultLimitsForCTS,
   kFeatureNames,
   kLimits,
   kLimitClasses,
@@ -42,10 +42,19 @@ g.test('default')
     const device = await t.requestDeviceTracked(adapter, ...args);
     assert(device !== null);
 
-    // Default device should have no features.
-    t.expect(device.features.size === 0, 'Default device should not have any features');
+    if (device.features.size === 1) {
+      t.expect(
+        device.features.has('core-features-and-limits'),
+        'Default device should not have any features other than "core-features-and-limits"'
+      );
+    } else {
+      t.expect(
+        device.features.size === 0,
+        'Default device should not have any features other than "core-features-and-limits"'
+      );
+    }
     // All limits should be defaults.
-    const limitInfo = getDefaultLimitsForAdapter(adapter);
+    const limitInfo = getDefaultLimitsForCTS();
     for (const limit of kLimits) {
       t.expect(
         device.limits[limit] === limitInfo[limit].default,
@@ -164,20 +173,8 @@ g.test('stale')
       );
     }
 
-    const kTimeoutMS = 1000;
-    const lostDevice = await t.requestDeviceTracked(adapter);
-    const lost = await raceWithRejectOnTimeout(
-      lostDevice.lost,
-      kTimeoutMS,
-      'adapter was not stale'
-    );
-    t.expect(lost.reason === 'unknown');
-
-    // Make sure to destroy the valid device after trying to get a second one. Otherwise, the second
-    // device may fail because the adapter is put into an invalid state from the destroy.
-    if (device) {
-      device.destroy();
-    }
+    // Since the adapter is consumed now, requesting another device is not possible anymore.
+    t.shouldReject('OperationError', t.requestDeviceTracked(adapter));
   });
 
 g.test('features,unknown')
@@ -265,7 +262,7 @@ g.test('limits,supported')
     const adapter = await gpu.requestAdapter();
     assert(adapter !== null);
 
-    const limitInfo = getDefaultLimitsForAdapter(adapter);
+    const limitInfo = getDefaultLimitsForCTS();
     let value: number | undefined = -1;
     let result: number = -1;
     switch (limitValue) {
@@ -342,7 +339,7 @@ g.test('limit,better_than_supported')
     const adapter = await gpu.requestAdapter();
     assert(adapter !== null);
 
-    const limitInfo = getDefaultLimitsForAdapter(adapter);
+    const limitInfo = getDefaultLimitsForCTS();
     const value = adapter.limits[limit]! * mul + add;
     const requiredLimits = {
       [limit]: clamp(value, { min: 0, max: limitInfo[limit].maximumValue }),
@@ -388,7 +385,7 @@ g.test('limit,out_of_range')
     const gpu = getGPU(t.rec);
     const adapter = await gpu.requestAdapter();
     assert(adapter !== null);
-    const limitInfo = getDefaultLimitsForAdapter(adapter)[limit];
+    const limitInfo = getDefaultLimitsForCTS()[limit];
 
     const requiredLimits = {
       [limit]: value,
@@ -446,7 +443,7 @@ g.test('limit,worse_than_default')
     const adapter = await gpu.requestAdapter();
     assert(adapter !== null);
 
-    const limitInfo = getDefaultLimitsForAdapter(adapter);
+    const limitInfo = getDefaultLimitsForCTS();
     const value = limitInfo[limit].default * mul + add;
     const requiredLimits = {
       [limit]: clamp(value, { min: 0, max: limitInfo[limit].maximumValue }),
@@ -498,36 +495,23 @@ g.test('always_returns_device')
     tested in the same browser configuration.
   `
   )
-  .params(u => u.combine('compatibilityMode', [false, true] as const))
+  .params(u => u.combine('featureLevel', ['core', 'compatibility'] as const))
   .fn(async t => {
-    const { compatibilityMode } = t.params;
+    const { featureLevel } = t.params;
     const gpu = getGPU(t.rec);
-    // MAINTENANCE_TODO: Remove compatibilityMode and the cast once compatibilityMode is no longer
-    // used (mainly in `setDefaultRequestAdapterOptions`).
     const adapter = await gpu.requestAdapter({
-      compatibilityMode,
-      featureLevel: compatibilityMode ? 'compatibility' : 'core',
-    } as GPURequestAdapterOptions);
+      featureLevel,
+    });
     if (adapter) {
       const device = await t.requestDeviceTracked(adapter);
       assert(device instanceof GPUDevice, 'requestDevice must return a device or throw');
 
-      if (!compatibilityMode) {
+      if (featureLevel === 'core' && adapter.features.has('core-features-and-limits')) {
+        // Check if the device supports core, when featureLevel is core and adapter supports core.
         // This check is to make sure something lower-level is not forcing compatibility mode.
 
-        // MAINTENANCE_TODO: Simplify this check (and typecast) once we standardize how to do this.
-        const adapterExtensions = adapter as unknown as {
-          isCompatibilityMode?: boolean;
-          featureLevel?: string;
-        };
         t.expect(
-          // Old version of Compat design.
-          !adapterExtensions.isCompatibilityMode &&
-            // Current version of Compat design, as of this writing.
-            adapterExtensions.featureLevel !== 'compatibility' &&
-            // An as-yet-unlanded proposed change to the Compat design, but for now it doesn't hurt
-            // to just check. Unlanded PR: https://github.com/gpuweb/gpuweb/pull/5036
-            !device.features.has('webgpu-core'),
+          device.features.has('core-features-and-limits'),
           'must not get a Compatibility adapter if not requested'
         );
       }

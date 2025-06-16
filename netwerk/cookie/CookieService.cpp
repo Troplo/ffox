@@ -27,7 +27,6 @@
 #include "mozilla/net/NeckoCommon.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/StoragePrincipalHelper.h"
-#include "mozilla/Telemetry.h"
 #include "mozIThirdPartyUtil.h"
 #include "nsICookiePermission.h"
 #include "nsIConsoleReportCollector.h"
@@ -155,13 +154,14 @@ bool ProcessSameSiteCookieForForeignRequest(nsIChannel* aChannel,
   // Explicit SameSite=None cookies are always processed. When laxByDefault
   // is OFF then so are default cookies.
   if (aCookie->SameSite() == nsICookie::SAMESITE_NONE ||
-      (!aLaxByDefault && aCookie->IsDefaultSameSite())) {
+      (!aLaxByDefault && aCookie->SameSite() == nsICookie::SAMESITE_UNSET)) {
     return true;
   }
 
   // Lax-by-default cookies are processed even with an intermediate
   // cross-site redirect (they are treated like aIsSameSiteForeign = false).
-  if (aLaxByDefault && aCookie->IsDefaultSameSite() && aHadCrossSiteRedirects &&
+  if (aLaxByDefault && aCookie->SameSite() == nsICookie::SAMESITE_UNSET &&
+      aHadCrossSiteRedirects &&
       StaticPrefs::
           network_cookie_sameSite_laxByDefault_allowBoomerangRedirect()) {
     return true;
@@ -171,7 +171,7 @@ bool ProcessSameSiteCookieForForeignRequest(nsIChannel* aChannel,
 
   // 2 minutes of tolerance for 'SameSite=Lax by default' for cookies set
   // without a SameSite value when used for unsafe http methods.
-  if (aLaxByDefault && aCookie->IsDefaultSameSite() &&
+  if (aLaxByDefault && aCookie->SameSite() == nsICookie::SAMESITE_UNSET &&
       StaticPrefs::network_cookie_sameSite_laxPlusPOST_timeout() > 0 &&
       currentTimeInUsec - aCookie->CreationTime() <=
           (StaticPrefs::network_cookie_sameSite_laxPlusPOST_timeout() *
@@ -180,8 +180,9 @@ bool ProcessSameSiteCookieForForeignRequest(nsIChannel* aChannel,
     return true;
   }
 
-  MOZ_ASSERT((aLaxByDefault && aCookie->IsDefaultSameSite()) ||
-             aCookie->SameSite() == nsICookie::SAMESITE_LAX);
+  MOZ_ASSERT(
+      (aLaxByDefault && aCookie->SameSite() == nsICookie::SAMESITE_UNSET) ||
+      aCookie->SameSite() == nsICookie::SAMESITE_LAX);
   // We only have SameSite=Lax or lax-by-default cookies at this point.  These
   // are processed only if it's a top-level navigation
   return aIsSafeTopLevelNav;
@@ -719,18 +720,21 @@ CookieService::Add(const nsACString& aHost, const nsACString& aPath,
     return NS_ERROR_INVALID_ARG;
   }
 
-  return AddNative(aHost, aPath, aName, aValue, aIsSecure, aIsHttpOnly,
+  return AddNative(nullptr, aHost, aPath, aName, aValue, aIsSecure, aIsHttpOnly,
                    aIsSession, aExpiry, &attrs, aSameSite, aSchemeMap,
-                   aIsPartitioned, nullptr);
+                   aIsPartitioned, /* from-http: */ true, nullptr,
+                   [](CookieStruct&) -> bool { return true; });
 }
 
 NS_IMETHODIMP_(nsresult)
-CookieService::AddNative(const nsACString& aHost, const nsACString& aPath,
-                         const nsACString& aName, const nsACString& aValue,
-                         bool aIsSecure, bool aIsHttpOnly, bool aIsSession,
-                         int64_t aExpiry, OriginAttributes* aOriginAttributes,
-                         int32_t aSameSite, nsICookie::schemeType aSchemeMap,
-                         bool aIsPartitioned, const nsID* aOperationID) {
+CookieService::AddNative(nsIURI* aCookieURI, const nsACString& aHost,
+                         const nsACString& aPath, const nsACString& aName,
+                         const nsACString& aValue, bool aIsSecure,
+                         bool aIsHttpOnly, bool aIsSession, int64_t aExpiry,
+                         OriginAttributes* aOriginAttributes, int32_t aSameSite,
+                         nsICookie::schemeType aSchemeMap, bool aIsPartitioned,
+                         bool aFromHttp, const nsID* aOperationID,
+                         const std::function<bool(CookieStruct&)>& aCheck) {
   if (NS_WARN_IF(!aOriginAttributes)) {
     return NS_ERROR_FAILURE;
   }
@@ -751,20 +755,22 @@ CookieService::AddNative(const nsACString& aHost, const nsACString& aPath,
   NS_ENSURE_SUCCESS(rv, rv);
 
   int64_t currentTimeInUsec = PR_Now();
-  CookieKey key = CookieKey(baseDomain, *aOriginAttributes);
-
-  CookieStruct cookieData(nsCString(aName), nsCString(aValue), nsCString(aHost),
+  CookieStruct cookieData(nsCString(aName), nsCString(aValue), host,
                           nsCString(aPath), aExpiry, currentTimeInUsec,
                           Cookie::GenerateUniqueCreationTime(currentTimeInUsec),
                           aIsHttpOnly, aIsSession, aIsSecure, aIsPartitioned,
-                          aSameSite, aSameSite, aSchemeMap);
+                          aSameSite, aSchemeMap);
 
-  RefPtr<Cookie> cookie = Cookie::Create(cookieData, key.mOriginAttributes);
+  if (!aCheck(cookieData)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  RefPtr<Cookie> cookie = Cookie::Create(cookieData, *aOriginAttributes);
   MOZ_ASSERT(cookie);
 
   CookieStorage* storage = PickStorage(*aOriginAttributes);
   storage->AddCookie(nullptr, baseDomain, *aOriginAttributes, cookie,
-                     currentTimeInUsec, nullptr, VoidCString(), true,
+                     currentTimeInUsec, aCookieURI, VoidCString(), aFromHttp,
                      !aOriginAttributes->mPartitionKey.IsEmpty(), nullptr,
                      aOperationID);
   return NS_OK;
@@ -773,7 +779,7 @@ CookieService::AddNative(const nsACString& aHost, const nsACString& aPath,
 nsresult CookieService::Remove(const nsACString& aHost,
                                const OriginAttributes& aAttrs,
                                const nsACString& aName, const nsACString& aPath,
-                               const nsID* aOperationID) {
+                               bool aFromHttp, const nsID* aOperationID) {
   // first, normalize the hostname, and fail if it contains illegal characters.
   nsAutoCString host(aHost);
   nsresult rv = NormalizeHost(host);
@@ -791,7 +797,7 @@ nsresult CookieService::Remove(const nsACString& aHost,
 
   CookieStorage* storage = PickStorage(aAttrs);
   storage->RemoveCookie(baseDomain, aAttrs, host, PromiseFlatCString(aName),
-                        PromiseFlatCString(aPath), aOperationID);
+                        PromiseFlatCString(aPath), aFromHttp, aOperationID);
 
   return NS_OK;
 }
@@ -806,19 +812,21 @@ CookieService::Remove(const nsACString& aHost, const nsACString& aName,
     return NS_ERROR_INVALID_ARG;
   }
 
-  return RemoveNative(aHost, aName, aPath, &attrs, nullptr);
+  return RemoveNative(aHost, aName, aPath, &attrs, /* from http: */ true,
+                      nullptr);
 }
 
 NS_IMETHODIMP_(nsresult)
 CookieService::RemoveNative(const nsACString& aHost, const nsACString& aName,
                             const nsACString& aPath,
-                            OriginAttributes* aOriginAttributes,
+                            OriginAttributes* aOriginAttributes, bool aFromHttp,
                             const nsID* aOperationID) {
   if (NS_WARN_IF(!aOriginAttributes)) {
     return NS_ERROR_FAILURE;
   }
 
-  nsresult rv = Remove(aHost, *aOriginAttributes, aName, aPath, aOperationID);
+  nsresult rv =
+      Remove(aHost, *aOriginAttributes, aName, aPath, aFromHttp, aOperationID);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -1480,7 +1488,8 @@ class RemoveAllSinceRunnable : public Runnable {
       auto* cookie = static_cast<Cookie*>(mList[mIndex].get());
       if (cookie->CreationTime() > mSinceWhen &&
           NS_FAILED(mSelf->Remove(cookie->Host(), cookie->OriginAttributesRef(),
-                                  cookie->Name(), cookie->Path(), nullptr))) {
+                                  cookie->Name(), cookie->Path(),
+                                  /* from http: */ true, nullptr))) {
         continue;
       }
     }

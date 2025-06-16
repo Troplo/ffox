@@ -259,6 +259,13 @@ pub struct MinimapData {
   pub root_content_scroll_id: u64
 }
 
+#[repr(C)]
+pub struct FrameReadyParams {
+    pub present: bool,
+    pub render: bool,
+    pub scrolled: bool,
+}
+
 /// A handler to integrate WebRender with the thread that contains the `Renderer`.
 pub trait RenderNotifier: Send {
     ///
@@ -270,7 +277,7 @@ pub trait RenderNotifier: Send {
         composite_needed: bool,
     );
     /// Notify the thread containing the `Renderer` that a new frame is ready.
-    fn new_frame_ready(&self, _: DocumentId, scrolled: bool, composite_needed: bool, frame_publish_id: FramePublishId);
+    fn new_frame_ready(&self, _: DocumentId, publish_id: FramePublishId, params: &FrameReadyParams);
     /// A Gecko-specific notification mechanism to get some code executed on the
     /// `Renderer`'s thread, mostly replaced by `NotificationHandler`. You should
     /// probably use the latter instead.
@@ -741,6 +748,8 @@ bitflags! {
         const MISSING_SNAPSHOT_PANIC    = (1 as u64) << 31; // need "as u32" until we have cbindgen#556
         /// Panic when a attempting to display a missing stacking context snapshot.
         const MISSING_SNAPSHOT_PINK     = (1 as u64) << 32;
+        /// Highlight backdrop filters
+        const HIGHLIGHT_BACKDROP_FILTERS = (1 as u64) << 33;
     }
 }
 

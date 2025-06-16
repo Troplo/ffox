@@ -22,12 +22,12 @@ add_task(async function test_translations_panel_source_lang_has_script_tag() {
     "The button is available."
   );
 
-  await FullPageTranslationsTestUtils.assertPageIsUntranslated(runInPage);
+  await FullPageTranslationsTestUtils.assertPageIsNotTranslated(runInPage);
 
   await FullPageTranslationsTestUtils.openPanel({
     expectedFromLanguage: "es",
     expectedToLanguage: "en",
-    onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewDefault,
+    onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewIntro,
   });
 
   await FullPageTranslationsTestUtils.changeSelectedFromLanguage({
@@ -43,7 +43,7 @@ add_task(async function test_translations_panel_source_lang_has_script_tag() {
     pivotTranslation: true,
   });
 
-  await FullPageTranslationsTestUtils.assertPageIsTranslated({
+  await FullPageTranslationsTestUtils.assertOnlyIntersectingNodesAreTranslated({
     fromLanguage: "zh-Hans",
     toLanguage: "es",
     runInPage,
@@ -71,12 +71,12 @@ add_task(async function test_translations_panel_target_lang_has_script_tag() {
     "The button is available."
   );
 
-  await FullPageTranslationsTestUtils.assertPageIsUntranslated(runInPage);
+  await FullPageTranslationsTestUtils.assertPageIsNotTranslated(runInPage);
 
   await FullPageTranslationsTestUtils.openPanel({
     expectedFromLanguage: "es",
     expectedToLanguage: "en",
-    onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewDefault,
+    onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewIntro,
   });
 
   await FullPageTranslationsTestUtils.changeSelectedToLanguage({
@@ -88,7 +88,7 @@ add_task(async function test_translations_panel_target_lang_has_script_tag() {
     pivotTranslation: true,
   });
 
-  await FullPageTranslationsTestUtils.assertPageIsTranslated({
+  await FullPageTranslationsTestUtils.assertOnlyIntersectingNodesAreTranslated({
     fromLanguage: "es",
     toLanguage: "zh-Hant",
     runInPage,
@@ -120,12 +120,12 @@ add_task(
       "The button is available."
     );
 
-    await FullPageTranslationsTestUtils.assertPageIsUntranslated(runInPage);
+    await FullPageTranslationsTestUtils.assertPageIsNotTranslated(runInPage);
 
     await FullPageTranslationsTestUtils.openPanel({
       expectedFromLanguage: "es",
       expectedToLanguage: "en",
-      onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewDefault,
+      onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewIntro,
     });
 
     await FullPageTranslationsTestUtils.changeSelectedFromLanguage({
@@ -140,11 +140,13 @@ add_task(
       pivotTranslation: true,
     });
 
-    await FullPageTranslationsTestUtils.assertPageIsTranslated({
-      fromLanguage: "zh-Hant",
-      toLanguage: "zh-Hans",
-      runInPage,
-    });
+    await FullPageTranslationsTestUtils.assertOnlyIntersectingNodesAreTranslated(
+      {
+        fromLanguage: "zh-Hant",
+        toLanguage: "zh-Hans",
+        runInPage,
+      }
+    );
 
     await cleanup();
   }

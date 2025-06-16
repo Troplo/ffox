@@ -179,11 +179,7 @@ internal class ReleaseMetricController(
             }
         }
         Component.BROWSER_TOOLBAR to ToolbarFacts.Items.MENU -> {
-            if (settings.navigationToolbarEnabled) {
-                Events.browserToolbarAction.record(Events.BrowserToolbarActionExtra("menu_press"))
-            } else {
-                Events.toolbarMenuVisible.record(NoExtras())
-            }
+            Events.toolbarMenuVisible.record(NoExtras())
         }
         Component.UI_TABCOUNTER to ToolbarFacts.Items.TOOLBAR -> {
             Events.browserToolbarAction.record(Events.BrowserToolbarActionExtra("tabs_tray"))
@@ -293,10 +289,34 @@ internal class ReleaseMetricController(
             Awesomebar.searchSuggestionClicked.record(NoExtras())
         }
         Component.FEATURE_AWESOMEBAR to AwesomeBarFacts.Items.TRENDING_SEARCH_SUGGESTION_CLICKED -> {
-            Awesomebar.trendingSearchSuggestionClicked.record(NoExtras())
+            Awesomebar.trendingSearchSuggestionClicked.record(
+                Awesomebar.TrendingSearchSuggestionClickedExtra(position = value?.toInt() ?: 0),
+            )
         }
         Component.FEATURE_AWESOMEBAR to AwesomeBarFacts.Items.TOP_SITE_SUGGESTION_CLICKED -> {
-            Awesomebar.topSiteSuggestionClicked.record(NoExtras())
+            Awesomebar.topSiteSuggestionClicked.record(
+                Awesomebar.TopSiteSuggestionClickedExtra(position = value?.toInt() ?: 0),
+            )
+        }
+        Component.FEATURE_AWESOMEBAR to AwesomeBarFacts.Items.RECENT_SEARCH_SUGGESTION_CLICKED -> {
+            Awesomebar.recentSearchSuggestionClicked.record(
+                Awesomebar.RecentSearchSuggestionClickedExtra(position = value?.toInt() ?: 0),
+            )
+        }
+        Component.FEATURE_AWESOMEBAR to AwesomeBarFacts.Items.TRENDING_SEARCH_SUGGESTIONS_DISPLAYED -> {
+            Awesomebar.trendingSearchSuggestionsDisplayed.record(
+                Awesomebar.TrendingSearchSuggestionsDisplayedExtra(count = value?.toInt() ?: 0),
+            )
+        }
+        Component.FEATURE_AWESOMEBAR to AwesomeBarFacts.Items.TOP_SITE_SUGGESTIONS_DISPLAYED -> {
+            Awesomebar.topSiteSuggestionsDisplayed.record(
+                Awesomebar.TopSiteSuggestionsDisplayedExtra(count = value?.toInt() ?: 0),
+            )
+        }
+        Component.FEATURE_AWESOMEBAR to AwesomeBarFacts.Items.RECENT_SEARCH_SUGGESTIONS_DISPLAYED -> {
+            Awesomebar.recentSearchSuggestionsDisplayed.record(
+                Awesomebar.RecentSearchSuggestionsDisplayedExtra(count = value?.toInt() ?: 0),
+            )
         }
         Component.FEATURE_AWESOMEBAR to AwesomeBarFacts.Items.OPENED_TAB_SUGGESTION_CLICKED -> {
             Awesomebar.openedTabSuggestionClicked.record(NoExtras())
@@ -341,6 +361,9 @@ internal class ReleaseMetricController(
 
             // Submit a separate `fx-suggest` ping for this click. These pings do not include the `client_id`.
             FxSuggest.pingType.set("fxsuggest-click")
+            (metadata?.get(FxSuggestFacts.MetadataKeys.CLIENT_COUNTRY) as? String)?.let {
+                FxSuggest.country.set(it)
+            }
             FxSuggest.isClicked.set(true)
             (metadata?.get(FxSuggestFacts.MetadataKeys.POSITION) as? Long)?.let {
                 FxSuggest.position.set(it)
@@ -391,6 +414,9 @@ internal class ReleaseMetricController(
             // and we submit them for engaged search sessions only.
             if (!engagementAbandoned) {
                 FxSuggest.pingType.set("fxsuggest-impression")
+                (metadata?.get(FxSuggestFacts.MetadataKeys.CLIENT_COUNTRY) as? String)?.let {
+                    FxSuggest.country.set(it)
+                }
                 (metadata?.get(FxSuggestFacts.MetadataKeys.IS_CLICKED) as? Boolean)?.let {
                     FxSuggest.isClicked.set(it)
                 }

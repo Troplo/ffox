@@ -3,6 +3,8 @@
 
 "use strict";
 
+requestLongerTimeout(2);
+
 const BASE_DOMAIN_A = "example.com";
 const ORIGIN_A = `https://${BASE_DOMAIN_A}`;
 const ORIGIN_A_HTTP = `http://${BASE_DOMAIN_A}`;
@@ -65,6 +67,10 @@ async function testCached(origin, isCached) {
     return SpecialPowers.getDOMWindowUtils(content).parsedStyleSheets;
   });
 
+  ok(
+    numParsed == 0 || numParsed == 1,
+    `Where did that stylesheet come from expected 0 or 1, got ${numParsed}`
+  );
   // Stylesheets is cached if numParsed is 0.
   is(!numParsed, isCached, `${origin} is${isCached ? " " : " not "}cached`);
 }
@@ -125,7 +131,9 @@ add_task(async function test_deleteByPrincipal() {
 
   // Cleanup
   cleanupTestTabs();
-  ChromeUtils.clearStyleSheetCache();
+  ChromeUtils.clearResourceCache({
+    types: ["stylesheet"],
+  });
 });
 
 add_task(async function test_deleteBySite() {
@@ -158,7 +166,7 @@ add_task(async function test_deleteBySite() {
 
   // Cleanup
   cleanupTestTabs();
-  ChromeUtils.clearStyleSheetCache();
+  ChromeUtils.clearResourceCache(["stylesheet"]);
 });
 
 add_task(async function test_deleteBySite_oa_pattern() {
@@ -192,5 +200,5 @@ add_task(async function test_deleteBySite_oa_pattern() {
 
   // Cleanup
   cleanupTestTabs();
-  ChromeUtils.clearStyleSheetCache();
+  ChromeUtils.clearResourceCache(["stylesheet"]);
 });

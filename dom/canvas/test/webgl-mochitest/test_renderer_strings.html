@@ -70,6 +70,7 @@ async function testKnownCiStrings() {
       'Adreno (TM) 620', // Android pixel5
       'llvmpipe (LLVM 10.0.0, 256 bits)', // Linux (Ubuntu 18.04)
       'llvmpipe (LLVM 17.0.6, 256 bits)', // Linux (Ubuntu 24.04)
+      'llvmpipe (LLVM 19.1.1, 256 bits)', // Linux (Ubuntu 24.04.2)
       'Intel(R) UHD Graphics 630', // Mac
       'Apple M1', // Mac
       'Apple M2', // Mac
@@ -149,13 +150,13 @@ async function testPrefBehaviorForExampleRtx3070() {
   ]});
 
   ext = gl.getExtension('WEBGL_debug_renderer_info');
-  ok(!ext,
-     'With RFP: Should not have access to \'WEBGL_debug_renderer_info\'.');
 
   {
     const EXPECTED = {
       renderer: 'Mozilla',
       vendor: 'Mozilla',
+      unmasked_renderer: 'Mozilla',
+      unmasked_vendor: 'Mozilla',
     };
     const was = getStrings();
     expectJsonEqual(was, EXPECTED, 'RFP behavior');

@@ -6,6 +6,7 @@ import { actionCreators as ac, actionTypes as at } from "common/Actions.mjs";
 import { DSImage } from "../DSImage/DSImage.jsx";
 import { DSLinkMenu } from "../DSLinkMenu/DSLinkMenu";
 import { ImpressionStats } from "../../DiscoveryStreamImpressionStats/ImpressionStats";
+import { getActiveCardSize } from "../../../lib/utils";
 import React from "react";
 import { SafeAnchor } from "../SafeAnchor/SafeAnchor";
 import {
@@ -39,7 +40,11 @@ export const DSSource = ({
   sponsor,
   sponsored_by_override,
   icon_src,
+  refinedCardsLayout,
 }) => {
+  // refinedCard styles will have a larger favicon size
+  const faviconSize = refinedCardsLayout ? 20 : 16;
+
   // First try to display sponsored label or time to read here.
   if (newSponsoredLabel) {
     // If we can display something for spocs, do so.
@@ -71,10 +76,12 @@ export const DSSource = ({
 
   // Otherwise display a default source.
   return (
-    <p className="source clamp">
-      {icon_src && <img src={icon_src} height="16" width="16" alt="" />}
-      {source}
-    </p>
+    <div className="source-wrapper">
+      {icon_src && (
+        <img src={icon_src} height={faviconSize} width={faviconSize} alt="" />
+      )}
+      <p className="source clamp">{source}</p>
+    </div>
   );
 };
 
@@ -103,6 +110,7 @@ export const DefaultMeta = ({
   isSectionsCard,
   showTopics,
   icon_src,
+  refinedCardsLayout,
 }) => {
   const shouldHaveThumbs =
     !isListCard &&
@@ -111,40 +119,39 @@ export const DefaultMeta = ({
     mayHaveThumbsUpDown;
   const shouldHaveFooterSection =
     isSectionsCard && (shouldHaveThumbs || showTopics);
+
   return (
     <div className="meta">
       <div className="info-wrap">
-        {ctaButtonVariant !== "variant-b" && format !== "rectangle" && (
-          <DSSource
-            source={source}
-            timeToRead={timeToRead}
-            newSponsoredLabel={newSponsoredLabel}
-            context={context}
-            sponsor={sponsor}
-            sponsored_by_override={sponsored_by_override}
-            icon_src={icon_src}
-          />
-        )}
-        {format !== "rectangle" && (
-          <>
-            <h3 className="title clamp">{title}</h3>
-            {excerpt && <p className="excerpt clamp">{excerpt}</p>}
-          </>
-        )}
-        {/* Rectangle format is returned for English clients only.*/}
-        {format === "rectangle" && (
-          <>
-            <h3 className="title clamp">Sponsored</h3>
-            <p className="excerpt clamp">
-              Sponsored content supports our mission to build a better web.
-            </p>
-          </>
+        {ctaButtonVariant !== "variant-b" &&
+          format !== "rectangle" &&
+          !refinedCardsLayout && (
+            <DSSource
+              source={source}
+              timeToRead={timeToRead}
+              newSponsoredLabel={newSponsoredLabel}
+              context={context}
+              sponsor={sponsor}
+              sponsored_by_override={sponsored_by_override}
+              icon_src={icon_src}
+            />
+          )}
+        <h3 className="title clamp">
+          {format === "rectangle" ? "Sponsored" : title}
+        </h3>
+        {format === "rectangle" ? (
+          <p className="excerpt clamp">
+            Sponsored content supports our mission to build a better web.
+          </p>
+        ) : (
+          excerpt && <p className="excerpt clamp">{excerpt}</p>
         )}
       </div>
       {!isListCard &&
         format !== "rectangle" &&
         !mayHaveSectionsCards &&
-        mayHaveThumbsUpDown && (
+        mayHaveThumbsUpDown &&
+        !refinedCardsLayout && (
           <DSThumbsUpDownButtons
             onThumbsDownClick={onThumbsDownClick}
             onThumbsUpClick={onThumbsUpClick}
@@ -153,15 +160,30 @@ export const DefaultMeta = ({
             isThumbsUpActive={state.isThumbsUpActive}
           />
         )}
-      {shouldHaveFooterSection && (
+      {(shouldHaveFooterSection || refinedCardsLayout) && (
         <div className="sections-card-footer">
-          {shouldHaveThumbs && (
+          {refinedCardsLayout &&
+            format !== "rectangle" &&
+            format !== "spoc" && (
+              <DSSource
+                source={source}
+                timeToRead={timeToRead}
+                newSponsoredLabel={newSponsoredLabel}
+                context={context}
+                sponsor={sponsor}
+                sponsored_by_override={sponsored_by_override}
+                icon_src={icon_src}
+                refinedCardsLayout={refinedCardsLayout}
+              />
+            )}
+          {(shouldHaveThumbs || refinedCardsLayout) && (
             <DSThumbsUpDownButtons
               onThumbsDownClick={onThumbsDownClick}
               onThumbsUpClick={onThumbsUpClick}
               sponsor={sponsor}
               isThumbsDownActive={state.isThumbsDownActive}
               isThumbsUpActive={state.isThumbsUpActive}
+              refinedCardsLayout={refinedCardsLayout}
             />
           )}
           {showTopics && (
@@ -210,6 +232,8 @@ export class _DSCard extends React.PureComponent {
     this.onMenuShow = this.onMenuShow.bind(this);
     this.onThumbsUpClick = this.onThumbsUpClick.bind(this);
     this.onThumbsDownClick = this.onThumbsDownClick.bind(this);
+    const refinedCardsLayout =
+      this.props.Prefs.values["discoverystream.refinedCardsLayout.enabled"];
 
     this.setContextMenuButtonHostRef = element => {
       this.contextMenuButtonHostElement = element;
@@ -226,7 +250,7 @@ export class _DSCard extends React.PureComponent {
 
     // If this is for the about:home startup cache, then we always want
     // to render the DSCard, regardless of whether or not its been seen.
-    if (props.App.isForStartupCache) {
+    if (props.App.isForStartupCache.App) {
       this.state.isSeen = true;
     }
 
@@ -281,16 +305,16 @@ export class _DSCard extends React.PureComponent {
 
     this.sectionsCardImagesSizes = {
       small: {
-        width: 100,
-        height: 120,
+        width: 110,
+        height: 117,
       },
       medium: {
         width: 300,
-        height: 150,
+        height: refinedCardsLayout ? 160 : 150,
       },
       large: {
-        width: 265,
-        height: 265,
+        width: 190,
+        height: 250,
       },
     };
 
@@ -349,6 +373,7 @@ export class _DSCard extends React.PureComponent {
             source: this.props.type.toUpperCase(),
             action_position: this.props.pos,
             value: {
+              event_source: "card",
               card_type: this.props.flightId ? "spoc" : "organic",
               recommendation_id: this.props.recommendation_id,
               tile_id: this.props.id,
@@ -362,20 +387,31 @@ export class _DSCard extends React.PureComponent {
               recommended_at: this.props.recommended_at,
               received_rank: this.props.received_rank,
               topic: this.props.topic,
+              features: this.props.features,
               matches_selected_topic: matchesSelectedTopic,
               selected_topics: this.props.selectedTopics,
               is_list_card: this.props.isListCard,
-              ...(this.props.format ? { format: this.props.format } : {}),
+              ...(this.props.format
+                ? { format: this.props.format }
+                : {
+                    format: getActiveCardSize(
+                      window.innerWidth,
+                      this.props.sectionsClassNames,
+                      this.props.section,
+                      this.props.flightId
+                    ),
+                  }),
               ...(this.props.section
                 ? {
                     section: this.props.section,
                     section_position: this.props.sectionPosition,
-                    is_secton_followed: this.props.sectionFollowed,
+                    is_section_followed: this.props.sectionFollowed,
                   }
                 : {}),
             },
           })
         );
+
         this.props.dispatch(
           ac.ImpressionStats({
             source: this.props.type.toUpperCase(),
@@ -394,12 +430,21 @@ export class _DSCard extends React.PureComponent {
                 topic: this.props.topic,
                 selected_topics: this.props.selectedTopics,
                 is_list_card: this.props.isListCard,
-                ...(this.props.format ? { format: this.props.format } : {}),
+                ...(this.props.format
+                  ? { format: this.props.format }
+                  : {
+                      format: getActiveCardSize(
+                        window.innerWidth,
+                        this.props.sectionsClassNames,
+                        this.props.section,
+                        this.props.flightId
+                      ),
+                    }),
                 ...(this.props.section
                   ? {
                       section: this.props.section,
                       section_position: this.props.sectionPosition,
-                      is_secton_followed: this.props.sectionFollowed,
+                      is_section_followed: this.props.sectionFollowed,
                     }
                   : {}),
               },
@@ -439,11 +484,17 @@ export class _DSCard extends React.PureComponent {
           thumbs_up: true,
           thumbs_down: false,
           topic: this.props.topic,
+          format: getActiveCardSize(
+            window.innerWidth,
+            this.props.sectionsClassNames,
+            this.props.section,
+            false // (thumbs up/down only exist on organic content)
+          ),
           ...(this.props.section
             ? {
                 section: this.props.section,
                 section_position: this.props.sectionPosition,
-                is_secton_followed: this.props.sectionFollowed,
+                is_section_followed: this.props.sectionFollowed,
               }
             : {}),
         },
@@ -529,11 +580,17 @@ export class _DSCard extends React.PureComponent {
             thumbs_up: false,
             thumbs_down: true,
             topic: this.props.topic,
+            format: getActiveCardSize(
+              window.innerWidth,
+              this.props.sectionsClassNames,
+              this.props.section,
+              false // (thumbs up/down only exist on organic content)
+            ),
             ...(this.props.section
               ? {
                   section: this.props.section,
                   section_position: this.props.sectionPosition,
-                  is_secton_followed: this.props.sectionFollowed,
+                  is_section_followed: this.props.sectionFollowed,
                 }
               : {}),
           },
@@ -678,12 +735,19 @@ export class _DSCard extends React.PureComponent {
     const layoutsVariantAEnabled = Prefs.values["newtabLayouts.variant-a"];
     const layoutsVariantBEnabled = Prefs.values["newtabLayouts.variant-b"];
     const sectionsEnabled = Prefs.values["discoverystream.sections.enabled"];
+    const refinedCardsLayout =
+      Prefs.values["discoverystream.refinedCardsLayout.enabled"];
     const layoutsVariantAorB = layoutsVariantAEnabled || layoutsVariantBEnabled;
 
     const smartCrop = Prefs.values["images.smart"];
     const faviconEnabled =
       Prefs.values["discoverystream.publisherFavicon.enabled"];
-    const excerpt = !hideDescriptions ? this.props.excerpt : "";
+    // Refined cards have their own excerpt hiding logic.
+    // We can ignore hideDescriptions if we are in sections and refined cards.
+    const excerpt =
+      !hideDescriptions || (sectionsEnabled && refinedCardsLayout)
+        ? this.props.excerpt
+        : "";
 
     let timeToRead;
     if (displayReadTime) {
@@ -716,6 +780,7 @@ export class _DSCard extends React.PureComponent {
     const descLinesClassName = `ds-card-desc-lines-${descLines}`;
     const isMediumRectangle = format === "rectangle";
     const spocFormatClassName = isMediumRectangle ? `ds-spoc-rectangle` : ``;
+    const refinedCardsClassName = refinedCardsLayout ? `refined-cards` : ``;
 
     let sizes = [];
     if (!isMediumRectangle) {
@@ -737,7 +802,7 @@ export class _DSCard extends React.PureComponent {
 
     return (
       <article
-        className={`ds-card ${listCardClassName} ${fakespotClassName} ${sectionsCardsClassName} ${compactImagesClassName} ${imageGradientClassName} ${titleLinesName} ${descLinesClassName} ${spocFormatClassName} ${ctaButtonClassName} ${ctaButtonVariantClassName}`}
+        className={`ds-card ${listCardClassName} ${fakespotClassName} ${sectionsCardsClassName} ${compactImagesClassName} ${imageGradientClassName} ${titleLinesName} ${descLinesClassName} ${spocFormatClassName} ${ctaButtonClassName} ${ctaButtonVariantClassName} ${refinedCardsClassName}`}
         ref={this.setContextMenuButtonHostRef}
         data-position-one={this.props["data-position-one"]}
         data-position-two={this.props["data-position-one"]}
@@ -754,7 +819,8 @@ export class _DSCard extends React.PureComponent {
           {this.props.showTopics &&
             !this.props.mayHaveSectionsCards &&
             this.props.topic &&
-            !isListCard && (
+            !isListCard &&
+            !refinedCardsLayout && (
               <span
                 className="ds-card-topic"
                 data-l10n-id={`newtab-topic-label-${this.props.topic}`}
@@ -789,6 +855,7 @@ export class _DSCard extends React.PureComponent {
                 recommended_at: this.props.recommended_at,
                 received_rank: this.props.received_rank,
                 topic: this.props.topic,
+                features: this.props.features,
                 is_list_card: isListCard,
                 ...(format ? { format } : {}),
                 isFakespot,
@@ -797,8 +864,12 @@ export class _DSCard extends React.PureComponent {
                   ? {
                       section: this.props.section,
                       section_position: this.props.sectionPosition,
-                      is_secton_followed: this.props.sectionFollowed,
+                      is_section_followed: this.props.sectionFollowed,
                     }
+                  : {}),
+                ...(!format && this.props.section
+                  ? // Note: sectionsCardsClassName is passed to ImpressionStats.jsx in order to calculate format
+                    { class_names: sectionsCardsClassName }
                   : {}),
               },
             ]}
@@ -838,7 +909,7 @@ export class _DSCard extends React.PureComponent {
               onThumbsDownClick={this.onThumbsDownClick}
               state={this.state}
               isListCard={isListCard}
-              showTopics={this.props.showTopics}
+              showTopics={!refinedCardsLayout && this.props.showTopics}
               isSectionsCard={
                 this.props.mayHaveSectionsCards &&
                 this.props.topic &&
@@ -847,6 +918,7 @@ export class _DSCard extends React.PureComponent {
               format={format}
               topic={this.props.topic}
               icon_src={faviconEnabled && this.props.icon_src}
+              refinedCardsLayout={refinedCardsLayout}
             />
           )}
         </SafeAnchor>
@@ -884,9 +956,22 @@ export class _DSCard extends React.PureComponent {
                 is_list_card={this.props.isListCard}
                 section={this.props.section}
                 section_position={this.props.sectionPosition}
-                is_secton_followed={this.props.sectionFollowed}
-                format={format}
+                is_section_followed={this.props.sectionFollowed}
+                fetchTimestamp={this.props.fetchTimestamp}
+                firstVisibleTimestamp={this.props.firstVisibleTimestamp}
+                format={
+                  format
+                    ? format
+                    : getActiveCardSize(
+                        window.innerWidth,
+                        this.props.sectionsClassNames,
+                        this.props.section,
+                        this.props.flightId
+                      )
+                }
                 isSectionsCard={this.props.mayHaveSectionsCards}
+                topic={this.props.topic}
+                selected_topics={this.props.selected_topics}
               />
             )}
           </div>

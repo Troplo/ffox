@@ -72,6 +72,47 @@ dictionary FormAutofillConfidences {
   double ccName = 0;
 };
 
+enum ResourceCacheType {
+  "stylesheet",
+  "script",
+  "image",
+};
+
+enum ResourceCacheTarget {
+  "chrome",
+  "content",
+};
+
+dictionary ClearResourceCacheOptions {
+  // If specified clear only those types of resources.
+  // If not specified, clears all types.
+  sequence<ResourceCacheType> types;
+
+  // If specified, clear only the specified target, either chrome or content.
+  // If not specified, clears both chrome and content.
+  //
+  // Exclusive with principal, schemelessSite, and url.
+  ResourceCacheTarget target;
+
+  // If specified, filters by principal.
+  //
+  // Exclusive with target, schemelessSite, and url.
+  Principal principal;
+
+  // If specified, filters by site, and needs to provide a pattern.
+  //
+  // Exclusive with target, principal, and url.
+  UTF8String schemelessSite;
+
+  // If specified with schemelessSite, filter by origin attributes.
+  OriginAttributesPatternDictionary pattern = {};
+
+  // If specified, clear the cache for the url
+  //
+  // Exclusive with target, principal, and schemelessSite.
+  UTF8String url;
+};
+
 /**
  * A collection of static utility methods that are only exposed to system code.
  * This is exposed in all the system globals where we can expose stuff by
@@ -230,53 +271,10 @@ namespace ChromeUtils {
 #endif // NIGHTLY_BUILD
 
   /**
-   * Clears the stylesheet cache by site. This includes associated
-   * state-partitioned cache.
-   */
-  undefined clearStyleSheetCacheBySite(UTF8String schemelessSite, optional OriginAttributesPatternDictionary pattern = {});
-
-  /**
-   * Clears the stylesheet cache by principal.
-   */
-  undefined clearStyleSheetCacheByPrincipal(Principal principal);
-
-  /**
-   * Clears the entire stylesheet cache.
-   *
-   * If chrome parameter is passed and true, this clears chrome cache.
-   * If chrome parameter is passed and false, this clears content cache.
-   * If chrome parameter is not passed, this clears all cache.
-   */
-  undefined clearStyleSheetCache(optional boolean chrome);
-
-  /**
-   * Clears the JavaScript cache by schemeless site. This includes associated
-   * state-partitioned cache.
-   */
-  undefined clearScriptCacheBySite(UTF8String schemelessSite, optional OriginAttributesPatternDictionary pattern = {});
-
-  /**
-   * Clears the JavaScript cache by principal.
-   */
-  undefined clearScriptCacheByPrincipal(Principal principal);
-
-  /**
-   * Clears the entire JavaScript cache.
-   *
-   * If chrome parameter is passed and true, this clears chrome cache.
-   * If chrome parameter is passed and false, this clears content cache.
-   * If chrome parameter is not passed, this clears all cache.
-   */
-  undefined clearScriptCache(optional boolean chrome);
-
-  /**
    * Clears the entire resource cache (stylesheets, JavaScripts, and images).
-   *
-   * If chrome parameter is passed and true, this clears chrome cache.
-   * If chrome parameter is passed and false, this clears content cache.
-   * If chrome parameter is not passed, this clears all cache.
    */
-  undefined clearResourceCache(optional boolean chrome);
+  [Throws]
+  undefined clearResourceCache(optional ClearResourceCacheOptions options = {});
 
   /**
    * Clears the Messaging Layer Security state by schemeless site.
@@ -423,6 +421,11 @@ namespace ChromeUtils {
   [Throws]
   undefined defineESModuleGetters(object aTarget, object aModules,
                                   optional ImportESModuleOptionsDictionary aOptions = {});
+
+  /**
+   * Returns whether |str| is a valid JS identifier
+   */
+  boolean isJSIdentifier(DOMString str);
 
   /**
    * IF YOU ADD NEW METHODS HERE, MAKE SURE THEY ARE THREAD-SAFE.
@@ -786,6 +789,25 @@ partial namespace ChromeUtils {
   boolean shouldResistFingerprinting(JSRFPTarget target,
                                      nsIRFPTargetSetIDL? overriddenFingerprintingSettings,
                                      optional boolean isPBM);
+
+  // Equivalent to pressing the home button. Exclusively for testing.
+  [ChromeOnly]
+  undefined androidMoveTaskToBack();
+
+  [Throws]
+  ContentSecurityPolicy createCSPFromHeader(DOMString header, URI selfURI, Principal loadingPrincipal);
+
+  // This helper function executes `func` and redirects any exception
+  // that may be thrown while running it to the DevTools Console currently
+  // debugging `targetGlobal`.
+  //
+  // This helps flag the nsIScriptError with a particular innerWindowID
+  // which is especially useful for WebExtension content scripts
+  // where script are running in a Sandbox whose prototype is the content window.
+  // We expect content script exception to be flagged with the content window
+  // innerWindowID in order to appear in the tab's DevTools.
+  [ChromeOnly, Throws]
+  any callFunctionAndLogException(any targetGlobal, any func);
 };
 
 /*
@@ -1138,6 +1160,8 @@ enum JSRFPTarget {
   "RoundWindowSize",
   "SiteSpecificZoom",
   "CSSPrefersColorScheme",
+  "JSLocalePrompt",
+  "HttpUserAgent",
 };
 
 #ifdef XP_UNIX

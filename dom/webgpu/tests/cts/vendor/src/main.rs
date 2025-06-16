@@ -1,25 +1,26 @@
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
-    env::{current_dir, set_current_dir},
-    path::{Path, PathBuf},
-    process::ExitCode,
+    env::set_current_dir,
+    path::PathBuf,
+    process::{ExitCode, Stdio},
 };
 
 use clap::Parser;
+use ezcmd::EasyCommand;
 use itertools::Itertools;
-use lets_find_up::{find_up_with, FindUpKind, FindUpOptions};
-use miette::{bail, ensure, miette, Context, Diagnostic, IntoDiagnostic, Report, SourceSpan};
+use joinery::JoinableIterator;
+use miette::{ensure, miette, Context, Diagnostic, IntoDiagnostic, Report, SourceSpan};
 use regex::Regex;
 
 use crate::{
-    fs::{copy_dir, create_dir_all, remove_file, FileRoot},
-    path::join_path,
-    process::{which, EasyCommand},
+    fs::{create_dir_all, remove_file, FileRoot},
+    process::which,
 };
 
 mod fs;
-mod path;
 mod process;
+mod test_split;
 
 /// Vendor WebGPU CTS tests from a local Git checkout of [our `gpuweb/cts` fork].
 ///
@@ -54,231 +55,43 @@ fn main() -> ExitCode {
 fn run(args: CliArgs) -> miette::Result<()> {
     let CliArgs { cts_checkout_path } = args;
 
-    let orig_working_dir = current_dir().unwrap();
+    let cts_ckt = FileRoot::new("cts", cts_checkout_path).unwrap();
 
-    let cts_dir = join_path(["dom", "webgpu", "tests", "cts"]);
-    let cts_vendor_dir = join_path([&*cts_dir, "vendor".as_ref()]);
-    let gecko_ckt = {
-        let find_up_opts = || FindUpOptions {
-            cwd: Path::new("."),
-            kind: FindUpKind::Dir,
-        };
-        let find_up = |repo_tech_name, root_dir_name| {
-            let err = || {
-                miette!(
-                    concat!(
-                        "failed to find a {} repository ({:?}) in any of current ",
-                        "working directory and its parent directories",
-                    ),
-                    repo_tech_name,
-                    root_dir_name,
-                )
-            };
-            find_up_with(root_dir_name, find_up_opts())
-                .map_err(Report::msg)
-                .wrap_err_with(err)
-                .and_then(|loc_opt| loc_opt.ok_or_else(err))
-                .map(|mut dir| {
-                    dir.pop();
-                    dir
-                })
-        };
-        let gecko_source_root = find_up("Mercurial", ".hg").or_else(|hg_err| {
-            find_up("Git", ".git").or_else(|git_err| match find_up("Jujutsu", ".jj") {
-                Ok(path) => {
-                    log::debug!("{hg_err:?}");
-                    Ok(path)
-                }
-                Err(jj_err) => {
-                    log::warn!("{hg_err:?}");
-                    log::warn!("{git_err:?}");
-                    log::warn!("{jj_err:?}");
-                    bail!("failed to find a Gecko repository root")
-                }
-            })
-        })?;
-
-        let root = FileRoot::new("gecko", &gecko_source_root)?;
-        log::info!("detected Gecko repository root at {root}");
-
-        ensure!(
-            root.try_child(&orig_working_dir)
-                .is_ok_and(|c| c.relative_path() == cts_vendor_dir),
-            concat!(
-                "It is expected to run this tool from the root of its Cargo project, ",
-                "but this does not appear to have been done. Bailing."
-            )
-        );
-
-        root
-    };
-
-    let cts_vendor_dir = gecko_ckt.child(orig_working_dir.parent().unwrap());
-
-    let wpt_tests_dir = {
-        let child = gecko_ckt.child(join_path(["testing", "web-platform", "mozilla", "tests"]));
-        ensure!(
-            child.is_dir(),
-            "WPT tests dir ({child}) does not appear to exist"
-        );
-        child
-    };
-
-    let (cts_ckt_git_dir, cts_ckt) = {
-        let failed_find_git_err = || {
-            miette!(concat!(
-                "failed to find a Git repository (`.git` directory) in the provided path ",
-                "and all of its parent directories"
-            ))
-        };
-        let git_dir = find_up_with(
-            ".git",
-            FindUpOptions {
-                cwd: &cts_checkout_path,
-                kind: FindUpKind::Dir,
-            },
-        )
-        .map_err(Report::msg)
-        .wrap_err_with(failed_find_git_err)?
-        .ok_or_else(failed_find_git_err)?;
-
-        let ckt = FileRoot::new("cts", git_dir.parent().unwrap())?;
-        log::debug!("detected CTS checkout root at {ckt}");
-        (git_dir, ckt)
-    };
-
-    let git_bin = which("git", "Git binary")?;
     let npm_bin = which("npm", "NPM binary")?;
 
-    // XXX: It'd be nice to expose separate operations for copying in source and generating WPT
-    // cases from the vendored copy. Checks like these really only matter when updating source.
-    let ensure_no_child = |p1: &FileRoot, p2| {
-        ensure!(
-            p1.try_child(p2).is_err(),
-            "{p1} is a child path of {p2}, which is not supported"
-        );
-        Ok(())
-    };
-    ensure_no_child(&cts_ckt, &gecko_ckt)?;
-    ensure_no_child(&gecko_ckt, &cts_ckt)?;
-
-    log::info!("making a vendored copy of checked-in files from {cts_ckt}…",);
-    gecko_ckt.regen_file(
-        join_path([&*cts_dir, "checkout_commit.txt".as_ref()]),
-        |checkout_commit_file| {
-            let mut git_status_porcelain_cmd = EasyCommand::new(&git_bin, |cmd| {
-                cmd.args(["status", "--porcelain"])
-                    .envs([("GIT_DIR", &*cts_ckt_git_dir), ("GIT_WORK_TREE", &*cts_ckt)])
-            });
-            log::info!(
-                "  …ensuring the working tree and index are clean with {}…",
-                git_status_porcelain_cmd
-            );
-            let git_status_porcelain_output = git_status_porcelain_cmd.just_stdout_utf8()?;
-            ensure!(
-                git_status_porcelain_output.is_empty(),
-                concat!(
-                    "expected a clean CTS working tree and index, ",
-                    "but {}'s output was not empty; ",
-                    "for reference, it was:\n\n{}",
-                ),
-                git_status_porcelain_cmd,
-                git_status_porcelain_output,
-            );
-
-            gecko_ckt.regen_dir(cts_vendor_dir.join("checkout"), |vendored_ckt_dir| {
-                log::info!("  …copying files tracked by Git to {vendored_ckt_dir}…");
-                let files_to_vendor = {
-                    let mut git_ls_files_cmd = EasyCommand::new(&git_bin, |cmd| {
-                        cmd.arg("ls-files").env("GIT_DIR", &cts_ckt_git_dir)
-                    });
-                    log::debug!("  …getting files to vendor from {git_ls_files_cmd}…");
-                    let output = git_ls_files_cmd.just_stdout_utf8()?;
-                    let mut files = output
-                        .split_terminator('\n')
-                        .map(PathBuf::from)
-                        .collect::<BTreeSet<_>>();
-                    log::trace!("  …files from {git_ls_files_cmd}: {files:#?}");
-
-                    log::trace!("  …validating that files from Git repo still exist…");
-                    let files_not_found = files
-                        .iter()
-                        .filter(|p| !cts_ckt.child(p).exists())
-                        .collect::<Vec<_>>();
-                    ensure!(
-                        files_not_found.is_empty(),
-                        concat!(
-                            "the following files were returned by `git ls-files`, ",
-                            "but do not exist on disk: {:#?}",
-                        ),
-                        files_not_found,
-                    );
-
-                    log::trace!("  …stripping files we actually don't want to vendor…");
-                    let files_to_actually_not_vendor = [
-                        // There's no reason to bring this over, and lots of reasons to not bring in
-                        // security-sensitive content unless we have to.
-                        "deploy_key.enc",
-                    ]
-                    .map(Path::new);
-                    log::trace!("    …files we don't want: {files_to_actually_not_vendor:?}");
-                    for path in files_to_actually_not_vendor {
-                        ensure!(
-                            files.remove(path),
-                            concat!(
-                                "failed to remove {} from list of files to vendor; ",
-                                "does it still exist?"
-                            ),
-                            cts_ckt.child(path)
-                        );
-                    }
-                    files
-                };
-
-                log::debug!("  …now doing the copying…");
-                for path in files_to_vendor {
-                    let vendor_from_path = cts_ckt.child(&path);
-                    let vendor_to_path = vendored_ckt_dir.child(&path);
-                    if let Some(parent) = vendor_to_path.parent() {
-                        create_dir_all(vendored_ckt_dir.child(parent))?;
-                    }
-                    log::trace!("    …copying {vendor_from_path} to {vendor_to_path}…");
-                    fs::copy(&vendor_from_path, &vendor_to_path)?;
-                }
-
-                Ok(())
-            })?;
-
-            log::info!("  …writing commit ref pointed to by `HEAD` to {checkout_commit_file}…");
-            let mut git_rev_parse_head_cmd = EasyCommand::new(&git_bin, |cmd| {
-                cmd.args(["rev-parse", "HEAD"])
-                    .env("GIT_DIR", &cts_ckt_git_dir)
-            });
-            log::trace!("    …getting output of {git_rev_parse_head_cmd}…");
-            fs::write(
-                checkout_commit_file,
-                git_rev_parse_head_cmd.just_stdout_utf8()?,
-            )
-            .wrap_err_with(|| format!("failed to write HEAD ref to {checkout_commit_file}"))
-        },
-    )?;
+    let node_bin = which("node", "Node.js binary")?;
 
     set_current_dir(&*cts_ckt)
         .into_diagnostic()
         .wrap_err("failed to change working directory to CTS checkout")?;
     log::debug!("changed CWD to {cts_ckt}");
 
-    let mut npm_ci_cmd = EasyCommand::new(&npm_bin, |cmd| cmd.arg("ci"));
+    let mut npm_ci_cmd = EasyCommand::simple(&npm_bin, ["ci"]);
     log::info!(
         "ensuring a clean {} directory with {npm_ci_cmd}…",
         cts_ckt.child("node_modules"),
     );
-    npm_ci_cmd.spawn()?;
+    npm_ci_cmd.run().into_diagnostic()?;
+
+    let test_listing_join_handle = {
+        let mut cmd = EasyCommand::new_with(node_bin, |cmd| {
+            cmd.args(["tools/run_node", "--list", "webgpu:*"])
+                .stderr(Stdio::inherit())
+        });
+        log::info!("requesting exhaustive list of tests in a separate thread using {cmd}…");
+        std::thread::spawn(move || {
+            let stdout = cmd.output().into_diagnostic()?.stdout;
+
+            String::from_utf8(stdout)
+                .into_diagnostic()
+                .context("failed to read output of exhaustive test listing command")
+        })
+    };
 
     let out_wpt_dir = cts_ckt.regen_dir("out-wpt", |out_wpt_dir| {
-        let mut npm_run_wpt_cmd = EasyCommand::new(&npm_bin, |cmd| cmd.args(["run", "wpt"]));
+        let mut npm_run_wpt_cmd = EasyCommand::simple(&npm_bin, ["run", "wpt"]);
         log::info!("generating WPT test cases into {out_wpt_dir} with {npm_run_wpt_cmd}…");
-        npm_run_wpt_cmd.spawn()
+        npm_run_wpt_cmd.run().into_diagnostic()
     })?;
 
     let cts_https_html_path = out_wpt_dir.child("cts-withsomeworkers.https.html");
@@ -369,11 +182,13 @@ fn run(args: CliArgs) -> miette::Result<()> {
                     "<script type=module src=/webgpu/common/runtime/wpt.js></script>";
                 ensure!(
                     boilerplate.contains(expected_wpt_script_tag),
-                    concat!(
-                        "failed to find expected `script` tag for `wpt.js` ",
-                        "({:?}); did something change upstream?",
+                    format!(
+                        concat!(
+                            "failed to find expected `script` tag for `wpt.js` ",
+                            "({:?}); did something change upstream?"
+                        ),
+                        expected_wpt_script_tag
                     ),
-                    expected_wpt_script_tag
                 );
                 let mut boilerplate = boilerplate.replacen(
                     expected_wpt_script_tag,
@@ -413,7 +228,7 @@ fn run(args: CliArgs) -> miette::Result<()> {
                 "<meta name=variant content='",
                 r"\?",
                 r"(:?worker=(?P<worker_type>\w+)&)?",
-                r"q=(?P<test_path>[^']*?):\*",
+                r"q=(?P<test_path>[^']*?:\*)",
                 "'>",
                 "$"
             ))
@@ -464,57 +279,143 @@ fn run(args: CliArgs) -> miette::Result<()> {
         log::info!("  …found {} test cases", cts_cases.len());
     }
 
+    let test_listing_buf;
+    let mut tests_to_split = {
+        log::info!("generating index of tests to split…");
+
+        let test_split_config = {
+            use test_split::*;
+            [(
+                "webgpu:api,operation,command_buffer,image_copy:mip_levels",
+                Config {
+                    new_sibling_basename: "image_copy__mip_levels",
+                    split_by: SplitBy::first_param(
+                        "initMethod",
+                        SplitParamsTo::SeparateTestsInSameFile,
+                    ),
+                },
+            )]
+        };
+
+        let mut tests_to_split = test_split_config
+            .into_iter()
+            .map(|(test_path, config)| (test_path, test_split::Entry::from_config(config)))
+            .collect::<BTreeMap<_, _>>();
+
+        log::debug!("blocking on list of tests…");
+        test_listing_buf = test_listing_join_handle
+            .join()
+            .expect("failed to get value from test listing thread")
+            .unwrap();
+        log::info!("building index from list of tests…");
+        for full_path in test_listing_buf.lines() {
+            let (subtest_path, params) = split_at_nth_colon(2, full_path)
+                .wrap_err_with(|| "failed to parse configured split entry")?;
+            if let Some(entry) = tests_to_split.get_mut(subtest_path) {
+                entry.process_listing_line(params)?;
+            }
+        }
+        test_split::assert_seen("test listing output", tests_to_split.iter(), |seen| {
+            &seen.listing
+        });
+
+        tests_to_split
+    };
+
     cts_ckt.regen_dir(out_wpt_dir.join("cts"), |cts_tests_dir| {
         log::info!("re-distributing tests into single file per test path…");
         let mut failed_writing = false;
         let mut cts_cases_by_spec_file_dir = BTreeMap::<_, BTreeMap<_, BTreeSet<_>>>::new();
         for (path, worker_type, meta) in cts_cases {
-            let case_dir = {
-                // Context: We want to mirror CTS upstream's `src/webgpu/**/*.spec.ts` paths as
-                // entire WPT tests, with each subtest being a WPT variant. Here's a diagram of
-                // a CTS path to explain why the logic below is correct:
-                //
-                // ```sh
-                // webgpu:this,is,the,spec.ts,file,path:subtest_in_file:…
-                // \____/ \___________________________/^\_____________/
-                //  test      `*.spec.ts` file path    |       |
-                // \__________________________________/|       |
-                //                   |                 |       |
-                //              We want this…          | …but not this. CTS upstream generates
-                //                                     | this too, but we don't want to divide
-                //         second ':' character here---/ here (yet).
-                // ```
-                let subtest_and_later_start_idx =
-                    match path.match_indices(':').nth(1).map(|(idx, _s)| idx) {
-                        Some(some) => some,
-                        None => {
-                            failed_writing = true;
-                            log::error!(
-                                concat!(
-                                    "failed to split suite and test path segments ",
-                                    "from CTS path `{}`"
-                                ),
-                                path
-                            );
-                            continue;
-                        }
-                    };
-                let slashed = path[..subtest_and_later_start_idx].replace([':', ','], "/");
-                cts_tests_dir.child(slashed)
-            };
-            if !cts_cases_by_spec_file_dir
-                .entry(case_dir)
-                .or_default()
-                .entry(worker_type)
-                .or_default()
-                .insert(meta)
-            {
-                log::warn!("duplicate entry {meta:?} detected")
+            macro_rules! insert {
+                ($path:expr, $meta:expr $(,)?) => {{
+                    let dir = cts_tests_dir.child($path);
+                    if !cts_cases_by_spec_file_dir
+                        .entry(dir)
+                        .or_default()
+                        .entry(worker_type)
+                        .or_default()
+                        .insert($meta)
+                    {
+                        log::warn!("duplicate entry {meta:?} detected")
+                    }
+                }};
             }
+
+            // Context: We want to mirror CTS upstream's `src/webgpu/**/*.spec.ts` paths as
+            // entire WPT tests, with each subtest being a WPT variant. Here's a diagram of
+            // a CTS path to explain why the logic below is correct:
+            //
+            // ```sh
+            // webgpu:this,is,the,spec.ts,file,path:test_in_file:…
+            // \____/ \___________________________/^\__________/
+            //  test      `*.spec.ts` file path    |       |
+            // \__________________________________/|       |
+            //                   |                 |       |
+            //              We want this…          | …but not this. CTS upstream generates
+            //                                     | this too, but we don't want to divide
+            //         second ':' character here---/ here (yet).
+            // ```
+            let (test_path, _cases) = match split_at_nth_colon(2, &path) {
+                Ok(ok) => ok,
+                Err(e) => {
+                    failed_writing = true;
+                    log::error!("{e}");
+                    continue;
+                }
+            };
+            let (test_group_path, _test_name) = test_path.rsplit_once(':').unwrap();
+            let mut test_group_path_components = test_group_path.split([':', ',']);
+
+            if let Some(entry) = tests_to_split.get_mut(test_path) {
+                let test_split::Entry { seen, ref config } = entry;
+                let test_split::Config {
+                    new_sibling_basename,
+                    split_by,
+                } = config;
+
+                let file_path = {
+                    test_group_path_components.next_back();
+                    test_group_path_components
+                        .chain([*new_sibling_basename])
+                        .join_with("/")
+                        .to_string()
+                };
+
+                seen.wpt_files = true;
+
+                match split_by {
+                    test_split::SplitBy::FirstParam {
+                        expected_name,
+                        split_to,
+                        observed_values,
+                    } => match split_to {
+                        test_split::SplitParamsTo::SeparateTestsInSameFile => {
+                            for value in observed_values {
+                                let new_meta = meta.replace(
+                                    &*path,
+                                    &format!("{test_path}:{expected_name}={value};*"),
+                                );
+                                assert_ne!(meta, new_meta);
+                                insert!(&file_path, new_meta.into());
+                            }
+                        }
+                    },
+                }
+            } else {
+                insert!(
+                    &test_group_path_components.join_with("/").to_string(),
+                    meta.into()
+                )
+            };
         }
 
+        test_split::assert_seen("WPT test output", tests_to_split.iter(), |seen| {
+            &seen.wpt_files
+        });
+
         struct WptEntry<'a> {
-            cases: BTreeSet<&'a str>,
+            cases: BTreeSet<Cow<'a, str>>,
             timeout_length: TimeoutLength,
         }
         #[derive(Clone, Copy, Debug)]
@@ -527,7 +428,7 @@ fn run(args: CliArgs) -> miette::Result<()> {
             fn insert_with_default_name<'a>(
                 split_cases: &mut BTreeMap<fs::Child<'a>, WptEntry<'a>>,
                 spec_file_dir: fs::Child<'a>,
-                cases: BTreeMap<Option<WorkerType>, BTreeSet<&'a str>>,
+                cases: BTreeMap<Option<WorkerType>, BTreeSet<Cow<'a, str>>>,
                 timeout_length: TimeoutLength,
             ) {
                 for (worker_type, cases) in cases {
@@ -659,12 +560,16 @@ fn run(args: CliArgs) -> miette::Result<()> {
         Ok(())
     })?;
 
-    gecko_ckt.regen_dir(wpt_tests_dir.join("webgpu"), |wpt_webgpu_tests_dir| {
-        log::info!("copying contents of {out_wpt_dir} to {wpt_webgpu_tests_dir}…");
-        copy_dir(&out_wpt_dir, wpt_webgpu_tests_dir)
-    })?;
-
     log::info!("All done! Now get your CTS _ON_! :)");
 
     Ok(())
+}
+
+fn split_at_nth_colon(nth: usize, path: &str) -> miette::Result<(&str, &str)> {
+    path.match_indices(':')
+        .nth(nth)
+        .map(|(idx, s)| (&path[..idx], &path[idx + s.len()..]))
+        .ok_or_else(move || {
+            miette::diagnostic!("failed to split at colon {nth} from CTS path `{path}`").into()
+        })
 }

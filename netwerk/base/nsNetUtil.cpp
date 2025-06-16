@@ -22,7 +22,6 @@
 #include "mozilla/StaticPrefs_privacy.h"
 #include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/TaskQueue.h"
-#include "mozilla/Telemetry.h"
 #include "nsAboutProtocolUtils.h"
 #include "nsBufferedStreams.h"
 #include "nsCategoryCache.h"
@@ -102,10 +101,13 @@
 #endif
 #include "nsAboutProtocolHandler.h"
 #include "nsResProtocolHandler.h"
+#include "mozilla/net/CookieJarSettings.h"
+#include "mozilla/net/MozSrcProtocolHandler.h"
 #include "mozilla/net/ExtensionProtocolHandler.h"
 #include "mozilla/net/PageThumbProtocolHandler.h"
 #include "mozilla/net/SFVService.h"
 #include <limits>
+#include "nsICookieService.h"
 #include "nsIXPConnect.h"
 #include "nsParserConstants.h"
 #include "nsCRT.h"
@@ -506,12 +508,36 @@ NS_NewChannelWithTriggeringPrincipal(
   MOZ_ASSERT(aLoadingNode);
   NS_ASSERTION(aTriggeringPrincipal,
                "Can not create channel without a triggering Principal!");
+
+  nsCOMPtr<nsICookieJarSettings> cookieJarSettings;
+
+  // Special treatment for resources injected by add-ons.
+  if (aTriggeringPrincipal &&
+      StaticPrefs::privacy_antitracking_isolateContentScriptResources() &&
+      nsContentUtils::IsExpandedPrincipal(aTriggeringPrincipal)) {
+    bool shouldResistFingerprinting =
+        nsContentUtils::ShouldResistFingerprinting_dangerous(
+            aLoadingNode->NodePrincipal(),
+            "CookieJarSettings can't exist yet, we're creating it",
+            RFPTarget::IsAlwaysEnabledForPrecompute);
+    cookieJarSettings = CookieJarSettings::Create(
+        nsICookieService::BEHAVIOR_REJECT,
+        StoragePrincipalHelper::PartitionKeyForExpandedPrincipal(
+            aTriggeringPrincipal),
+        OriginAttributes::IsFirstPartyEnabled(), false,
+        shouldResistFingerprinting);
+  } else {
+    // Let's inherit the cookie behavior and permission from the parent
+    // document.
+    cookieJarSettings = aLoadingNode->OwnerDoc()->CookieJarSettings();
+  }
+
   return NS_NewChannelInternal(
       outChannel, aUri, aLoadingNode, aLoadingNode->NodePrincipal(),
       aTriggeringPrincipal, Maybe<ClientInfo>(),
       Maybe<ServiceWorkerDescriptor>(), aSecurityFlags, aContentPolicyType,
-      aLoadingNode->OwnerDoc()->CookieJarSettings(), aPerformanceStorage,
-      aLoadGroup, aCallbacks, aLoadFlags, aIoService);
+      cookieJarSettings, aPerformanceStorage, aLoadGroup, aCallbacks,
+      aLoadFlags, aIoService);
 }
 
 // See NS_NewChannelInternal for usage and argument description
@@ -756,9 +782,9 @@ nsresult NS_NewInputStreamChannelInternal(
     const nsACString& aContentCharset, nsINode* aLoadingNode,
     nsIPrincipal* aLoadingPrincipal, nsIPrincipal* aTriggeringPrincipal,
     nsSecurityFlags aSecurityFlags, nsContentPolicyType aContentPolicyType) {
-  nsCOMPtr<nsILoadInfo> loadInfo = new mozilla::net::LoadInfo(
-      aLoadingPrincipal, aTriggeringPrincipal, aLoadingNode, aSecurityFlags,
-      aContentPolicyType);
+  nsCOMPtr<nsILoadInfo> loadInfo = MOZ_TRY(
+      LoadInfo::Create(aLoadingPrincipal, aTriggeringPrincipal, aLoadingNode,
+                       aSecurityFlags, aContentPolicyType));
   if (!loadInfo) {
     return NS_ERROR_UNEXPECTED;
   }
@@ -821,9 +847,9 @@ nsresult NS_NewInputStreamChannelInternal(
     nsIPrincipal* aLoadingPrincipal, nsIPrincipal* aTriggeringPrincipal,
     nsSecurityFlags aSecurityFlags, nsContentPolicyType aContentPolicyType,
     bool aIsSrcdocChannel /* = false */) {
-  nsCOMPtr<nsILoadInfo> loadInfo = new mozilla::net::LoadInfo(
-      aLoadingPrincipal, aTriggeringPrincipal, aLoadingNode, aSecurityFlags,
-      aContentPolicyType);
+  nsCOMPtr<nsILoadInfo> loadInfo = MOZ_TRY(
+      net::LoadInfo::Create(aLoadingPrincipal, aTriggeringPrincipal,
+                            aLoadingNode, aSecurityFlags, aContentPolicyType));
   return NS_NewInputStreamChannelInternal(outChannel, aUri, aData, aContentType,
                                           loadInfo, aIsSrcdocChannel);
 }
@@ -1912,6 +1938,15 @@ nsresult NS_NewURI(nsIURI** aURI, const nsACString& aSpec,
     return handler->NewURI(aSpec, aCharset, aBaseURI, aURI);
   }
 
+  if (scheme.EqualsLiteral("moz-src")) {
+    RefPtr<MozSrcProtocolHandler> handler =
+        MozSrcProtocolHandler::GetSingleton();
+    if (!handler) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
+    return handler->NewURI(aSpec, aCharset, aBaseURI, aURI);
+  }
+
   if (scheme.EqualsLiteral("indexeddb") || scheme.EqualsLiteral("uuid")) {
     return NS_MutateURI(new nsStandardURL::Mutator())
         .Apply(&nsIStandardURLMutator::Init, nsIStandardURL::URLTYPE_AUTHORITY,
@@ -2805,6 +2840,24 @@ bool NS_IsAboutSrcdoc(nsIURI* uri) {
   return spec.EqualsLiteral("about:srcdoc");
 }
 
+// https://fetch.spec.whatwg.org/#fetch-scheme
+bool NS_IsFetchScheme(nsIURI* uri) {
+  for (const auto& scheme : {
+           "http",
+           "https",
+           "about",
+           "blob",
+           "data",
+           "file",
+       }) {
+    if (uri->SchemeIs(scheme)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 nsresult NS_GenerateHostPort(const nsCString& host, int32_t port,
                              nsACString& hostLine) {
   if (strchr(host.get(), ':')) {
@@ -3356,59 +3409,9 @@ bool ChannelIsPost(nsIChannel* aChannel) {
   return false;
 }
 
-bool SchemeIsHTTP(nsIURI* aURI) {
+bool SchemeIsHttpOrHttps(nsIURI* aURI) {
   MOZ_ASSERT(aURI);
-  return aURI->SchemeIs("http");
-}
-
-bool SchemeIsHTTPS(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  return aURI->SchemeIs("https");
-}
-
-bool SchemeIsJavascript(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  return aURI->SchemeIs("javascript");
-}
-
-bool SchemeIsChrome(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  return aURI->SchemeIs("chrome");
-}
-
-bool SchemeIsAbout(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  return aURI->SchemeIs("about");
-}
-
-bool SchemeIsBlob(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  return aURI->SchemeIs("blob");
-}
-
-bool SchemeIsFile(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  return aURI->SchemeIs("file");
-}
-
-bool SchemeIsData(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  return aURI->SchemeIs("data");
-}
-
-bool SchemeIsViewSource(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  return aURI->SchemeIs("view-source");
-}
-
-bool SchemeIsResource(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  return aURI->SchemeIs("resource");
-}
-
-bool SchemeIsFTP(nsIURI* aURI) {
-  MOZ_ASSERT(aURI);
-  return aURI->SchemeIs("ftp");
+  return aURI->SchemeIs("http") || aURI->SchemeIs("https");
 }
 
 bool SchemeIsSpecial(const nsACString& aScheme) {
@@ -3887,18 +3890,13 @@ bool IsFontMimeType(const nsAString& aType) {
   return false;
 }
 
-static const nsAttrValue::EnumTable kAsAttributeTable[] = {
-    {"", DESTINATION_INVALID},
-    {"audio", DESTINATION_AUDIO},
-    {"font", DESTINATION_FONT},
-    {"image", DESTINATION_IMAGE},
-    {"script", DESTINATION_SCRIPT},
-    {"style", DESTINATION_STYLE},
-    {"track", DESTINATION_TRACK},
-    {"video", DESTINATION_VIDEO},
-    {"fetch", DESTINATION_FETCH},
-    {"json", DESTINATION_JSON},
-    {nullptr, 0}};
+static constexpr nsAttrValue::EnumTableEntry kAsAttributeTable[] = {
+    {"", DESTINATION_INVALID},      {"audio", DESTINATION_AUDIO},
+    {"font", DESTINATION_FONT},     {"image", DESTINATION_IMAGE},
+    {"script", DESTINATION_SCRIPT}, {"style", DESTINATION_STYLE},
+    {"track", DESTINATION_TRACK},   {"video", DESTINATION_VIDEO},
+    {"fetch", DESTINATION_FETCH},   {"json", DESTINATION_JSON},
+};
 
 void ParseAsValue(const nsAString& aValue, nsAttrValue& aResult) {
   DebugOnly<bool> success =
@@ -4168,5 +4166,36 @@ nsresult AddExtraHeaders(nsIHttpChannel* aHttpChannel,
   return NS_OK;
 }
 
+bool IsLocalNetworkAccess(nsILoadInfo::IPAddressSpace aParentIPAddressSpace,
+                          nsILoadInfo::IPAddressSpace aTargetIPAddressSpace) {
+  // Determine if the request is moving to a more private address space
+  // i.e. Public -> Private or Local
+  // Private -> Local
+  // Refer
+  // https://wicg.github.io/private-network-access/#private-network-request-heading
+  // for private network access
+  // XXX (sunil) add link to LNA spec once it is published
+
+  if (aTargetIPAddressSpace == nsILoadInfo::IPAddressSpace::Public ||
+      aTargetIPAddressSpace == nsILoadInfo::IPAddressSpace::Unknown) {
+    return false;
+  }
+  // Check if this is an access to a local resource from Public or Private
+  // network
+  if ((aTargetIPAddressSpace == nsILoadInfo::IPAddressSpace::Local) &&
+      (aParentIPAddressSpace == nsILoadInfo::IPAddressSpace::Public ||
+       aParentIPAddressSpace == nsILoadInfo::IPAddressSpace::Private)) {
+    return true;
+  }
+
+  // Check if this is an access to a Private Network resource from a Public
+  // network
+  if ((aTargetIPAddressSpace == nsILoadInfo::IPAddressSpace::Private) &&
+      (aParentIPAddressSpace == nsILoadInfo::IPAddressSpace::Public)) {
+    return true;
+  }
+
+  return false;
+}
 }  // namespace net
 }  // namespace mozilla

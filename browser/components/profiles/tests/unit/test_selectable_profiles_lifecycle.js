@@ -7,6 +7,9 @@ const { MockRegistrar } = ChromeUtils.importESModule(
   "resource://testing-common/MockRegistrar.sys.mjs"
 );
 
+// Windows doesn't support the normal permissions and always creates and returns as 0666.
+const EXPECTED_PERMISSIONS = AppConstants.platform == "win" ? 0o666 : 0o700;
+
 const badgingService = {
   isRegistered: false,
   badge: null,
@@ -59,9 +62,14 @@ add_setup(() => {
 
 add_task(async function test_SelectableProfileLifecycle() {
   startProfileService();
+
   const SelectableProfileService = getSelectableProfileService();
+  const ProfilesDatastoreService = getProfilesDatastoreService();
+
+  await ProfilesDatastoreService.init();
 
   Services.prefs.setBoolPref("browser.profiles.enabled", false);
+  Services.prefs.setBoolPref("browser.profiles.created", false);
   await SelectableProfileService.init();
   Assert.ok(
     !SelectableProfileService.isEnabled,
@@ -170,6 +178,17 @@ add_task(async function test_SelectableProfileLifecycle() {
   Assert.ok(
     profileLocalDirExists,
     "Profile local dir was successfully created"
+  );
+
+  Assert.equal(
+    (await IOUtils.stat(profilePath)).permissions,
+    EXPECTED_PERMISSIONS,
+    "Profile dir should have the correct permissions"
+  );
+  Assert.equal(
+    (await IOUtils.stat(profileLocalPath)).permissions,
+    EXPECTED_PERMISSIONS,
+    "Profile local dir should have the correct permissions"
   );
 
   let times = PathUtils.join(rootDir.path, "times.json");

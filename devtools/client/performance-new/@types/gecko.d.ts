@@ -26,6 +26,9 @@ declare namespace MockedExports {
     "resource:///modules/CustomizableUI.sys.mjs": typeof import("resource:///modules/CustomizableUI.sys.mjs");
     "resource:///modules/CustomizableWidgets.sys.mjs": typeof import("resource:///modules/CustomizableWidgets.sys.mjs");
     "resource://devtools/shared/loader/Loader.sys.mjs": typeof import("resource://devtools/shared/loader/Loader.sys.mjs");
+    "resource://devtools/shared/performance-new/errors.sys.mjs": typeof import("resource://devtools/shared/performance-new/errors.sys.mjs");
+    "resource://devtools/shared/performance-new/prefs-presets.sys.mjs": typeof import("resource://devtools/shared/performance-new/prefs-presets.sys.mjs");
+    "resource://devtools/shared/performance-new/recording-utils.sys.mjs": typeof import("resource://devtools/shared/performance-new/recording-utils.sys.mjs");
     "resource://devtools/client/performance-new/shared/background.sys.mjs": typeof import("resource://devtools/client/performance-new/shared/background.sys.mjs");
     "resource://devtools/client/performance-new/shared/symbolication.sys.mjs": typeof import("resource://devtools/client/performance-new/shared/symbolication.sys.mjs");
     "resource://devtools/shared/loader/browser-loader.sys.mjs": any;
@@ -229,19 +232,21 @@ declare namespace MockedExports {
 
   interface FaviconData {
     uri: nsIURI;
-    dataLen: number;
-    data: number[];
+    rawData: number[];
     mimeType: string;
-    size: number;
+    width: number;
   }
 
   const PlaceUtilsSYSMJS: {
     PlacesUtils: {
-      promiseFaviconData: (
-        pageUrl: string | URL | nsIURI,
-        preferredWidth?: number
-      ) => Promise<FaviconData>;
-      // TS-TODO: Add the rest.
+      favicons: {
+        getFaviconForPage: (
+          pageUrl: nsIURI,
+          preferredWidth?: number
+        ) => Promise<FaviconData>;
+        // TS-TODO: Add the rest.
+      };
+      toURI: (uri: string | URL | nsIURI) => nsIURI;
     };
   };
 
@@ -309,9 +314,14 @@ interface PathUtilsInterface {
   isAbsolute: (path: string) => boolean;
 }
 
-declare module "resource://devtools/client/shared/vendor/react.js" {
+declare module "resource://devtools/client/shared/vendor/react.mjs" {
   import * as React from "react";
   export = React;
+}
+
+declare module "resource://devtools/client/shared/vendor/react-dom.mjs" {
+  import * as ReactDOM from "react-dom";
+  export = ReactDOM;
 }
 
 declare module "resource://devtools/client/shared/vendor/react-dom-factories.js" {
@@ -492,3 +502,12 @@ declare type nsIPrefBranch = MockedExports.nsIPrefBranch;
 interface Function {
   isInstance(obj: any): boolean;
 }
+
+// We're declaring these interfaces only to be able to use them in perf.d.ts,
+// for documentation reason. Indeed we use them in places that are not
+// type-checked.
+declare interface nsIInputStream {}
+declare interface nsIAsyncInputStream extends nsIInputStream {}
+declare interface nsIBinaryInputStream extends nsIInputStream {}
+declare interface nsIOutputStream {}
+declare interface nsIAsyncOutputStream extends nsIOutputStream {}

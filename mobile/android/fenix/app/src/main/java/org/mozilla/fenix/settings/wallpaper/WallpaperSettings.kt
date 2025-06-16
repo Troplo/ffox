@@ -46,10 +46,11 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.core.graphics.createBitmap
 import mozilla.components.compose.base.annotation.FlexibleWindowLightDarkPreview
+import mozilla.components.compose.base.modifier.debouncedClickable
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.ClickableSubstringLink
-import org.mozilla.fenix.compose.ext.debouncedClickable
 import org.mozilla.fenix.theme.FirefoxTheme
 import org.mozilla.fenix.wallpapers.Wallpaper
 
@@ -118,7 +119,7 @@ private fun WallpaperGroupHeading(
     // and descriptions so they could be localized.
     // In the future, we may want to either use the dynamic wallpaper properties with localized fallbacks
     // or invest in a method of localizing the remote strings themselves.
-    if (collection.name == Wallpaper.classicFirefoxCollectionName) {
+    if (collection.name == Wallpaper.CLASSIC_FIREFOX_COLLECTION) {
         Text(
             text = stringResource(R.string.wallpaper_classic_title, stringResource(R.string.firefox)),
             color = FirefoxTheme.colors.textSecondary,
@@ -239,7 +240,7 @@ private fun WallpaperThumbnailItem(
     }
     val border = if (isSelected) {
         BorderStroke(width = FirefoxTheme.layout.border.thick, color = FirefoxTheme.colors.borderAccent)
-    } else if (wallpaper.name == Wallpaper.defaultName) {
+    } else if (wallpaper.name == Wallpaper.DEFAULT) {
         BorderStroke(width = FirefoxTheme.layout.border.thick, color = FirefoxTheme.colors.borderPrimary)
     } else {
         null
@@ -340,7 +341,7 @@ private fun WallpaperThumbnailsPreview() {
                 if (wallpaper == Wallpaper.Default) {
                     null
                 } else {
-                    Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
+                    createBitmap(100, 100, Bitmap.Config.ARGB_8888)
                 }
             },
             wallpaperGroups = mapOf(

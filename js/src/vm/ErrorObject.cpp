@@ -85,6 +85,9 @@ const JSClass ErrorObject::protoClasses[JSEXN_ERROR_LIMIT] = {
     IMPLEMENT_ERROR_PROTO_CLASS(CompileError),
     IMPLEMENT_ERROR_PROTO_CLASS(LinkError),
     IMPLEMENT_ERROR_PROTO_CLASS(RuntimeError),
+#ifdef ENABLE_WASM_JSPI
+    IMPLEMENT_ERROR_PROTO_CLASS(SuspendError),
+#endif
 };
 
 static bool exn_toSource(JSContext* cx, unsigned argc, Value* vp);
@@ -95,16 +98,13 @@ static const JSFunctionSpec error_methods[] = {
     JS_FS_END,
 };
 
-#ifdef NIGHTLY_BUILD
 static bool exn_isError(JSContext* cx, unsigned argc, Value* vp);
+
 static bool exn_captureStackTrace(JSContext* cx, unsigned argc, Value* vp);
-#endif
 
 static const JSFunctionSpec error_static_methods[] = {
-#ifdef NIGHTLY_BUILD
     JS_FN("isError", exn_isError, 1, 0),
     JS_FN("captureStackTrace", exn_captureStackTrace, 2, 0),
-#endif
     JS_FS_END,
 };
 
@@ -139,6 +139,9 @@ IMPLEMENT_NATIVE_ERROR_PROPERTIES(DebuggeeWouldRun)
 IMPLEMENT_NATIVE_ERROR_PROPERTIES(CompileError)
 IMPLEMENT_NATIVE_ERROR_PROPERTIES(LinkError)
 IMPLEMENT_NATIVE_ERROR_PROPERTIES(RuntimeError)
+#ifdef ENABLE_WASM_JSPI
+IMPLEMENT_NATIVE_ERROR_PROPERTIES(SuspendError)
+#endif
 
 #define IMPLEMENT_NATIVE_ERROR_SPEC(name) \
   {ErrorObject::createConstructor,        \
@@ -179,7 +182,11 @@ const ClassSpec ErrorObject::classSpecs[JSEXN_ERROR_LIMIT] = {
     IMPLEMENT_NONGLOBAL_ERROR_SPEC(DebuggeeWouldRun),
     IMPLEMENT_NONGLOBAL_ERROR_SPEC(CompileError),
     IMPLEMENT_NONGLOBAL_ERROR_SPEC(LinkError),
-    IMPLEMENT_NONGLOBAL_ERROR_SPEC(RuntimeError)};
+    IMPLEMENT_NONGLOBAL_ERROR_SPEC(RuntimeError),
+#ifdef ENABLE_WASM_JSPI
+    IMPLEMENT_NONGLOBAL_ERROR_SPEC(SuspendError),
+#endif
+};
 
 #define IMPLEMENT_ERROR_CLASS_CORE(name, reserved_slots) \
   {#name,                                                \
@@ -231,6 +238,9 @@ const JSClass ErrorObject::classes[JSEXN_ERROR_LIMIT] = {
     IMPLEMENT_ERROR_CLASS(CompileError),
     IMPLEMENT_ERROR_CLASS(LinkError),
     IMPLEMENT_ERROR_CLASS_MAYBE_WASM_TRAP(RuntimeError),
+#ifdef ENABLE_WASM_JSPI
+    IMPLEMENT_ERROR_CLASS(SuspendError),
+#endif
 };
 
 static void exn_finalize(JS::GCContext* gcx, JSObject* obj) {
@@ -877,6 +887,14 @@ void js::ErrorObject::setFromWasmTrap() {
 }
 
 JSString* js::ErrorToSource(JSContext* cx, HandleObject obj) {
+  AutoCycleDetector detector(cx, obj);
+  if (!detector.init()) {
+    return nullptr;
+  }
+  if (detector.foundCycle()) {
+    return NewStringCopyZ<CanGC>(cx, "{}");
+  }
+
   RootedValue nameVal(cx);
   RootedString name(cx);
   if (!GetProperty(cx, obj, obj, cx->names().name, &nameVal) ||
@@ -898,6 +916,17 @@ JSString* js::ErrorToSource(JSContext* cx, HandleObject obj) {
     return nullptr;
   }
 
+  RootedValue errorsVal(cx);
+  RootedString errors(cx);
+  bool isAggregateError = obj->is<ErrorObject>() &&
+                          obj->as<ErrorObject>().type() == JSEXN_AGGREGATEERR;
+  if (isAggregateError) {
+    if (!GetProperty(cx, obj, obj, cx->names().errors, &errorsVal) ||
+        !(errors = ValueToSource(cx, errorsVal))) {
+      return nullptr;
+    }
+  }
+
   RootedValue linenoVal(cx);
   uint32_t lineno;
   if (!GetProperty(cx, obj, obj, cx->names().lineNumber, &linenoVal) ||
@@ -908,6 +937,12 @@ JSString* js::ErrorToSource(JSContext* cx, HandleObject obj) {
   JSStringBuilder sb(cx);
   if (!sb.append("(new ") || !sb.append(name) || !sb.append("(")) {
     return nullptr;
+  }
+
+  if (isAggregateError) {
+    if (!sb.append(errors) || !sb.append(", ")) {
+      return nullptr;
+    }
   }
 
   if (!sb.append(message)) {
@@ -964,8 +999,6 @@ static bool exn_toSource(JSContext* cx, unsigned argc, Value* vp) {
   args.rval().setString(str);
   return true;
 }
-
-#ifdef NIGHTLY_BUILD
 
 /**
  * Error.isError Proposal
@@ -1096,4 +1129,3 @@ static bool exn_captureStackTrace(JSContext* cx, unsigned argc, Value* vp) {
   args.rval().setUndefined();
   return true;
 }
-#endif

@@ -15,12 +15,16 @@ import {
   kBlendOperations,
 } from '../../../capability_info.js';
 import { GPUConst } from '../../../constants.js';
-import { kRegularTextureFormats, kTextureFormatInfo } from '../../../format_info.js';
-import { GPUTest, TextureTestMixin } from '../../../gpu_test.js';
+import {
+  EncodableTextureFormat,
+  kPossibleColorRenderableTextureFormats,
+} from '../../../format_info.js';
+import { AllFeaturesMaxLimitsGPUTest } from '../../../gpu_test.js';
+import * as ttu from '../../../texture_test_utils.js';
 import { clamp } from '../../../util/math.js';
 import { TexelView } from '../../../util/texture/texel_view.js';
 
-class BlendingTest extends GPUTest {
+class BlendingTest extends AllFeaturesMaxLimitsGPUTest {
   createRenderPipelineForTest(colorTargetState: GPUColorTargetState): GPURenderPipeline {
     return this.device.createRenderPipeline({
       layout: 'auto',
@@ -73,7 +77,7 @@ class BlendingTest extends GPUTest {
   }
 }
 
-export const g = makeTestGroup(TextureTestMixin(BlendingTest));
+export const g = makeTestGroup(BlendingTest);
 
 function mapColor(
   col: GPUColorDict,
@@ -202,15 +206,13 @@ g.test('blending,GPUBlendComponent')
         return needsBlendConstant ? [{ r: 0.91, g: 0.82, b: 0.73, a: 0.64 }] : [undefined];
       })
   )
-  .beforeAllSubcases(t => {
+  .fn(t => {
     if (
       IsDualSourceBlendingFactor(t.params.srcFactor) ||
       IsDualSourceBlendingFactor(t.params.dstFactor)
     ) {
-      t.selectDeviceOrSkipTestCase('dual-source-blending');
+      t.skipIfDeviceDoesNotHaveFeature('dual-source-blending');
     }
-  })
-  .fn(t => {
     const textureFormat: GPUTextureFormat = kBlendingGPUBlendComponentFormat;
     const srcColor = t.params.srcColor;
     const srcColor1 = t.params.srcColor1;
@@ -366,7 +368,8 @@ struct FragOutput {
 
     t.device.queue.submit([commandEncoder.finish()]);
 
-    t.expectSinglePixelComparisonsAreOkInTexture(
+    ttu.expectSinglePixelComparisonsAreOkInTexture(
+      t,
       { texture: renderTarget },
       [
         {
@@ -378,11 +381,6 @@ struct FragOutput {
     );
   });
 
-const kBlendableFormats = kRegularTextureFormats.filter(f => {
-  const info = kTextureFormatInfo[f];
-  return info.colorRender && info.color.type === 'float';
-});
-
 g.test('blending,formats')
   .desc(
     `Test blending results works for all formats that support it, and that blending is not applied
@@ -390,13 +388,13 @@ g.test('blending,formats')
   )
   .params(u =>
     u //
-      .combine('format', kBlendableFormats)
+      .combine('format', kPossibleColorRenderableTextureFormats)
   )
-  .beforeAllSubcases(t => {
-    t.skipIfTextureFormatNotSupported(t.params.format);
-  })
   .fn(t => {
     const { format } = t.params;
+    t.skipIfTextureFormatNotSupported(format);
+    t.skipIfTextureFormatNotUsableAsRenderAttachment(format);
+    t.skipIfTextureFormatNotBlendable(format);
 
     const pipeline = t.device.createRenderPipeline({
       layout: 'auto',
@@ -457,8 +455,16 @@ g.test('blending,formats')
     t.device.queue.submit([commandEncoder.finish()]);
 
     const expColor = { R: 0.6, G: 0.6, B: 0.6, A: 0.6 };
-    const expTexelView = TexelView.fromTexelsAsColors(format, _coords => expColor);
-    t.expectTexelViewComparisonIsOkInTexture({ texture: renderTarget }, expTexelView, [1, 1, 1]);
+    const expTexelView = TexelView.fromTexelsAsColors(
+      format as EncodableTextureFormat,
+      _coords => expColor
+    );
+    ttu.expectTexelViewComparisonIsOkInTexture(
+      t,
+      { texture: renderTarget },
+      expTexelView,
+      [1, 1, 1]
+    );
   });
 
 g.test('blend_constant,initial')
@@ -506,7 +512,7 @@ g.test('blend_constant,initial')
     // a white color buffer data.
     const expColor = { R: 0, G: 0, B: 0, A: 0 };
     const expTexelView = TexelView.fromTexelsAsColors(format, _coords => expColor);
-    t.expectTexelViewComparisonIsOkInTexture({ texture: renderTarget }, expTexelView, [
+    ttu.expectTexelViewComparisonIsOkInTexture(t, { texture: renderTarget }, expTexelView, [
       kSize,
       kSize,
     ]);
@@ -565,7 +571,7 @@ g.test('blend_constant,setting')
     const expColor = { R: r, G: g, B: b, A: a };
     const expTexelView = TexelView.fromTexelsAsColors(format, _coords => expColor);
 
-    t.expectTexelViewComparisonIsOkInTexture({ texture: renderTarget }, expTexelView, [
+    ttu.expectTexelViewComparisonIsOkInTexture(t, { texture: renderTarget }, expTexelView, [
       kSize,
       kSize,
     ]);
@@ -638,7 +644,7 @@ g.test('blend_constant,not_inherited')
     const expColor = { R: 0, G: 0, B: 0, A: 0 };
     const expTexelView = TexelView.fromTexelsAsColors(format, _coords => expColor);
 
-    t.expectTexelViewComparisonIsOkInTexture({ texture: renderTarget }, expTexelView, [
+    ttu.expectTexelViewComparisonIsOkInTexture(t, { texture: renderTarget }, expTexelView, [
       kSize,
       kSize,
     ]);
@@ -719,7 +725,7 @@ g.test('color_write_mask,channel_work')
     const expColor = { R: r, G: g, B: b, A: a };
     const expTexelView = TexelView.fromTexelsAsColors(format, _coords => expColor);
 
-    t.expectTexelViewComparisonIsOkInTexture({ texture: renderTarget }, expTexelView, [
+    ttu.expectTexelViewComparisonIsOkInTexture(t, { texture: renderTarget }, expTexelView, [
       kSize,
       kSize,
     ]);
@@ -777,7 +783,7 @@ g.test('color_write_mask,blending_disabled')
     const expColor = { R: 1, G: 0, B: 0, A: 0 };
     const expTexelView = TexelView.fromTexelsAsColors(format, _coords => expColor);
 
-    t.expectTexelViewComparisonIsOkInTexture({ texture: renderTarget }, expTexelView, [
+    ttu.expectTexelViewComparisonIsOkInTexture(t, { texture: renderTarget }, expTexelView, [
       kSize,
       kSize,
     ]);
@@ -874,5 +880,10 @@ g.test('blending,clamping')
     const expColor = { R: expValue, G: expValue, B: expValue, A: expValue };
     const expTexelView = TexelView.fromTexelsAsColors(format, _coords => expColor);
 
-    t.expectTexelViewComparisonIsOkInTexture({ texture: renderTarget }, expTexelView, [1, 1, 1]);
+    ttu.expectTexelViewComparisonIsOkInTexture(
+      t,
+      { texture: renderTarget },
+      expTexelView,
+      [1, 1, 1]
+    );
   });

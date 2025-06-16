@@ -8,7 +8,7 @@
 
 %{C++
 #include "mozilla/MemoryReporting.h"
-#include "mozilla/ipc/SharedMemory.h"
+#include "mozilla/ipc/SharedMemoryHandle.h"
 
 namespace mozilla {
 namespace dom {
@@ -27,7 +27,7 @@ class ContentParent;
 %}
 
 [ptr] native ContentParent(mozilla::dom::ContentParent);
-[ref] native SharedMemoryHandle(mozilla::ipc::SharedMemoryHandle);
+native ReadOnlySharedMemoryHandle(mozilla::ipc::ReadOnlySharedMemoryHandle&&);
 native MallocSizeOf(mozilla::MallocSizeOf);
 
 [scriptable, builtinclass, uuid(D85A17C2-AA7C-11d2-9B8C-00805F8A16D9)]
@@ -79,16 +79,6 @@ interface nsIStringBundleService : nsISupports
   nsIStringBundle createBundle(in string aURLSpec);
 
   /**
-   * Formats a message string from a status code and status arguments.
-   * @param aStatus - The status code. This is mapped into a string ID and
-   *            used in the string lookup process.
-   * @param aStatusArg - The status message argument(s). Multiple arguments
-   *            can be separated by newline ('\n') characters.
-   * @return the formatted message
-   */
-  AString formatStatusMessage(in nsresult aStatus, in wstring aStatusArg);
-
-  /**
    * flushes the string bundle cache - useful when the locale changes or
    * when we need to get some extra memory back
    *
@@ -104,6 +94,5 @@ interface nsIStringBundleService : nsISupports
   [notxpcom, nostdcall] void sendContentBundles(in ContentParent aContentParent);
 
   [notxpcom, nostdcall] void registerContentBundle(in ACString aBundleURL,
-                                                   [const] in SharedMemoryHandle aMapHandle,
-                                                   in size_t aMapSize);
+                                                   in ReadOnlySharedMemoryHandle aMapHandle);
 };

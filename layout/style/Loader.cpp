@@ -144,7 +144,6 @@ namespace mozilla {
 
 SheetLoadDataHashKey::SheetLoadDataHashKey(const css::SheetLoadData& aLoadData)
     : mURI(aLoadData.mURI),
-      mPrincipal(aLoadData.mTriggeringPrincipal),
       mLoaderPrincipal(aLoadData.mLoader->LoaderPrincipal()),
       mPartitionPrincipal(aLoadData.mLoader->PartitionedPrincipal()),
       mEncodingGuess(aLoadData.mGuessedEncoding),
@@ -154,7 +153,6 @@ SheetLoadDataHashKey::SheetLoadDataHashKey(const css::SheetLoadData& aLoadData)
       mIsLinkRelPreloadOrEarlyHint(aLoadData.IsLinkRelPreloadOrEarlyHint()) {
   MOZ_COUNT_CTOR(SheetLoadDataHashKey);
   MOZ_ASSERT(mURI);
-  MOZ_ASSERT(mPrincipal);
   MOZ_ASSERT(mLoaderPrincipal);
   MOZ_ASSERT(mPartitionPrincipal);
   aLoadData.mSheet->GetIntegrity(mSRIMetadata);
@@ -180,20 +178,9 @@ bool SheetLoadDataHashKey::KeyEquals(const SheetLoadDataHashKey& aKey) const {
     return true;
   }
 
-  if (!mPrincipal->Equals(aKey.mPrincipal)) {
-    LOG((" > Principal mismatch\n"));
+  if (!mPartitionPrincipal->Equals(aKey.mPartitionPrincipal)) {
+    LOG((" > Partition principal mismatch\n"));
     return false;
-  }
-
-  // We only check for partition principal equality if any of the loads are
-  // triggered by a document rather than e.g. an extension (which have different
-  // origins than the loader principal).
-  if (mPrincipal->Equals(mLoaderPrincipal) ||
-      aKey.mPrincipal->Equals(aKey.mLoaderPrincipal)) {
-    if (!mPartitionPrincipal->Equals(aKey.mPartitionPrincipal)) {
-      LOG((" > Partition principal mismatch\n"));
-      return false;
-    }
   }
 
   if (mCORSMode != aKey.mCORSMode) {
@@ -429,11 +416,6 @@ void SheetLoadData::SetLoadCompleted() {
   MOZ_ASSERT(mIsLoading, "Not loading?");
   MOZ_ASSERT(!mLoadStart.IsNull());
   mIsLoading = false;
-  // Belts and suspenders just in case.
-  if (MOZ_LIKELY(!mLoadStart.IsNull())) {
-    glean::performance_pageload::async_sheet_load.AccumulateRawDuration(
-        TimeStamp::Now() - mLoadStart);
-  }
 }
 
 void SheetLoadData::OnCoalescedTo(const SheetLoadData& aExistingLoad) {
@@ -765,9 +747,10 @@ nsresult SheetLoadData::VerifySheetReadyToParse(nsresult aStatus,
     NS_ConvertUTF8toUTF16 sheetUri(mSheet->GetSheetURI()->GetSpecOrDefault());
     NS_ConvertUTF8toUTF16 contentType16(contentType);
 
-    nsCOMPtr<nsIURI> referrer = ReferrerInfo()->GetOriginalReferrer();
     nsAutoCString referrerSpec;
-    referrer->GetSpec(referrerSpec);
+    if (nsCOMPtr<nsIURI> referrer = ReferrerInfo()->GetOriginalReferrer()) {
+      referrer->GetSpec(referrerSpec);
+    }
     mLoader->mReporter->AddConsoleReport(
         flag, "CSS Loader"_ns, nsContentUtils::eCSS_PROPERTIES, referrerSpec, 0,
         0, errorMessage, {sheetUri, contentType16});
@@ -845,9 +828,9 @@ nsresult Loader::CheckContentPolicy(nsIPrincipal* aLoadingPrincipal,
   nsContentPolicyType contentPolicyType =
       ComputeContentPolicyType(aPreloadKind);
 
-  nsCOMPtr<nsILoadInfo> secCheckLoadInfo = new net::LoadInfo(
+  nsCOMPtr<nsILoadInfo> secCheckLoadInfo = MOZ_TRY(net::LoadInfo::Create(
       aLoadingPrincipal, aTriggeringPrincipal, aRequestingNode,
-      nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK, contentPolicyType);
+      nsILoadInfo::SEC_ONLY_FOR_EXPLICIT_CONTENTSEC_CHECK, contentPolicyType));
   secCheckLoadInfo->SetCspNonce(aNonce);
 
   int16_t shouldLoad = nsIContentPolicy::ACCEPT;
@@ -940,8 +923,7 @@ Loader::CreateSheet(nsIURI* aURI, nsIContent* aLinkingContent,
   }
 
   if (mSheets) {
-    SheetLoadDataHashKey key(aURI, aTriggeringPrincipal, LoaderPrincipal(),
-                             PartitionedPrincipal(),
+    SheetLoadDataHashKey key(aURI, LoaderPrincipal(), PartitionedPrincipal(),
                              GetFallbackEncoding(*this, aLinkingContent,
                                                  aPreloadOrParentDataEncoding),
                              aCORSMode, aParsingMode, CompatMode(aPreloadKind),
@@ -1687,20 +1669,19 @@ void Loader::MarkLoadTreeFailed(SheetLoadData& aLoadData,
 
 RefPtr<StyleSheet> Loader::LookupInlineSheetInCache(
     const nsAString& aBuffer, nsIPrincipal* aSheetPrincipal) {
-  auto result = mInlineSheets.Lookup(aBuffer);
+  MOZ_ASSERT(mSheets, "Document associated loader should have sheet cache");
+  auto result = mSheets->LookupInline(LoaderPrincipal(), aBuffer);
   if (!result) {
     return nullptr;
   }
+
   StyleSheet* sheet = result.Data();
-  if (NS_WARN_IF(sheet->HasModifiedRules())) {
-    // Remove it now that we know that we're never going to use this stylesheet
-    // again.
-    result.Remove();
-    return nullptr;
-  }
+  MOZ_ASSERT(!sheet->HasModifiedRules(),
+             "How did we end up with a dirty sheet?");
+
   if (NS_WARN_IF(!sheet->Principal()->Equals(aSheetPrincipal))) {
     // If the sheet is going to have different access rights, don't return it
-    // from the cache.
+    // from the cache. XXX can this happen now that we eagerly clone?
     return nullptr;
   }
   return sheet->Clone(nullptr, nullptr);
@@ -1815,7 +1796,7 @@ Result<Loader::LoadSheetResult, nsresult> Loader::LoadInlineStyle(
                                                       true));
     completed = ParseSheet(utf8, holder, AllowAsyncParse::No);
     if (completed == Completed::Yes) {
-      mInlineSheets.InsertOrUpdate(aBuffer, std::move(sheet));
+      mSheets->InsertInline(LoaderPrincipal(), aBuffer, data->ValueForCache());
     } else {
       data->mMustNotify = true;
     }
@@ -2278,10 +2259,6 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(Loader)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Loader)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSheets);
-  for (const auto& data : tmp->mInlineSheets.Values()) {
-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "Inline sheet cache in Loader");
-    cb.NoteXPCOMChild(data);
-  }
   for (nsCOMPtr<nsICSSLoaderObserver>& obs : tmp->mObservers.ForwardRange()) {
     ImplCycleCollectionTraverse(cb, obs, "mozilla::css::Loader.mObservers");
   }
@@ -2295,7 +2272,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Loader)
     }
     tmp->mSheets = nullptr;
   }
-  tmp->mInlineSheets.Clear();
   tmp->mObservers.Clear();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocGroup)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -2304,19 +2280,6 @@ size_t Loader::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const {
   size_t n = aMallocSizeOf(this);
 
   n += mObservers.ShallowSizeOfExcludingThis(aMallocSizeOf);
-
-  n += mInlineSheets.ShallowSizeOfExcludingThis(aMallocSizeOf);
-  for (const auto& entry : mInlineSheets) {
-    n += entry.GetKey().SizeOfExcludingThisIfUnshared(aMallocSizeOf);
-    // If the sheet has a parent, then its parent will report it so we don't
-    // have to worry about it here.
-    const StyleSheet* sheet = entry.GetWeak();
-    MOZ_ASSERT(!sheet->GetParentSheet(),
-               "How did an @import rule end up here?");
-    if (!sheet->GetOwnerNode()) {
-      n += sheet->SizeOfIncludingThis(aMallocSizeOf);
-    }
-  }
 
   // Measurement of the following members may be added later if DMD finds it is
   // worthwhile:

@@ -51,7 +51,6 @@
   <string name="menu_settings">सेटिंग्स</string>
   <string name="menu_about">के संबंध में</string>
   <string name="menu_help">मदत</string>
-  <string name="menu_rights" moz:removedIn="137">अपने के अधिकार</string>
   <!--
     Menu item: This is the label for a menu entry that shows how many trackers have been blocked
     for the currently loaded website. The number of blocked trackers is shown below this label.
@@ -429,23 +428,6 @@
     item in the list of browsers. Clicking it will open the app store installed on the device (usually that's Google Play).
   -->
   <string name="download_firefox" tools:ignore="BrandUsage">Firefox डाउनलोड करियै</string>
-  <!--
-    Text shown in the "Your rights" screen.
-    %1$s will be replaced with the name of the app (e.g. Firefox Focus)
-  -->
-  <string name="your_rights_content1" moz:removedIn="137">%1$s Mozilla आरू आन योगदानकर्ता द्वारा बनाएल गेलो स्वतंत्र आरू मुक्त स्रोत सॉफ्टवेयर छै.</string>
-  <!--
-    Text shown in the "Your rights" screen.
-    %1$s will be replaced with the name of the app (e.g. Firefox Focus)
-    %2$s will be replaced with a URL linking to the MPL (e.g. https://www.mozilla.org/en-US/MPL/)
-  -->
-  <string name="your_rights_content2" moz:removedIn="137" tools:ignore="IncorrectStraightDoubleQuote">%1$s &lt;a href="%2$s"&gt;मोज़िला सार्वजनिक लाइसेंस&lt;/a&gt; आरू आन मुक्त स्रोत लाइसेंस केरो नियम के अंतर्गत अहाँ के उपलब्ध करैलो जाए छै.</string>
-  <!--
-    Text shown in the "Your rights" screen.
-    %1$s will be replaced with the name of the app (e.g. Firefox Focus)
-    %2$s will be replaced with a URL linking to the list of licenses used by the dependencies.
-  -->
-  <string name="your_rights_content4" moz:removedIn="137" tools:ignore="IncorrectStraightDoubleQuote">%1$s लेली अतिरिक्त स्रोत कोड अनेक आन निशुल्क आरू मुक्त स्रोत &lt;a href="%2$s"&gt;लाइसेन्स&lt;/a&gt; केरो अंतर्गत उपलब्ध छै.</string>
   <!-- Text shown in prompts for GeckoView -->
   <string name="gv_prompt_username_hint">यूजरनाम</string>
   <string name="gv_prompt_password_hint">पासवर्ड</string>
@@ -505,11 +487,11 @@
   <!-- Preference for altering the location access for all websites -->
   <string name="preference_phone_feature_location">स्थान</string>
   <!-- Learn more link for studies, links to an article for more information about studies. -->
-  <string name="studies_learn_more">बेसी जानकारी</string>
+  <string name="studies_learn_more" moz:removedIn="140">बेसी जानकारी</string>
   <!-- Title of the remove studies button -->
-  <string name="studies_remove">हटैइयै</string>
+  <string name="studies_remove" moz:removedIn="140">हटैइयै</string>
   <!-- Title of the completed section on the studies list -->
-  <string name="studies_completed">पूरा भेल</string>
+  <string name="studies_completed" moz:removedIn="140">पूरा भेल</string>
   <!-- Preference to enable remote debugging of the app via USB or Wi-Fi -->
   <string name="preference_remote_debugging">USB/Wi-Fi के द्वारा रिमोट डीबगिंग</string>
   <!--

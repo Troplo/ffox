@@ -838,9 +838,23 @@ void Animation::CommitStyles(ErrorResult& aRv) {
   UniquePtr<StyleAnimationValueMap> animationValues(
       Servo_AnimationValueMap_Create());
   if (!presContext->EffectCompositor()->ComposeServoAnimationRuleForEffect(
-          *keyframeEffect, CascadeLevel(), animationValues.get())) {
+          *keyframeEffect, CascadeLevel(), animationValues.get(),
+          StaticPrefs::dom_animations_commit_styles_endpoint_inclusive()
+              ? EndpointBehavior::Inclusive
+              : EndpointBehavior::Exclusive)) {
     NS_WARNING("Failed to compose animation style to commit");
     return;
+  }
+
+  // Count how often the endpoint-inclusive behavior makes a difference so we
+  // can gauge if it is Web-compatible.
+  auto computedTimingWithEndpointIncluded =
+      keyframeEffect->GetComputedTiming(nullptr, EndpointBehavior::Inclusive);
+  auto computedTimingWithEndpointExcluded =
+      keyframeEffect->GetComputedTiming(nullptr, EndpointBehavior::Exclusive);
+  if (computedTimingWithEndpointIncluded.mProgress !=
+      computedTimingWithEndpointExcluded.mProgress) {
+    doc->SetUseCounter(eUseCounter_custom_CommitStylesNonFillingFinalValue);
   }
 
   // Calling SetCSSDeclaration will trigger attribute setting code.
@@ -1192,12 +1206,13 @@ void Animation::Remove() {
   QueuePlaybackEvent(nsGkAtoms::onremove, GetTimelineCurrentTimeAsTimeStamp());
 }
 
-bool Animation::HasLowerCompositeOrderThan(
+int32_t Animation::CompareCompositeOrder(
     const Maybe<EventContext>& aContext, const Animation& aOther,
-    const Maybe<EventContext>& aOtherContext) const {
+    const Maybe<EventContext>& aOtherContext,
+    nsContentUtils::NodeIndexCache& aCache) const {
   // 0. Object-equality case
   if (&aOther == this) {
-    return false;
+    return 0;
   }
 
   // 1. CSS Transitions sort lowest
@@ -1215,8 +1230,8 @@ bool Animation::HasLowerCompositeOrderThan(
     const auto* const otherTransition =
         asCSSTransitionForSorting(aOther, aOtherContext);
     if (thisTransition && otherTransition) {
-      return thisTransition->HasLowerCompositeOrderThan(
-          aContext, *otherTransition, aOtherContext);
+      return thisTransition->CompareCompositeOrder(aContext, *otherTransition,
+                                                   aOtherContext, aCache);
     }
     if (thisTransition || otherTransition) {
       // Cancelled transitions no longer have an owning element. To be strictly
@@ -1230,7 +1245,7 @@ bool Animation::HasLowerCompositeOrderThan(
       // (which is our only hard requirement until specs say otherwise).
       // Furthermore, we only reach here when we have events with equal
       // timestamps so this is an edge case we can probably ignore for now.
-      return thisTransition;
+      return thisTransition ? -1 : 1;
     }
   }
 
@@ -1244,10 +1259,10 @@ bool Animation::HasLowerCompositeOrderThan(
     auto thisAnimation = asCSSAnimationForSorting(*this);
     auto otherAnimation = asCSSAnimationForSorting(aOther);
     if (thisAnimation && otherAnimation) {
-      return thisAnimation->HasLowerCompositeOrderThan(*otherAnimation);
+      return thisAnimation->CompareCompositeOrder(*otherAnimation, aCache);
     }
     if (thisAnimation || otherAnimation) {
-      return thisAnimation;
+      return thisAnimation ? -1 : 1;
     }
   }
 
@@ -1260,7 +1275,7 @@ bool Animation::HasLowerCompositeOrderThan(
 
   // 3. Finally, generic animations sort by their position in the global
   // animation array.
-  return mAnimationIndex < aOther.mAnimationIndex;
+  return mAnimationIndex > aOther.mAnimationIndex ? 1 : -1;
 }
 
 void Animation::WillComposeStyle() {
@@ -1276,7 +1291,8 @@ void Animation::WillComposeStyle() {
 
 void Animation::ComposeStyle(
     StyleAnimationValueMap& aComposeResult,
-    const InvertibleAnimatedPropertyIDSet& aPropertiesToSkip) {
+    const InvertibleAnimatedPropertyIDSet& aPropertiesToSkip,
+    EndpointBehavior aEndpointBehavior) {
   if (!mEffect) {
     return;
   }
@@ -1330,7 +1346,8 @@ void Animation::ComposeStyle(
 
     KeyframeEffect* keyframeEffect = mEffect->AsKeyframeEffect();
     if (keyframeEffect) {
-      keyframeEffect->ComposeStyle(aComposeResult, aPropertiesToSkip);
+      keyframeEffect->ComposeStyle(aComposeResult, aPropertiesToSkip,
+                                   aEndpointBehavior);
     }
   }
 
@@ -1376,7 +1393,7 @@ static TimeStamp EnsurePaintIsScheduled(Document& aDoc) {
   if (!rd->IsInRefresh()) {
     return {};
   }
-  return rd->MostRecentRefresh(/* aEnsureTimerStarted = */ false);
+  return rd->MostRecentRefresh();
 }
 
 // https://drafts.csswg.org/web-animations/#play-an-animation
@@ -1691,7 +1708,8 @@ void Animation::UpdateEffect(PostRestyleMode aPostRestyle) {
 void Animation::FlushUnanimatedStyle() const {
   if (Document* doc = GetRenderedDocument()) {
     doc->FlushPendingNotifications(
-        ChangesToFlush(FlushType::Style, false /* flush animations */));
+        ChangesToFlush(FlushType::Style, /* aFlushAnimations = */ false,
+                       /* aUpdateRelevancy = */ false));
   }
 }
 

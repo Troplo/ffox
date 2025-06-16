@@ -6,6 +6,7 @@
 
 /**
  * @typedef {import("resource://services-settings/RemoteSettingsClient.sys.mjs").RemoteSettingsClient} RemoteSettingsClient
+ * @typedef {import("../uniffi-bindgen-gecko-js/components/generated/RustSearch.sys.mjs").SearchEngineDefinition} SearchEngineDefinition
  */
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
@@ -14,7 +15,7 @@ import {
   SearchEngine,
   EngineURL,
   QueryParameter,
-} from "resource://gre/modules/SearchEngine.sys.mjs";
+} from "moz-src:///toolkit/components/search/SearchEngine.sys.mjs";
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
@@ -24,8 +25,9 @@ ChromeUtils.defineESModuleGetters(lazy, {
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   ObjectUtils: "resource://gre/modules/ObjectUtils.sys.mjs",
   RemoteSettings: "resource://services-settings/remote-settings.sys.mjs",
-  SearchEngineClassification: "resource://gre/modules/RustSearch.sys.mjs",
-  SearchUtils: "resource://gre/modules/SearchUtils.sys.mjs",
+  SearchEngineClassification:
+    "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSearch.sys.mjs",
+  SearchUtils: "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
 });
 
 XPCOMUtils.defineLazyServiceGetter(
@@ -432,6 +434,8 @@ export class AppProvidedSearchEngine extends SearchEngine {
    */
   #prevEngineInfo = null;
 
+  #partnerCode = "";
+
   /**
    * @param {object} options
    *   The options for this search engine.
@@ -541,6 +545,14 @@ export class AppProvidedSearchEngine extends SearchEngine {
   }
 
   /**
+   * @type {string}
+   *   The partner code being used by this search engine in the Search URL.
+   */
+  get partnerCode() {
+    return this.#partnerCode;
+  }
+
+  /**
    * Returns the icon URL for the search engine closest to the preferred width.
    *
    * @param {number} preferredWidth
@@ -612,7 +624,7 @@ export class AppProvidedSearchEngine extends SearchEngine {
   /**
    * Initializes the engine.
    *
-   * @param {object} engineConfig
+   * @param {SearchEngineDefinition} engineConfig
    *   The search engine configuration for application provided engines.
    */
   #init(engineConfig) {
@@ -621,7 +633,8 @@ export class AppProvidedSearchEngine extends SearchEngine {
     this.#isGeneralPurposeSearchEngine = lazy.SearchUtils
       .rustSelectorFeatureGate
       ? engineConfig.classification == lazy.SearchEngineClassification.GENERAL
-      : engineConfig.classification == "general";
+      : // @ts-ignore This is supporting the non-Rust search engine selector.
+        engineConfig.classification == "general";
 
     if (engineConfig.charset) {
       this._queryCharset = engineConfig.charset;
@@ -638,6 +651,7 @@ export class AppProvidedSearchEngine extends SearchEngine {
     this._name = engineConfig.name.trim();
     this._definedAliases =
       engineConfig.aliases?.map(alias => `@${alias}`) ?? [];
+    this.#partnerCode = engineConfig.partnerCode ?? "";
 
     for (const [type, urlData] of Object.entries(engineConfig.urls)) {
       if (urlData) {

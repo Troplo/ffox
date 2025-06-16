@@ -13,6 +13,7 @@ import requests
 from redo import retry
 from taskgraph import create
 from taskgraph.target_tasks import register_target_task
+from taskgraph.util.attributes import attrmatch
 from taskgraph.util.parameterization import resolve_timestamps
 from taskgraph.util.taskcluster import (
     find_task_id,
@@ -20,9 +21,11 @@ from taskgraph.util.taskcluster import (
     get_task_definition,
     parse_time,
 )
+from taskgraph.util.yaml import load_yaml
 
 from gecko_taskgraph import GECKO, try_option_syntax
 from gecko_taskgraph.util.attributes import (
+    is_try,
     match_run_on_hg_branches,
     match_run_on_projects,
 )
@@ -45,7 +48,6 @@ UNCOMMON_TRY_TASK_LABELS = [
     r"android-geckoview-docs",
     r"android-hw",
     # Windows tasks
-    r"windows11-64-2009-hw-ref",
     r"windows11-64-24h2-hw-ref",
     r"windows10-aarch64-qr",
     # Linux tasks
@@ -544,8 +546,8 @@ def target_tasks_mozilla_release(full_task_graph, parameters, graph_config):
     ]
 
 
-@register_target_task("mozilla_esr128_tasks")
-def target_tasks_mozilla_esr128(full_task_graph, parameters, graph_config):
+@register_target_task("mozilla_esr140_tasks")
+def target_tasks_mozilla_esr140(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a promotable beta or release build
     of desktop, without android CI. The candidates build process involves a pipeline
     of builds and signing, but does not include beetmover or balrog jobs."""
@@ -751,8 +753,8 @@ def target_tasks_custom_car_perf_testing(full_task_graph, parameters, graph_conf
                 # Bug 1928416
                 # For ARM coverage, this will only run on M2 machines at the moment.
                 if "jetstream2" in try_name:
-                    # Bug 1947649 - Disable js2 on 1400 mac for custom-car due to near perma
-                    if "m-car" in try_name and "1400" in platform:
+                    # Bug 1963732 - Disable js2 on 1500 mac for custom-car due to near perma
+                    if "m-car" in try_name and "1500" in platform:
                         return False
                     return True
                 return True
@@ -764,14 +766,21 @@ def target_tasks_custom_car_perf_testing(full_task_graph, parameters, graph_conf
                     return False
                 if "jetstream2" in try_name:
                     return True
-                # Bug 1898514: avoid tp6m or non-essential tp6 jobs in cron on non-a55 platform
-                if "tp6m" in try_name and "a55" not in platform:
+                # Bug 1954124 - Don't run JS3 + Android on a cron yet.
+                if "jetstream3" in try_name:
                     return False
-                # Bug 1945165 Disable ebay-kleinanzeigen on cstm-car-m because of permafail
+                # Bug 1898514 - Avoid tp6m or non-essential tp6 jobs in cron on non-a55 platform
+                # Bug 1961831 - Disable pageload tests temporarily during provider switch
+                if "tp6m" in try_name:
+                    return False
+                # Bug 1945165 - Disable ebay-kleinanzeigen on cstm-car-m because of permafail
                 if (
                     "ebay-kleinanzeigen" in try_name
                     and "ebay-kleinanzeigen-search" not in try_name
                 ):
+                    return False
+                # Bug 1960921 Disable ebay-kleinanzeigen-search-nofis on custom-car
+                if "ebay-kleinanzeigen-search-nofis" in try_name:
                     return False
                 return True
         return False
@@ -813,6 +822,9 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
                 # Disabled chrome responsiveness tests temporarily in bug 1898351
                 # due to frequent failures
                 return False
+            # Bug 1961145 - Disable bing-search for test-windows11-64-24h2-shippable
+            if "windows11" in platform and "bing-search" in try_name:
+                return False
             if "browsertime" in try_name:
                 if "chrome" in try_name:
                     if "tp6" in try_name and "essential" not in try_name:
@@ -829,6 +841,11 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
                     if "speedometer" in try_name:
                         return True
                 if "safari" and "benchmark" in try_name:
+                    # Bug 1954202 Safari + JS3 seems to be perma failing on CI.
+                    if "jetstream3" in try_name and "safari-tp" not in try_name:
+                        return False
+                    if "jetstream2" in try_name and "safari" in try_name:
+                        return False
                     return True
         # Android selection
         elif accept_raptor_android_build(platform):
@@ -838,6 +855,13 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
                 return False
             # Bug 1929960 - Enable all chrome-m tp6m tests on a55 only
             if "chrome-m" in try_name and "tp6m" in try_name and "hw-a55" in platform:
+                # Bug 1954923 - Disable ebay-kleinanzeigen
+                if (
+                    "ebay-kleinanzeigen" in try_name
+                    and "search" not in try_name
+                    and "nofis" in try_name
+                ):
+                    return False
                 return True
             if "chrome-m" in try_name and (
                 ("ebay" in try_name and "live" not in try_name)
@@ -867,6 +891,9 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
                     return False
                 if "jetstream2" in try_name:
                     return True
+                # Bug 1954124 - Don't run JS3 + Android on a cron yet.
+                if "jetstream3" in try_name:
+                    return False
                 if "fenix" in try_name:
                     return False
                 if "speedometer" in try_name:
@@ -1144,6 +1171,9 @@ def target_tasks_build_linux64_clang_trunk_perf(
 
     # Only keep tasks generated from platform `linux1804-64-clang-trunk-qr/opt`
     def filter(task_label):
+        # Bug 1961141 - Disable unity webgl for linux1804-64-clang-trunk-qr
+        if "linux1804-64-clang-trunk-qr/opt" in task_label and "unity" in task_label:
+            return False
         if "linux1804-64-clang-trunk-qr/opt" in task_label and "live" not in task_label:
             return True
         return False
@@ -1226,7 +1256,7 @@ def _filter_by_release_project(parameters):
         "nightly": "mozilla-central",
         "beta": "mozilla-beta",
         "release": "mozilla-release",
-        "esr128": "mozilla-esr128",
+        "esr140": "mozilla-esr140",
     }
     target_project = project_by_release.get(parameters["release_type"])
     if target_project is None:
@@ -1436,7 +1466,6 @@ def target_tasks_weekly_release_perf(full_task_graph, parameters, graph_config):
                 if "youtube-playback" in try_name:
                     return True
         elif accept_raptor_android_build(platform):
-
             if "browsertime" and "geckoview" in try_name:
                 return False
 
@@ -1612,14 +1641,17 @@ def target_tasks_holly(full_task_graph, parameters, graph_config):
     return [l for l, t in full_task_graph.tasks.items() if filter(t)]
 
 
-@register_target_task("snap_upstream_tests")
-def target_tasks_snap_upstream_tests(full_task_graph, parameters, graph_config):
+@register_target_task("snap_upstream_tasks")
+def target_tasks_snap_upstream_tasks(full_task_graph, parameters, graph_config):
     """
-    Select tasks for testing Snap package built as upstream. Omit -try because
-    it does not really make sense on a m-c cron
+    Select tasks for building/testing Snap package built as upstream. Omit -try
+    because it does not really make sense on a m-c cron
+
+    Use test tasks for linux64 builds and only builds for arm* until there is
+    support for running tests (bug 1855463)
     """
     for name, task in full_task_graph.tasks.items():
-        if "snap-upstream-test" in name and not "-try" in name:
+        if "snap-upstream" in name and not "-local" in name:
             yield name
 
 
@@ -1676,22 +1708,38 @@ def target_tasks_android_l10n_sync(full_task_graph, parameters, graph_config):
 
 @register_target_task("os-integration")
 def target_tasks_os_integration(full_task_graph, parameters, graph_config):
-    labels = []
+    candidate_attrs = load_yaml(
+        os.path.join(GECKO, "taskcluster", "kinds", "test", "os-integration.yml")
+    )
 
+    labels = []
     for label, task in full_task_graph.tasks.items():
-        if task.attributes.get("unittest_variant") != "os-integration":
+        if task.kind not in ("test", "source-test", "perftest"):
             continue
 
-        index = label.index("-osint")
-        base_label = label[:index]
-        if base_label not in full_task_graph.tasks:
-            base_label += "-1"
-        base_task = full_task_graph.tasks[base_label]
+        # Match tasks against attribute sets defined in os-integration.yml.
+        if not any(attrmatch(task.attributes, **c) for c in candidate_attrs):
+            continue
 
-        if (
-            filter_for_project(base_task, parameters)
-            and filter_for_hg_branch(base_task, parameters)
-            and filter_tests_without_manifests(base_task, parameters)
-        ):
-            labels.append(label)
+        if not is_try(parameters):
+            # Only run hardware tasks if scheduled from try. We do this because
+            # the `cron` task is designed to provide a base for testing worker
+            # images, which isn't something that impacts our hardware pools.
+            if (
+                task.attributes.get("build_platform") == "macosx64"
+                or "android-hw" in label
+            ):
+                continue
+
+            # Perform additional filtering for non-try repos. We don't want to
+            # limit what can be scheduled on try as os-integration tests are still
+            # useful for manual verification of things.
+            if not (
+                filter_for_project(task, parameters)
+                and filter_for_hg_branch(task, parameters)
+                and filter_tests_without_manifests(task, parameters)
+            ):
+                continue
+
+        labels.append(label)
     return labels

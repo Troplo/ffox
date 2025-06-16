@@ -41,6 +41,7 @@ struct IDXGIDecodeSwapChain;
 struct IDXGIResource;
 struct IDXGISwapChain1;
 struct IDCompositionVirtualSurface;
+struct IDCompositionRectangleClip;
 
 namespace mozilla {
 
@@ -58,6 +59,7 @@ namespace wr {
 // will never render a surface larger than this.
 #define VIRTUAL_SURFACE_SIZE (1024 * 1024)
 
+class DCLayerSurface;
 class DCTile;
 class DCSurface;
 class DCSwapChain;
@@ -129,7 +131,12 @@ class DCLayerTree {
   void MaybeUpdateDebug();
   void MaybeCommit();
   void WaitForCommitCompletion();
+
+  bool UseNativeCompositor() const;
+  bool UseLayerCompositor() const;
   void DisableNativeCompositor();
+  void EnableAsyncScreenshot();
+  bool GetAsyncScreenshotEnabled() const { return mEnableAsyncScreenshot; }
 
   // Interface for wr::Compositor
   void CompositorBeginFrame();
@@ -151,7 +158,9 @@ class DCLayerTree {
   void AddSurface(wr::NativeSurfaceId aId,
                   const wr::CompositorSurfaceTransform& aTransform,
                   wr::DeviceIntRect aClipRect,
-                  wr::ImageRendering aImageRendering);
+                  wr::ImageRendering aImageRendering,
+                  wr::DeviceIntRect aRoundedClipRect,
+                  wr::ClipRadius aClipRadius);
   void BindSwapChain(wr::NativeSurfaceId aId);
   void PresentSwapChain(wr::NativeSurfaceId aId);
 
@@ -199,6 +208,10 @@ class DCLayerTree {
       wr::DeviceIntPoint aSurfaceOffset);
   void ReleaseNativeCompositorResources();
   layers::OverlayInfo GetOverlayInfo();
+
+  bool mUseNativeCompositor = true;
+  bool mEnableAsyncScreenshot = false;
+  int mAsyncScreenshotLastFrameUsed = 0;
 
   RefPtr<gl::GLContext> mGL;
   EGLConfig mEGLConfig;
@@ -299,8 +312,10 @@ class DCSurface {
   virtual bool Initialize();
   void CreateTile(int32_t aX, int32_t aY);
   void DestroyTile(int32_t aX, int32_t aY);
+  void SetClip(wr::DeviceIntRect aClipRect, wr::ClipRadius aClipRadius);
 
-  IDCompositionVisual2* GetVisual() const { return mVisual; }
+  IDCompositionVisual2* GetContentVisual() const { return mContentVisual; }
+  IDCompositionVisual2* GetRootVisual() const { return mRootVisual; }
   DCTile* GetTile(int32_t aX, int32_t aY) const;
 
   struct TileKey {
@@ -330,6 +345,7 @@ class DCSurface {
 
   virtual DCSurfaceVideo* AsDCSurfaceVideo() { return nullptr; }
   virtual DCSurfaceHandle* AsDCSurfaceHandle() { return nullptr; }
+  virtual DCLayerSurface* AsDCLayerSurface() { return nullptr; }
   virtual DCSwapChain* AsDCSwapChain() { return nullptr; }
 
  protected:
@@ -341,17 +357,22 @@ class DCSurface {
     }
   };
 
-  // The visual for this surface. No content is attached to here, but tiles
-  // that belong to this surface are added as children. In this way, we can
-  // set the clip and scroll offset once, on this visual, to affect all
-  // children.
+  // Each surface creates two visuals. The root is where it gets attached
+  // to parent visuals, the content is where surface (or child visuals)
+  // get attached. Most of the time, the root visual does nothing, but
+  // in the case of a complex clip, we attach the clip here. This allows
+  // us to implement the simple rectangle clip on the content, and apply
+  // the complex clip, if present, in a way that it's not affected by
+  // the transform of the content visual.
   //
-  // However when using a virtual surface, it is directly attached to this
-  // visual and the tiles do not own visuals.
+  // When using a virtual surface, it is directly attached to this
+  // child visual and the tiles do not own visuals.
   //
   // Whether mIsVirtualSurface is enabled is decided at DCSurface creation
   // time based on the pref gfx.webrender.dcomp-use-virtual-surfaces
-  RefPtr<IDCompositionVisual2> mVisual;
+  RefPtr<IDCompositionVisual2> mRootVisual;
+  RefPtr<IDCompositionVisual2> mContentVisual;
+  RefPtr<IDCompositionRectangleClip> mClip;
 
   wr::DeviceIntSize mTileSize;
   bool mIsOpaque;
@@ -361,21 +382,34 @@ class DCSurface {
   RefPtr<IDCompositionVirtualSurface> mVirtualSurface;
 };
 
-class DCSwapChain : public DCSurface {
+class DCLayerSurface : public DCSurface {
+ public:
+  DCLayerSurface(bool aIsOpaque, DCLayerTree* aDCLayerTree)
+      : DCSurface(wr::DeviceIntSize{}, wr::DeviceIntPoint{}, false, aIsOpaque,
+                  aDCLayerTree) {}
+  virtual ~DCLayerSurface() = default;
+
+  virtual void Bind() = 0;
+  virtual bool Resize(wr::DeviceIntSize aSize) = 0;
+  virtual void Present() = 0;
+
+  DCLayerSurface* AsDCLayerSurface() override { return this; }
+};
+
+class DCSwapChain : public DCLayerSurface {
  public:
   DCSwapChain(wr::DeviceIntSize aSize, bool aIsOpaque,
               DCLayerTree* aDCLayerTree)
-      : DCSurface(wr::DeviceIntSize{}, wr::DeviceIntPoint{}, false, aIsOpaque,
-                  aDCLayerTree),
+      : DCLayerSurface(aIsOpaque, aDCLayerTree),
         mSize(aSize),
         mEGLSurface(EGL_NO_SURFACE) {}
-  ~DCSwapChain();
+  virtual ~DCSwapChain();
 
   bool Initialize() override;
 
-  void Bind();
-  void Resize(wr::DeviceIntSize aSize);
-  void Present();
+  void Bind() override;
+  bool Resize(wr::DeviceIntSize aSize) override;
+  void Present() override;
 
   DCSwapChain* AsDCSwapChain() override { return this; }
 
@@ -383,6 +417,25 @@ class DCSwapChain : public DCSurface {
   wr::DeviceIntSize mSize;
   RefPtr<IDXGISwapChain1> mSwapChain;
   EGLSurface mEGLSurface;
+  bool mFirstPresent = true;
+};
+
+class DCLayerCompositionSurface : public DCLayerSurface {
+ public:
+  DCLayerCompositionSurface(wr::DeviceIntSize aSize, bool aIsOpaque,
+                            DCLayerTree* aDCLayerTree);
+  virtual ~DCLayerCompositionSurface();
+
+  bool Initialize() override;
+
+  void Bind() override;
+  bool Resize(wr::DeviceIntSize aSize) override;
+  void Present() override;
+
+ private:
+  wr::DeviceIntSize mSize;
+  EGLSurface mEGLSurface = EGL_NO_SURFACE;
+  RefPtr<IDCompositionSurface> mCompositionSurface;
 };
 
 /**
@@ -395,7 +448,7 @@ class DCExternalSurfaceWrapper : public DCSurface {
                   false /* virtual surface */, false /* opaque */,
                   aDCLayerTree),
         mIsOpaque(aIsOpaque) {}
-  ~DCExternalSurfaceWrapper() = default;
+  virtual ~DCExternalSurfaceWrapper() = default;
 
   void AttachExternalImage(wr::ExternalImageId aExternalImage) override;
 
@@ -464,7 +517,7 @@ class DCSurfaceVideo : public DCSurface {
 class DCSurfaceHandle : public DCSurface {
  public:
   DCSurfaceHandle(bool aIsOpaque, DCLayerTree* aDCLayerTree);
-  ~DCSurfaceHandle() = default;
+  virtual ~DCSurfaceHandle() = default;
 
   void AttachExternalImage(wr::ExternalImageId aExternalImage) override;
   void PresentSurfaceHandle();

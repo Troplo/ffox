@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::Debug;
+use std::{cmp::min, fmt::Debug};
 
 use neqo_common::Encoder;
 use neqo_transport::{Connection, StreamId, StreamType};
@@ -38,7 +38,7 @@ impl FrameReaderTest {
     }
 
     fn process<T: FrameDecoder<T>>(&mut self, v: &[u8]) -> Option<T> {
-        self.conn_s.stream_send(self.stream_id, v).unwrap();
+        self.conn_s.stream_send(self.stream_id, v).ok()?;
         let out = self.conn_s.process_output(now());
         drop(self.conn_c.process(out.dgram(), now()));
         let (frame, fin) = self
@@ -47,7 +47,7 @@ impl FrameReaderTest {
                 &mut self.conn_c,
                 self.stream_id,
             ))
-            .unwrap();
+            .ok()?;
         assert!(!fin);
         frame
     }
@@ -264,7 +264,7 @@ fn test_reading_frame<T: FrameDecoder<T> + PartialEq + Debug>(
             assert!(fin);
             assert!(f.is_none());
         }
-    };
+    }
 }
 
 #[test]
@@ -277,7 +277,7 @@ fn complete_and_incomplete_unknown_frame() {
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
 
-    let len = std::cmp::min(buf.len() - 1, 10);
+    let len = min(buf.len() - 1, 10);
     for i in 1..len {
         test_reading_frame::<HFrame>(
             &buf[..i],
@@ -321,7 +321,7 @@ fn test_complete_and_incomplete_frame<T: FrameDecoder<T> + PartialEq + Debug>(
     // Let's consume partial frames. It is enough to test partial frames
     // up to 10 byte. 10 byte is greater than frame type and frame
     // length and bit of data.
-    let len = std::cmp::min(buf.len() - 1, 10);
+    let len = min(buf.len() - 1, 10);
     for i in 1..len {
         test_reading_frame::<T>(
             &buf[..i],

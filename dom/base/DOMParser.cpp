@@ -58,7 +58,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMParser)
 already_AddRefed<Document> DOMParser::ParseFromStringInternal(
     const nsAString& aStr, SupportedType aType, ErrorResult& aRv) {
   if (aType == SupportedType::Text_html) {
-    nsCOMPtr<Document> document = SetUpDocument(DocumentFlavorHTML, aRv);
+    nsCOMPtr<Document> document = SetUpDocument(DocumentFlavor::HTML, aRv);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
@@ -101,7 +101,8 @@ already_AddRefed<Document> DOMParser::ParseFromStringInternal(
 }
 
 already_AddRefed<Document> DOMParser::ParseFromString(
-    const TrustedHTMLOrString& aStr, SupportedType aType, ErrorResult& aRv) {
+    const TrustedHTMLOrString& aStr, SupportedType aType,
+    nsIPrincipal* aSubjectPrincipal, ErrorResult& aRv) {
   constexpr nsLiteralString sink = u"DOMParser parseFromString"_ns;
 
   MOZ_ASSERT(mOwner);
@@ -110,7 +111,7 @@ already_AddRefed<Document> DOMParser::ParseFromString(
   const nsAString* compliantString =
       TrustedTypeUtils::GetTrustedTypesCompliantString(
           aStr, sink, kTrustedTypesOnlySinkGroup, *pinnedOwner,
-          compliantStringHolder, aRv);
+          aSubjectPrincipal, compliantStringHolder, aRv);
   if (aRv.Failed()) {
     return nullptr;
   }
@@ -191,8 +192,8 @@ already_AddRefed<Document> DOMParser::ParseFromStream(nsIInputStream* aStream,
     stream = bufferedStream;
   }
 
-  nsCOMPtr<Document> document =
-      SetUpDocument(svg ? DocumentFlavorSVG : DocumentFlavorLegacyGuess, aRv);
+  nsCOMPtr<Document> document = SetUpDocument(
+      svg ? DocumentFlavor::SVG : DocumentFlavor::LegacyGuess, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }

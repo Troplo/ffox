@@ -42,6 +42,16 @@ interface nsISearchEngine : nsISupports
    */
   nsISearchSubmission getSubmission(in AString searchTerms,
                                     [optional] in AString responseType);
+
+  /**
+   * Returns a search URL with no search terms. This is typically used for
+   * purposes where we want to check something on the URL, but not use it for
+   * an actual submission to the search engine.
+   *
+   * @returns {nsIURI}
+   */
+  readonly attribute nsIURI searchURLWithNoTerms;
+
   /**
    * Returns the search term of a possible search result URI if and only if:
    * - The URI has the same scheme, host, and path as the engine.
@@ -123,11 +133,6 @@ interface nsISearchEngine : nsISupports
   readonly attribute Array<AString> aliases;
 
   /**
-   * A text description describing the engine.
-   */
-  readonly attribute AString description;
-
-  /**
    * Whether the engine should be hidden from the user.
    */
   attribute boolean hidden;
@@ -159,6 +164,11 @@ interface nsISearchEngine : nsISupports
   readonly attribute AString identifier;
 
   /**
+   * Anonymized path of where we initially loaded the engine from.
+   */
+  readonly attribute AString loadPath;
+
+  /**
    * Whether or not this engine is provided by the application, e.g. it is
    * in the list of configured search engines.
    */
@@ -173,6 +183,12 @@ interface nsISearchEngine : nsISupports
    * from the user's saved settings file.
    */
   readonly attribute boolean inMemory;
+
+  /**
+   * If this engine has been overridden by a third-party engine, the id returned
+   * will be the engine it was overriden by. Otherwise this will return null.
+   */
+  readonly attribute string overriddenById;
 
   /**
    * Whether or not this engine is a "general" search engine, e.g. is it for
@@ -203,6 +219,11 @@ interface nsISearchEngine : nsISupports
    */
   readonly attribute AString searchForm;
 
+  /**
+   * The partner code being used by this search engine in the Search URL.
+   * @return {string}
+   */
+  readonly attribute AUTF8String partnerCode;
 };
 
 [scriptable, uuid(0dc93e51-a7bf-4a16-862d-4b3469ff6206)]
@@ -230,25 +251,31 @@ interface nsISearchParseSubmissionResult : nsISupports
 [scriptable, uuid(0301834b-2630-440e-8b98-db8dc55f34b9)]
 interface nsISearchService : nsISupports
 {
-  const unsigned long ERROR_DOWNLOAD_FAILURE = 0x1;
-  const unsigned long ERROR_DUPLICATE_ENGINE = 0x2;
-  const unsigned long ERROR_ENGINE_CORRUPTED = 0x3;
+  cenum OpenSearchInstallErrors : 8 {
+    ERROR_DOWNLOAD_FAILURE = 0x1,
+    ERROR_DUPLICATE_ENGINE = 0x2,
+    ERROR_ENGINE_CORRUPTED = 0x3,
+  };
 
-  const unsigned short CHANGE_REASON_UNKNOWN = 0x0;
-  const unsigned short CHANGE_REASON_USER = 0x1;
-  const unsigned short CHANGE_REASON_USER_PRIVATE_SPLIT = 0x2;
-  const unsigned short CHANGE_REASON_USER_SEARCHBAR = 0x3;
-  const unsigned short CHANGE_REASON_USER_SEARCHBAR_CONTEXT = 0x4;
-  const unsigned short CHANGE_REASON_ADDON_INSTALL = 0x5;
-  const unsigned short CHANGE_REASON_ADDON_UNINSTALL = 0x6;
-  const unsigned short CHANGE_REASON_CONFIG = 0x7;
-  const unsigned short CHANGE_REASON_LOCALE = 0x8;
-  const unsigned short CHANGE_REASON_REGION = 0x9;
-  const unsigned short CHANGE_REASON_EXPERIMENT = 0xA;
-  const unsigned short CHANGE_REASON_ENTERPRISE = 0xB;
-  const unsigned short CHANGE_REASON_UITOUR = 0xC;
-  const unsigned short CHANGE_REASON_ENGINE_UPDATE = 0xD;
-  const unsigned short CHANGE_REASON_USER_PRIVATE_PREF_ENABLED = 0xE;
+  cenum DefaultEngineChangeReason : 8 {
+    CHANGE_REASON_UNKNOWN = 0x0,
+    CHANGE_REASON_USER = 0x1,
+    CHANGE_REASON_USER_PRIVATE_SPLIT = 0x2,
+    CHANGE_REASON_USER_SEARCHBAR = 0x3,
+    CHANGE_REASON_USER_SEARCHBAR_CONTEXT = 0x4,
+    CHANGE_REASON_ADDON_INSTALL = 0x5,
+    CHANGE_REASON_ADDON_UNINSTALL = 0x6,
+    CHANGE_REASON_CONFIG = 0x7,
+    CHANGE_REASON_LOCALE = 0x8,
+    CHANGE_REASON_REGION = 0x9,
+    CHANGE_REASON_EXPERIMENT = 0xA,
+    CHANGE_REASON_ENTERPRISE = 0xB,
+    CHANGE_REASON_UITOUR = 0xC,
+    CHANGE_REASON_ENGINE_UPDATE = 0xD,
+    CHANGE_REASON_USER_PRIVATE_PREF_ENABLED = 0xE,
+    CHANGE_REASON_ENGINE_IGNORE_LIST_UPDATED = 0xF,
+    CHANGE_REASON_NO_EXISTING_DEFAULT_ENGINE = 0x10,
+  };
 
   /**
    * Start asynchronous initialization.
@@ -321,17 +348,12 @@ interface nsISearchService : nsISupports
   /**
    * Adds a new search engine defined by the user.
    *
-   * @param name
-   *        The name of the engine.
-   * @param url
-   *        The url of the engine with %s denoting where to
-   *        replace the search term.
-   * @param alias [optional]
-   *        The alias to refer to the engine.
+   * @param formInfo
+   *         General information about the search engine. See UserSearchEngine
+   *         for more details.
+   * @returns The generated nsISearchEngine object.
    */
-  Promise addUserEngine(in AString name,
-                        in AString url,
-                        [optional] in AString alias);
+  Promise addUserEngine(in jsval formInfo);
 
   /**
    * Adds search providers to the search service.  If the search
@@ -351,7 +373,8 @@ interface nsISearchService : nsISupports
   void restoreDefaultEngines();
 
   /**
-   * Returns an engine with the specified alias.
+   * Returns the first search engine matching the provided alias
+   * (case-insensitive).
    *
    * @param   alias
    *          The search engine's alias.
@@ -499,7 +522,7 @@ interface nsISearchService : nsISupports
   attribute nsISearchEngine defaultEngine;
 
   Promise getDefault();
-  Promise setDefault(in nsISearchEngine engine, in unsigned short changeSource);
+  Promise setDefault(in nsISearchEngine engine, in unsigned short changeReason);
 
   /**
    * The currently active search engine for private browsing mode.
@@ -510,7 +533,7 @@ interface nsISearchService : nsISupports
   Promise getDefaultPrivate();
   Promise setDefaultPrivate(
     in nsISearchEngine engine,
-    in unsigned short changeSource);
+    in unsigned short changeReason);
 
   /**
    * Whether to display the "Search in Private Window" result in the urlbar.

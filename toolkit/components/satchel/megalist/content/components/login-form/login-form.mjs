@@ -140,24 +140,28 @@ export class LoginForm extends MozLitElement {
           <moz-button
             type="icon ghost"
             iconSrc="chrome://browser/skin/back.svg"
+            data-l10n-id="contextual-manager-passwords-remove-login-card-back-message"
             @click=${this.#toggleDeleteCard}
           >
           </moz-button>
-          <p data-l10n-id="passwords-remove-login-card-back-message"></p>
         </div>
         <div class="remove-card-text">
-          <h3 data-l10n-id="passwords-remove-login-card-title"></h3>
-          <p data-l10n-id="passwords-remove-login-card-message"></p>
+          <h3
+            data-l10n-id="contextual-manager-passwords-remove-login-card-title"
+          ></h3>
+          <p
+            data-l10n-id="contextual-manager-passwords-remove-login-card-message"
+          ></p>
         </div>
         <moz-button-group>
           <moz-button
-            data-l10n-id="passwords-remove-login-card-cancel-button"
+            data-l10n-id="contextual-manager-passwords-remove-login-card-cancel-button"
             @click=${this.#toggleDeleteCard}
           >
           </moz-button>
           <moz-button
             type="destructive"
-            data-l10n-id="passwords-remove-login-card-remove-button"
+            data-l10n-id="contextual-manager-passwords-remove-login-card-remove-button"
             @click=${this.onDeleteClick}
           >
           </moz-button>
@@ -171,7 +175,9 @@ export class LoginForm extends MozLitElement {
     }
 
     const heading =
-      this.type !== "edit" ? "passwords-create-label" : "passwords-edit-label";
+      this.type !== "edit"
+        ? "contextual-manager-passwords-create-label"
+        : "contextual-manager-passwords-edit-label";
 
     return html`<link
         rel="stylesheet"
@@ -184,7 +190,7 @@ export class LoginForm extends MozLitElement {
             <div class="delete-login-button-container">
               <moz-button
                 class="delete-login-button"
-                data-l10n-id="passwords-remove-label"
+                data-l10n-id="contextual-manager-passwords-remove-label"
                 type="icon"
                 iconSrc="chrome://global/skin/icons/delete.svg"
                 @click=${this.#toggleDeleteCard}

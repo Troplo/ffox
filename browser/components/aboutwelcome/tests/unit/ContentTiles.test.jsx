@@ -11,7 +11,7 @@ describe("ContentTiles component", () => {
   let wrapper;
   let handleAction;
   let setActiveMultiSelect;
-  let setActiveSingleSelect;
+  let setActiveSingleSelectSelection;
   let globals;
 
   const CHECKLIST_TILE = {
@@ -78,7 +78,7 @@ describe("ContentTiles component", () => {
     sandbox = sinon.createSandbox();
     handleAction = sandbox.stub();
     setActiveMultiSelect = sandbox.stub();
-    setActiveSingleSelect = sandbox.stub();
+    setActiveSingleSelectSelection = sandbox.stub();
     globals = new GlobalOverrider();
     globals.set({
       AWSendToDeviceEmailsSupported: () => Promise.resolve(),
@@ -434,7 +434,7 @@ describe("ContentTiles component", () => {
         handleAction={() => {}}
         activeMultiSelect={null}
         setActiveMultiSelect={setActiveMultiSelect}
-        setActiveSingleSelect={setActiveSingleSelect}
+        setActiveSingleSelectSelection={setActiveSingleSelectSelection}
       />
     );
 
@@ -653,6 +653,220 @@ describe("ContentTiles component", () => {
       "Second option should still be checked"
     );
 
+    wrapper.unmount();
+  });
+
+  it("should select defaults of single select tiles independently of one another", () => {
+    const SINGLE_SELECT_1 = {
+      type: "single-select",
+      selected: "test1",
+      data: [
+        {
+          id: "test1",
+          label: {
+            raw: "test1 label",
+          },
+        },
+        {
+          defaultValue: true,
+          id: "test2",
+          label: {
+            raw: "test2 label",
+          },
+        },
+      ],
+    };
+
+    const SINGLE_SELECT_2 = {
+      type: "single-select",
+      selected: "test4",
+      data: [
+        {
+          id: "test3",
+          label: {
+            raw: "test3 label",
+          },
+        },
+        {
+          defaultValue: true,
+          id: "test4",
+          label: {
+            raw: "test4 label",
+          },
+        },
+      ],
+    };
+
+    const content = { tiles: [SINGLE_SELECT_1, SINGLE_SELECT_2] };
+    wrapper = mount(
+      <ContentTiles
+        content={content}
+        setActiveSingleSelectSelection={setActiveSingleSelectSelection}
+        handleAction={handleAction}
+      />
+    );
+    wrapper.update();
+
+    sinon.assert.calledWithExactly(
+      setActiveSingleSelectSelection.getCall(0),
+      "test1",
+      "single-select-0"
+    );
+
+    sinon.assert.calledWithExactly(
+      setActiveSingleSelectSelection.getCall(1),
+      "test4",
+      "single-select-1"
+    );
+    wrapper.unmount();
+  });
+
+  it("should handle interactions with multiple single select tiles independently of one another", () => {
+    const SINGLE_SELECT_1 = {
+      type: "single-select",
+      selected: "test1",
+      data: [
+        {
+          id: "test1",
+          label: {
+            raw: "test1 label",
+          },
+        },
+        {
+          defaultValue: true,
+          id: "test2",
+          label: {
+            raw: "test2 label",
+          },
+        },
+      ],
+    };
+
+    const SINGLE_SELECT_2 = {
+      type: "single-select",
+      selected: "test4",
+      data: [
+        {
+          id: "test3",
+          label: {
+            raw: "test3 label",
+          },
+        },
+        {
+          defaultValue: true,
+          id: "test4",
+          label: {
+            raw: "test4 label",
+          },
+        },
+      ],
+    };
+
+    const content = { tiles: [SINGLE_SELECT_1, SINGLE_SELECT_2] };
+    wrapper = mount(
+      <ContentTiles
+        content={content}
+        setActiveSingleSelectSelection={setActiveSingleSelectSelection}
+        handleAction={handleAction}
+      />
+    );
+
+    wrapper.update();
+
+    const tile2 = wrapper.find('input[value="test2"]');
+    tile2.simulate("click");
+
+    sinon.assert.calledWithExactly(
+      setActiveSingleSelectSelection.getCall(2),
+      "test2",
+      "single-select-0"
+    );
+
+    const tile3 = wrapper.find('input[value="test3"]');
+    tile3.simulate("click");
+
+    sinon.assert.calledWithExactly(
+      setActiveSingleSelectSelection.getCall(3),
+      "test3",
+      "single-select-1"
+    );
+    wrapper.unmount();
+  });
+
+  it("should apply styles to label element", () => {
+    const TEST_STYLE = { marginBlock: "5px" };
+    const tileData = {
+      type: "single-select",
+      selected: "vertical",
+      data: [
+        {
+          id: "vertical",
+          label: { raw: "Vertical", marginBlock: "5px" },
+        },
+      ],
+    };
+
+    wrapper = mount(
+      <ContentTiles
+        content={{ tiles: [tileData] }}
+        setActiveSingleSelectSelection={() => {}}
+        handleAction={() => {}}
+      />
+    );
+
+    const styledDiv = wrapper.find(".text").at(0);
+
+    assert.deepEqual(
+      styledDiv.prop("style"),
+      TEST_STYLE,
+      "Style prop should match TEST_STYLE"
+    );
+    wrapper.unmount();
+  });
+
+  it("should apply valid styles from tile.data.style and include minWidth from icon.width", () => {
+    const icon = {
+      width: "101px",
+    };
+
+    const style = {
+      paddingBlock: "8px",
+    };
+
+    const tileData = {
+      type: "single-select",
+      selected: "test",
+      data: [
+        {
+          id: "test",
+          icon,
+          label: { raw: "Test" },
+          style,
+        },
+      ],
+    };
+
+    wrapper = mount(
+      <ContentTiles
+        content={{ tiles: [tileData] }}
+        setActiveSingleSelectSelection={() => {}}
+        handleAction={() => {}}
+      />
+    );
+
+    const label = wrapper.find("label.select-item").at(0);
+    const labelStyle = label.prop("style");
+
+    assert.equal(
+      labelStyle.paddingBlock,
+      "8px",
+      "paddingBlock should be applied"
+    );
+    assert.equal(
+      labelStyle.minWidth,
+      "101px",
+      "minWidth should be set from icon.width"
+    );
     wrapper.unmount();
   });
 });

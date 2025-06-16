@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import { ReaderMode } from "resource://gre/modules/ReaderMode.sys.mjs";
+import { ReaderMode } from "moz-src:///toolkit/components/reader/ReaderMode.sys.mjs";
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
@@ -127,9 +127,7 @@ export var AboutReader = function (
   this._innerWindowId = win.windowGlobalChild.innerWindowId;
 
   this._article = null;
-  this._languagePromise = new Promise(resolve => {
-    this._foundLanguage = resolve;
-  });
+  this._languageDeferred = Promise.withResolvers();
 
   if (articlePromise) {
     this._articlePromise = articlePromise;
@@ -425,7 +423,7 @@ export var AboutReader = function (
   this._setupFontSizeButtons();
 
   if (win.speechSynthesis && Services.prefs.getBoolPref("narrate.enabled")) {
-    new lazy.NarrateControls(win, this._languagePromise);
+    new lazy.NarrateControls(win, this._languageDeferred.promise);
   }
 
   this._loadArticle(docContentType);
@@ -1484,7 +1482,10 @@ AboutReader.prototype = {
       this._doc.title = article.title;
     }
 
-    this._containerElement.setAttribute("lang", article.lang);
+    let lang = article.lang ?? article.detectedLanguage;
+    if (lang) {
+      this._containerElement.setAttribute("lang", lang);
+    }
 
     this._headerElement.classList.add("reader-show-element");
 
@@ -1502,7 +1503,7 @@ AboutReader.prototype = {
     this._contentElement.innerHTML = "";
     this._contentElement.appendChild(contentFragment);
     this._maybeSetTextDirection(article);
-    this._foundLanguage(article.language);
+    this._languageDeferred.resolve(article.detectedLanguage);
 
     this._contentElement.classList.add("reader-show-element");
     this._updateImageMargins();

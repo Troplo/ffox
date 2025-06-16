@@ -51,7 +51,7 @@ class FxSuggestSuggestionProvider(
         if (text.isEmpty()) {
             emptyList()
         } else {
-            val providers = buildList() {
+            val providers = buildList {
                 val availableSuggestionTypes = FxSuggestNimbus.features
                     .awesomebarSuggestionProvider
                     .value()
@@ -60,7 +60,7 @@ class FxSuggestSuggestionProvider(
                     add(SuggestionProvider.AMP)
                 }
                 if (includeSponsoredSuggestions && availableSuggestionTypes[SuggestionType.AMP_MOBILE] == true) {
-                    add(SuggestionProvider.AMP_MOBILE)
+                    add(SuggestionProvider.AMP)
                 }
                 if (includeNonSponsoredSuggestions && availableSuggestionTypes[SuggestionType.WIKIPEDIA] == true) {
                     add(SuggestionProvider.WIKIPEDIA)

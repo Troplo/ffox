@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:tools="http://schemas.android.com/tools" xmlns:moz="http://schemas.android.com/apk/res-auto">
+<resources xmlns:tools="http://schemas.android.com/tools">
   <!-- Description for privacy add-on permission. -->
   <string name="mozac_feature_addons_permissions_privacy_description">Emoñe’ẽ ha emoambue ñemboheko ñemigua</string>
   <!-- Description for all_urls add-on permission. -->
@@ -36,8 +36,6 @@
   <string name="mozac_feature_addons_permissions_content_description_item">%1$s, %2$d %3$d peve</string>
   <!-- Description for tabs add-on permission. -->
   <string name="mozac_feature_addons_permissions_tabs_description">Eike kundahára rendayképe</string>
-  <!-- Description for unlimited_storage permission. -->
-  <string name="mozac_feature_addons_permissions_unlimited_storage_description" moz:removedIn="137" tools:ignore="UnusedResources">Embyaty heta mba’ekuaarã ñemuhára gotyogua</string>
   <!-- Description for navigation permission. -->
   <string name="mozac_feature_addons_permissions_web_navigation_description">Eike kundahára rembiapópe eikundaha aja</string>
   <!-- Description for bookmarks permission. -->
@@ -84,6 +82,8 @@
   <string name="mozac_feature_addons_permissions_trial_ml_description">Emboguejy ha emongu’e IA rehegua ne mba’e’okápe</string>
   <!-- Description for userScripts permission. -->
   <string name="mozac_feature_addons_permissions_user_scripts_description">Emoneĩ scripts mbohapyháva ani hag̃ua oike ne mba’ekuaarãme</string>
+  <!-- The text shown when an extension requests the userScripts permission, near the usual description of the userScripts permission -->
+  <string name="mozac_feature_addons_permissions_user_scripts_extra_warning">Umi scripts ojehechajey’ỹva ikatu omboyke tekorosã ha tekoñemi. Omongu’e scripts jepysokue térã teñoiha ejeroviaha.</string>
   <!-- Description for devtools permission. -->
   <string name="mozac_feature_addons_permissions_devtools_description">Embohetave mboguatahára rembiporu eike hag̃ua ne mba’ekuaarã rendayke ijurujávape</string>
   <!-- Description for text button that expands the list of domain permissions -->

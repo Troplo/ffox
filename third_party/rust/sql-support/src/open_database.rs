@@ -29,12 +29,19 @@
 ///
 ///  See the autofill DB code for an example.
 ///
-use crate::ConnExt;
+use std::{
+    borrow::Cow,
+    path::Path,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+
 use rusqlite::{
     Connection, Error as RusqliteError, ErrorCode, OpenFlags, Transaction, TransactionBehavior,
 };
-use std::path::Path;
 use thiserror::Error;
+
+use crate::ConnExt;
+use crate::{debug, info, warn};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -118,24 +125,37 @@ pub fn open_database_with_flags<CI: ConnectionInitializer, P: AsRef<Path>>(
     })
 }
 
+/// OpenFlags for a read-write database
+pub fn read_write_flags() -> OpenFlags {
+    OpenFlags::SQLITE_OPEN_URI
+        | OpenFlags::SQLITE_OPEN_NO_MUTEX
+        | OpenFlags::SQLITE_OPEN_CREATE
+        | OpenFlags::SQLITE_OPEN_READ_WRITE
+}
+
+/// OpenFlags for a read-only database
+pub fn read_only_flags() -> OpenFlags {
+    OpenFlags::SQLITE_OPEN_URI | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_READ_ONLY
+}
+
 fn do_open_database_with_flags<CI: ConnectionInitializer, P: AsRef<Path>>(
     path: P,
     open_flags: OpenFlags,
     connection_initializer: &CI,
 ) -> Result<Connection> {
     // Try running the migration logic with an existing file
-    log::debug!("{}: opening database", CI::NAME);
+    debug!("{}: opening database", CI::NAME);
     let mut conn = Connection::open_with_flags(path, open_flags)?;
-    log::debug!("{}: checking if initialization is necessary", CI::NAME);
+    debug!("{}: checking if initialization is necessary", CI::NAME);
     let db_empty = is_db_empty(&conn)?;
 
-    log::debug!("{}: preparing", CI::NAME);
+    debug!("{}: preparing", CI::NAME);
     connection_initializer.prepare(&conn, db_empty)?;
 
     if open_flags.contains(OpenFlags::SQLITE_OPEN_READ_WRITE) {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if db_empty {
-            log::debug!("{}: initializing new database", CI::NAME);
+            debug!("{}: initializing new database", CI::NAME);
             connection_initializer.init(&tx)?;
         } else {
             let mut current_version = get_schema_version(&tx)?;
@@ -143,7 +163,7 @@ fn do_open_database_with_flags<CI: ConnectionInitializer, P: AsRef<Path>>(
                 return Err(Error::IncompatibleVersion(current_version));
             }
             while current_version < CI::END_VERSION {
-                log::debug!(
+                debug!(
                     "{}: upgrading database to {}",
                     CI::NAME,
                     current_version + 1
@@ -152,7 +172,7 @@ fn do_open_database_with_flags<CI: ConnectionInitializer, P: AsRef<Path>>(
                 current_version += 1;
             }
         }
-        log::debug!("{}: finishing writable database open", CI::NAME);
+        debug!("{}: finishing writable database open", CI::NAME);
         connection_initializer.finish(&tx)?;
         set_schema_version(&tx, CI::END_VERSION)?;
         tx.commit()?;
@@ -164,10 +184,10 @@ fn do_open_database_with_flags<CI: ConnectionInitializer, P: AsRef<Path>>(
             get_schema_version(&conn)? == CI::END_VERSION,
             "existing writer must have migrated"
         );
-        log::debug!("{}: finishing readonly database open", CI::NAME);
+        debug!("{}: finishing readonly database open", CI::NAME);
         connection_initializer.finish(&conn)?;
     }
-    log::debug!("{}: database open successful", CI::NAME);
+    debug!("{}: database open successful", CI::NAME);
     Ok(conn)
 }
 
@@ -192,15 +212,15 @@ fn try_handle_db_failure<CI: ConnectionInitializer, P: AsRef<Path>>(
     if !open_flags.contains(OpenFlags::SQLITE_OPEN_CREATE)
         && matches!(err, Error::SqlError(rusqlite::Error::SqliteFailure(code, _)) if code.code == rusqlite::ErrorCode::CannotOpen)
     {
-        log::info!(
+        info!(
             "{}: database doesn't exist, but we weren't requested to create it",
             CI::NAME
         );
         return Err(err);
     }
-    log::warn!("{}: database operation failed: {}", CI::NAME, err);
+    warn!("{}: database operation failed: {}", CI::NAME, err);
     if !open_flags.contains(OpenFlags::SQLITE_OPEN_READ_WRITE) {
-        log::warn!(
+        warn!(
             "{}: not attempting recovery as this is a read-only connection request",
             CI::NAME
         );
@@ -209,7 +229,7 @@ fn try_handle_db_failure<CI: ConnectionInitializer, P: AsRef<Path>>(
 
     let delete = matches!(err, Error::Corrupt);
     if delete {
-        log::info!(
+        info!(
             "{}: the database is fatally damaged; deleting and starting fresh",
             CI::NAME
         );
@@ -237,6 +257,17 @@ fn get_schema_version(conn: &Connection) -> Result<u32> {
 fn set_schema_version(conn: &Connection, version: u32) -> Result<()> {
     conn.set_pragma("user_version", version)?;
     Ok(())
+}
+
+// Get a unique in-memory database path
+//
+// This can be very useful for testing.
+pub fn unique_in_memory_db_path() -> String {
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    format!(
+        "file:in-memory-db-{}?mode=memory&cache=shared",
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 // It would be nice for this to be #[cfg(test)], but that doesn't allow it to be used in tests for
@@ -426,7 +457,10 @@ pub mod test_utils {
 
         pub fn assert_schema_matches_new_database(&self) {
             let db = self.open();
-            let new_db = open_memory_database(&self.connection_initializer).unwrap();
+            let new_db = match open_memory_database(&self.connection_initializer) {
+                Ok(db) => db,
+                Err(e) => panic!("Creating new database failed:\n{e}"),
+            };
 
             compare_sql_maps("table", get_sql(&db, "table"), get_sql(&new_db, "table"));
             compare_sql_maps("index", get_sql(&db, "index"), get_sql(&new_db, "index"));
@@ -471,11 +505,29 @@ pub mod test_utils {
         }
         for key in old_db_keys {
             assert_eq!(
-                old_items.get(key).unwrap(),
-                new_items.get(key).unwrap(),
+                old_items.get(key).unwrap().as_deref().map(normalize),
+                new_items.get(key).unwrap().as_deref().map(normalize),
                 "sql differs for {type_} {key}"
             );
         }
+    }
+
+    /// Normalize SQL code by changing all whitespace to a single space.
+    fn normalize(sql: &str) -> String {
+        sql.split('\'')
+            .enumerate()
+            .map(|(i, part)| {
+                // Only normalize the even parts.  Odd parts are either inside a string literal.
+                // Note: SQLite uses a double quote (`''`) as the escape, which works with this
+                // system.  We'll just end up normalizing the empty string, which doesn't hurt
+                // anything.
+                if (i % 2) == 0 {
+                    Cow::Owned(part.split_whitespace().collect::<Vec<_>>().join(" "))
+                } else {
+                    Cow::Borrowed(part)
+                }
+            })
+            .collect()
     }
 }
 

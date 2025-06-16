@@ -24,7 +24,6 @@ ScriptHashKey::ScriptHashKey(ScriptLoader* aLoader,
                              const JS::loader::ScriptLoadRequest* aRequest)
     : PLDHashEntryHdr(),
       mURI(aRequest->mURI),
-      mPrincipal(aRequest->TriggeringPrincipal()),
       mLoaderPrincipal(aLoader->LoaderPrincipal()),
       mPartitionPrincipal(aLoader->PartitionedPrincipal()),
       mCORSMode(aRequest->CORSMode()),
@@ -56,7 +55,7 @@ bool ScriptHashKey::KeyEquals(const ScriptHashKey& aKey) const {
     }
   }
 
-  if (!mPrincipal->Equals(aKey.mPrincipal)) {
+  if (!mPartitionPrincipal->Equals(aKey.mPartitionPrincipal)) {
     return false;
   }
 
@@ -123,7 +122,8 @@ NS_IMETHODIMP
 SharedScriptCache::CollectReports(nsIHandleReportCallback* aHandleReport,
                                   nsISupports* aData, bool aAnonymize) {
   MOZ_COLLECT_REPORT("explicit/js-non-window/cache", KIND_HEAP, UNITS_BYTES,
-                     SizeOfIncludingThis(SharedScriptCacheMallocSizeOf),
+                     SharedScriptCacheMallocSizeOf(this) +
+                         SizeOfExcludingThis(SharedScriptCacheMallocSizeOf),
                      "Memory used for SharedScriptCache to share script "
                      "across documents");
   return NS_OK;
@@ -142,18 +142,29 @@ SharedScriptCache::Observe(nsISupports* aSubject, const char* aTopic,
 void SharedScriptCache::Clear(const Maybe<bool>& aChrome,
                               const Maybe<nsCOMPtr<nsIPrincipal>>& aPrincipal,
                               const Maybe<nsCString>& aSchemelessSite,
-                              const Maybe<OriginAttributesPattern>& aPattern) {
+                              const Maybe<OriginAttributesPattern>& aPattern,
+                              const Maybe<nsCString>& aURL) {
   using ContentParent = dom::ContentParent;
 
   if (XRE_IsParentProcess()) {
     for (auto* cp : ContentParent::AllProcesses(ContentParent::eLive)) {
       Unused << cp->SendClearScriptCache(aChrome, aPrincipal, aSchemelessSite,
-                                         aPattern);
+                                         aPattern, aURL);
     }
   }
 
   if (sSingleton) {
-    sSingleton->ClearInProcess(aChrome, aPrincipal, aSchemelessSite, aPattern);
+    sSingleton->ClearInProcess(aChrome, aPrincipal, aSchemelessSite, aPattern,
+                               aURL);
+  }
+}
+
+/* static */
+void SharedScriptCache::PrepareForLastCC() {
+  if (sSingleton) {
+    sSingleton->mComplete.Clear();
+    sSingleton->mPending.Clear();
+    sSingleton->mLoading.Clear();
   }
 }
 

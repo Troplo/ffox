@@ -135,6 +135,19 @@ static NotNull<Accessible*> GetSelectionContainer(TextLeafRange& aRange) {
   return WrapNotNull(nsAccUtils::DocumentFor(acc));
 }
 
+static TextLeafPoint NormalizePoint(Accessible* aAcc, int32_t aOffset) {
+  if (!aAcc) {
+    return TextLeafPoint(aAcc, aOffset);
+  }
+  int32_t length = static_cast<int32_t>(nsAccUtils::TextLength(aAcc));
+  if (aOffset > length) {
+    // This range was created when this leaf contained more characters, but some
+    // characters were since removed. Restrict to the new length.
+    aOffset = length;
+  }
+  return TextLeafPoint(aAcc, aOffset);
+}
+
 // UiaTextRange
 
 UiaTextRange::UiaTextRange(const TextLeafRange& aRange) {
@@ -163,12 +176,12 @@ TextLeafRange UiaTextRange::GetRange() const {
   // handle this case.
   if (mIsEndOfLineInsertionPoint) {
     MOZ_ASSERT(mStartAcc == mEndAcc && mStartOffset == mEndOffset);
-    TextLeafPoint point(mStartAcc->Acc(), mStartOffset);
+    TextLeafPoint point = NormalizePoint(mStartAcc->Acc(), mStartOffset);
     point.mIsEndOfLineInsertionPoint = true;
     return TextLeafRange(point, point);
   }
-  return TextLeafRange({mStartAcc->Acc(), mStartOffset},
-                       {mEndAcc->Acc(), mEndOffset});
+  return TextLeafRange(NormalizePoint(mStartAcc->Acc(), mStartOffset),
+                       NormalizePoint(mEndAcc->Acc(), mEndOffset));
 }
 
 /* static */
@@ -690,7 +703,21 @@ UiaTextRange::GetBoundingRectangles(__RPC__deref_out_opt SAFEARRAY** aRetVal) {
   }
 
   // Get the rectangles for each line.
-  const nsTArray<LayoutDeviceIntRect> lineRects = range.LineRects();
+  nsTArray<LayoutDeviceIntRect> lineRects = range.LineRects();
+  if (lineRects.IsEmpty() && !mIsEndOfLineInsertionPoint &&
+      range.Start() == range.End()) {
+    // The documentation for GetBoundingRectangles says that we should return
+    // "An empty array for a degenerate range.":
+    // https://learn.microsoft.com/en-us/windows/win32/api/uiautomationcore/nf-uiautomationcore-itextrangeprovider-getboundingrectangles#return-value
+    // This is exactly what range.LineRects() just did. However, contrary to
+    // this, some clients (including Microsoft Text Cursor Indicator) call
+    // GetBoundingRectangles on a degenerate range when querying the caret and
+    // expect rectangles to be returned. Therefore, use the character bounds.
+    // Bug 1966812: Ideally, we would also return a rectangle when
+    // mIsEndOfLineInsertionPoint is true. However, we don't currently have code
+    // to calculate a rectangle in that case.
+    lineRects.AppendElement(range.Start().CharBounds());
+  }
 
   // For UIA's purposes, the rectangles of this array are four doubles arranged
   // in order {left, top, width, height}.
@@ -746,12 +773,25 @@ UiaTextRange::GetEnclosingElement(
     return CO_E_OBJNOTCONNECTED;
   }
   RemoveExcludedAccessiblesFromRange(range);
-  if (Accessible* enclosing =
-          range.Start().mAcc->GetClosestCommonInclusiveAncestor(
-              range.End().mAcc)) {
-    RefPtr<IRawElementProviderSimple> uia = MsaaAccessible::GetFrom(enclosing);
-    uia.forget(aRetVal);
+  Accessible* enclosing =
+      range.Start().mAcc->GetClosestCommonInclusiveAncestor(range.End().mAcc);
+  if (!enclosing) {
+    return S_OK;
   }
+  for (Accessible* acc = enclosing; acc && !acc->IsDoc(); acc = acc->Parent()) {
+    if (nsAccUtils::MustPrune(acc) ||
+        // Bug 1950535: Narrator won't report a link correctly when navigating
+        // by character or word if we return a child text leaf. However, if
+        // there is more than a single text leaf, we need to return the child
+        // because it might have semantic significance; e.g. an embedded image.
+        (acc->Role() == roles::LINK && acc->ChildCount() == 1 &&
+         acc->FirstChild()->IsText())) {
+      enclosing = acc;
+      break;
+    }
+  }
+  RefPtr<IRawElementProviderSimple> uia = MsaaAccessible::GetFrom(enclosing);
+  uia.forget(aRetVal);
   return S_OK;
 }
 
@@ -874,17 +914,7 @@ MOZ_CAN_RUN_SCRIPT_BOUNDARY STDMETHODIMP UiaTextRange::Select() {
   if (!range) {
     return CO_E_OBJNOTCONNECTED;
   }
-  NotNull<Accessible*> container = GetSelectionContainer(range);
-  nsTArray<TextLeafRange> ranges;
-  TextLeafRange::GetSelection(container, ranges);
-  HyperTextAccessibleBase* conHyp = container->AsHyperTextBase();
-  MOZ_ASSERT(conHyp);
-  // Remove all ranges from the selection.
-  for (int32_t s = ranges.Length() - 1; s >= 0; --s) {
-    conHyp->RemoveFromSelection(s);
-  }
-  // Select just this range.
-  if (!range.SetSelection(0)) {
+  if (!range.SetSelection(TextLeafRange::kRemoveAllExistingSelectedRanges)) {
     return UIA_E_INVALIDOPERATION;
   }
   return S_OK;

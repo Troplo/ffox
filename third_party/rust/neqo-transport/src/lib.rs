@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::fmt::{self, Display, Formatter};
+
 use neqo_common::qwarn;
 use neqo_crypto::Error as CryptoError;
 
@@ -44,7 +46,7 @@ pub mod send_stream;
 mod send_stream;
 mod sender;
 pub mod server;
-mod shuffle;
+mod sni;
 mod stats;
 pub mod stream_id;
 pub mod streams;
@@ -67,9 +69,9 @@ pub use self::{
     packet::MIN_INITIAL_PACKET_SIZE,
     pmtud::Pmtud,
     quic_datagrams::DatagramTracking,
-    recv_stream::{RecvStreamStats, RECV_BUFFER_SIZE},
-    send_stream::{SendStreamStats, SEND_BUFFER_SIZE},
-    shuffle::find_sni,
+    recv_stream::{RecvStreamStats, INITIAL_RECV_WINDOW_SIZE},
+    send_stream::SendStreamStats,
+    sni::find_sni,
     stats::Stats,
     stream_id::{StreamId, StreamType},
     version::Version,
@@ -107,7 +109,6 @@ pub enum Error {
     ConnectionIdLimitExceeded,
     ConnectionIdsExhausted,
     ConnectionState,
-    DecodingFrame,
     DecryptError,
     DisabledVersion,
     IdleTimeout,
@@ -118,12 +119,12 @@ pub enum Error {
     InvalidResumptionToken,
     InvalidRetry,
     InvalidStreamId,
-    KeysDiscarded(crypto::CryptoSpace),
+    KeysDiscarded(crypto::Epoch),
     /// Packet protection keys are exhausted.
     /// Also used when too many key updates have happened.
     KeysExhausted,
     /// Packet protection keys aren't available yet for the identified space.
-    KeysPending(crypto::CryptoSpace),
+    KeysPending(crypto::Epoch),
     /// An attempt to update keys can be blocked if
     /// a packet sent with the current keys hasn't been acknowledged.
     KeyUpdateBlocked,
@@ -141,6 +142,7 @@ pub enum Error {
     UnknownFrameType,
     VersionNegotiation,
     WrongRole,
+    UnknownTransportParameter,
 }
 
 impl Error {
@@ -206,8 +208,8 @@ impl ::std::error::Error for Error {
     }
 }
 
-impl ::std::fmt::Display for Error {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Transport error: {self:?}")
     }
 }

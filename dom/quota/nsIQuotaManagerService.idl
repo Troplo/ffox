@@ -119,6 +119,19 @@ interface nsIQuotaManagerService : nsISupports
   initTemporaryStorage();
 
   /**
+   * Initializes all temporary origins. Only used in tests to verify the
+   * initialization of all temporary origins.
+   *
+   * Calling this method only makes sense when lazy origin initialization is
+   * enabled, as initTemporaryStorage does not initialize origins in that case.
+   *
+   * If the dom.quotaManager.testing preference is not set to true, this call
+   * will be a no-op.
+   */
+  [must_use] nsIQuotaRequest
+  initializeAllTemporaryOrigins();
+
+  /**
    * Initializes temporary origin directories for the given group. This can be
    * used in tests to verify group initialization.
    *
@@ -200,11 +213,15 @@ interface nsIQuotaManagerService : nsISupports
    *        initialized.
    * @param aClientType
    *        A string that tells what client type will be initialized.
+   * @param aCreateIfNonExistent
+   *        An optional boolean to indicate creation of client directory if it
+   *        doesn't exist yet.
    */
   [must_use] nsIQuotaRequest
   initializeTemporaryClient(in ACString aPersistenceType,
                             in nsIPrincipal aPrincipal,
-                            in AString aClientType);
+                            in AString aClientType,
+                            [optional] in boolean aCreateIfNonExistent);
 
   /**
    * Gets full origin metadata cached in memory for the given persistence type

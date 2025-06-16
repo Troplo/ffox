@@ -13,6 +13,7 @@
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/StackArray.h"
+#include "mozilla/layers/FenceD3D11.h"
 #include "mozilla/layers/TextureD3D11.h"
 #include "mozilla/layers/HelpersD3D11.h"
 #include "mozilla/layers/SyncObject.h"
@@ -23,7 +24,7 @@
 #include "mozilla/widget/CompositorWidget.h"
 #include "mozilla/widget/WinCompositorWidget.h"
 #include "mozilla/WindowsVersion.h"
-#include "mozilla/Telemetry.h"
+#include "mozilla/glean/GfxMetrics.h"
 #include "nsPrintfCString.h"
 #include "FxROutputHandler.h"
 
@@ -124,21 +125,18 @@ bool RenderCompositorANGLE::Initialize(nsACString& aError) {
   MOZ_ASSERT(mEGLConfig);
 
   mDevice = GetDeviceOfEGLDisplay(aError);
-
   if (!mDevice) {
     return false;
+  }
+
+  if (layers::FenceD3D11::IsSupported(mDevice)) {
+    mFence = layers::FenceD3D11::Create(mDevice);
   }
 
   mDevice->GetImmediateContext(getter_AddRefs(mCtx));
   if (!mCtx) {
     aError.Assign("RcANGLE(get immediate context failed)"_ns);
     return false;
-  }
-
-  // Disable native compositor when fast snapshot is needed.
-  // Taking snapshot of native compositor is very slow on Windows.
-  if (mWidget->GetCompositorOptions().NeedFastSnaphot()) {
-    mUseNativeCompositor = false;
   }
 
   // Create DCLayerTree when DirectComposition is used.
@@ -154,6 +152,12 @@ bool RenderCompositorANGLE::Initialize(nsACString& aError) {
       aError.Assign("RcANGLE(no compositor window)"_ns);
       return false;
     }
+  }
+
+  // Disable native compositor when fast snapshot is needed.
+  // Taking snapshot of native compositor is very slow on Windows.
+  if (mDCLayerTree && mWidget->GetCompositorOptions().NeedFastSnaphot()) {
+    mDCLayerTree->DisableNativeCompositor();
   }
 
   // Create SwapChain when compositor is not used
@@ -462,6 +466,10 @@ RenderedFrameId RenderCompositorANGLE::EndFrame(
   RenderedFrameId frameId = GetNextRenderFrameId();
   InsertGraphicsCommandsFinishedWaitQuery(frameId);
 
+  if (mFence) {
+    mFence->IncrementAndSignal();
+  }
+
   if (!UseCompositor()) {
     auto start = TimeStamp::Now();
     if (auto* fxrHandler = mWidget->AsWindows()->GetFxrOutputHandler()) {
@@ -525,8 +533,8 @@ RenderedFrameId RenderCompositorANGLE::EndFrame(
       mSwapChain->Present(interval, flags);
     }
     auto end = TimeStamp::Now();
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::COMPOSITE_SWAP_TIME,
-                                   (end - start).ToMilliseconds() * 10.);
+    mozilla::glean::gfx::composite_swap_time.AccumulateSingleSample(
+        (end - start).ToMilliseconds() * 10.);
 
     if (mFirstPresent && mDCLayerTree) {
       // Wait for the GPU to finish executing its commands before
@@ -562,6 +570,14 @@ RenderedFrameId RenderCompositorANGLE::EndFrame(
   }
 
   return frameId;
+}
+
+RefPtr<layers::Fence> RenderCompositorANGLE::GetAndResetReleaseFence() {
+  RefPtr<layers::Fence> fence;
+  if (mFence) {
+    fence = mFence->CloneFromHandle();
+  }
+  return fence.forget();
 }
 
 bool RenderCompositorANGLE::WaitForGPU() {
@@ -812,21 +828,23 @@ gfx::DeviceResetReason RenderCompositorANGLE::IsContextLost(bool aForce) {
 }
 
 bool RenderCompositorANGLE::UseCompositor() const {
-  return mUseNativeCompositor && mDCLayerTree &&
-         gfx::gfxVars::UseWebRenderCompositor();
+  return mDCLayerTree && mDCLayerTree->UseNativeCompositor();
+}
+
+bool RenderCompositorANGLE::UseLayerCompositor() const {
+  return mDCLayerTree && mDCLayerTree->UseLayerCompositor();
 }
 
 bool RenderCompositorANGLE::SupportAsyncScreenshot() {
-#ifdef NIGHTLY_BUILD
-  if (StaticPrefs::gfx_webrender_layer_compositor_AtStartup()) {
-    return true;
-  }
-#endif
   return !UseCompositor() && !mDisablingNativeCompositor;
 }
 
 bool RenderCompositorANGLE::ShouldUseNativeCompositor() {
   return UseCompositor();
+}
+
+bool RenderCompositorANGLE::ShouldUseLayerCompositor() {
+  return UseLayerCompositor();
 }
 
 void RenderCompositorANGLE::CompositorBeginFrame() {
@@ -897,8 +915,10 @@ void RenderCompositorANGLE::AttachExternalImage(
 
 void RenderCompositorANGLE::AddSurface(
     wr::NativeSurfaceId aId, const wr::CompositorSurfaceTransform& aTransform,
-    wr::DeviceIntRect aClipRect, wr::ImageRendering aImageRendering) {
-  mDCLayerTree->AddSurface(aId, aTransform, aClipRect, aImageRendering);
+    wr::DeviceIntRect aClipRect, wr::ImageRendering aImageRendering,
+    wr::DeviceIntRect aRoundedClipRect, wr::ClipRadius aClipRadius) {
+  mDCLayerTree->AddSurface(aId, aTransform, aClipRect, aImageRendering,
+                           aRoundedClipRect, aClipRadius);
 }
 
 void RenderCompositorANGLE::GetCompositorCapabilities(
@@ -916,6 +936,9 @@ void RenderCompositorANGLE::GetCompositorCapabilities(
 
 void RenderCompositorANGLE::GetWindowProperties(WindowProperties* aProperties) {
   aProperties->is_opaque = !ShouldUseAlpha();
+  const bool enable_screenshot =
+      mDCLayerTree && mDCLayerTree->GetAsyncScreenshotEnabled();
+  aProperties->enable_screenshot = enable_screenshot;
 }
 
 void RenderCompositorANGLE::EnableNativeCompositor(bool aEnable) {
@@ -928,7 +951,6 @@ void RenderCompositorANGLE::EnableNativeCompositor(bool aEnable) {
     return;
   }
 
-  mUseNativeCompositor = false;
   mDCLayerTree->DisableNativeCompositor();
 
   if (!RecreateNonNativeCompositorSwapChain()) {
@@ -938,6 +960,14 @@ void RenderCompositorANGLE::EnableNativeCompositor(bool aEnable) {
   }
 
   mDisablingNativeCompositor = true;
+}
+
+bool RenderCompositorANGLE::EnableAsyncScreenshot() {
+  if (!UseLayerCompositor()) {
+    return false;
+  }
+  mDCLayerTree->EnableAsyncScreenshot();
+  return true;
 }
 
 bool RenderCompositorANGLE::RecreateNonNativeCompositorSwapChain() {

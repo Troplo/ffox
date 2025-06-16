@@ -548,21 +548,80 @@
           "properties": {
             "type": {
               "type": "string",
-              "description": "Should the message be global (persisted across tabs) or local (disappear when switching to a different tab).",
+              "description": "Specifies where the message should appear and persist: 'global' (persists across tabs in the current window), 'tab' (only visible in the current tab), or 'universal' (visible across all tabs and windows, current and future).",
               "enum": [
                 "global",
-                "tab"
+                "tab",
+                "universal"
               ]
             },
             "text": {
-              "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText",
-              "description": "The text show in the notification box."
+              "description": "Either a single localizableText, or an array of raw strings and/or localizableText objects. localizableText can contain an optional href property for the text to be rendered as a link.",
+              "oneOf": [
+                {
+                  "$ref": "file:///InfoBar.schema.json#/$defs/plainText"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText"
+                    },
+                    {
+                      "not": {
+                        "required": [
+                          "href"
+                        ]
+                      }
+                    }
+                  ]
+                },
+                {
+                  "$ref": "file:///InfoBar.schema.json#/$defs/localizableTextWithHref"
+                },
+                {
+                  "$ref": "file:///InfoBar.schema.json#/$defs/rawTextWithHref"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      {
+                        "$ref": "file:///InfoBar.schema.json#/$defs/plainText"
+                      },
+                      {
+                        "allOf": [
+                          {
+                            "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText"
+                          },
+                          {
+                            "not": {
+                              "required": [
+                                "href"
+                              ]
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "$ref": "file:///InfoBar.schema.json#/$defs/localizableTextWithHref"
+                      },
+                      {
+                        "$ref": "file:///InfoBar.schema.json#/$defs/rawTextWithHref"
+                      }
+                    ]
+                  }
+                }
+              ]
             },
             "priority": {
               "description": "Infobar priority level https://searchfox.org/mozilla-central/rev/3aef835f6cb12e607154d56d68726767172571e4/toolkit/content/widgets/notificationbox.js#387",
               "type": "number",
               "minumum": 0,
               "exclusiveMaximum": 10
+            },
+            "dismissable": {
+              "description": "Should the infobar include an X dismiss button, defaults to true",
+              "type": "boolean"
             },
             "buttons": {
               "type": "array",
@@ -584,6 +643,10 @@
                   "action": {
                     "type": "object",
                     "properties": {
+                      "dismiss": {
+                        "type": "boolean",
+                        "description": "Should the infobar be dismissed when the action is dispatched, defaults to true"
+                      },
                       "type": {
                         "type": "string",
                         "description": "Action dispatched by the button."
@@ -635,6 +698,43 @@
           "description": "Target for links or buttons",
           "type": "string",
           "format": "uri"
+        },
+        "localizableTextWithHref": {
+          "description": "Everything a localizableText allows, plus a required href",
+          "allOf": [
+            {
+              "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/localizableText"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "href": {
+                  "$ref": "file:///InfoBar.schema.json#/$defs/linkUrl"
+                }
+              },
+              "required": [
+                "href"
+              ],
+              "additionalProperties": true
+            }
+          ]
+        },
+        "rawTextWithHref": {
+          "description": "A literal text chunk that must include href",
+          "type": "object",
+          "properties": {
+            "raw": {
+              "type": "string"
+            },
+            "href": {
+              "$ref": "file:///InfoBar.schema.json#/$defs/linkUrl"
+            }
+          },
+          "required": [
+            "raw",
+            "href"
+          ],
+          "additionalProperties": false
         }
       }
     },
@@ -710,9 +810,29 @@
               "type": "string",
               "description": "URL for image to use with the content."
             },
-            "imageVerticalOffset": {
+            "imageWidth": {
               "type": "number",
-              "description": "The margin-block-start value to apply to the image in pixels."
+              "description": "The image width in pixels. Default is 120px."
+            },
+            "imageVerticalTopOffset": {
+              "type": "number",
+              "description": "The margin-block-start value to apply to the image in pixels, used in 'column' layouts."
+            },
+            "imageVerticalBottomOffset": {
+              "type": "number",
+              "description": "The margin-block-end value to apply to the image in pixels, used in 'row' layouts."
+            },
+            "containerVerticalBottomOffset": {
+              "type": "number",
+              "description": "The container's margin-block-end value in pixels. Used to visually offset the image in 'row' layouts when 'imageVerticalBottomOffset' is applied."
+            },
+            "layout": {
+              "type": "string",
+              "description": "The layout of the message content and illustration. Row displays the image to the inline to the right of the text, column displays the image above the text.",
+              "enum": [
+                "row",
+                "column"
+              ]
             }
           }
         },
@@ -917,6 +1037,41 @@
         "template": {
           "type": "string",
           "const": "pb_newtab"
+        }
+      },
+      "additionalProperties": true,
+      "required": [
+        "targeting"
+      ]
+    },
+    "NewtabMessage": {
+      "$schema": "https://json-schema.org/draft/2019-09/schema",
+      "$id": "file:///NewtabMessage.schema.json",
+      "title": "NewtabMessage",
+      "description": "A template for messages that are rendered within newtab",
+      "allOf": [
+        {
+          "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/Message"
+        }
+      ],
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "object",
+          "properties": {
+            "messageType": {
+              "type": "string",
+              "description": "The subtype of the message."
+            }
+          },
+          "additionalProperties": true,
+          "required": [
+            "messageType"
+          ]
+        },
+        "template": {
+          "type": "string",
+          "const": "newtab_message"
         }
       },
       "additionalProperties": true,
@@ -1278,6 +1433,7 @@
             "infobar",
             "menu_message",
             "pb_newtab",
+            "newtab_message",
             "spotlight",
             "feature_callout",
             "toast_notification",
@@ -1521,6 +1677,25 @@
           },
           "then": {
             "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/NewtabPromoMessage"
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "template": {
+                "type": "string",
+                "enum": [
+                  "newtab_message"
+                ]
+              }
+            },
+            "required": [
+              "template"
+            ]
+          },
+          "then": {
+            "$ref": "chrome://browser/content/asrouter/schemas/MessagingExperiment.schema.json#/$defs/NewtabMessage"
           }
         },
         {

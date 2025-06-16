@@ -11,10 +11,11 @@ import {
 
 
 '../../../../common/util/util.js';
-import { AllFeaturesMaxLimitsGPUTest, TextureTestMixin } from '../../../gpu_test.js';
+import { AllFeaturesMaxLimitsGPUTest } from '../../../gpu_test.js';
+import * as ttu from '../../../texture_test_utils.js';
 
 
-class DrawTest extends TextureTestMixin(AllFeaturesMaxLimitsGPUTest) {
+class DrawTest extends AllFeaturesMaxLimitsGPUTest {
   checkTriangleDraw(opts)
 
 
@@ -314,7 +315,11 @@ struct Output {
         });
       }
     }
-    this.expectSinglePixelComparisonsAreOkInTexture({ texture: renderTarget }, pixelComparisons);
+    ttu.expectSinglePixelComparisonsAreOkInTexture(
+      this,
+      { texture: renderTarget },
+      pixelComparisons
+    );
   }
 }
 
@@ -355,12 +360,10 @@ combine('vertex_buffer_offset', [0, 32]).
 expand('index_buffer_offset', (p) => p.indexed ? [0, 16] : [undefined]).
 expand('base_vertex', (p) => p.indexed ? [0, 9] : [undefined])
 ).
-beforeAllSubcases((t) => {
-  if (t.params.first_instance > 0 && t.params.indirect) {
-    t.selectDeviceOrSkipTestCase('indirect-first-instance');
-  }
-}).
 fn((t) => {
+  if (t.params.first_instance > 0 && t.params.indirect) {
+    t.skipIfDeviceDoesNotHaveFeature('indirect-first-instance');
+  }
   t.checkTriangleDraw({
     firstIndex: t.params.first,
     count: t.params.count,

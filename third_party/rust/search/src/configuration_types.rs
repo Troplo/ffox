@@ -37,7 +37,7 @@ impl JSONEngineMethod {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct JSONEngineUrl {
     /// The PrePath and FilePath of the URL. May include variables for engines
-    /// which have a variable FilePath, e.g. `{searchTerm}` for when a search
+    /// which have a variable FilePath, e.g. `{searchTerms}` for when a search
     /// term is within the path of the url.
     pub base: Option<String>,
 
@@ -49,7 +49,7 @@ pub(crate) struct JSONEngineUrl {
     pub params: Option<Vec<SearchUrlParam>>,
 
     /// The name of the query parameter for the search term. Automatically
-    /// appended to the end of the query. This may be skipped if `{searchTerm}`
+    /// appended to the end of the query. This may be skipped if `{searchTerms}`
     /// is included in the base.
     pub search_term_param_name: Option<String>,
 }
@@ -59,13 +59,16 @@ pub(crate) struct JSONEngineUrl {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct JSONEngineUrls {
     /// The URL to use for searches.
-    pub search: JSONEngineUrl,
+    pub search: Option<JSONEngineUrl>,
 
     /// The URL to use for suggestions.
     pub suggestions: Option<JSONEngineUrl>,
 
     /// The URL to use for trending suggestions.
     pub trending: Option<JSONEngineUrl>,
+
+    /// The URL of the search engine homepage.
+    pub search_form: Option<JSONEngineUrl>,
 }
 
 /// Represents the engine base section of the configuration.
@@ -81,6 +84,7 @@ pub(crate) struct JSONEngineBase {
     /// The classification of search engine according to the main search types
     /// (e.g. general, shopping, travel, dictionary). Currently, only marking as
     /// a general search engine is supported.
+    #[serde(default)]
     pub classification: SearchEngineClassification,
 
     /// The user visible name for the search engine.
@@ -182,6 +186,15 @@ pub(crate) struct JSONEngineVariant {
 
     /// The urls for this variant.
     pub urls: Option<JSONEngineUrls>,
+
+    /// This section describes subvariations of this search engine that may occur
+    /// depending on the user's environment. The last subvariant that matches
+    /// the user's environment will be applied to the engine.
+    ///
+    /// Note: sub-variants are only supported in a top-level variant. You cannot
+    /// have nested sub-variants.
+    #[serde(default)]
+    pub sub_variants: Vec<JSONEngineVariant>,
 }
 
 /// Represents an individual engine record in the configuration.
@@ -240,11 +253,36 @@ pub(crate) struct JSONDefaultEnginesRecord {
     pub specific_defaults: Vec<JSONSpecificDefaultRecord>,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct JSONEngineOrder {
+    /// The specific environment to match for this record.
+    pub environment: JSONVariantEnvironment,
+
+    /// The order of engine identifiers for the associated environment. If engines
+    /// are present for the user but not included in this list, they will follow
+    /// after the ones in this list in alphabetical order. If an individual entry
+    /// is suffixed with a star, matching is applied on a "starts with" basis.
+    #[serde(default)]
+    pub order: Vec<String>,
+}
+
 /// Represents the engine orders record.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct JSONEngineOrdersRecord {
-    // TODO: Implementation.
+    /// When a user's instance matches the defined environments, the associated
+    /// engine order will be applied. The array is ordered, when multiple entries
+    /// match on environments, the later entry will override earlier entries.
+    pub orders: Vec<JSONEngineOrder>,
+}
+
+/// Represents the available locales record.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct JSONAvailableLocalesRecord {
+    /// The available locales in the search config v2.
+    pub locales: Vec<String>,
 }
 
 /// Represents an individual record in the raw search configuration.
@@ -254,6 +292,7 @@ pub(crate) enum JSONSearchConfigurationRecords {
     DefaultEngines(JSONDefaultEnginesRecord),
     Engine(Box<JSONEngineRecord>),
     EngineOrders(JSONEngineOrdersRecord),
+    AvailableLocales(JSONAvailableLocalesRecord),
     // Include some flexibilty if we choose to add new record types in future.
     // Current versions of the application receiving the configuration will
     // ignore the new record types.

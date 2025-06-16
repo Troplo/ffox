@@ -30,12 +30,12 @@ namespace mozilla {
 namespace layers {
 
 enum CancelAnimationFlags : uint32_t {
-  Default = 0x0,             /* Cancel all animations */
-  ExcludeOverscroll = 0x1,   /* Don't clear overscroll */
-  ScrollSnap = 0x2,          /* Snap to snap points */
-  ExcludeWheel = 0x4,        /* Don't stop wheel smooth-scroll animations */
-  TriggeredExternally = 0x8, /* Cancellation was not triggered by APZ in
-                                response to an input event */
+  Default = 0,                    /* Cancel all animations */
+  ExcludeOverscroll = (1 << 0),   /* Don't clear overscroll */
+  ScrollSnap = (1 << 1),          /* Snap to snap points */
+  TriggeredExternally = (1 << 2), /* Cancellation was not triggered by APZ in
+                                     response to an input event */
+  ExcludeAutoscroll = (1 << 3)    /* Don't cancel overscroll animations */
 };
 
 inline CancelAnimationFlags operator|(CancelAnimationFlags a,
@@ -181,16 +181,6 @@ enum class AsyncTransformConsumer {
  * the purpose of scrolling and handoff for the purpose of pull-to-refresh.
  */
 enum class HandoffConsumer { Scrolling, PullToRefresh };
-
-/**
- * Metrics that GeckoView wants to know at every composite.
- * These are the effective visual scroll offset and zoom level of
- * the root content APZC at composition time.
- */
-struct GeckoViewMetrics {
-  CSSPoint mVisualScrollOffset;
-  CSSToParentLayerScale mZoom;
-};
 
 namespace apz {
 

@@ -22,7 +22,7 @@ struct IDataObject;
  * Native Win32 Clipboard wrapper
  */
 
-class nsClipboard : public nsBaseClipboard, public nsIObserver {
+class nsClipboard final : public nsBaseClipboard, public nsIObserver {
   virtual ~nsClipboard();
 
  public:
@@ -41,6 +41,9 @@ class nsClipboard : public nsBaseClipboard, public nsIObserver {
   static nsresult SetupNativeDataObject(nsITransferable* aTransferable,
                                         IDataObject* aDataObj,
                                         MightNeedToFlush* = nullptr);
+  static mozilla::Result<nsCOMPtr<nsISupports>, nsresult> GetDataFromDataObject(
+      IDataObject* aDataObject, UINT anIndex, nsIWidget* aWindow,
+      const nsCString& aFlavor);
   static nsresult GetDataFromDataObject(IDataObject* aDataObject, UINT anIndex,
                                         nsIWidget* aWindow,
                                         nsITransferable* aTransferable);
@@ -59,6 +62,9 @@ class nsClipboard : public nsBaseClipboard, public nsIObserver {
   // registered as clipboard format "text/html" to support previous versions
   // of Gecko.
   static UINT GetFormat(const char* aMimeStr, bool aMapHTMLMime = true);
+  // This function returns a secondary format for a given MIME string, if any.
+  // This is something that Firefox can read and convert to the expected type.
+  static mozilla::Maybe<UINT> GetSecondaryFormat(const char* aMimeStr);
 
   static UINT GetClipboardFileDescriptorFormatA();
   static UINT GetClipboardFileDescriptorFormatW();
@@ -75,8 +81,8 @@ class nsClipboard : public nsBaseClipboard, public nsIObserver {
   // Implement the native clipboard behavior.
   NS_IMETHOD SetNativeClipboardData(nsITransferable* aTransferable,
                                     ClipboardType aWhichClipboard) override;
-  NS_IMETHOD GetNativeClipboardData(nsITransferable* aTransferable,
-                                    ClipboardType aWhichClipboard) override;
+  mozilla::Result<nsCOMPtr<nsISupports>, nsresult> GetNativeClipboardData(
+      const nsACString& aFlavor, ClipboardType aWhichClipboard) override;
   nsresult EmptyNativeClipboardData(ClipboardType aWhichClipboard) override;
   mozilla::Result<bool, nsresult> HasNativeClipboardDataMatchingFlavors(
       const nsTArray<nsCString>& aFlavorList,

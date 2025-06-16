@@ -26,6 +26,7 @@
 #include "mozilla/dom/WheelEventBinding.h"
 #include "nsCommandParams.h"
 #include "nsContentUtils.h"
+#include "nsFmtString.h"
 #include "nsIContent.h"
 #include "nsIDragSession.h"
 #include "nsMathUtils.h"
@@ -72,6 +73,7 @@ bool IsPointerEventMessage(EventMessage aMessage) {
     case ePointerOut:
     case ePointerEnter:
     case ePointerLeave:
+    case ePointerRawUpdate:
     case ePointerGotCapture:
     case ePointerLostCapture:
     case ePointerClick:
@@ -120,6 +122,7 @@ bool IsForbiddenDispatchingToNonElementContent(EventMessage aMessage) {
     case ePointerOut:
     case ePointerEnter:
     case ePointerLeave:
+    case ePointerRawUpdate:
     case ePointerCancel:
     case ePointerGotCapture:
     case ePointerLostCapture:
@@ -169,6 +172,12 @@ bool IsForbiddenDispatchingToNonElementContent(EventMessage aMessage) {
     case eTouchEnd:
     case eTouchCancel:
     case eTouchPointerCancel:
+      return true;
+
+    case eMouseRawUpdate:
+    case eTouchRawUpdate:
+      MOZ_ASSERT_UNREACHABLE(
+          "Internal raw update events shouldn't be dispatched to the DOM");
       return true;
 
     default:
@@ -381,6 +390,7 @@ bool WidgetEvent::HasMouseEventMessage() const {
     case eMouseOut:
     case eMouseHitTest:
     case eMouseMove:
+    case eMouseRawUpdate:
       return true;
     // TODO: Perhaps, we should rename this method.
     case ePointerClick:
@@ -528,7 +538,7 @@ bool WidgetEvent::IsTargetedAtFocusedContent() const {
 bool WidgetEvent::IsAllowedToDispatchDOMEvent() const {
   switch (mClass) {
     case eMouseEventClass:
-      if (mMessage == eMouseTouchDrag) {
+      if (mMessage == eMouseRawUpdate || mMessage == eMouseTouchDrag) {
         return false;
       }
       [[fallthrough]];
@@ -538,7 +548,7 @@ bool WidgetEvent::IsAllowedToDispatchDOMEvent() const {
       // DOM events.
       // Synthesized button up events also do not cause DOM events because they
       // do not have a reliable mRefPoint.
-      return AsMouseEvent()->mReason == WidgetMouseEvent::eReal;
+      return AsMouseEvent()->IsReal();
 
     case eWheelEventClass: {
       // wheel event whose all delta values are zero by user pref applied, it
@@ -548,7 +558,7 @@ bool WidgetEvent::IsAllowedToDispatchDOMEvent() const {
              wheelEvent->mDeltaZ != 0.0;
     }
     case eTouchEventClass:
-      return mMessage != eTouchPointerCancel;
+      return mMessage != eTouchRawUpdate && mMessage != eTouchPointerCancel;
     // Following events are handled in EventStateManager, so, we don't need to
     // dispatch DOM event for them into the DOM tree.
     case eQueryContentEventClass:
@@ -897,6 +907,107 @@ bool WidgetMouseEventBase::InputSourceSupportsHover() const {
     case dom::MouseEvent_Binding::MOZ_SOURCE_CURSOR:
     default:
       return false;
+  }
+}
+
+float WidgetMouseEventBase::ComputeMouseButtonPressure() const {
+  MOZ_ASSERT(IsTrusted());
+  switch (mMessage) {
+    // This method is designed for mouse events.
+    case eMouseMove:
+    case eMouseRawUpdate:
+    case eMouseUp:
+    case eMouseDown:
+    case eMouseEnterIntoWidget:
+    case eMouseExitFromWidget:
+    case eMouseDoubleClick:
+    case eMouseActivate:
+      // When mButtons is 0, the pressure should always be 0.0f.
+      if (!mButtons) {
+        return 0.0f;
+      }
+      // When mPressure is not 0.0f, that must have been set by the dispatcher.
+      // We should trust the value in any cases.  If it's not a good value,
+      // we should fix the dispatcher side.
+      if (mPressure != 0.0f) {
+        return mPressure;
+      }
+      break;
+    // These event messages are internal use only.  Just return the given
+    // pressure.
+    case eMouseHitTest:
+    case eMouseLongTap:
+    case eMouseTouchDrag:
+      return mPressure;
+    // Pointer Events which represent a user input or a pointer capture state
+    // change should be initialized with the proper pressure value.
+    case ePointerClick:
+    case ePointerAuxClick:
+    case ePointerMove:
+    case ePointerRawUpdate:
+    case ePointerUp:
+    case ePointerDown:
+    case ePointerCancel:
+    case ePointerGotCapture:
+    case ePointerLostCapture:
+      return mPressure;
+    // However, mouse/pointer boundary events before dispatching its source
+    // event may need to compute the pressure.
+    case eMouseOver:
+    case eMouseOut:
+    case eMouseEnter:
+    case eMouseLeave:
+    case ePointerOver:
+    case ePointerOut:
+    case ePointerEnter:
+    case ePointerLeave:
+      // If this event (or the source event if this is copied from it) has
+      // already been dispatched, the web app already know the pressure value.
+      // Therefore, we should use it.  And also if the input source does not
+      // support hover, the pressure value should be initialized properly.
+      // See CreateMouseOrPointerWidgetEvent() in EventStateManager.cpp and bug
+      // 1844723 for the detail.
+      if (mFlags.mDispatchedAtLeastOnce || !InputSourceSupportsHover()) {
+        return mPressure;
+      }
+      // When mButtons is 0, the pressure should always be 0.0f.
+      if (!mButtons) {
+        return 0.0f;
+      }
+      break;
+    default:
+      NS_ASSERTION(false,
+                   nsFmtCString(FMT_STRING("This method is not designed for "
+                                           "{}, implement the case explicitly"),
+                                ToChar(mMessage))
+                       .get());
+  }
+  switch (mInputSource) {
+    // The caller must want to handle these cases.
+    case dom::MouseEvent_Binding::MOZ_SOURCE_MOUSE:
+    case dom::MouseEvent_Binding::MOZ_SOURCE_KEYBOARD:
+    // UNKNOWN is currently used for a tap on uikit widget or eClick when
+    // HTMLElement.click().  Let's treat them as not pressure supported input
+    // source.
+    case dom::MouseEvent_Binding::MOZ_SOURCE_UNKNOWN:
+      // If some buttons are pressed, the pressure value should not be 0.0f, but
+      // some input sources such as mouse and keyboard do not support pressure
+      // value and our widget does not set the field.  Therefore, we should use
+      // the default value, 0.5f, as the preferred pressure value.
+      // https://w3c.github.io/pointerevents/#dom-pointerevent-pressure
+      return 0.5f;
+    // If this is initialized for touch or pen input source, mPressure should've
+    // been initialized before dispatching it.
+    case dom::MouseEvent_Binding::MOZ_SOURCE_PEN:
+    case dom::MouseEvent_Binding::MOZ_SOURCE_TOUCH:
+      return mPressure;
+    // These input sources are not used when this method is implemented.
+    // Please do expected behavior if you start to use them.
+    case dom::MouseEvent_Binding::MOZ_SOURCE_CURSOR:
+    case dom::MouseEvent_Binding::MOZ_SOURCE_ERASER:
+    default:
+      MOZ_ASSERT_UNREACHABLE("Implement the input source case");
+      return mPressure;
   }
 }
 

@@ -70,6 +70,7 @@
 #include "mozilla/dom/RootedDictionary.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/SerializedStackHolder.h"
+#include "mozilla/dom/TimeoutManager.h"
 #include "mozilla/CycleCollectedJSRuntime.h"
 #include "nsRefreshDriver.h"
 #include "nsJSPrincipals.h"
@@ -78,7 +79,7 @@
 #include "prthread.h"
 
 #include "mozilla/Preferences.h"
-#include "mozilla/Telemetry.h"
+#include "mozilla/glean/DomMetrics.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
@@ -980,7 +981,7 @@ static void FireForgetSkippable(bool aRemoveChildless, TimeStamp aDeadline) {
 
     uint32_t percent =
         uint32_t(idleDuration.ToSeconds() / duration.ToSeconds() * 100);
-    Telemetry::Accumulate(Telemetry::FORGET_SKIPPABLE_DURING_IDLE, percent);
+    glean::dom::forget_skippable_during_idle.AccumulateSingleSample(percent);
   }
 }
 
@@ -1544,9 +1545,8 @@ static void DOMGCSliceCallback(JSContext* aCx, JS::GCProgress aProgress,
       }
 
       MOZ_ASSERT(sCurrentGCStartTime);
-      Telemetry::Accumulate(
-          Telemetry::GC_IN_PROGRESS_MS,
-          (TimeStamp::Now() - sCurrentGCStartTime).ToMilliseconds());
+      glean::dom::gc_in_progress.AccumulateRawDuration(TimeStamp::Now() -
+                                                       sCurrentGCStartTime);
 
 #if defined(MOZ_MEMORY)
       if (freeDirty &&
@@ -1698,9 +1698,10 @@ class JSDispatchableRunnable final : public Runnable {
   ~JSDispatchableRunnable() { MOZ_ASSERT(!mDispatchable); }
 
  public:
-  explicit JSDispatchableRunnable(JS::Dispatchable* aDispatchable)
+  explicit JSDispatchableRunnable(
+      js::UniquePtr<JS::Dispatchable>&& aDispatchable)
       : mozilla::Runnable("JSDispatchableRunnable"),
-        mDispatchable(aDispatchable) {
+        mDispatchable(std::move(aDispatchable)) {
     MOZ_ASSERT(mDispatchable);
   }
 
@@ -1715,18 +1716,51 @@ class JSDispatchableRunnable final : public Runnable {
         sShuttingDown ? JS::Dispatchable::ShuttingDown
                       : JS::Dispatchable::NotShuttingDown;
 
-    mDispatchable->run(jsapi.cx(), maybeShuttingDown);
-    mDispatchable = nullptr;  // mDispatchable may delete itself
+    JS::Dispatchable::Run(jsapi.cx(), std::move(mDispatchable),
+                          maybeShuttingDown);
+    // mDispatchable is no longer valid after this point.
 
     return NS_OK;
   }
 
  private:
-  JS::Dispatchable* mDispatchable;
+  js::UniquePtr<JS::Dispatchable> mDispatchable;
 };
 
-static bool DispatchToEventLoop(void* closure,
-                                JS::Dispatchable* aDispatchable) {
+static bool DelayedDispatchToEventLoop(
+    void* closure, js::UniquePtr<JS::Dispatchable>&& aDispatchable,
+    uint32_t aDelay) {
+  MOZ_ASSERT(!closure);
+
+  // Unlike DispatchToEventLoop, this is used exclusively on the Main Thread.
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsIGlobalObject* global = GetCurrentGlobal();
+
+  TimeoutManager* timeoutManager = global->GetTimeoutManager();
+  if (timeoutManager) {
+    JSContext* cx = nsContentUtils::GetCurrentJSContext();
+    RefPtr<TimeoutHandler> handler =
+        new DelayedJSDispatchableHandler(cx, std::move(aDispatchable));
+
+    int32_t handle;
+    timeoutManager->SetTimeout(handler, aDelay, /* aIsInterval */ false,
+                               Timeout::Reason::eJSTimeout, &handle);
+  } else {
+    // Currently only used for waitAsync timeout implementation.
+    // We end up in this branch if the global does not have a
+    // timeout manager (for example, no innerWindow global).
+    // In this case, we reuse the ReleaseFailedTask machinery to
+    // cancel the pending associated notify task.
+    JS::Dispatchable::ReleaseFailedTask(std::move(aDispatchable));
+    return false;
+  }
+
+  return true;
+}
+
+static bool DispatchToEventLoop(
+    void* closure, js::UniquePtr<JS::Dispatchable>&& aDispatchable) {
   MOZ_ASSERT(!closure);
 
   // This callback may execute either on the main thread or a random JS-internal
@@ -1736,10 +1770,15 @@ static bool DispatchToEventLoop(void* closure,
 
   nsCOMPtr<nsIEventTarget> mainTarget = GetMainThreadSerialEventTarget();
   if (!mainTarget) {
+    // if we have not transfered ownership of the dispatchable to the
+    // dispatchable runnable, release it here, so that the JS engine will
+    // handle deleting it on JS context shutdown.
+    JS::Dispatchable::ReleaseFailedTask(std::move(aDispatchable));
     return false;
   }
 
-  RefPtr<JSDispatchableRunnable> r = new JSDispatchableRunnable(aDispatchable);
+  RefPtr<JSDispatchableRunnable> r =
+      new JSDispatchableRunnable(std::move(aDispatchable));
   MOZ_ALWAYS_SUCCEEDS(mainTarget->Dispatch(r.forget(), NS_DISPATCH_NORMAL));
   return true;
 }
@@ -1778,7 +1817,9 @@ void nsJSContext::EnsureStatics() {
 
   JS::SetCreateGCSliceBudgetCallback(jsapi.cx(), CreateGCSliceBudget);
 
-  JS::InitDispatchToEventLoop(jsapi.cx(), DispatchToEventLoop, nullptr);
+  JS::InitDispatchsToEventLoop(jsapi.cx(), DispatchToEventLoop,
+                               DelayedDispatchToEventLoop, nullptr);
+
   JS::InitConsumeStreamCallback(jsapi.cx(), ConsumeStream,
                                 FetchUtil::ReportJSStreamError);
 
@@ -1936,6 +1977,11 @@ void nsJSContext::EnsureStatics() {
       SetMemoryPrefChangedCallbackInt,
       "javascript.options.mem.nursery_eager_collection_timeout_ms",
       (void*)JSGC_NURSERY_EAGER_COLLECTION_TIMEOUT_MS);
+
+  Preferences::RegisterCallbackAndCall(
+      SetMemoryPrefChangedCallbackInt,
+      "javascript.options.mem.nursery_max_time_goal_ms",
+      (void*)JSGC_NURSERY_MAX_TIME_GOAL_MS);
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (!obs) {

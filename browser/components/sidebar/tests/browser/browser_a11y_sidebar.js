@@ -3,8 +3,6 @@
 
 "use strict";
 
-let win;
-
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -18,11 +16,6 @@ add_setup(async () => {
       ["sidebar.main.tools", "aichat,syncedtabs,history,bookmarks"],
     ],
   });
-  win = await BrowserTestUtils.openNewBrowserWindow();
-});
-
-registerCleanupFunction(async () => {
-  await BrowserTestUtils.closeWindow(win);
 });
 
 function isActiveElement(el) {
@@ -30,26 +23,28 @@ function isActiveElement(el) {
 }
 
 add_task(async function test_keyboard_navigation() {
-  const { document } = win;
   const sidebar = document.querySelector("sidebar-main");
-  const toolButtons = await TestUtils.waitForCondition(
-    () => sidebar.toolButtons,
-    "Tool buttons are shown."
+  info("Waiting for tool buttons to be present");
+  await BrowserTestUtils.waitForMutationCondition(
+    sidebar,
+    { subTree: true, childList: true },
+    () => !!sidebar.toolButtons.length
   );
+  const toolButtons = sidebar.toolButtons;
 
   toolButtons[0].focus();
   ok(isActiveElement(toolButtons[0]), "First tool button is focused.");
 
   info("Press Arrow Down key.");
-  EventUtils.synthesizeKey("KEY_ArrowDown", {}, win);
+  EventUtils.synthesizeKey("KEY_ArrowDown", {});
   ok(isActiveElement(toolButtons[1]), "Second tool button is focused.");
 
   info("Press Arrow Up key.");
-  EventUtils.synthesizeKey("KEY_ArrowUp", {}, win);
+  EventUtils.synthesizeKey("KEY_ArrowUp", {});
   ok(isActiveElement(toolButtons[0]), "First tool button is focused.");
 
   info("Press Enter key.");
-  EventUtils.synthesizeKey("KEY_Enter", {}, win);
+  EventUtils.synthesizeKey("KEY_Enter", {});
   await sidebar.updateComplete;
   ok(sidebar.open, "Sidebar is open.");
   is(
@@ -69,7 +64,7 @@ add_task(async function test_keyboard_navigation() {
   );
 
   info("Press Enter key again.");
-  EventUtils.synthesizeKey("KEY_Enter", {}, win);
+  EventUtils.synthesizeKey("KEY_Enter", {});
   await sidebar.updateComplete;
   ok(!sidebar.open, "Sidebar is closed.");
   is(
@@ -82,17 +77,53 @@ add_task(async function test_keyboard_navigation() {
   toolButtons[0].focus();
 
   info("Press Tab key.");
-  EventUtils.synthesizeKey("KEY_Tab", {}, win);
+  EventUtils.synthesizeKey("KEY_Tab", {});
   ok(isActiveElement(customizeButton), "Customize button is focused.");
+  info("Press Enter key again.");
+  const promiseFocused = BrowserTestUtils.waitForEvent(
+    window,
+    "SidebarFocused"
+  );
+  EventUtils.synthesizeKey("KEY_Enter", {});
+  await promiseFocused;
+  await sidebar.updateComplete;
+  ok(sidebar.open, "Sidebar is open.");
+
+  let customizeDocument = SidebarController.browser.contentDocument;
+  const customizeComponent =
+    customizeDocument.querySelector("sidebar-customize");
+  const sidebarPanelHeader = customizeComponent.shadowRoot.querySelector(
+    "sidebar-panel-header"
+  );
+  let closeButton = sidebarPanelHeader.closeButton;
+  info("Press Tab key.");
+  EventUtils.synthesizeKey("KEY_Tab", {});
+  ok(isActiveElement(closeButton), "Close button is focused.");
+
+  info("Press Tab key.");
+  EventUtils.synthesizeKey("KEY_Tab", {});
+  ok(
+    isActiveElement(customizeComponent.verticalTabsInput),
+    "First customize component is focused"
+  );
+
+  info("Press Tab and Shift key.");
+  EventUtils.synthesizeKey("KEY_Tab", { shiftKey: true }, window);
+  ok(isActiveElement(closeButton), "Close button is focused.");
+  EventUtils.synthesizeKey("KEY_Enter", {});
+  await sidebar.updateComplete;
+  ok(!sidebar.open, "Sidebar is closed.");
 });
 
 add_task(async function test_menu_items_labeled() {
-  const { document, SidebarController } = win;
   const sidebar = document.querySelector("sidebar-main");
-  const allButtons = await TestUtils.waitForCondition(
-    () => sidebar.allButtons,
-    "All buttons are shown."
+  info("Waiting for tool buttons to be present");
+  await BrowserTestUtils.waitForMutationCondition(
+    sidebar,
+    { subTree: true, childList: true },
+    () => !!sidebar.toolButtons.length
   );
+  const allButtons = sidebar.allButtons;
   const dynamicTooltips = Object.keys(SidebarController.sidebarMain.tooltips);
 
   await SidebarController.initializeUIState({ launcherExpanded: false });
@@ -125,7 +156,6 @@ add_task(async function test_menu_items_labeled() {
 });
 
 add_task(async function test_genai_chat_sidebar_tooltip() {
-  const { document, SidebarController } = win;
   const chatbotButton = document
     .querySelector("sidebar-main")
     .shadowRoot.querySelector("[view=viewGenaiChatSidebar]");
@@ -158,29 +188,30 @@ add_task(async function test_genai_chat_sidebar_tooltip() {
 });
 
 add_task(async function test_keyboard_navigation_vertical_tabs() {
-  const { document } = win;
   SpecialPowers.pushPrefEnv({
-    set: [["sidebar.verticalTabs", true]],
+    set: [[VERTICAL_TABS_PREF, true]],
   });
   await waitForTabstripOrientation("vertical");
   const sidebar = document.querySelector("sidebar-main");
-  const toolButtons = await TestUtils.waitForCondition(
-    () => sidebar.toolButtons,
-    "Tool buttons are shown."
+  info("Waiting for tool buttons to be present");
+  await BrowserTestUtils.waitForMutationCondition(
+    sidebar,
+    { subTree: true, childList: true },
+    () => !!sidebar.toolButtons.length
   );
   const newTabButton = sidebar.querySelector("#tabs-newtab-button");
 
-  win.gBrowser.tabs[0].focus();
-  ok(isActiveElement(win.gBrowser.tabs[0]), "First tab is focused.");
+  window.gBrowser.tabs[0].focus();
+  ok(isActiveElement(window.gBrowser.tabs[0]), "First tab is focused.");
 
   info("Tab to new tab button.");
-  EventUtils.synthesizeKey("KEY_Tab", {}, win);
+  EventUtils.synthesizeKey("KEY_Tab", {});
   ok(isActiveElement(newTabButton), "New tab button is focused.");
 
   info("Press Enter key.");
-  EventUtils.synthesizeKey("KEY_Enter", {}, win);
+  EventUtils.synthesizeKey("KEY_Enter", {});
   await TestUtils.waitForCondition(
-    () => win.gBrowser.tabs.length === 2,
+    () => window.gBrowser.tabs.length === 2,
     "Two tabs are open."
   );
 
@@ -190,16 +221,13 @@ add_task(async function test_keyboard_navigation_vertical_tabs() {
   ok(isActiveElement(newTabButton), "New tab button is focused again.");
 
   info("Tab to get to tools.");
-  EventUtils.synthesizeKey("KEY_Tab", {}, win);
-  ok(isActiveElement(toolButtons[0]), "First tool button is focused.");
+  EventUtils.synthesizeKey("KEY_Tab", {});
+  ok(isActiveElement(sidebar.toolButtons[0]), "First tool button is focused.");
 
   info("Shift+Tab back to new tab button.");
-  EventUtils.synthesizeKey("KEY_Tab", { shiftKey: true }, win);
+  EventUtils.synthesizeKey("KEY_Tab", { shiftKey: true }, window);
   ok(isActiveElement(newTabButton), "New tab button is focused.");
 
   await SpecialPowers.popPrefEnv();
-  // clean up extra tabs
-  while (win.gBrowser.tabs.length > 1) {
-    BrowserTestUtils.removeTab(win.gBrowser.tabs.at(-1));
-  }
+  cleanUpExtraTabs();
 });

@@ -77,9 +77,7 @@ nsMathMLmfracFrame::TransmitAutomaticData() {
   return NS_OK;
 }
 
-nscoord nsMathMLmfracFrame::CalcLineThickness(nsPresContext* aPresContext,
-                                              ComputedStyle* aComputedStyle,
-                                              nsString& aThicknessAttribute,
+nscoord nsMathMLmfracFrame::CalcLineThickness(nsString& aThicknessAttribute,
                                               nscoord onePixel,
                                               nscoord aDefaultRuleThickness,
                                               float aFontSizeInflation) {
@@ -91,9 +89,9 @@ nscoord nsMathMLmfracFrame::CalcLineThickness(nsPresContext* aPresContext,
   // https://w3c.github.io/mathml-core/#dfn-linethickness
   if (!aThicknessAttribute.IsEmpty()) {
     lineThickness = defaultThickness;
-    ParseNumericValue(aThicknessAttribute, &lineThickness,
-                      dom::MathMLElement::PARSE_ALLOW_NEGATIVE, aPresContext,
-                      aComputedStyle, aFontSizeInflation);
+    ParseAndCalcNumericValue(aThicknessAttribute, &lineThickness,
+                             dom::MathMLElement::PARSE_ALLOW_NEGATIVE,
+                             aFontSizeInflation, this);
     // MathML Core says a negative value is interpreted as 0.
     if (lineThickness < 0) {
       lineThickness = 0;
@@ -122,7 +120,7 @@ nsresult nsMathMLmfracFrame::AttributeChanged(int32_t aNameSpaceID,
                                               nsAtom* aAttribute,
                                               int32_t aModType) {
   if (aNameSpaceID == kNameSpaceID_None &&
-      nsGkAtoms::linethickness_ == aAttribute) {
+      nsGkAtoms::linethickness == aAttribute) {
     // The thickness changes, so a repaint of the bar is needed.
     InvalidateFrame();
     // The thickness affects vertical offsets.
@@ -198,10 +196,9 @@ nsresult nsMathMLmfracFrame::Place(DrawTarget* aDrawTarget,
 
   // see if the linethickness attribute is there
   nsAutoString value;
-  mContent->AsElement()->GetAttr(nsGkAtoms::linethickness_, value);
-  mLineThickness =
-      CalcLineThickness(presContext, mComputedStyle, value, onePixel,
-                        defaultRuleThickness, fontSizeInflation);
+  mContent->AsElement()->GetAttr(nsGkAtoms::linethickness, value);
+  mLineThickness = CalcLineThickness(value, onePixel, defaultRuleThickness,
+                                     fontSizeInflation);
 
   bool displayStyle = StyleFont()->mMathStyle == StyleMathStyle::Normal;
 

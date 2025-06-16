@@ -3,13 +3,10 @@
 
 "use strict";
 
-const { actionTypes: at, actionCreators: ac } = ChromeUtils.importESModule(
-  "resource://newtab/common/Actions.mjs"
-);
-
 ChromeUtils.defineESModuleGetters(this, {
+  actionCreators: "resource://newtab/common/Actions.mjs",
+  actionTypes: "resource://newtab/common/Actions.mjs",
   AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
-  ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   NewTabUtils: "resource://gre/modules/NewTabUtils.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   PartnerLinkAttribution: "resource:///modules/PartnerLinkAttribution.sys.mjs",
@@ -21,8 +18,6 @@ ChromeUtils.defineESModuleGetters(this, {
   sinon: "resource://testing-common/Sinon.sys.mjs",
   TestUtils: "resource://testing-common/TestUtils.sys.mjs",
 });
-
-const { PlacesObserver } = PlacesFeed;
 
 const FAKE_BOOKMARK = {
   bookmarkGuid: "D3r1sKRobtbW",
@@ -147,7 +142,7 @@ add_task(async function test_onAction_PlacesEvents() {
   let feed = getPlacesFeedForTest(sandbox);
   sandbox.stub(feed.placesObserver, "handlePlacesEvent");
 
-  feed.onAction({ type: at.INIT });
+  feed.onAction({ type: actionTypes.INIT });
   // The PlacesObserver registration happens at the next tick of the
   // event loop.
   await TestUtils.waitForTick();
@@ -223,7 +218,7 @@ add_task(async function test_onAction_PlacesEvents() {
 
   // Unlike INIT, UNINIT removes the observers synchronously, so no need to
   // wait for the event loop to tick around again.
-  feed.onAction({ type: at.UNINIT });
+  feed.onAction({ type: actionTypes.UNINIT });
 
   for (let notification of notifications) {
     PlacesUtils.observers.notifyListeners([notification]);
@@ -247,7 +242,7 @@ add_task(async function test_onAction_BLOCK_URL() {
   sandbox.stub(NewTabUtils.activityStreamLinks, "blockURL");
 
   feed.onAction({
-    type: at.BLOCK_URL,
+    type: actionTypes.BLOCK_URL,
     data: [{ url: "apple.com", pocket_id: 1234 }],
   });
   Assert.ok(
@@ -270,7 +265,7 @@ add_task(async function test_onAction_BLOCK_URL_topsites_sponsors() {
   sandbox.stub(feed, "addToBlockedTopSitesSponsors");
 
   feed.onAction({
-    type: at.BLOCK_URL,
+    type: actionTypes.BLOCK_URL,
     data: [{ url: "foo.com", pocket_id: 1234, isSponsoredTopSite: 1 }],
   });
   Assert.ok(feed.addToBlockedTopSitesSponsors.calledWith([{ url: "foo.com" }]));
@@ -286,7 +281,7 @@ add_task(async function test_onAction_BOOKMARK_URL() {
 
   let data = { url: "pear.com", title: "A pear" };
   let _target = { browser: { ownerGlobal() {} } };
-  feed.onAction({ type: at.BOOKMARK_URL, data, _target });
+  feed.onAction({ type: actionTypes.BOOKMARK_URL, data, _target });
   Assert.ok(
     NewTabUtils.activityStreamLinks.addBookmark.calledWith(
       data,
@@ -303,7 +298,7 @@ add_task(async function test_onAction_DELETE_BOOKMARK_BY_ID() {
   let feed = getPlacesFeedForTest(sandbox);
   sandbox.stub(NewTabUtils.activityStreamLinks, "deleteBookmark");
 
-  feed.onAction({ type: at.DELETE_BOOKMARK_BY_ID, data: "g123kd" });
+  feed.onAction({ type: actionTypes.DELETE_BOOKMARK_BY_ID, data: "g123kd" });
   Assert.ok(
     NewTabUtils.activityStreamLinks.deleteBookmark.calledWith("g123kd")
   );
@@ -321,7 +316,7 @@ add_task(async function test_onAction_DELETE_HISTORY_URL() {
   sandbox.stub(NewTabUtils.activityStreamLinks, "blockURL");
 
   feed.onAction({
-    type: at.DELETE_HISTORY_URL,
+    type: actionTypes.DELETE_HISTORY_URL,
     data: { url: "guava.com", forceBlock: null },
   });
   Assert.ok(
@@ -343,7 +338,7 @@ add_task(async function test_onAction_DELETE_HISTORY_URL_and_block() {
   sandbox.stub(NewTabUtils.activityStreamLinks, "blockURL");
 
   feed.onAction({
-    type: at.DELETE_HISTORY_URL,
+    type: actionTypes.DELETE_HISTORY_URL,
     data: { url: "guava.com", forceBlock: "g123kd" },
   });
   Assert.ok(
@@ -368,7 +363,7 @@ add_task(async function test_onAction_OPEN_NEW_WINDOW() {
   let feed = getPlacesFeedForTest(sandbox);
   let openTrustedLinkIn = sandbox.stub();
   let openWindowAction = {
-    type: at.OPEN_NEW_WINDOW,
+    type: actionTypes.OPEN_NEW_WINDOW,
     data: { url: "https://foo.com" },
     _target: { browser: { ownerGlobal: { openTrustedLinkIn } } },
   };
@@ -394,7 +389,7 @@ add_task(async function test_onAction_OPEN_PRIVATE_WINDOW() {
   let feed = getPlacesFeedForTest(sandbox);
   let openTrustedLinkIn = sandbox.stub();
   let openWindowAction = {
-    type: at.OPEN_PRIVATE_WINDOW,
+    type: actionTypes.OPEN_PRIVATE_WINDOW,
     data: { url: "https://foo.com" },
     _target: { browser: { ownerGlobal: { openTrustedLinkIn } } },
   };
@@ -420,7 +415,7 @@ add_task(async function test_onAction_OPEN_LINK() {
   let feed = getPlacesFeedForTest(sandbox);
   let openTrustedLinkIn = sandbox.stub();
   let openLinkAction = {
-    type: at.OPEN_LINK,
+    type: actionTypes.OPEN_LINK,
     data: { url: "https://foo.com" },
     _target: {
       browser: {
@@ -446,7 +441,7 @@ add_task(async function test_onAction_OPEN_LINK_referrer() {
   let feed = getPlacesFeedForTest(sandbox);
   let openTrustedLinkIn = sandbox.stub();
   let openLinkAction = {
-    type: at.OPEN_LINK,
+    type: actionTypes.OPEN_LINK,
     data: { url: "https://foo.com", referrer: "https://foo.com/ref" },
     _target: {
       browser: {
@@ -489,7 +484,7 @@ add_task(async function test_onAction_OPEN_LINK_typed_bonus() {
     callOrder.push("openTrustedLinkIn");
   });
   let openLinkAction = {
-    type: at.OPEN_LINK,
+    type: actionTypes.OPEN_LINK,
     data: {
       typedBonus: true,
       url: "https://foo.com",
@@ -516,7 +511,7 @@ add_task(async function test_onAction_OPEN_LINK_pocket() {
   let feed = getPlacesFeedForTest(sandbox);
   let openTrustedLinkIn = sandbox.stub();
   let openLinkAction = {
-    type: at.OPEN_LINK,
+    type: actionTypes.OPEN_LINK,
     data: {
       url: "https://foo.com",
       open_url: "https://getpocket.com/foo",
@@ -547,7 +542,7 @@ add_task(async function test_onAction_OPEN_LINK_not_http() {
   let feed = getPlacesFeedForTest(sandbox);
   let openTrustedLinkIn = sandbox.stub();
   let openLinkAction = {
-    type: at.OPEN_LINK,
+    type: actionTypes.OPEN_LINK,
     data: { url: "file:///foo.com" },
     _target: {
       browser: {
@@ -572,7 +567,7 @@ add_task(async function test_onAction_FILL_SEARCH_TERM() {
   let feed = getPlacesFeedForTest(sandbox);
   sandbox.stub(feed, "fillSearchTopSiteTerm");
 
-  feed.onAction({ type: at.FILL_SEARCH_TERM });
+  feed.onAction({ type: actionTypes.FILL_SEARCH_TERM });
 
   Assert.ok(
     feed.fillSearchTopSiteTerm.calledOnce,
@@ -590,7 +585,7 @@ add_task(async function test_onAction_ABOUT_SPONSORED_TOP_SITES() {
   let feed = getPlacesFeedForTest(sandbox);
   let openTrustedLinkIn = sandbox.stub();
   let openLinkAction = {
-    type: at.ABOUT_SPONSORED_TOP_SITES,
+    type: actionTypes.ABOUT_SPONSORED_TOP_SITES,
     _target: {
       browser: {
         ownerGlobal: { openTrustedLinkIn },
@@ -619,7 +614,7 @@ add_task(async function test_onAction_FILL_SEARCH_TERM() {
   let feed = getPlacesFeedForTest(sandbox);
   let locationBar = { search: sandbox.stub() };
   let action = {
-    type: at.FILL_SEARCH_TERM,
+    type: actionTypes.FILL_SEARCH_TERM,
     data: { label: "@Foo" },
     _target: { browser: { ownerGlobal: { gURLBar: locationBar } } },
   };
@@ -645,7 +640,7 @@ add_task(async function test_onAction_SAVE_TO_POCKET() {
   sandbox.stub(feed, "saveToPocket");
 
   let action = {
-    type: at.SAVE_TO_POCKET,
+    type: actionTypes.SAVE_TO_POCKET,
     data: { site: { url: "raspberry.com", title: "raspberry" } },
     _target: { browser: {} },
   };
@@ -671,9 +666,10 @@ add_task(async function test_onAction_SAVE_TO_POCKET_not_logged_in() {
   let sandbox = sinon.createSandbox();
   sandbox.stub(pktApi, "isUserLoggedIn").returns(false);
   sandbox.stub(NimbusFeatures.pocketNewtab, "getVariable").returns(true);
-  sandbox.stub(ExperimentAPI, "getExperiment").returns({
+  sandbox.stub(NimbusFeatures.pocketNewtab, "getEnrollmentMetadata").returns({
     slug: "slug",
-    branch: { slug: "branch-slug" },
+    branch: "branch-slug",
+    isRollout: false,
   });
   Services.prefs.setStringPref(POCKET_SITE_PREF, "getpocket.com");
 
@@ -681,7 +677,7 @@ add_task(async function test_onAction_SAVE_TO_POCKET_not_logged_in() {
 
   let openTrustedLinkIn = sandbox.stub();
   let action = {
-    type: at.SAVE_TO_POCKET,
+    type: actionTypes.SAVE_TO_POCKET,
     data: { site: { url: "raspberry.com", title: "raspberry" } },
     _target: {
       browser: {
@@ -721,7 +717,7 @@ add_task(async function test_onAction_SAVE_TO_POCKET_logged_in() {
 
   let openTrustedLinkIn = sandbox.stub();
   let action = {
-    type: at.SAVE_TO_POCKET,
+    type: actionTypes.SAVE_TO_POCKET,
     data: { site: { url: "raspberry.com", title: "raspberry" } },
     _target: {
       browser: {
@@ -816,7 +812,7 @@ add_task(async function test_saveToPocket_broadcast_to_content() {
   );
   Assert.equal(
     feed.store.dispatch.firstCall.args[0].type,
-    at.PLACES_SAVED_TO_POCKET
+    actionTypes.PLACES_SAVED_TO_POCKET
   );
   Assert.deepEqual(feed.store.dispatch.firstCall.args[0].data, {
     url: "raspberry.com",
@@ -873,7 +869,7 @@ add_task(async function test_onAction_DELETE_FROM_POCKET() {
   sandbox.stub(feed, "deleteFromPocket");
 
   feed.onAction({
-    type: at.DELETE_FROM_POCKET,
+    type: actionTypes.DELETE_FROM_POCKET,
     data: { pocket_id: 12345 },
   });
 
@@ -933,7 +929,7 @@ add_task(async function test_deleteFromPocket_calls_deletePocketEntry() {
   );
   Assert.ok(
     feed.store.dispatch.calledWithExactly({
-      type: at.POCKET_LINK_DELETED_OR_ARCHIVED,
+      type: actionTypes.POCKET_LINK_DELETED_OR_ARCHIVED,
     })
   );
 
@@ -950,7 +946,7 @@ add_task(async function test_onAction_ARCHIVE_FROM_POCKET() {
   sandbox.stub(feed, "archiveFromPocket");
 
   await feed.onAction({
-    type: at.ARCHIVE_FROM_POCKET,
+    type: actionTypes.ARCHIVE_FROM_POCKET,
     data: { pocket_id: 12345 },
   });
 
@@ -1011,7 +1007,7 @@ add_task(async function test_archiveFromPocket_calls_archivePocketEntry() {
   );
   Assert.ok(
     feed.store.dispatch.calledWithExactly({
-      type: at.POCKET_LINK_DELETED_OR_ARCHIVED,
+      type: actionTypes.POCKET_LINK_DELETED_OR_ARCHIVED,
     })
   );
 
@@ -1029,7 +1025,7 @@ add_task(async function test_onAction_HANDOFF_SEARCH_TO_AWESOMEBAR() {
   sandbox.stub(feed, "handoffSearchToAwesomebar");
 
   let action = {
-    type: at.HANDOFF_SEARCH_TO_AWESOMEBAR,
+    type: actionTypes.HANDOFF_SEARCH_TO_AWESOMEBAR,
     data: { text: "f" },
     meta: { fromTarget: {} },
     _target: { browser: { ownerGlobal: { gURLBar: { focus: () => {} } } } },
@@ -1058,7 +1054,7 @@ add_task(async function test_onAction_PARTNER_LINK_ATTRIBUTION() {
 
   let data = { targetURL: "https://partnersite.com", source: "topsites" };
   feed.onAction({
-    type: at.PARTNER_LINK_ATTRIBUTION,
+    type: actionTypes.PARTNER_LINK_ATTRIBUTION,
     data,
   });
 
@@ -1391,7 +1387,7 @@ add_task(async function test_observe_dispatch_PLACES_LINK_BLOCKED() {
   feed.observe(null, BLOCKED_EVENT, "foo123.com");
   Assert.equal(
     feed.store.dispatch.firstCall.args[0].type,
-    at.PLACES_LINK_BLOCKED
+    actionTypes.PLACES_LINK_BLOCKED
   );
   Assert.deepEqual(feed.store.dispatch.firstCall.args[0].data, {
     url: "foo123.com",
@@ -1499,7 +1495,7 @@ add_task(
 
       Assert.ok(
         feed.store.dispatch.withArgs(
-          ac.OnlyToMain({ type: at.PLACES_LINKS_CHANGED })
+          actionCreators.OnlyToMain({ type: actionTypes.PLACES_LINKS_CHANGED })
         ).calledOnce,
         "PlacesFeed.store.dispatch called with PLACES_LINKS_CHANGED once"
       );
@@ -1516,7 +1512,7 @@ add_task(async function test_PlacesObserver_dispatches() {
         "PlacesObserver should dispatch a PLACES_HISTORY_CLEARED action " +
         "on history-cleared",
       args: { type: "history-cleared" },
-      expectedAction: { type: at.PLACES_HISTORY_CLEARED },
+      expectedAction: { type: actionTypes.PLACES_HISTORY_CLEARED },
     },
     {
       message:
@@ -1528,7 +1524,7 @@ add_task(async function test_PlacesObserver_dispatches() {
         isRemovedFromStore: true,
       },
       expectedAction: {
-        type: at.PLACES_LINKS_DELETED,
+        type: actionTypes.PLACES_LINKS_DELETED,
         data: { urls: ["foo.com"] },
       },
     },
@@ -1547,7 +1543,7 @@ add_task(async function test_PlacesObserver_dispatches() {
         type: "bookmark-added",
       },
       expectedAction: {
-        type: at.PLACES_BOOKMARK_ADDED,
+        type: actionTypes.PLACES_BOOKMARK_ADDED,
         data: {
           bookmarkGuid: FAKE_BOOKMARK.bookmarkGuid,
           bookmarkTitle: FAKE_BOOKMARK.bookmarkTitle,
@@ -1571,7 +1567,7 @@ add_task(async function test_PlacesObserver_dispatches() {
         type: "bookmark-added",
       },
       expectedAction: {
-        type: at.PLACES_BOOKMARK_ADDED,
+        type: actionTypes.PLACES_BOOKMARK_ADDED,
         data: {
           bookmarkGuid: FAKE_BOOKMARK.bookmarkGuid,
           bookmarkTitle: FAKE_BOOKMARK.bookmarkTitle,
@@ -1586,7 +1582,7 @@ add_task(async function test_PlacesObserver_dispatches() {
     info(message);
     let sandbox = sinon.createSandbox();
     let dispatch = sandbox.spy();
-    let observer = new PlacesObserver(dispatch);
+    let observer = new PlacesFeed.PlacesObserver(dispatch);
     await observer.handlePlacesEvent([args]);
     Assert.ok(dispatch.calledWith(expectedAction));
     sandbox.restore();
@@ -1771,7 +1767,7 @@ add_task(async function test_PlacesObserver_ignores() {
     info(message);
     let sandbox = sinon.createSandbox();
     let dispatch = sandbox.spy();
-    let observer = new PlacesObserver(dispatch);
+    let observer = new PlacesFeed.PlacesObserver(dispatch);
 
     await observer.handlePlacesEvent([event]);
     Assert.ok(dispatch.notCalled, "PlacesObserver.dispatch not called");
@@ -1786,7 +1782,7 @@ add_task(async function test_PlacesObserver_bookmark_removed() {
   );
   let sandbox = sinon.createSandbox();
   let dispatch = sandbox.spy();
-  let observer = new PlacesObserver(dispatch);
+  let observer = new PlacesFeed.PlacesObserver(dispatch);
 
   await observer.handlePlacesEvent([
     {
@@ -1804,7 +1800,7 @@ add_task(async function test_PlacesObserver_bookmark_removed() {
 
   Assert.ok(
     dispatch.calledWith({
-      type: at.PLACES_BOOKMARKS_REMOVED,
+      type: actionTypes.PLACES_BOOKMARKS_REMOVED,
       data: { urls: ["foo.com"] },
     })
   );

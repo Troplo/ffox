@@ -12,6 +12,11 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import mozilla.components.browser.state.state.BrowserState
+import mozilla.components.browser.state.state.createTab
+import mozilla.components.browser.state.store.BrowserStore
+import mozilla.components.concept.engine.EngineSession
+import mozilla.components.support.test.mock
 import mozilla.components.support.test.robolectric.testContext
 import mozilla.components.support.test.rule.MainCoroutineRule
 import mozilla.telemetry.glean.testing.GleanTestRule
@@ -22,6 +27,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.fenix.GleanMetrics.BrokenSiteReport
+import org.mozilla.fenix.GleanMetrics.BrokenSiteReportBrowserInfo
 import org.mozilla.fenix.GleanMetrics.BrokenSiteReportBrowserInfoApp
 import org.mozilla.fenix.GleanMetrics.BrokenSiteReportBrowserInfoGraphics
 import org.mozilla.fenix.GleanMetrics.BrokenSiteReportBrowserInfoPrefs
@@ -63,6 +69,10 @@ class WebCompatReporterSubmissionMiddlewareTest {
                 BrokenSiteReportTabInfoAntitracking.btpHasPurgedSite.testGetValue(),
             )
             assertEquals(
+                "standard",
+                BrokenSiteReportTabInfoAntitracking.etpCategory.testGetValue(),
+            )
+            assertEquals(
                 false,
                 BrokenSiteReportTabInfoAntitracking.hasMixedActiveContentBlocked.testGetValue(),
             )
@@ -77,6 +87,16 @@ class WebCompatReporterSubmissionMiddlewareTest {
             assertEquals(
                 false,
                 BrokenSiteReportTabInfoAntitracking.isPrivateBrowsing.testGetValue(),
+            )
+
+            assertEquals(
+                BrokenSiteReportBrowserInfo.AddonsObject(),
+                BrokenSiteReportBrowserInfo.addons.testGetValue(),
+            )
+
+            assertEquals(
+                BrokenSiteReportBrowserInfo.ExperimentsObject(),
+                BrokenSiteReportBrowserInfo.experiments.testGetValue(),
             )
 
             assertEquals(
@@ -203,10 +223,24 @@ class WebCompatReporterSubmissionMiddlewareTest {
         Pings.brokenSiteReport.testBeforeNextSubmit {
             assertNull(BrokenSiteReportTabInfoAntitracking.blockList.testGetValue())
             assertNull(BrokenSiteReportTabInfoAntitracking.btpHasPurgedSite.testGetValue())
+            assertNull(BrokenSiteReportTabInfoAntitracking.etpCategory.testGetValue())
             assertNull(BrokenSiteReportTabInfoAntitracking.hasMixedActiveContentBlocked.testGetValue())
             assertNull(BrokenSiteReportTabInfoAntitracking.hasMixedDisplayContentBlocked.testGetValue())
             assertNull(BrokenSiteReportTabInfoAntitracking.hasTrackingContentBlocked.testGetValue())
             assertNull(BrokenSiteReportTabInfoAntitracking.isPrivateBrowsing.testGetValue())
+
+            assertNull(BrokenSiteReportBrowserInfo.addons.testGetValue())
+            assertNull(BrokenSiteReportBrowserInfo.experiments.testGetValue())
+
+            assertEquals(
+                BrokenSiteReportBrowserInfo.AddonsObject(),
+                BrokenSiteReportBrowserInfo.addons.testGetValue(),
+            )
+
+            assertEquals(
+                BrokenSiteReportBrowserInfo.ExperimentsObject(),
+                BrokenSiteReportBrowserInfo.experiments.testGetValue(),
+            )
 
             assertEquals(
                 "testDefaultUserAgent",
@@ -232,6 +266,16 @@ class WebCompatReporterSubmissionMiddlewareTest {
             assertEquals(
                 """[{"id":"monitor1"},{"id":"monitor2"},{"id":"monitor3"}]""",
                 BrokenSiteReportBrowserInfoGraphics.monitorsJson.testGetValue(),
+            )
+
+            assertEquals(
+                BrokenSiteReportBrowserInfo.AddonsObject(),
+                BrokenSiteReportBrowserInfo.addons.testGetValue(),
+            )
+
+            assertEquals(
+                BrokenSiteReportBrowserInfo.ExperimentsObject(),
+                BrokenSiteReportBrowserInfo.experiments.testGetValue(),
             )
 
             assertEquals(
@@ -312,10 +356,14 @@ class WebCompatReporterSubmissionMiddlewareTest {
         Pings.brokenSiteReport.testBeforeNextSubmit {
             assertNull(BrokenSiteReportTabInfoAntitracking.blockList.testGetValue())
             assertNull(BrokenSiteReportTabInfoAntitracking.btpHasPurgedSite.testGetValue())
+            assertNull(BrokenSiteReportTabInfoAntitracking.etpCategory.testGetValue())
             assertNull(BrokenSiteReportTabInfoAntitracking.hasMixedActiveContentBlocked.testGetValue())
             assertNull(BrokenSiteReportTabInfoAntitracking.hasMixedDisplayContentBlocked.testGetValue())
             assertNull(BrokenSiteReportTabInfoAntitracking.hasTrackingContentBlocked.testGetValue())
             assertNull(BrokenSiteReportTabInfoAntitracking.isPrivateBrowsing.testGetValue())
+
+            assertNull(BrokenSiteReportBrowserInfo.addons.testGetValue())
+            assertNull(BrokenSiteReportBrowserInfo.experiments.testGetValue())
 
             assertNull(BrokenSiteReportBrowserInfoApp.defaultUseragentString.testGetValue())
 
@@ -360,21 +408,37 @@ class WebCompatReporterSubmissionMiddlewareTest {
         store.dispatch(WebCompatReporterAction.SendReportClicked)
     }
 
-    private fun createStore(service: WebCompatReporterRetrievalService) = WebCompatReporterStore(
-        initialState = WebCompatReporterState(
-            tabUrl = "https://www.mozilla.org",
-            enteredUrl = "https://www.mozilla.org/en-US/firefox/new/",
-            reason = WebCompatReporterState.BrokenSiteReason.Slow,
-            problemDescription = "",
-        ),
-        middleware = listOf(
-            WebCompatReporterSubmissionMiddleware(
-                appStore = appStore,
-                webCompatReporterRetrievalService = service,
-                scope = coroutinesTestRule.scope,
+    private fun createStore(service: WebCompatReporterRetrievalService): WebCompatReporterStore {
+        val engineSession: EngineSession = mock()
+        val tab = createTab(
+            url = "https://www.mozilla.org",
+            id = "test-tab",
+            engineSession = engineSession,
+        )
+        val browserStore = BrowserStore(
+            initialState = BrowserState(
+                tabs = listOf(tab),
+                selectedTabId = tab.id,
             ),
-        ),
-    )
+        )
+
+        return WebCompatReporterStore(
+            initialState = WebCompatReporterState(
+                tabUrl = "https://www.mozilla.org",
+                enteredUrl = "https://www.mozilla.org/en-US/firefox/new/",
+                reason = WebCompatReporterState.BrokenSiteReason.Slow,
+                problemDescription = "",
+            ),
+            middleware = listOf(
+                WebCompatReporterSubmissionMiddleware(
+                    appStore = appStore,
+                    browserStore = browserStore,
+                    webCompatReporterRetrievalService = service,
+                    scope = coroutinesTestRule.scope,
+                ),
+            ),
+        )
+    }
 
     private class FakeWebCompatReporterRetrievalService : WebCompatReporterRetrievalService {
 
@@ -383,14 +447,23 @@ class WebCompatReporterSubmissionMiddlewareTest {
                 antitracking = WebCompatInfoDto.WebCompatAntiTrackingDto(
                     blockList = "basic",
                     btpHasPurgedSite = false,
+                    etpCategory = "standard",
                     hasMixedActiveContentBlocked = false,
                     hasMixedDisplayContentBlocked = false,
                     hasTrackingContentBlocked = false,
                     isPrivateBrowsing = false,
                 ),
                 browser = WebCompatInfoDto.WebCompatBrowserDto(
+                    addons = listOf(
+                        WebCompatInfoDto.WebCompatBrowserDto.AddonDto(id = "id.temp", name = "name1", temporary = true, version = "version1"),
+                        WebCompatInfoDto.WebCompatBrowserDto.AddonDto(id = "id.perm", name = "name2", temporary = false, version = "version2"),
+                    ),
                     app = WebCompatInfoDto.WebCompatBrowserDto.AppDto(
                         defaultUserAgent = "testDefaultUserAgent",
+                    ),
+                    experiments = listOf(
+                        WebCompatInfoDto.WebCompatBrowserDto.ExperimentDto(branch = "branch1", slug = "slug1", kind = "kind1"),
+                        WebCompatInfoDto.WebCompatBrowserDto.ExperimentDto(branch = "branch2", slug = "slug2", kind = "kind2"),
                     ),
                     graphics = WebCompatInfoDto.WebCompatBrowserDto.GraphicsDto(
                         devices = buildJsonArray {

@@ -14,7 +14,6 @@
 #ifdef MOZ_AV1
 #  include "AOMDecoder.h"
 #endif
-#include "DecoderBenchmark.h"
 #include "MediaData.h"
 #include "MediaDataDecoderProxy.h"
 #include "MediaInfo.h"
@@ -206,6 +205,12 @@ void MediaFormatReader::DecoderData::Flush() {
         });
   }
   mFlushed = true;
+}
+
+void MediaFormatReader::DecoderData::RequestDrain() {
+  LOG("");
+  MOZ_RELEASE_ASSERT(mDrainState == DrainState::None);
+  mDrainState = DrainState::DrainRequested;
 }
 
 class MediaFormatReader::DecoderFactory {
@@ -483,10 +488,6 @@ void MediaFormatReader::DecoderFactory::DoInitDecoder(Data& aData) {
                 ownerData.mDecoder.get());
             mOwner->SetVideoDecodeThreshold();
             mOwner->ScheduleUpdate(aTrack);
-            if (aTrack == TrackInfo::kVideoTrack) {
-              DecoderBenchmark::CheckVersion(
-                  ownerData.GetCurrentInfo()->mMimeType);
-            }
             if (aTrack == TrackInfo::kAudioTrack) {
               ownerData.mProcessName = ownerData.mDecoder->GetProcessName();
               ownerData.mCodecName = ownerData.mDecoder->GetCodecName();
@@ -1019,19 +1020,6 @@ void MediaFormatReader::ShutdownDecoder(TrackType aTrack) {
 
   // Shut down the decoder if any.
   decoder.ShutdownDecoder();
-}
-
-void MediaFormatReader::NotifyDecoderBenchmarkStore() {
-  MOZ_ASSERT(OnTaskQueue());
-  if (!StaticPrefs::media_mediacapabilities_from_database()) {
-    return;
-  }
-  auto& decoder = GetDecoderData(TrackInfo::kVideoTrack);
-  if (decoder.GetCurrentInfo() && decoder.GetCurrentInfo()->GetAsVideoInfo()) {
-    VideoInfo info = *(decoder.GetCurrentInfo()->GetAsVideoInfo());
-    info.SetFrameRate(static_cast<int32_t>(ceil(decoder.mMeanRate.Mean())));
-    mOnStoreDecoderBenchmark.Notify(std::move(info));
-  }
 }
 
 void MediaFormatReader::NotifyTrackInfoUpdated() {
@@ -2200,11 +2188,6 @@ void MediaFormatReader::HandleDemuxedSamples(
     PROFILER_MARKER_TEXT("StreamID Change", MEDIA_PLAYBACK, {}, markerString);
     LOG("%s", markerString.get());
 
-    if (aTrack == TrackInfo::kVideoTrack) {
-      // We are about to create a new decoder thus the benchmark,
-      // up to this point, is stored.
-      NotifyDecoderBenchmarkStore();
-    }
     decoder.mNextStreamSourceID.reset();
     decoder.mLastStreamSourceID = info->GetID();
     decoder.mInfo = info;
@@ -2353,17 +2336,19 @@ void MediaFormatReader::DrainDecoder(TrackType aTrack) {
   decoder.mDecoder->Drain()
       ->Then(
           mTaskQueue, __func__,
-          [self, aTrack, &decoder](MediaDataDecoder::DecodedData&& aResults) {
+          [this, self, aTrack,
+           &decoder](MediaDataDecoder::DecodedData&& aResults) {
             decoder.mDrainRequest.Complete();
             DDLOGEX(self.get(), DDLogCategory::Log, "drained", DDNoValue{});
             if (aResults.IsEmpty()) {
+              LOG("DrainDecoder drained");
               decoder.mDrainState = DrainState::DrainCompleted;
             } else {
-              self->NotifyNewOutput(aTrack, std::move(aResults));
+              NotifyNewOutput(aTrack, std::move(aResults));
               // Let's see if we have any more data available to drain.
               decoder.mDrainState = DrainState::PartialDrainPending;
             }
-            self->ScheduleUpdate(aTrack);
+            ScheduleUpdate(aTrack);
           },
           [self, aTrack, &decoder](const MediaResult& aError) {
             decoder.mDrainRequest.Complete();
@@ -2500,10 +2485,6 @@ void MediaFormatReader::Update(TrackType aTrack) {
     } else if (decoder.HasCompletedDrain()) {
       if (decoder.mDemuxEOS) {
         LOG("Rejecting %s promise: EOS", TrackTypeToStr(aTrack));
-        if (aTrack == TrackInfo::kVideoTrack) {
-          // End of video, store the benchmark of the decoder.
-          NotifyDecoderBenchmarkStore();
-        }
         decoder.RejectPromise(NS_ERROR_DOM_MEDIA_END_OF_STREAM, __func__);
       } else if (decoder.mWaitingForDataStartTime) {
         if (decoder.mDrainState == DrainState::DrainCompleted &&
@@ -2815,6 +2796,7 @@ RefPtr<MediaFormatReader::WaitForDataPromise> MediaFormatReader::WaitForData(
   auto& decoder = GetDecoderData(trackType);
   if (!decoder.IsWaitingForData() && !decoder.IsWaitingForKey()) {
     // We aren't waiting for anything.
+    LOGV("Not waiting. Returning resolved promise");
     return WaitForDataPromise::CreateAndResolve(decoder.mType, __func__);
   }
   RefPtr<WaitForDataPromise> p = decoder.mWaitingPromise.Ensure(__func__);

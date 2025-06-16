@@ -8,13 +8,14 @@ ChromeUtils.defineESModuleGetters(this, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   BuiltInThemes: "resource:///modules/BuiltInThemes.sys.mjs",
   CFRMessageProvider: "resource:///modules/asrouter/CFRMessageProvider.sys.mjs",
+  ClientID: "resource://gre/modules/ClientID.sys.mjs",
   ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
-  ExperimentFakes: "resource://testing-common/NimbusTestUtils.sys.mjs",
   FxAccounts: "resource://gre/modules/FxAccounts.sys.mjs",
   HomePage: "resource:///modules/HomePage.sys.mjs",
   InfoBar: "resource:///modules/asrouter/InfoBar.sys.mjs",
   NewTabUtils: "resource://gre/modules/NewTabUtils.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+  NimbusTestUtils: "resource://testing-common/NimbusTestUtils.sys.mjs",
   PlacesTestUtils: "resource://testing-common/PlacesTestUtils.sys.mjs",
   ProfileAge: "resource://gre/modules/ProfileAge.sys.mjs",
   QueryCache: "resource:///modules/asrouter/ASRouterTargeting.sys.mjs",
@@ -220,6 +221,12 @@ add_task(async function check_canCreateSelectableProfiles() {
     return;
   }
 
+  // Reset profiles prefs
+  await pushPrefs(
+    ["browser.profiles.enabled", false],
+    ["browser.profiles.created", false]
+  );
+
   is(
     await ASRouterTargeting.Environment.canCreateSelectableProfiles,
     false,
@@ -227,8 +234,13 @@ add_task(async function check_canCreateSelectableProfiles() {
   );
 
   // We have to fake there being a real profile available and enable the profiles feature
-  await pushPrefs(["browser.profiles.enabled", "someValue"]);
-  await SelectableProfileService.resetProfileService({ currentProfile: {} });
+  await pushPrefs(
+    ["browser.profiles.enabled", true],
+    ["browser.profiles.created", false]
+  );
+  await ProfilesDatastoreService.resetProfileService({ currentProfile: {} });
+  await SelectableProfileService.uninit();
+  await SelectableProfileService.init();
 
   is(
     await ASRouterTargeting.Environment.canCreateSelectableProfiles,
@@ -243,7 +255,7 @@ add_task(async function check_canCreateSelectableProfiles() {
     "should select correct item by canCreateSelectableProfiles"
   );
 
-  await SelectableProfileService.resetProfileService(null);
+  await ProfilesDatastoreService.resetProfileService(null);
 });
 
 add_task(async function check_hasSelectableProfiles() {
@@ -253,7 +265,7 @@ add_task(async function check_hasSelectableProfiles() {
     "should return false before the pref is set"
   );
 
-  await pushPrefs(["toolkit.profiles.storeID", "someValue"]);
+  await pushPrefs(["browser.profiles.created", true]);
   is(
     await ASRouterTargeting.Environment.hasSelectableProfiles,
     true,
@@ -518,6 +530,15 @@ add_task(async function checkAddonsInfo() {
   const FAKE_NAME = "Test Addon";
   const FAKE_VERSION = "0.5.7";
 
+  let { hasInstalledAddons: installedAddons } =
+    await ASRouterTargeting.Environment.addonsInfo;
+
+  Assert.strictEqual(
+    installedAddons,
+    false,
+    "should correctly return hasInstalledAddons"
+  );
+
   const xpi = AddonTestUtils.createTempWebExtensionFile({
     manifest: {
       browser_specific_settings: { gecko: { id: FAKE_ID } },
@@ -536,8 +557,11 @@ add_task(async function checkAddonsInfo() {
     "service",
   ]);
 
-  const { addons: asRouterAddons, isFullData } =
-    await ASRouterTargeting.Environment.addonsInfo;
+  const {
+    addons: asRouterAddons,
+    isFullData,
+    hasInstalledAddons,
+  } = await ASRouterTargeting.Environment.addonsInfo;
 
   ok(
     addons.every(({ id }) => asRouterAddons[id]),
@@ -611,6 +635,8 @@ add_task(async function checkAddonsInfo() {
       Math.abs(Date.now() - new Date(testAddon.installDate)) < 60 * 1000,
     "should correctly provide `installDate` property from full data"
   );
+
+  ok(hasInstalledAddons, "should correctly return hasInstalledAddons");
 });
 
 add_task(async function checkFrecentSites() {
@@ -1544,6 +1570,64 @@ add_task(async function check_isMSIX() {
   );
 });
 
+add_task(async function check_packageFamilyName() {
+  if (AppConstants.platform !== "win") {
+    is(
+      ASRouterTargeting.Environment.packageFamilyName,
+      null,
+      "Should always be null on non-Windows"
+    );
+    return;
+  }
+
+  let winPackageFamilyName = Services.sysinfo.getProperty(
+    "winPackageFamilyName"
+  );
+  if (winPackageFamilyName === "") {
+    is(
+      ASRouterTargeting.Environment.packageFamilyName,
+      null,
+      "Should be null if sysinfo is empty"
+    );
+  } else {
+    is(
+      ASRouterTargeting.Environment.packageFamilyName,
+      winPackageFamilyName,
+      "Should match non-empty sysinfo"
+    );
+  }
+});
+
+add_task(async function check_msixConsistency() {
+  if (ASRouterTargeting.Environment.isMSIX) {
+    Assert.greater(
+      ASRouterTargeting.Environment.packageFamilyName.length,
+      0,
+      "packageFamilyName should be non-empty if installed by MSIX"
+    );
+  } else {
+    is(
+      ASRouterTargeting.Environment.packageFamilyName,
+      null,
+      "packageFamilyName should be empty if not installed by MSIX"
+    );
+  }
+
+  if (ASRouterTargeting.Environment.packageFamilyName === null) {
+    is(
+      ASRouterTargeting.Environment.isMSIX,
+      false,
+      "isMSIX should be false if packageFamilyName is not present"
+    );
+  } else {
+    is(
+      ASRouterTargeting.Environment.isMSIX,
+      true,
+      "isMSIX should be true if packageFamilyName is present"
+    );
+  }
+});
+
 add_task(async function check_isRTAMO() {
   is(
     typeof ASRouterTargeting.Environment.isRTAMO,
@@ -1985,4 +2069,42 @@ add_task(async function check_unhandledCampaignAction() {
       after();
     }
   }
+});
+
+add_task(async function check_profileGroupIdTargeting() {
+  const expected = await ClientID.getCachedProfileGroupID();
+  const result = await ASRouterTargeting.Environment.profileGroupId;
+
+  is(typeof result, "string", "profileGroupId should be a string");
+
+  is(result, expected, "it should be equal to the profile group id");
+
+  const message = {
+    id: "foo",
+    targeting: `profileGroupId == "${expected.toString()}"`,
+  };
+  is(
+    await ASRouterTargeting.findMatchingMessage({ messages: [message] }),
+    message,
+    "should select correct item by profile group id"
+  );
+});
+
+add_task(async function test_buildId() {
+  is(
+    typeof ASRouterTargeting.Environment.buildId,
+    "number",
+    "Should return a number"
+  );
+
+  const message = {
+    id: "foo",
+    // Later than January 2025
+    targeting: `buildId >= 20251010000`,
+  };
+  is(
+    await ASRouterTargeting.findMatchingMessage({ messages: [message] }),
+    message,
+    "should select correct item when filtering by build ID"
+  );
 });

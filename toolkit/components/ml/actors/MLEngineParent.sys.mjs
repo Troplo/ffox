@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 /**
  * @typedef {object} Lazy
@@ -27,14 +28,70 @@ ChromeUtils.defineESModuleGetters(lazy, {
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
   clearTimeout: "resource://gre/modules/Timer.sys.mjs",
   ModelHub: "chrome://global/content/ml/ModelHub.sys.mjs",
-  getInferenceProcessInfo: "chrome://global/content/ml/Utils.sys.mjs",
   Progress: "chrome://global/content/ml/Utils.sys.mjs",
+  isAddonEngineId: "chrome://global/content/ml/Utils.sys.mjs",
 });
 
+XPCOMUtils.defineLazyServiceGetter(
+  lazy,
+  "mlUtils",
+  "@mozilla.org/ml-utils;1",
+  "nsIMLUtils"
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "CHECK_FOR_MEMORY",
+  "browser.ml.checkForMemory"
+);
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "MINIMUM_PHYSICAL_MEMORY",
+  "browser.ml.minimumPhysicalMemory"
+);
+
+const ONE_GiB = 1024 * 1024 * 1024;
 const RS_RUNTIME_COLLECTION = "ml-onnx-runtime";
 const RS_INFERENCE_OPTIONS_COLLECTION = "ml-inference-options";
 const RS_ALLOW_DENY_COLLECTION = "ml-model-allow-deny-list";
 const TERMINATE_TIMEOUT = 5000;
+
+/**
+ * Custom error class for handling insufficient memory errors.
+ *
+ * @augments Error
+ */
+export class NotEnoughMemoryError extends Error {
+  /**
+   * Creates an instance of NotEnoughMemoryError.
+   *
+   * @param {object} options - The error options.
+   * @param {string} [options.message="Not enough physical memory available"] - The error message.
+   * @param {number} options.requiredMemory - The amount of memory required in bytes.
+   * @param {number} options.availableMemory - The amount of available memory in bytes.
+   */
+  constructor({
+    message = "Not enough physical memory available",
+    requiredMemory,
+    availableMemory,
+  }) {
+    super(message);
+    this.name = "NotEnoughMemoryError";
+    this.requiredMemory = requiredMemory;
+    this.availableMemory = availableMemory;
+    Error.captureStackTrace(this, this.constructor);
+  }
+
+  /**
+   * Returns a formatted string with details about the memory issue.
+   *
+   * @returns {string} A string describing the required and available memory in GiB.
+   */
+  getDetails() {
+    return `Required Memory: ${(this.requiredMemory / ONE_GiB).toFixed(2)} GiB, Available Memory: ${(this.availableMemory / ONE_GiB).toFixed(2)} GiB`;
+  }
+}
 
 /**
  * The ML engine is in its own content process. This actor handles the
@@ -48,8 +105,8 @@ export class MLEngineParent extends JSProcessActorParent {
    */
   static #remoteClients = {};
 
-  /** @type {Promise<WasmRecord> | null} */
-  static #wasmRecord = null;
+  /** @type {Record<string, Promise<WasmRecord> | null>} */
+  static #wasmRecord = {};
 
   /**
    * Locks to prevent race conditions when creating engines.
@@ -62,21 +119,22 @@ export class MLEngineParent extends JSProcessActorParent {
    * The following constant controls the major and minor version for onnx wasm downloaded from
    * Remote Settings.
    *
-   * In our case, we want to use two distinct ort versions:
-   * - Transformers 2.x needs onnxruntime-web <= 1.19
-   * - Transformers 3.x needs onnxruntime-web > 1.19
+   * When a breaking change is introduced, increment this value and add a corresponding version
    *
-   * We are using "1.x" for the first one, and "2.x" for the second one.
-   * So when updating the versions in remote setting, make sure you use 2.0+ for 1.20+
+   * onnx:
+   * - 1 => Transformers 2.x
+   * - 2 => Transformers < 3.1
+   * - 3 => Transformers < 3.4
+   * - 4 => Transformers >= 3.4.0
+   * - 5 => Transformers >= 3.5.1
    *
-   * When a breaking change is introduced, Nightly will have these
-   * numbers incremented by one, but Beta and Release will still be on the previous
-   * version. Remote Settings will ship both versions of the records, and the latest
-   * asset released in that version will be used. For instance, with a major version
-   * of "1", assets can be downloaded for "1.0", "1.2", "1.3beta", but assets marked
-   * as "2.0", "2.1", etc will not be downloaded.
+   * wllama:
+   * - 3 => wllama 2.x
    */
-  static WASM_MAJOR_VERSION = 3;
+  static WASM_MAJOR_VERSION = {
+    onnx: 5,
+    wllama: 3,
+  };
 
   /**
    * This wasm file supports CPU, WebGPU and WebNN.
@@ -84,7 +142,15 @@ export class MLEngineParent extends JSProcessActorParent {
    * Since SIMD is supported by all major JavaScript engines, non-SIMD build is no longer provided.
    * We also serve the threaded build since we can simply set numThreads to 1 to disable multi-threading.
    */
-  static WASM_FILENAME = "ort-wasm-simd-threaded.jsep.wasm";
+  static WASM_FILENAME = {
+    onnx: "ort-wasm-simd-threaded.jsep.wasm",
+    wllama: "wllama.wasm",
+  };
+
+  /**
+   * This default backend to use when none is specified.
+   */
+  static DEFAULT_BACKEND = "onnx";
 
   /**
    * The modelhub used to retrieve files.
@@ -128,7 +194,7 @@ export class MLEngineParent extends JSProcessActorParent {
   static mockRemoteSettings(remoteClients) {
     lazy.console.log("Mocking remote settings in MLEngineParent.");
     MLEngineParent.#remoteClients = remoteClients;
-    MLEngineParent.#wasmRecord = null;
+    MLEngineParent.#wasmRecord = {};
   }
 
   /**
@@ -137,7 +203,7 @@ export class MLEngineParent extends JSProcessActorParent {
   static removeMocks() {
     lazy.console.log("Removing mocked remote client in MLEngineParent.");
     MLEngineParent.#remoteClients = {};
-    MLEngineParent.#wasmRecord = null;
+    MLEngineParent.#wasmRecord = {};
   }
 
   /**
@@ -150,6 +216,16 @@ export class MLEngineParent extends JSProcessActorParent {
    * @returns {Promise<MLEngine>}
    */
   async getEngine(pipelineOptions, notificationsCallback = null) {
+    if (
+      lazy.CHECK_FOR_MEMORY &&
+      lazy.mlUtils.totalPhysicalMemory < lazy.MINIMUM_PHYSICAL_MEMORY * ONE_GiB
+    ) {
+      throw new NotEnoughMemoryError({
+        availableMemory: lazy.mlUtils.totalPhysicalMemory,
+        requiredMemory: lazy.MINIMUM_PHYSICAL_MEMORY * ONE_GiB,
+      });
+    }
+
     const engineId = pipelineOptions.engineId;
 
     // Allow notifications callback changes even when reusing engine.
@@ -169,7 +245,6 @@ export class MLEngineParent extends JSProcessActorParent {
 
       if (currentEngine) {
         if (currentEngine.pipelineOptions.equals(pipelineOptions)) {
-          lazy.console.debug("Returning existing engine", engineId);
           return currentEngine;
         }
         await MLEngine.removeInstance(
@@ -179,12 +254,19 @@ export class MLEngineParent extends JSProcessActorParent {
         );
       }
 
-      lazy.console.debug("Creating a new engine");
-      const engine = await MLEngine.initialize({
+      var engine;
+      const start = Cu.now();
+
+      engine = await MLEngine.initialize({
         mlEngineParent: this,
         pipelineOptions,
         notificationsCallback,
       });
+      const creationTime = Cu.now() - start;
+
+      Glean.firefoxAiRuntime.engineCreationSuccess[
+        engine.getGleanLabel()
+      ].accumulateSingleSample(creationTime);
 
       // TODO - What happens if the engine is already killed here?
       return engine;
@@ -218,13 +300,16 @@ export class MLEngineParent extends JSProcessActorParent {
   async receiveMessage(message) {
     switch (message.name) {
       case "MLEngine:GetWasmArrayBuffer":
-        return MLEngineParent.getWasmArrayBuffer();
+        return MLEngineParent.getWasmArrayBuffer(message.data);
 
       case "MLEngine:GetModelFile":
         return this.getModelFile(message.data);
 
-      case "MLEngine:GetInferenceProcessInfo":
-        return lazy.getInferenceProcessInfo();
+      case "MLEngine:NotifyModelDownloadComplete":
+        return this.notifyModelDownloadComplete(message.data);
+
+      case "MLEngine:GetWorkerConfig":
+        return MLEngineParent.getWorkerConfig();
 
       case "MLEngine:DestroyEngineProcess":
         if (this.processKeepAlive) {
@@ -241,7 +326,8 @@ export class MLEngineParent extends JSProcessActorParent {
         this.checkTaskName(message.json.taskName);
         return MLEngineParent.getInferenceOptions(
           message.json.featureId,
-          message.json.taskName
+          message.json.taskName,
+          message.json.modelId
         );
       case "MLEngine:Removed":
         if (!message.json.replacement) {
@@ -266,31 +352,18 @@ export class MLEngineParent extends JSProcessActorParent {
       lazy.console.debug(
         "Ignored attempt to delete previous models when the engine is not fully initialized."
       );
+      return;
     }
-
-    const deletePromises = [];
-
-    for (const [
-      key,
-      { taskName, model, revision },
-    ] of this.#modelFilesInUse.entries()) {
-      lazy.console.debug("Deleting previous version for ", {
-        taskName,
-        model,
-        revision,
-      });
-      deletePromises.push(
-        this.modelHub
-          .deleteNonMatchingModelRevisions({
-            taskName,
-            model,
-            targetRevision: revision,
-          })
-          .then(() => this.#modelFilesInUse.delete(key))
-      );
-    }
-
-    await Promise.all(deletePromises);
+    await Promise.all(
+      [...this.#modelFilesInUse].map(async ([key, entry]) => {
+        await this.modelHub.deleteNonMatchingModelRevisions({
+          modelWithHostname: entry.modelWithHostname,
+          taskName: entry.taskName,
+          targetRevision: entry.revision,
+        });
+        this.#modelFilesInUse.delete(key);
+      })
+    );
   }
 
   /**
@@ -308,9 +381,19 @@ export class MLEngineParent extends JSProcessActorParent {
    * the model hub root or an absolute URL.
    * @param {string} config.urlTemplate - The URL of the model file to fetch. Can be a path relative to
    * the model hub root or an absolute URL.
+   * @param {string} config.featureId - The engine id.
+   * @param {string} config.sessionId - Shared across the same model download session.
    * @returns {Promise<[string, object]>} The file local path and headers
    */
-  async getModelFile({ engineId, taskName, url, rootUrl, urlTemplate }) {
+  async getModelFile({
+    engineId,
+    taskName,
+    url,
+    rootUrl,
+    urlTemplate,
+    featureId,
+    sessionId,
+  }) {
     // Create the model hub instance if needed
     if (!this.modelHub) {
       lazy.console.debug("Creating model hub instance");
@@ -336,10 +419,14 @@ export class MLEngineParent extends JSProcessActorParent {
     const [data, headers] = await this.modelHub.getModelDataAsFile({
       engineId,
       taskName,
-      ...parsedUrl,
+      model: parsedUrl.model,
+      revision: parsedUrl.revision,
+      file: parsedUrl.file,
       modelHubRootUrl: rootUrl,
       modelHubUrlTemplate: urlTemplate,
       progressCallback: this.notificationsCallback?.bind(this),
+      featureId,
+      sessionId,
     });
 
     // Keep the latest revision for each task, model
@@ -357,17 +444,55 @@ export class MLEngineParent extends JSProcessActorParent {
     return [data, headers];
   }
 
+  /**
+   * Notify that a model download is complete.
+   *
+   * @param {object} config
+   * @param {string} config.engineId - The engine id.
+   * @param {string} config.model - The model name (organization/name).
+   * @param {string} config.revision - The model revision.
+   * @param {string} config.featureId - The engine id.
+   * @param {string} config.sessionId - Shared across the same model download session.
+   * @returns {Promise<[string, object]>} The file local path and headers
+   */
+  async notifyModelDownloadComplete({
+    engineId,
+    model,
+    revision,
+    featureId,
+    sessionId,
+  }) {
+    return this.modelHub.notifyModelDownloadComplete({
+      engineId,
+      sessionId,
+      featureId,
+      model,
+      revision,
+    });
+  }
+
   /** Gets the wasm file from remote settings.
    *
    * @param {RemoteSettingsClient} client
+   * @param {string} backend - The ML engine for which the WASM buffer is requested.
    */
-  static async #getWasmArrayRecord(client) {
+  static async #getWasmArrayRecord(client, backend) {
     /** @type {WasmRecord[]} */
     const wasmRecords =
       await lazy.TranslationsParent.getMaxSupportedVersionRecords(client, {
-        filters: { name: MLEngineParent.WASM_FILENAME },
-        minSupportedMajorVersion: MLEngineParent.WASM_MAJOR_VERSION,
-        maxSupportedMajorVersion: MLEngineParent.WASM_MAJOR_VERSION,
+        filters: {
+          name: MLEngineParent.WASM_FILENAME[
+            backend || MLEngineParent.DEFAULT_BACKEND
+          ],
+        },
+        minSupportedMajorVersion:
+          MLEngineParent.WASM_MAJOR_VERSION[
+            backend || MLEngineParent.DEFAULT_BACKEND
+          ],
+        maxSupportedMajorVersion:
+          MLEngineParent.WASM_MAJOR_VERSION[
+            backend || MLEngineParent.DEFAULT_BACKEND
+          ],
       });
 
     if (wasmRecords.length === 0) {
@@ -391,6 +516,18 @@ export class MLEngineParent extends JSProcessActorParent {
   }
 
   /**
+   * Gets the configuration of the worker
+   *
+   * @returns {Promise<object>}
+   */
+  static getWorkerConfig() {
+    return {
+      url: "chrome://global/content/ml/MLEngine.worker.mjs",
+      options: { type: "module" },
+    };
+  }
+
+  /**
    * Gets the allow/deny list from remote settings
    *
    */
@@ -407,37 +544,48 @@ export class MLEngineParent extends JSProcessActorParent {
    *
    * @param {string} featureId - id of the feature
    * @param {string} taskName - name of the inference task
+   * @param {string|null} modelId - name of the model id
    * @returns {Promise<ModelRevisionRecord>}
    */
-  static async getInferenceOptions(featureId, taskName) {
+
+  static async getInferenceOptions(featureId, taskName, modelId) {
     const client = MLEngineParent.#getRemoteClient(
       RS_INFERENCE_OPTIONS_COLLECTION
     );
 
-    let records = featureId ? await client.get({ filters: { featureId } }) : [];
-
-    // if the featureId is not in our settings, we fallback to the task name
-    if (records.length === 0) {
-      records = await client.get({
-        filters: {
-          taskName,
-        },
-      });
+    const filters = featureId ? { featureId } : { taskName };
+    if (modelId) {
+      filters.modelId = modelId;
     }
 
-    // if we get more than one entry we error out
+    let records = await client.get({ filters });
+
+    // If no records found and we searched by featureId, retry with taskName
+    if (records.length === 0 && featureId) {
+      lazy.console.debug(`No record for feature id "${featureId}"`);
+      const fallbackFilters = { taskName };
+      if (modelId) {
+        fallbackFilters.modelId = modelId;
+      }
+      records = await client.get({ filters: fallbackFilters });
+      lazy.console.debug(`fallbackFilters: "${fallbackFilters}"`);
+    }
+
+    // Handle case where multiple records exist
     if (records.length > 1) {
       throw new Error(
-        `Found more than one inference options record for ${featureId} and ${taskName}`
+        `Found more than one inference options record for "${featureId}" and "${taskName}", and no matching modelId in pipelineOptions`
       );
     }
 
-    // if the task name is not in our settings, we just set the onnx runtime filename.
+    // If still no records, return default runtime options
     if (records.length === 0) {
       return {
-        runtimeFilename: MLEngineParent.WASM_FILENAME,
+        runtimeFilename:
+          MLEngineParent.WASM_FILENAME[MLEngineParent.DEFAULT_BACKEND],
       };
     }
+
     const options = records[0];
     return {
       modelRevision: options.modelRevision,
@@ -448,33 +596,41 @@ export class MLEngineParent extends JSProcessActorParent {
       processorId: options.processorId,
       dtype: options.dtype,
       numThreads: options.numThreads,
-      runtimeFilename: MLEngineParent.WASM_FILENAME,
+      runtimeFilename:
+        MLEngineParent.WASM_FILENAME[
+          options.backend || MLEngineParent.DEFAULT_BACKEND
+        ],
     };
   }
 
   /**
    * Download the wasm for the ML inference engine.
    *
+   * @param {string} backend - The ML engine for which the WASM buffer is requested.
    * @returns {Promise<ArrayBuffer>}
    */
-  static async getWasmArrayBuffer() {
+  static async getWasmArrayBuffer(backend) {
     const client = MLEngineParent.#getRemoteClient(RS_RUNTIME_COLLECTION);
+    backend = backend || MLEngineParent.DEFAULT_BACKEND;
 
-    if (!MLEngineParent.#wasmRecord) {
+    if (!MLEngineParent.#wasmRecord[backend]) {
       // Place the records into a promise to prevent any races.
-      MLEngineParent.#wasmRecord = MLEngineParent.#getWasmArrayRecord(client);
+      MLEngineParent.#wasmRecord[backend] = MLEngineParent.#getWasmArrayRecord(
+        client,
+        backend
+      );
     }
 
     let wasmRecord;
     try {
-      wasmRecord = await MLEngineParent.#wasmRecord;
+      wasmRecord = await MLEngineParent.#wasmRecord[backend];
       if (!wasmRecord) {
         return Promise.reject(
           "Error: Unable to get the ML engine from Remote Settings."
         );
       }
     } catch (error) {
-      MLEngineParent.#wasmRecord = null;
+      MLEngineParent.#wasmRecord[backend] = null;
       throw error;
     }
 
@@ -702,6 +858,18 @@ class MLEngine {
   notificationsCallback = null;
 
   /**
+   * Returns the label used in telemetry for that engine id
+   *
+   * @returns {string}
+   */
+  getGleanLabel() {
+    if (lazy.isAddonEngineId(this.engineId)) {
+      return "webextension";
+    }
+    return this.engineId;
+  }
+
+  /**
    * Removes an instance of the MLEngine with the given engineId.
    *
    * @param {string} engineId - The ID of the engine instance to be removed.
@@ -902,7 +1070,19 @@ class MLEngine {
         const { response, error, requestId } = data;
         const request = this.#requests.get(requestId);
         if (request) {
+          if (error) {
+            Glean.firefoxAiRuntime.runInferenceFailure.record({
+              engineId: this.engineId,
+              modelId: this.pipelineOptions.modelId,
+              featureId: this.pipelineOptions.featureId,
+            });
+          }
           if (response) {
+            const totalTime =
+              response.metrics.tokenizingTime + response.metrics.inferenceTime;
+            Glean.firefoxAiRuntime.runInferenceSuccess[
+              this.getGleanLabel()
+            ].accumulateSingleSample(totalTime);
             request.resolve(response);
           } else {
             request.reject(error);
@@ -913,6 +1093,7 @@ class MLEngine {
             data
           );
         }
+
         this.#requests.delete(requestId);
         break;
       }
@@ -1027,7 +1208,6 @@ class MLEngine {
     const resolvers = Promise.withResolvers();
     const requestId = this.#nextRequestId++;
     this.#requests.set(requestId, resolvers);
-
     let transferables = [];
     if (request.data instanceof ArrayBuffer) {
       transferables.push(request.data);

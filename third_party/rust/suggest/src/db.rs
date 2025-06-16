@@ -7,13 +7,12 @@ use std::{cell::OnceCell, path::Path, sync::Arc};
 
 use interrupt_support::{SqlInterruptHandle, SqlInterruptScope};
 use parking_lot::{Mutex, MutexGuard};
-use remote_settings::RemoteSettingsResponse;
 use rusqlite::{
     named_params,
     types::{FromSql, ToSql},
-    Connection, OpenFlags, OptionalExtension,
+    Connection,
 };
-use sql_support::{open_database::open_database_with_flags, repeat_sql_vars, ConnExt};
+use sql_support::{open_database, repeat_sql_vars, ConnExt};
 
 use crate::{
     config::{SuggestGlobalConfig, SuggestProviderConfig},
@@ -24,12 +23,13 @@ use crate::{
     provider::{AmpMatchingStrategy, SuggestionProvider},
     query::{full_keywords_to_fts_content, FtsQuery},
     rs::{
-        DownloadedAmoSuggestion, DownloadedAmpSuggestion, DownloadedAmpWikipediaSuggestion,
-        DownloadedExposureSuggestion, DownloadedFakespotSuggestion, DownloadedMdnSuggestion,
+        DownloadedAmoSuggestion, DownloadedAmpSuggestion, DownloadedDynamicRecord,
+        DownloadedDynamicSuggestion, DownloadedFakespotSuggestion, DownloadedMdnSuggestion,
         DownloadedPocketSuggestion, DownloadedWikipediaSuggestion, Record, SuggestRecordId,
+        SuggestRecordType,
     },
     schema::{clear_database, SuggestConnectionInitializer},
-    suggestion::{cook_raw_suggestion_url, AmpSuggestionType, FtsMatchInfo, Suggestion},
+    suggestion::{cook_raw_suggestion_url, FtsMatchInfo, Suggestion},
     util::full_keyword,
     weather::WeatherCache,
     Result, SuggestionQuery,
@@ -51,24 +51,6 @@ pub const DEFAULT_SUGGESTION_SCORE: f64 = 0.2;
 pub(crate) enum ConnectionType {
     ReadOnly,
     ReadWrite,
-}
-
-impl From<ConnectionType> for OpenFlags {
-    fn from(type_: ConnectionType) -> Self {
-        match type_ {
-            ConnectionType::ReadOnly => {
-                OpenFlags::SQLITE_OPEN_URI
-                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
-                    | OpenFlags::SQLITE_OPEN_READ_ONLY
-            }
-            ConnectionType::ReadWrite => {
-                OpenFlags::SQLITE_OPEN_URI
-                    | OpenFlags::SQLITE_OPEN_NO_MUTEX
-                    | OpenFlags::SQLITE_OPEN_CREATE
-                    | OpenFlags::SQLITE_OPEN_READ_WRITE
-            }
-        }
-    }
 }
 
 #[derive(Default, Clone)]
@@ -98,9 +80,12 @@ impl SuggestDb {
         extensions_to_load: &[Sqlite3Extension],
         type_: ConnectionType,
     ) -> Result<Self> {
-        let conn = open_database_with_flags(
+        let conn = open_database::open_database_with_flags(
             path,
-            type_.into(),
+            match type_ {
+                ConnectionType::ReadWrite => open_database::read_write_flags(),
+                ConnectionType::ReadOnly => open_database::read_only_flags(),
+            },
             &SuggestConnectionInitializer::new(extensions_to_load),
         )?;
         Ok(Self::with_connection(conn))
@@ -217,52 +202,6 @@ impl<'a> SuggestDao<'a> {
     //
     //  These methods implement CRUD operations
 
-    pub fn read_cached_rs_data(&self, collection: &str) -> Option<RemoteSettingsResponse> {
-        match self.try_read_cached_rs_data(collection) {
-            Ok(result) => result,
-            Err(e) => {
-                // Return None on failure . If the cached data is corrupted, maybe because the
-                // RemoteSettingsResponse schema changed, then we want to just continue on.  This also matches
-                // the proposed API from #6328, so it should be easier to adapt this code once
-                // that's merged.
-                error_support::report_error!("suggest-rs-cache-read", "{e}");
-                None
-            }
-        }
-    }
-
-    pub fn write_cached_rs_data(&mut self, collection: &str, data: &RemoteSettingsResponse) {
-        if let Err(e) = self.try_write_cached_rs_data(collection, data) {
-            // Return None on failure for the same reason as in [Self::read_cached_rs_data]
-            error_support::report_error!("suggest-rs-cache-write", "{e}");
-        }
-    }
-
-    fn try_read_cached_rs_data(&self, collection: &str) -> Result<Option<RemoteSettingsResponse>> {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT data FROM rs_cache WHERE collection = ?")?;
-        let data = stmt
-            .query_row((collection,), |row| row.get::<_, Vec<u8>>(0))
-            .optional()?;
-        match data {
-            Some(data) => Ok(Some(rmp_serde::decode::from_slice(data.as_slice())?)),
-            None => Ok(None),
-        }
-    }
-
-    fn try_write_cached_rs_data(
-        &mut self,
-        collection: &str,
-        data: &RemoteSettingsResponse,
-    ) -> Result<()> {
-        let mut stmt = self
-            .conn
-            .prepare_cached("INSERT OR REPLACE INTO rs_cache(collection, data) VALUES(?, ?)")?;
-        stmt.execute((collection, rmp_serde::encode::to_vec(data)?))?;
-        Ok(())
-    }
-
     pub fn get_ingested_records(&self) -> Result<Vec<IngestedRecord>> {
         let mut stmt = self
             .conn
@@ -317,25 +256,21 @@ impl<'a> SuggestDao<'a> {
     }
 
     /// Fetches Suggestions of type Amp provider that match the given query
-    pub fn fetch_amp_suggestions(
-        &self,
-        query: &SuggestionQuery,
-        suggestion_type: AmpSuggestionType,
-    ) -> Result<Vec<Suggestion>> {
+    pub fn fetch_amp_suggestions(&self, query: &SuggestionQuery) -> Result<Vec<Suggestion>> {
         let strategy = query
             .provider_constraints
             .as_ref()
             .and_then(|c| c.amp_alternative_matching.as_ref());
         match strategy {
-            None => self.fetch_amp_suggestions_using_keywords(query, suggestion_type, true),
+            None => self.fetch_amp_suggestions_using_keywords(query, true),
             Some(AmpMatchingStrategy::NoKeywordExpansion) => {
-                self.fetch_amp_suggestions_using_keywords(query, suggestion_type, false)
+                self.fetch_amp_suggestions_using_keywords(query, false)
             }
             Some(AmpMatchingStrategy::FtsAgainstFullKeywords) => {
-                self.fetch_amp_suggestions_using_fts(query, suggestion_type, "full_keywords")
+                self.fetch_amp_suggestions_using_fts(query, "full_keywords")
             }
             Some(AmpMatchingStrategy::FtsAgainstTitle) => {
-                self.fetch_amp_suggestions_using_fts(query, suggestion_type, "title")
+                self.fetch_amp_suggestions_using_fts(query, "title")
             }
         }
     }
@@ -343,14 +278,9 @@ impl<'a> SuggestDao<'a> {
     pub fn fetch_amp_suggestions_using_keywords(
         &self,
         query: &SuggestionQuery,
-        suggestion_type: AmpSuggestionType,
         allow_keyword_expansion: bool,
     ) -> Result<Vec<Suggestion>> {
         let keyword_lowercased = &query.keyword.to_lowercase();
-        let provider = match suggestion_type {
-            AmpSuggestionType::Mobile => SuggestionProvider::AmpMobile,
-            AmpSuggestionType::Desktop => SuggestionProvider::Amp,
-        };
         let where_extra = if allow_keyword_expansion {
             ""
         } else {
@@ -379,12 +309,17 @@ impl<'a> SuggestDao<'a> {
                   s.provider = :provider
                   AND k.keyword = :keyword
                   {where_extra}
-                AND NOT EXISTS (SELECT 1 FROM dismissed_suggestions WHERE url=s.url)
+                  AND NOT EXISTS (
+                    -- For AMP suggestions dismissed with the deprecated URL-based dismissal API,
+                    -- `dismissed_suggestions.url` will be the suggestion URL. With the new
+                    -- `Suggestion`-based API, it will be the full keyword.
+                    SELECT 1 FROM dismissed_suggestions WHERE url IN (fk.full_keyword, s.url)
+                  )
                 "#
             ),
             named_params! {
                 ":keyword": keyword_lowercased,
-                ":provider": provider
+                ":provider": SuggestionProvider::Amp,
             },
             |row| -> Result<Suggestion> {
                 let suggestion_id: i64 = row.get("id")?;
@@ -393,24 +328,6 @@ impl<'a> SuggestDao<'a> {
                 let score: f64 = row.get("score")?;
                 let full_keyword_from_db: Option<String> = row.get("full_keyword")?;
 
-                let keywords: Vec<String> = self.conn.query_rows_and_then_cached(
-                    r#"
-                    SELECT
-                        keyword
-                    FROM
-                        keywords
-                    WHERE
-                        suggestion_id = :suggestion_id
-                        AND rank >= :rank
-                    ORDER BY
-                        rank ASC
-                    "#,
-                    named_params! {
-                        ":suggestion_id": suggestion_id,
-                        ":rank": row.get::<_, i64>("rank")?,
-                    },
-                    |row| row.get(0),
-                )?;
                 self.conn.query_row_and_then(
                     r#"
                     SELECT
@@ -443,8 +360,7 @@ impl<'a> SuggestDao<'a> {
                             title,
                             url: cooked_url,
                             raw_url,
-                            full_keyword: full_keyword_from_db
-                                .unwrap_or_else(|| full_keyword(keyword_lowercased, &keywords)),
+                            full_keyword: full_keyword_from_db.unwrap_or_default(),
                             icon: row.get("icon")?,
                             icon_mimetype: row.get("icon_mimetype")?,
                             impression_url: row.get("impression_url")?,
@@ -463,15 +379,10 @@ impl<'a> SuggestDao<'a> {
     pub fn fetch_amp_suggestions_using_fts(
         &self,
         query: &SuggestionQuery,
-        suggestion_type: AmpSuggestionType,
         fts_column: &str,
     ) -> Result<Vec<Suggestion>> {
         let fts_query = query.fts_query();
         let match_arg = &fts_query.match_arg;
-        let provider = match suggestion_type {
-            AmpSuggestionType::Mobile => SuggestionProvider::AmpMobile,
-            AmpSuggestionType::Desktop => SuggestionProvider::Amp,
-        };
         let suggestions = self.conn.query_rows_and_then_cached(
             &format!(
                 r#"
@@ -495,7 +406,7 @@ impl<'a> SuggestDao<'a> {
                 "#
             ),
             named_params! {
-                ":provider": provider
+                ":provider": SuggestionProvider::Amp,
             },
             |row| -> Result<Suggestion> {
                 let suggestion_id: i64 = row.get("id")?;
@@ -1003,68 +914,66 @@ impl<'a> SuggestDao<'a> {
         })
     }
 
-    /// Fetches exposure suggestions
-    pub fn fetch_exposure_suggestions(&self, query: &SuggestionQuery) -> Result<Vec<Suggestion>> {
-        // A single exposure suggestion can be spread across multiple remote
-        // settings records, for example if it has very many keywords. On ingest
-        // we will insert one row in `exposure_custom_details` and one row in
-        // `suggestions` per record, but that's only an implementation detail.
-        // Logically, and for consumers, there's only ever at most one exposure
-        // suggestion with a given exposure suggestion type.
-        //
-        // Why do insertions this way? It's how other suggestions work, and it
-        // lets us perform relational operations on suggestions, records, and
-        // keywords. For example, when a record is deleted we can look up its ID
-        // in `suggestions`, join the keywords table on the suggestion ID, and
-        // delete the keywords that were added by that record.
-
+    /// Fetches dynamic suggestions
+    pub fn fetch_dynamic_suggestions(&self, query: &SuggestionQuery) -> Result<Vec<Suggestion>> {
         let Some(suggestion_types) = query
             .provider_constraints
             .as_ref()
-            .and_then(|c| c.exposure_suggestion_types.as_ref())
+            .and_then(|c| c.dynamic_suggestion_types.as_ref())
         else {
             return Ok(vec![]);
         };
 
         let keyword = query.keyword.to_lowercase();
         let params = rusqlite::params_from_iter(
-            std::iter::once(&SuggestionProvider::Exposure as &dyn ToSql)
+            std::iter::once(&SuggestionProvider::Dynamic as &dyn ToSql)
                 .chain(std::iter::once(&keyword as &dyn ToSql))
                 .chain(suggestion_types.iter().map(|t| t as &dyn ToSql)),
         );
         self.conn.query_rows_and_then_cached(
             &format!(
                 r#"
-                    SELECT DISTINCT
-                      d.type
-                    FROM
-                      suggestions s
-                    JOIN
-                      exposure_custom_details d
-                      ON d.suggestion_id = s.id
-                    JOIN
-                      keywords k
-                      ON k.suggestion_id = s.id
-                    WHERE
-                      s.provider = ?
-                      AND k.keyword = ?
-                      AND d.type IN ({})
-                    ORDER BY
-                      d.type
-                    "#,
+                SELECT
+                  s.url,
+                  s.score,
+                  d.suggestion_type,
+                  d.json_data
+                FROM
+                  suggestions s
+                JOIN
+                  dynamic_custom_details d
+                  ON d.suggestion_id = s.id
+                JOIN
+                  keywords k
+                  ON k.suggestion_id = s.id
+                WHERE
+                  s.provider = ?
+                  AND k.keyword = ?
+                  AND d.suggestion_type IN ({})
+                  AND NOT EXISTS (SELECT 1 FROM dismissed_suggestions WHERE url = s.url)
+                ORDER BY
+                  s.score ASC, d.suggestion_type ASC, s.id ASC
+                "#,
                 repeat_sql_vars(suggestion_types.len())
             ),
             params,
             |row| -> Result<Suggestion> {
-                Ok(Suggestion::Exposure {
-                    suggestion_type: row.get("type")?,
-                    score: 1.0,
+                let dismissal_key: String = row.get("url")?;
+                let json_data: Option<String> = row.get("json_data")?;
+                Ok(Suggestion::Dynamic {
+                    suggestion_type: row.get("suggestion_type")?,
+                    data: match json_data {
+                        None => None,
+                        Some(j) => serde_json::from_str(&j)?,
+                    },
+                    score: row.get("score")?,
+                    dismissal_key: (!dismissal_key.is_empty()).then_some(dismissal_key),
                 })
             },
         )
     }
 
-    pub fn is_exposure_suggestion_ingested(&self, record_id: &SuggestRecordId) -> Result<bool> {
+    pub fn are_suggestions_ingested_for_record(&self, record_id: &SuggestRecordId) -> Result<bool> {
         Ok(self.conn.exists(
             r#"
             SELECT
@@ -1129,59 +1038,43 @@ impl<'a> SuggestDao<'a> {
         Ok(())
     }
 
-    /// Inserts all suggestions from a downloaded AMP-Wikipedia attachment into
-    /// the database.
-    pub fn insert_amp_wikipedia_suggestions(
+    /// Inserts suggestions from an AMP attachment into the database.
+    pub fn insert_amp_suggestions(
         &mut self,
         record_id: &SuggestRecordId,
-        suggestions: &[DownloadedAmpWikipediaSuggestion],
+        suggestions: &[DownloadedAmpSuggestion],
         enable_fts: bool,
     ) -> Result<()> {
         // Prepare statements outside of the loop.  This results in a large performance
         // improvement on a fresh ingest, since there are so many rows.
         let mut suggestion_insert = SuggestionInsertStatement::new(self.conn)?;
         let mut amp_insert = AmpInsertStatement::new(self.conn)?;
-        let mut wiki_insert = WikipediaInsertStatement::new(self.conn)?;
         let mut keyword_insert = KeywordInsertStatement::new(self.conn)?;
         let mut fts_insert = AmpFtsInsertStatement::new(self.conn)?;
         for suggestion in suggestions {
             self.scope.err_if_interrupted()?;
-            let common_details = suggestion.common_details();
-            let provider = suggestion.provider();
-
             let suggestion_id = suggestion_insert.execute(
                 record_id,
-                &common_details.title,
-                &common_details.url,
-                common_details.score.unwrap_or(DEFAULT_SUGGESTION_SCORE),
-                provider,
+                &suggestion.title,
+                &suggestion.url,
+                suggestion.score.unwrap_or(DEFAULT_SUGGESTION_SCORE),
+                SuggestionProvider::Amp,
             )?;
-            match suggestion {
-                DownloadedAmpWikipediaSuggestion::Amp(amp) => {
-                    amp_insert.execute(suggestion_id, amp)?;
-                }
-                DownloadedAmpWikipediaSuggestion::Wikipedia(wikipedia) => {
-                    wiki_insert.execute(suggestion_id, wikipedia)?;
-                }
-            }
+            amp_insert.execute(suggestion_id, suggestion)?;
             if enable_fts {
                 fts_insert.execute(
                     suggestion_id,
-                    &common_details.full_keywords_fts_column(),
-                    &common_details.title,
+                    &suggestion.full_keywords_fts_column(),
+                    &suggestion.title,
                 )?;
             }
             let mut full_keyword_inserter = FullKeywordInserter::new(self.conn, suggestion_id);
-            for keyword in common_details.keywords() {
-                let full_keyword_id = match (suggestion, keyword.full_keyword) {
-                    // Try to associate full keyword data.  Only do this for AMP, we decided to
-                    // skip it for Wikipedia in https://bugzilla.mozilla.org/show_bug.cgi?id=1876217
-                    (DownloadedAmpWikipediaSuggestion::Amp(_), Some(full_keyword)) => {
-                        Some(full_keyword_inserter.maybe_insert(full_keyword)?)
-                    }
-                    _ => None,
+            for keyword in suggestion.keywords() {
+                let full_keyword_id = if let Some(full_keyword) = keyword.full_keyword {
+                    Some(full_keyword_inserter.maybe_insert(full_keyword)?)
+                } else {
+                    None
                 };
-
                 keyword_insert.execute(
                     suggestion_id,
                     keyword.keyword,
@@ -1193,40 +1086,30 @@ impl<'a> SuggestDao<'a> {
         Ok(())
     }
 
-    /// Inserts all suggestions from a downloaded AMP-Mobile attachment into
-    /// the database.
-    pub fn insert_amp_mobile_suggestions(
+    /// Inserts suggestions from a Wikipedia attachment into the database.
+    pub fn insert_wikipedia_suggestions(
         &mut self,
         record_id: &SuggestRecordId,
-        suggestions: &[DownloadedAmpSuggestion],
+        suggestions: &[DownloadedWikipediaSuggestion],
     ) -> Result<()> {
+        // Prepare statements outside of the loop.  This results in a large performance
+        // improvement on a fresh ingest, since there are so many rows.
         let mut suggestion_insert = SuggestionInsertStatement::new(self.conn)?;
-        let mut amp_insert = AmpInsertStatement::new(self.conn)?;
+        let mut wiki_insert = WikipediaInsertStatement::new(self.conn)?;
         let mut keyword_insert = KeywordInsertStatement::new(self.conn)?;
         for suggestion in suggestions {
             self.scope.err_if_interrupted()?;
-            let common_details = &suggestion.common_details;
             let suggestion_id = suggestion_insert.execute(
                 record_id,
-                &common_details.title,
-                &common_details.url,
-                common_details.score.unwrap_or(DEFAULT_SUGGESTION_SCORE),
-                SuggestionProvider::AmpMobile,
+                &suggestion.title,
+                &suggestion.url,
+                suggestion.score.unwrap_or(DEFAULT_SUGGESTION_SCORE),
+                SuggestionProvider::Wikipedia,
             )?;
-            amp_insert.execute(suggestion_id, suggestion)?;
-
-            let mut full_keyword_inserter = FullKeywordInserter::new(self.conn, suggestion_id);
-            for keyword in common_details.keywords() {
-                let full_keyword_id = keyword
-                    .full_keyword
-                    .map(|full_keyword| full_keyword_inserter.maybe_insert(full_keyword))
-                    .transpose()?;
-                keyword_insert.execute(
-                    suggestion_id,
-                    keyword.keyword,
-                    full_keyword_id,
-                    keyword.rank,
-                )?;
+            wiki_insert.execute(suggestion_id, suggestion)?;
+            for keyword in suggestion.keywords() {
+                // Don't update `full_keywords`, see bug 1876217.
+                keyword_insert.execute(suggestion_id, keyword.keyword, None, keyword.rank)?;
             }
         }
         Ok(())
@@ -1331,31 +1214,34 @@ impl<'a> SuggestDao<'a> {
         Ok(())
     }
 
-    /// Inserts exposure suggestion records data into the database.
-    pub fn insert_exposure_suggestions(
+    /// Inserts dynamic suggestion records data into the database.
+    pub fn insert_dynamic_suggestions(
         &mut self,
         record_id: &SuggestRecordId,
-        suggestion_type: &str,
-        suggestions: &[DownloadedExposureSuggestion],
+        record: &DownloadedDynamicRecord,
+        suggestions: &[DownloadedDynamicSuggestion],
     ) -> Result<()> {
-        // `suggestion.keywords()` can yield duplicates for exposure
+        // `suggestion.keywords()` can yield duplicates for dynamic
         // suggestions, so ignore failures on insert in the uniqueness
         // constraint on `(suggestion_id, keyword)`.
         let mut keyword_insert = KeywordInsertStatement::new_with_or_ignore(self.conn)?;
         let mut suggestion_insert = SuggestionInsertStatement::new(self.conn)?;
-        let mut exposure_insert = ExposureInsertStatement::new(self.conn)?;
+        let mut dynamic_insert = DynamicInsertStatement::new(self.conn)?;
         for suggestion in suggestions {
             self.scope.err_if_interrupted()?;
             let suggestion_id = suggestion_insert.execute(
                 record_id,
-                "", // title, not used by exposure suggestions
-                "", // url, not used by exposure suggestions
-                DEFAULT_SUGGESTION_SCORE,
-                SuggestionProvider::Exposure,
+                // title - Not used by dynamic suggestions.
+                "",
+                // url - Dynamic suggestions store their dismissal key here
+                // instead.
+                suggestion.dismissal_key.as_deref().unwrap_or(""),
+                record.score.unwrap_or(DEFAULT_SUGGESTION_SCORE),
+                SuggestionProvider::Dynamic,
             )?;
-            exposure_insert.execute(suggestion_id, suggestion_type)?;
+            dynamic_insert.execute(suggestion_id, &record.suggestion_type, suggestion)?;
 
-            // Exposure suggestions don't use `rank` but `(suggestion_id, rank)`
+            // Dynamic suggestions don't use `rank` but `(suggestion_id, rank)`
             // must be unique since there's an index on that tuple.
             for (rank, keyword) in suggestion.keywords().enumerate() {
                 keyword_insert.execute(suggestion_id, &keyword, None, rank)?;
@@ -1386,12 +1272,12 @@ impl<'a> SuggestDao<'a> {
         Ok(())
     }
 
-    pub fn insert_dismissal(&self, url: &str) -> Result<()> {
+    pub fn insert_dismissal(&self, key: &str) -> Result<()> {
         self.conn.execute(
             "INSERT OR IGNORE INTO dismissed_suggestions(url)
              VALUES(:url)",
             named_params! {
-                ":url": url,
+                ":url": key,
             },
         )?;
         Ok(())
@@ -1400,6 +1286,21 @@ impl<'a> SuggestDao<'a> {
     pub fn clear_dismissals(&self) -> Result<()> {
         self.conn.execute("DELETE FROM dismissed_suggestions", ())?;
         Ok(())
+    }
+
+    pub fn has_dismissal(&self, key: &str) -> Result<bool> {
+        Ok(self.conn.exists(
+            "SELECT 1 FROM dismissed_suggestions WHERE url = :url",
+            named_params! {
+                ":url": key,
+            },
+        )?)
+    }
+
+    pub fn any_dismissals(&self) -> Result<bool> {
+        Ok(self
+            .conn
+            .exists("SELECT 1 FROM dismissed_suggestions LIMIT 1", ())?)
     }
 
     /// Deletes all suggestions associated with a Remote Settings record from
@@ -1456,17 +1357,17 @@ impl<'a> SuggestDao<'a> {
         )?;
         self.scope.err_if_interrupted()?;
         self.conn.execute_cached(
-            "DELETE FROM yelp_location_signs WHERE record_id = :record_id",
-            named_params! { ":record_id": record_id.as_str() },
-        )?;
-        self.scope.err_if_interrupted()?;
-        self.conn.execute_cached(
             "DELETE FROM yelp_custom_details WHERE record_id = :record_id",
             named_params! { ":record_id": record_id.as_str() },
         )?;
         self.scope.err_if_interrupted()?;
         self.conn.execute_cached(
             "DELETE FROM geonames WHERE record_id = :record_id",
+            named_params! { ":record_id": record_id.as_str() },
+        )?;
+        self.scope.err_if_interrupted()?;
+        self.conn.execute_cached(
+            "DELETE FROM geonames_alternates WHERE record_id = :record_id",
             named_params! { ":record_id": record_id.as_str() },
         )?;
         self.scope.err_if_interrupted()?;
@@ -1550,6 +1451,32 @@ impl<'a> SuggestDao<'a> {
     ) -> Result<Option<SuggestProviderConfig>> {
         self.get_meta::<String>(&provider_config_meta_key(provider))?
             .map_or_else(|| Ok(None), |json| Ok(serde_json::from_str(&json)?))
+    }
+
+    /// Gets keywords metrics for a record type.
+    pub fn get_keywords_metrics(&self, record_type: SuggestRecordType) -> Result<KeywordsMetrics> {
+        let data = self.conn.try_query_row(
+            r#"
+            SELECT
+                max(max_len) AS len,
+                max(max_word_count) AS word_count
+            FROM
+                keywords_metrics
+            WHERE
+                record_type = :record_type
+            "#,
+            named_params! {
+                ":record_type": record_type,
+            },
+            |row| -> Result<(usize, usize)> { Ok((row.get("len")?, row.get("word_count")?)) },
+            true, // cache
+        )?;
+        Ok(data
+            .map(|(max_len, max_word_count)| KeywordsMetrics {
+                max_len,
+                max_word_count,
+            })
+            .unwrap_or_default())
     }
 }
 
@@ -1828,24 +1755,37 @@ impl<'conn> FakespotInsertStatement<'conn> {
     }
 }
 
-struct ExposureInsertStatement<'conn>(rusqlite::Statement<'conn>);
+struct DynamicInsertStatement<'conn>(rusqlite::Statement<'conn>);
 
-impl<'conn> ExposureInsertStatement<'conn> {
+impl<'conn> DynamicInsertStatement<'conn> {
     fn new(conn: &'conn Connection) -> Result<Self> {
         Ok(Self(conn.prepare(
-            "INSERT INTO exposure_custom_details(
+            "INSERT INTO dynamic_custom_details(
                  suggestion_id,
-                 type
+                 suggestion_type,
+                 json_data
              )
-             VALUES(?, ?)
+             VALUES(?, ?, ?)
              ",
         )?))
     }
 
-    fn execute(&mut self, suggestion_id: i64, suggestion_type: &str) -> Result<()> {
+    fn execute(
+        &mut self,
+        suggestion_id: i64,
+        suggestion_type: &str,
+        suggestion: &DownloadedDynamicSuggestion,
+    ) -> Result<()> {
         self.0
-            .execute((suggestion_id, suggestion_type))
-            .with_context("exposure insert")?;
+            .execute((
+                suggestion_id,
+                suggestion_type,
+                match &suggestion.data {
+                    None => None,
+                    Some(d) => Some(serde_json::to_string(&d)?),
+                },
+            ))
+            .with_context("dynamic insert")?;
         Ok(())
     }
 }
@@ -1931,32 +1871,68 @@ impl<'conn> PrefixKeywordInsertStatement<'conn> {
     }
 }
 
-pub(crate) struct KeywordMetricsInsertStatement<'conn>(rusqlite::Statement<'conn>);
+#[derive(Debug, Default)]
+pub(crate) struct KeywordsMetrics {
+    pub(crate) max_len: usize,
+    pub(crate) max_word_count: usize,
+}
 
-impl<'conn> KeywordMetricsInsertStatement<'conn> {
-    pub(crate) fn new(conn: &'conn Connection) -> Result<Self> {
-        Ok(Self(conn.prepare(
-            "INSERT INTO keywords_metrics(
-                 record_id,
-                 provider,
-                 max_length,
-                 max_word_count
-             )
-             VALUES(?, ?, ?, ?)
-             ",
-        )?))
+/// This can be used to update metrics as keywords are inserted into the DB.
+/// Create a `KeywordsMetricsUpdater`, call `update` on it as each keyword is
+/// inserted, and then call `finish` after all keywords have been inserted.
+pub(crate) struct KeywordsMetricsUpdater {
+    pub(crate) max_len: usize,
+    pub(crate) max_word_count: usize,
+}
+
+impl KeywordsMetricsUpdater {
+    pub(crate) fn new() -> Self {
+        Self {
+            max_len: 0,
+            max_word_count: 0,
+        }
     }
 
-    pub(crate) fn execute(
-        &mut self,
+    pub(crate) fn update(&mut self, keyword: &str) {
+        self.max_len = std::cmp::max(self.max_len, keyword.len());
+        self.max_word_count =
+            std::cmp::max(self.max_word_count, keyword.split_whitespace().count());
+    }
+
+    /// Inserts keywords metrics into the database. This assumes you have a
+    /// cache object inside the `cache` cell that caches the metrics. It will be
+    /// cleared since it will be invalidated by the metrics update.
+    pub(crate) fn finish<T>(
+        &self,
+        conn: &Connection,
         record_id: &SuggestRecordId,
-        provider: SuggestionProvider,
-        max_len: usize,
-        max_word_count: usize,
+        record_type: SuggestRecordType,
+        cache: &mut OnceCell<T>,
     ) -> Result<()> {
-        self.0
-            .execute((record_id.as_str(), provider, max_len, max_word_count))
-            .with_context("keyword metrics insert")?;
+        let mut insert_stmt = conn.prepare(
+            r#"
+            INSERT OR REPLACE INTO keywords_metrics(
+                record_id,
+                record_type,
+                max_len,
+                max_word_count
+            )
+            VALUES(?, ?, ?, ?)
+            "#,
+        )?;
+        insert_stmt
+            .execute((
+                record_id.as_str(),
+                record_type,
+                self.max_len,
+                self.max_word_count,
+            ))
+            .with_context("keywords metrics insert")?;
+
+        // We just made some insertions that might invalidate the data in the
+        // cache. Clear it so it's repopulated the next time it's accessed.
+        cache.take();
+
         Ok(())
     }
 }

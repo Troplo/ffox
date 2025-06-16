@@ -20,19 +20,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import mozilla.components.compose.base.theme.AcornTheme
 import mozilla.components.compose.browser.toolbar.concept.Action
 import mozilla.components.compose.browser.toolbar.concept.Action.ActionButton
-import mozilla.components.compose.browser.toolbar.concept.Action.CustomAction
+import mozilla.components.compose.browser.toolbar.concept.Action.DropdownAction
+import mozilla.components.compose.browser.toolbar.store.BrowserToolbarInteraction.BrowserToolbarEvent
 import mozilla.components.compose.browser.toolbar.ui.InlineAutocompleteTextField
-import mozilla.components.compose.browser.toolbar.ui.SearchSelector
 import mozilla.components.ui.icons.R as iconsR
 
 private val ROUNDED_CORNER_SHAPE = RoundedCornerShape(8.dp)
@@ -42,7 +43,6 @@ private val ROUNDED_CORNER_SHAPE = RoundedCornerShape(8.dp)
  * URL ("edit mode").
  *
  * @param url The initial URL to be edited.
- * @param colors The color scheme to use in the browser edit toolbar.
  * @param useComposeTextField Whether or not to use the Compose [TextField] or a view-based
  * inline autocomplete text field.
  * @param editActionsStart List of [Action]s to be displayed at the start of the URL of
@@ -53,23 +53,25 @@ private val ROUNDED_CORNER_SHAPE = RoundedCornerShape(8.dp)
  * parameter of the callback.
  * @param onUrlCommitted Will be called when the user has finished editing and wants to initiate
  * loading the entered URL. The committed text value comes as a parameter of the callback.
+ * @param onInteraction Callback for handling [BrowserToolbarEvent]s on user interactions.
  */
 @Composable
+@Suppress("LongMethod")
 fun BrowserEditToolbar(
     url: String,
-    colors: BrowserEditToolbarColors,
     useComposeTextField: Boolean = false,
     editActionsStart: List<Action> = emptyList(),
     editActionsEnd: List<Action> = emptyList(),
     onUrlEdit: (String) -> Unit = {},
     onUrlCommitted: (String) -> Unit = {},
+    onInteraction: (BrowserToolbarEvent) -> Unit,
 ) {
     Row(
         modifier = Modifier
-            .background(color = colors.background)
+            .background(color = AcornTheme.colors.layer1)
             .padding(all = 8.dp)
             .background(
-                color = colors.urlBackground,
+                color = AcornTheme.colors.layer3,
                 shape = ROUNDED_CORNER_SHAPE,
             ),
         verticalAlignment = Alignment.CenterVertically,
@@ -81,7 +83,7 @@ fun BrowserEditToolbar(
                     onUrlEdit(value)
                 },
                 colors = TextFieldDefaults.textFieldColors(
-                    textColor = colors.text,
+                    textColor = AcornTheme.colors.textPrimary,
                     focusedIndicatorColor = Color.Transparent,
                     unfocusedIndicatorColor = Color.Transparent,
                     disabledIndicatorColor = Color.Transparent,
@@ -98,15 +100,21 @@ fun BrowserEditToolbar(
                 modifier = Modifier.fillMaxWidth(),
                 shape = ROUNDED_CORNER_SHAPE,
                 leadingIcon = {
-                    ActionContainer(actions = editActionsStart)
+                    ActionContainer(
+                        actions = editActionsStart,
+                        onInteraction = onInteraction,
+                    )
                 },
                 trailingIcon = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        ActionContainer(actions = editActionsEnd)
+                        ActionContainer(
+                            actions = editActionsEnd,
+                            onInteraction = onInteraction,
+                        )
 
                         if (url.isNotEmpty()) {
                             ClearButton(
-                                tint = colors.clearButton,
+                                tint = AcornTheme.colors.iconPrimary,
                                 onButtonClicked = { onUrlEdit("") },
                             )
                         }
@@ -114,21 +122,26 @@ fun BrowserEditToolbar(
                 },
             )
         } else {
-            ActionContainer(actions = editActionsStart)
+            ActionContainer(
+                actions = editActionsStart,
+                onInteraction = onInteraction,
+            )
 
             InlineAutocompleteTextField(
                 url = url,
-                colors = colors,
                 modifier = Modifier.weight(1f),
                 onUrlEdit = onUrlEdit,
                 onUrlCommitted = onUrlCommitted,
             )
 
-            ActionContainer(actions = editActionsEnd)
+            ActionContainer(
+                actions = editActionsEnd,
+                onInteraction = onInteraction,
+            )
 
             if (url.isNotEmpty()) {
                 ClearButton(
-                    tint = colors.clearButton,
+                    tint = AcornTheme.colors.iconPrimary,
                     onButtonClicked = { onUrlEdit("") },
                 )
             }
@@ -165,33 +178,27 @@ private fun BrowserEditToolbarPreview() {
     AcornTheme {
         BrowserEditToolbar(
             url = "http://www.mozilla.org",
-            colors = BrowserToolbarDefaults.colors().editToolbarColors,
             useComposeTextField = true,
             editActionsStart = listOf(
-                CustomAction(
-                    content = {
-                        SearchSelector(
-                            painter = painterResource(iconsR.drawable.mozac_ic_search_24),
-                            tint = AcornTheme.colors.iconPrimary,
-                            onClick = {},
-                        )
-                    },
+                DropdownAction(
+                    icon = ContextCompat.getDrawable(LocalContext.current, iconsR.drawable.mozac_ic_search_24)!!,
+                    contentDescription = android.R.string.untitled,
+                    menu = { emptyList() },
                 ),
             ),
             editActionsEnd = listOf(
                 ActionButton(
                     icon = iconsR.drawable.mozac_ic_microphone_24,
-                    contentDescription = null,
-                    tint = AcornTheme.colors.iconPrimary.toArgb(),
-                    onClick = {},
+                    contentDescription = android.R.string.untitled,
+                    onClick = object : BrowserToolbarEvent {},
                 ),
                 ActionButton(
                     icon = iconsR.drawable.mozac_ic_qr_code_24,
-                    contentDescription = null,
-                    tint = AcornTheme.colors.iconPrimary.toArgb(),
-                    onClick = {},
+                    contentDescription = android.R.string.untitled,
+                    onClick = object : BrowserToolbarEvent {},
                 ),
             ),
+            onInteraction = {},
         )
     }
 }

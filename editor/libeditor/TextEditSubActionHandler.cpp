@@ -13,6 +13,7 @@
 #include "HTMLEditor.h"
 
 #include "mozilla/Assertions.h"
+#include "mozilla/Logging.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPrefs_editor.h"
@@ -43,6 +44,8 @@
 #include "nsUnicharUtils.h"
 
 namespace mozilla {
+
+extern LazyLogModule gTextInputLog;  // Defined in EditorBase.cpp
 
 using namespace dom;
 
@@ -346,6 +349,12 @@ Result<EditActionResult, nsresult> TextEditor::HandleInsertText(
     const nsAString& aInsertionString, InsertTextFor aPurpose) {
   MOZ_ASSERT(IsEditActionDataAvailable());
 
+  MOZ_LOG(
+      gTextInputLog, LogLevel::Info,
+      ("%p TextEditor::HandleInsertText(aInsertionString=\"%s\", aPurpose=%s)",
+       this, NS_ConvertUTF16toUTF8(aInsertionString).get(),
+       ToString(aPurpose).c_str()));
+
   UndefineCaretBidiLevel();
 
   nsAutoString insertionString(aInsertionString);
@@ -527,9 +536,7 @@ Result<EditActionResult, nsresult> TextEditor::SetTextWithoutTransaction(
 
   MaybeDoAutoPasswordMasking();
 
-  RefPtr<Element> anonymousDivElement = GetRoot();
-  RefPtr<Text> textNode =
-      Text::FromNodeOrNull(anonymousDivElement->GetFirstChild());
+  const RefPtr<Text> textNode = GetTextNode();
   MOZ_ASSERT(textNode);
 
   // We can use this fast path only when:
@@ -624,8 +631,8 @@ Result<EditActionResult, nsresult> TextEditor::HandleDeleteSelectionInternal(
         return Err(NS_ERROR_FAILURE);
       }
 
-      if (const Text* theTextNode = AsTextEditor()->GetTextNode()) {
-        rangesToDelete.EnsureRangesInTextNode(*theTextNode);
+      if (const Text* const textNode = GetTextNode()) {
+        rangesToDelete.EnsureRangesInTextNode(*textNode);
       }
 
       Result<CaretPoint, nsresult> caretPointOrError =
@@ -706,7 +713,7 @@ TextEditor::ComputeValueFromTextNodeAndBRElement(nsAString& aValue) const {
     return EditActionResult::HandledResult();
   }
 
-  Text* textNode = Text::FromNodeOrNull(anonymousDivElement->GetFirstChild());
+  const Text* const textNode = GetTextNode();
   MOZ_ASSERT(textNode);
 
   if (!textNode->Length()) {

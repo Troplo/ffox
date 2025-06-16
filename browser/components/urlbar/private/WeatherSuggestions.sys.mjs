@@ -28,14 +28,14 @@ const MERINO_TIMEOUT_MS = 5000; // 5s
 const MERINO_WEATHER_CACHE_PERIOD_MS = 60000; // 1 minute
 
 const RESULT_MENU_COMMAND = {
+  DISMISS: "dismiss",
+  HELP: "help",
   INACCURATE_LOCATION: "inaccurate_location",
   MANAGE: "manage",
-  NOT_INTERESTED: "not_interested",
-  NOT_RELEVANT: "not_relevant",
   SHOW_LESS_FREQUENTLY: "show_less_frequently",
 };
 
-const WEATHER_PROVIDER_DISPLAY_NAME = "AccuWeather";
+const WEATHER_PROVIDER_DISPLAY_NAME = "AccuWeather®";
 
 const WEATHER_DYNAMIC_TYPE = "weather";
 const WEATHER_VIEW_TEMPLATE = {
@@ -154,6 +154,10 @@ export class WeatherSuggestions extends SuggestProvider {
     ];
   }
 
+  get primaryUserControlledPreference() {
+    return "suggest.weather";
+  }
+
   get rustSuggestionType() {
     return "Weather";
   }
@@ -193,7 +197,15 @@ export class WeatherSuggestions extends SuggestProvider {
     if (suggestions.length <= 1) {
       return suggestions;
     }
-    let suggestion = await lazy.GeolocationUtils.best(suggestions);
+
+    let suggestion = await lazy.GeolocationUtils.best(suggestions, s => ({
+      latitude: s.city?.latitude,
+      longitude: s.city?.longitude,
+      country: s.city?.countryCode,
+      region: s.city?.adminDivisionCodes.get(1),
+      population: s.city?.population,
+    }));
+
     return [suggestion];
   }
 
@@ -210,16 +222,28 @@ export class WeatherSuggestions extends SuggestProvider {
 
     // Set up location params to pass to Merino. We need to null-check each
     // suggestion property because `MerinoClient` will stringify null values.
-    let otherParams = {};
-    for (let key of ["city", "region", "country"]) {
-      if (suggestion[key]) {
-        otherParams[key] = suggestion[key];
+    let otherParams = { source: "urlbar" };
+    if (suggestion.city) {
+      if (suggestion.city.name) {
+        otherParams.city = suggestion.city.name;
+      }
+      if (suggestion.city.countryCode) {
+        otherParams.country = suggestion.city.countryCode;
+      }
+      // The admin codes are a `Map` from integer levels to codes. Convert it to
+      // a comma-separated string of codes sorted by level ascending.
+      let adminCodes = [...suggestion.city.adminDivisionCodes.entries()]
+        .sort(([level1, _admin1], [level2, _admin2]) => level1 - level2)
+        .map(([_, admin]) => admin)
+        .join(",");
+      if (adminCodes) {
+        otherParams.region = adminCodes;
       }
     }
 
     let merino = this.#merino;
     let fetchInstance = (this.#fetchInstance = {});
-    let suggestions = await merino.fetch({
+    let merinoSuggestions = await merino.fetch({
       query: "",
       otherParams,
       providers: [MERINO_PROVIDER],
@@ -229,16 +253,37 @@ export class WeatherSuggestions extends SuggestProvider {
       return null;
     }
 
-    if (!suggestions.length) {
+    if (!merinoSuggestions.length) {
       return null;
     }
-    suggestion = suggestions[0];
+    let merinoSuggestion = merinoSuggestions[0];
 
     let unit = Services.locale.regionalPrefsLocales[0] == "en-US" ? "f" : "c";
 
     let treatment = lazy.UrlbarPrefs.get("weatherUiTreatment");
     if (treatment == 1 || treatment == 2) {
-      return this.#makeDynamicResult(suggestion, unit);
+      return this.#makeDynamicResult(merinoSuggestion, unit);
+    }
+
+    // Firefox 140 temporary fix for localized weather suggestions in the
+    // following locales. See `urlbar-result-action-sponsored` in:
+    // https://github.com/mozilla-l10n/firefox-l10n/blob/main/LANGUAGE/browser/browser/browser.ftl
+    let sponsoredByLocale = {
+      de: "Gesponsert",
+      fr: "Sponsorisé",
+      it: "Sponsorizzato",
+      pl: "sponsorowane",
+    };
+    let titleHtml;
+    let bottomText;
+    let locale = Services.locale.appLocaleAsBCP47;
+    if (sponsoredByLocale.hasOwnProperty(locale)) {
+      let sponsored = sponsoredByLocale[locale];
+      let { city_name: city, region_code: region } = merinoSuggestion;
+      let temperature = merinoSuggestion.current_conditions.temperature[unit];
+      let unitDisplay = unit.toUpperCase();
+      titleHtml = `<strong>${temperature}°${unitDisplay}</strong> · ${city}, ${region}`;
+      bottomText = `${WEATHER_PROVIDER_DISPLAY_NAME} · ${sponsored}`;
     }
 
     return Object.assign(
@@ -246,31 +291,39 @@ export class WeatherSuggestions extends SuggestProvider {
         lazy.UrlbarUtils.RESULT_TYPE.URL,
         lazy.UrlbarUtils.RESULT_SOURCE.SEARCH,
         {
-          url: suggestion.url,
-          titleL10n: {
-            id: "firefox-suggest-weather-title-simplest",
-            args: {
-              temperature: suggestion.current_conditions.temperature[unit],
-              unit: unit.toUpperCase(),
-              city: suggestion.city_name,
-              region: suggestion.region_code,
-            },
-            parseMarkup: true,
-            cacheable: true,
-            excludeArgsFromCacheKey: true,
-          },
-          bottomTextL10n: {
-            id: "firefox-suggest-weather-sponsored",
-            args: { provider: WEATHER_PROVIDER_DISPLAY_NAME },
-            cacheable: true,
-          },
+          url: merinoSuggestion.url,
+          titleHtml,
+          titleL10n: titleHtml
+            ? undefined
+            : {
+                id: "firefox-suggest-weather-title-simplest",
+                args: {
+                  temperature:
+                    merinoSuggestion.current_conditions.temperature[unit],
+                  unit: unit.toUpperCase(),
+                  city: merinoSuggestion.city_name,
+                  region: merinoSuggestion.region_code,
+                },
+                parseMarkup: true,
+                cacheable: true,
+                excludeArgsFromCacheKey: true,
+              },
+          bottomText,
+          bottomTextL10n: bottomText
+            ? undefined
+            : {
+                id: "firefox-suggest-weather-sponsored",
+                args: { provider: WEATHER_PROVIDER_DISPLAY_NAME },
+                cacheable: true,
+              },
+          helpUrl: lazy.QuickSuggest.HELP_URL,
         }
       ),
       {
         suggestedIndex: 1,
         isRichSuggestion: true,
         richSuggestionIconVariation: String(
-          suggestion.current_conditions.icon_id
+          merinoSuggestion.current_conditions.icon_id
         ),
       }
     );
@@ -295,6 +348,7 @@ export class WeatherSuggestions extends SuggestProvider {
           high: suggestion.forecast.high[unit],
           low: suggestion.forecast.low[unit],
           showRowLabel: true,
+          helpUrl: lazy.QuickSuggest.HELP_URL,
         }
       ),
       {
@@ -389,7 +443,7 @@ export class WeatherSuggestions extends SuggestProvider {
       {
         name: RESULT_MENU_COMMAND.INACCURATE_LOCATION,
         l10n: {
-          id: "firefox-suggest-weather-command-inaccurate-location",
+          id: "urlbar-result-menu-report-inaccurate-location",
         },
       },
     ];
@@ -398,36 +452,29 @@ export class WeatherSuggestions extends SuggestProvider {
       commands.push({
         name: RESULT_MENU_COMMAND.SHOW_LESS_FREQUENTLY,
         l10n: {
-          id: "firefox-suggest-command-show-less-frequently",
+          id: "urlbar-result-menu-show-less-frequently",
         },
       });
     }
 
     commands.push(
       {
+        name: RESULT_MENU_COMMAND.DISMISS,
         l10n: {
-          id: "firefox-suggest-command-dont-show-this",
+          id: "urlbar-result-menu-dont-show-weather-suggestions",
         },
-        children: [
-          {
-            name: RESULT_MENU_COMMAND.NOT_RELEVANT,
-            l10n: {
-              id: "firefox-suggest-command-not-relevant",
-            },
-          },
-          {
-            name: RESULT_MENU_COMMAND.NOT_INTERESTED,
-            l10n: {
-              id: "firefox-suggest-command-not-interested",
-            },
-          },
-        ],
       },
       { name: "separator" },
       {
         name: RESULT_MENU_COMMAND.MANAGE,
         l10n: {
           id: "urlbar-result-menu-manage-firefox-suggest",
+        },
+      },
+      {
+        name: RESULT_MENU_COMMAND.HELP,
+        l10n: {
+          id: "urlbar-result-menu-learn-more-about-firefox-suggest",
         },
       }
     );
@@ -438,17 +485,18 @@ export class WeatherSuggestions extends SuggestProvider {
   onEngagement(queryContext, controller, details, searchString) {
     let { result } = details;
     switch (details.selType) {
+      case RESULT_MENU_COMMAND.HELP:
       case RESULT_MENU_COMMAND.MANAGE:
-        // "manage" is handled by UrlbarInput, no need to do anything here.
+        // "help" and "manage" are handled by UrlbarInput, no need to do
+        // anything here.
         break;
-      // selType == "dismiss" when the user presses the dismiss key shortcut.
-      case "dismiss":
-      case RESULT_MENU_COMMAND.NOT_INTERESTED:
-      case RESULT_MENU_COMMAND.NOT_RELEVANT:
+      // Note that selType == "dismiss" when the user presses the dismiss key
+      // shortcut, in addition to the result menu command.
+      case RESULT_MENU_COMMAND.DISMISS:
         this.logger.info("Dismissing weather result");
         lazy.UrlbarPrefs.set("suggest.weather", false);
         result.acknowledgeDismissalL10n = {
-          id: "firefox-suggest-dismissal-acknowledgment-all",
+          id: "urlbar-dismissal-acknowledgment-weather",
         };
         controller.removeResult(result);
         break;

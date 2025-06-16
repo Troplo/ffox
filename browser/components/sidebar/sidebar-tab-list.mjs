@@ -34,12 +34,43 @@ export class SidebarTabList extends FxviewTabListBase {
    * @param {KeyboardEvent} e
    */
   handleFocusElementInRow(e) {
-    if (e.code == "ArrowUp" || e.code == "ArrowDown") {
+    if (
+      (e.code == "ArrowUp" && this.activeIndex > 0) ||
+      (e.code == "ArrowDown" && this.activeIndex < this.rowEls.length - 1)
+    ) {
       super.handleFocusElementInRow(e);
+    } else if (e.code == "ArrowUp" && this.activeIndex == 0) {
+      let parentCard = e.target.getRootNode().host.closest("moz-card");
+      if (parentCard) {
+        parentCard.summaryEl.focus();
+      }
+    } else if (
+      e.code == "ArrowDown" &&
+      this.activeIndex == this.rowEls.length - 1
+    ) {
+      let parentCard = e.target.getRootNode().host.closest("moz-card");
+      if (
+        this.sortOption == "datesite" &&
+        parentCard.classList.contains("last-card")
+      ) {
+        // If we're going down from the last site, then focus the next date.
+        const dateCard = parentCard.parentElement;
+        const nextDate = dateCard.nextElementSibling;
+        nextDate?.summaryEl.focus();
+      }
+      let nextCard = parentCard.nextElementSibling;
+      if (nextCard && nextCard.localName == "moz-card") {
+        nextCard.summaryEl.focus();
+      }
     }
   }
 
   itemTemplate = (tabItem, i) => {
+    let tabIndex = -1;
+    if (this.sortOption == "lastvisited" && i == 0) {
+      // Last Visited doesn't have a header. Make the first row focusable.
+      tabIndex = 0;
+    }
     return html`
       <sidebar-tab-row
         ?active=${i == this.activeIndex}
@@ -63,7 +94,7 @@ export class SidebarTabList extends FxviewTabListBase {
         .sourceClosedId=${ifDefined(tabItem.sourceClosedId)}
         .sourceWindowId=${ifDefined(tabItem.sourceWindowId)}
         .tabElement=${ifDefined(tabItem.tabElement)}
-        tabindex="0"
+        tabindex=${tabIndex}
         .title=${tabItem.title}
         .url=${tabItem.url}
         @keydown=${e => e.currentTarget.primaryActionHandler(e)}

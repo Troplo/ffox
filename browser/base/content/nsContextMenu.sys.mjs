@@ -14,13 +14,15 @@ ChromeUtils.defineESModuleGetters(lazy, {
   DevToolsShim: "chrome://devtools-startup/content/DevToolsShim.sys.mjs",
   E10SUtils: "resource://gre/modules/E10SUtils.sys.mjs",
   GenAI: "resource:///modules/GenAI.sys.mjs",
+  LinkPreview: "moz-src:///browser/components/genai/LinkPreview.sys.mjs",
   LoginHelper: "resource://gre/modules/LoginHelper.sys.mjs",
   LoginManagerContextMenu:
     "resource://gre/modules/LoginManagerContextMenu.sys.mjs",
   NetUtil: "resource://gre/modules/NetUtil.sys.mjs",
   PlacesUIUtils: "resource:///modules/PlacesUIUtils.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
-  ReaderMode: "resource://gre/modules/ReaderMode.sys.mjs",
+  ReaderMode: "moz-src:///toolkit/components/reader/ReaderMode.sys.mjs",
+  ScreenshotsUtils: "resource:///modules/ScreenshotsUtils.sys.mjs",
   ShortcutUtils: "resource://gre/modules/ShortcutUtils.sys.mjs",
   TranslationsParent: "resource://gre/actors/TranslationsParent.sys.mjs",
   WebsiteFilter: "resource:///modules/policies/WebsiteFilter.sys.mjs",
@@ -176,8 +178,6 @@ export class nsContextMenu {
       nsContextMenu.contentData = null;
     }
 
-    this.remoteType = this.actor?.domProcess?.remoteType;
-
     const { gBrowser } = this.window;
 
     this.shouldDisplay = context.shouldDisplay;
@@ -218,6 +218,7 @@ export class nsContextMenu {
     this.onEditable = context.onEditable;
     this.onImage = context.onImage;
     this.onKeywordField = context.onKeywordField;
+    this.onSearchField = context.onSearchField;
     this.onLink = context.onLink;
     this.onLoadedImage = context.onLoadedImage;
     this.onMailtoLink = context.onMailtoLink;
@@ -274,6 +275,8 @@ export class nsContextMenu {
           "ContextMenu"
         );
     }
+
+    this.remoteType = this.actor.manager.domProcess.remoteType;
 
     this.selectedText = this.selectionInfo.text;
     this.isTextSelected = !!this.selectedText.length;
@@ -562,6 +565,10 @@ export class nsContextMenu {
       shouldShow && !isWindowPrivate && showContainers
     );
     this.showItem("context-openlinkincurrent", this.onPlainTextLink);
+    this.showItem(
+      "context-previewlink",
+      lazy.LinkPreview.shouldShowContextMenu(this)
+    );
   }
 
   initNavigationItems() {
@@ -899,6 +906,7 @@ export class nsContextMenu {
         !this.onMozExtLink) ||
         this.onPlainTextLink
     );
+    this.showItem("context-add-engine", this.shouldShowAddEngine());
     this.showItem("context-keywordfield", this.shouldShowAddKeyword());
     this.showItem("frame", this.inFrame);
 
@@ -1419,7 +1427,7 @@ export class nsContextMenu {
 
   shouldShowTakeScreenshot() {
     let shouldShow =
-      !this.window.gScreenshots.shouldScreenshotsButtonBeDisabled() &&
+      lazy.ScreenshotsUtils.screenshotsEnabled &&
       this.inTabBrowser &&
       !this.onTextInput &&
       !this.onLink &&
@@ -2173,7 +2181,7 @@ export class nsContextMenu {
     let cookieJarSettings = this.contentData.cookieJarSettings;
     if (this.onCanvas) {
       // Bypass cache, since it's a data: URL.
-      this._canvasToBlobURL(this.targetIdentifier).then(function (blobURL) {
+      this._canvasToBlobURL(this.targetIdentifier).then(blobURL => {
         this.window.internalSave(
           blobURL,
           null, // originalURL
@@ -2305,6 +2313,12 @@ export class nsContextMenu {
     );
   }
 
+  previewLink(url = this.linkURL) {
+    // If we're in a view-source tab, remove the view-source: prefix
+    url = url.replace(/^view-source:/, "");
+    lazy.LinkPreview.handleContextMenuClick(url, this);
+  }
+
   /**
    * Copies a stripped version of a URI to the clipboard.
    * 'Stripped' means that query parameters for tracking/ link decoration
@@ -2342,6 +2356,41 @@ export class nsContextMenu {
         this.window
       );
     });
+  }
+
+  async addSearchFieldAsEngine() {
+    let { url, formData, charset, method } =
+      await this.actor.getSearchFieldEngineData(this.targetIdentifier);
+
+    for (let value of formData.values()) {
+      if (typeof value != "string") {
+        throw new Error("Non-string values are not supported.");
+      }
+    }
+
+    let { engineInfo } = await this.window.gDialogBox.open(
+      "chrome://browser/content/search/addEngine.xhtml",
+      {
+        mode: "FORM",
+        title: true,
+        nameTemplate: Services.io.newURI(url).host,
+      }
+    );
+
+    // If the user saved, engineInfo contains `name` and `alias`.
+    // Otherwise, it's undefined.
+    if (engineInfo) {
+      let searchEngine = await Services.search.addUserEngine({
+        name: engineInfo.name,
+        alias: engineInfo.alias,
+        url,
+        params: new URLSearchParams(formData),
+        charset,
+        method,
+      });
+
+      this.window.gURLBar.search("", { searchEngine });
+    }
   }
 
   /**
@@ -2488,7 +2537,30 @@ export class nsContextMenu {
   }
 
   shouldShowAddKeyword() {
-    return this.onTextInput && this.onKeywordField && !this.isLoginForm();
+    return (
+      this.onTextInput &&
+      this.onKeywordField &&
+      !this.isLoginForm() &&
+      !Services.prefs.getBoolPref(
+        "browser.urlbar.update2.engineAliasRefresh",
+        false
+      )
+    );
+  }
+
+  shouldShowAddEngine() {
+    let uri = this.browser.currentURI;
+
+    return (
+      this.onTextInput &&
+      this.onSearchField &&
+      !this.isLoginForm() &&
+      (uri.schemeIs("http") || uri.schemeIs("https")) &&
+      Services.prefs.getBoolPref(
+        "browser.urlbar.update2.engineAliasRefresh",
+        false
+      )
+    );
   }
 
   addDictionaries() {
@@ -2579,10 +2651,7 @@ export class nsContextMenu {
   getImageText() {
     let dialogBox = this.window.gBrowser.getTabDialogBox(this.browser);
     const imageTextResult = this.actor.getImageText(this.targetIdentifier);
-    TelemetryStopwatch.start(
-      "TEXT_RECOGNITION_API_PERFORMANCE",
-      imageTextResult
-    );
+    let timerId = Glean.textRecognition.apiPerformance.start();
     const { dialog } = dialogBox.open(
       "chrome://browser/content/textrecognition/textrecognition.html",
       {
@@ -2591,7 +2660,8 @@ export class nsContextMenu {
       },
       imageTextResult,
       () => dialog.resizeVertically(),
-      this.window.openLinkIn
+      this.window.openLinkIn,
+      timerId
     );
   }
 

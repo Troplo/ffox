@@ -30,6 +30,8 @@ SafeRefPtr<InternalRequest> InternalRequest::GetRequestConstructorCopy(
       MakeSafeRefPtr<InternalRequest>(mURLList.LastElement(), mFragment);
   copy->SetMethod(mMethod);
   copy->mHeaders = new InternalHeaders(*mHeaders);
+  copy->mTriggeringPrincipalOverride = mTriggeringPrincipalOverride;
+  copy->mNeverTaint = mNeverTaint;
   copy->SetUnsafeRequest();
   copy->mBodyStream = mBodyStream;
   copy->mBodyLength = mBodyLength;
@@ -104,6 +106,8 @@ InternalRequest::InternalRequest(const InternalRequest& aOther,
     : mMethod(aOther.mMethod),
       mURLList(aOther.mURLList.Clone()),
       mHeaders(new InternalHeaders(*aOther.mHeaders)),
+      mTriggeringPrincipalOverride(aOther.mTriggeringPrincipalOverride),
+      mNeverTaint(aOther.mNeverTaint),
       mBodyLength(InternalResponse::UNKNOWN_BODY_SIZE),
       mContentPolicyType(aOther.mContentPolicyType),
       mInternalPriority(aOther.mInternalPriority),
@@ -131,7 +135,6 @@ InternalRequest::InternalRequest(const InternalRequest& aOther,
       mInterceptionRedirectChain(aOther.mInterceptionRedirectChain),
       mInterceptionFromThirdParty(aOther.mInterceptionFromThirdParty) {
   // NOTE: does not copy body stream... use the fallible Clone() for that
-
   if (aOther.GetInterceptionTriggeringPrincipalInfo()) {
     mInterceptionTriggeringPrincipalInfo =
         MakeUnique<mozilla::ipc::PrincipalInfo>(
@@ -146,8 +149,7 @@ InternalRequest::InternalRequest(const IPCInternalRequest& aIPCRequest)
                                    aIPCRequest.headersGuard())),
       mBodyLength(aIPCRequest.bodySize()),
       mPreferredAlternativeDataType(aIPCRequest.preferredAlternativeDataType()),
-      mContentPolicyType(
-          static_cast<nsContentPolicyType>(aIPCRequest.contentPolicyType())),
+      mContentPolicyType(aIPCRequest.contentPolicyType()),
       mInternalPriority(aIPCRequest.internalPriority()),
       mReferrer(aIPCRequest.referrer()),
       mReferrerPolicy(aIPCRequest.referrerPolicy()),
@@ -161,8 +163,8 @@ InternalRequest::InternalRequest(const IPCInternalRequest& aIPCRequest)
       mKeepalive(aIPCRequest.keepalive()),
       mFragment(aIPCRequest.fragment()),
       mEmbedderPolicy(aIPCRequest.embedderPolicy()),
-      mInterceptionContentPolicyType(static_cast<nsContentPolicyType>(
-          aIPCRequest.interceptionContentPolicyType())),
+      mInterceptionContentPolicyType(
+          aIPCRequest.interceptionContentPolicyType()),
       mInterceptionRedirectChain(aIPCRequest.interceptionRedirectChain()),
       mInterceptionFromThirdParty(aIPCRequest.interceptionFromThirdParty()) {
   if (aIPCRequest.principalInfo()) {
@@ -307,8 +309,6 @@ RequestDestination InternalRequest::MapContentPolicyTypeToRequestDestination(
     case nsIContentPolicy::TYPE_INTERNAL_XMLHTTPREQUEST_SYNC:
       return RequestDestination::_empty;
     case nsIContentPolicy::TYPE_INTERNAL_EVENTSOURCE:
-      return RequestDestination::_empty;
-    case nsIContentPolicy::TYPE_OBJECT_SUBREQUEST:
       return RequestDestination::_empty;
     case nsIContentPolicy::TYPE_DTD:
     case nsIContentPolicy::TYPE_INTERNAL_DTD:

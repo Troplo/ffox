@@ -735,64 +735,6 @@ function sortBy(array, prop) {
 }
 
 /**
- * Asynchronously set the favicon associated with a page.
- * @param page
- *        The page's URL
- * @param icon
- *        The URL of the favicon to be set.
- * @param [optional] forceReload
- *        Whether to enforce reloading the icon.
- */
-async function setFaviconForPage(page, icon, forceReload = true) {
-  let pageURI =
-    page instanceof Ci.nsIURI ? page : NetUtil.newURI(new URL(page).href);
-  let iconURI =
-    icon instanceof Ci.nsIURI ? icon : NetUtil.newURI(new URL(icon).href);
-
-  let dataURL;
-  if (!forceReload) {
-    dataURL = await PlacesTestUtils.getFaviconDataURLFromDB(iconURI);
-  }
-  if (!dataURL) {
-    dataURL = await PlacesTestUtils.getFaviconDataURLFromNetwork(iconURI);
-  }
-
-  await PlacesUtils.favicons.setFaviconForPage(pageURI, iconURI, dataURL);
-}
-
-function getFaviconUrlForPage(page, width = 0) {
-  let pageURI =
-    page instanceof Ci.nsIURI ? page : NetUtil.newURI(new URL(page).href);
-  return new Promise((resolve, reject) => {
-    PlacesUtils.favicons.getFaviconURLForPage(
-      pageURI,
-      iconURI => {
-        if (iconURI) {
-          resolve(iconURI.spec);
-        } else {
-          reject("Unable to find an icon for " + pageURI.spec);
-        }
-      },
-      width
-    );
-  });
-}
-
-function getFaviconDataForPage(page, width = 0) {
-  let pageURI =
-    page instanceof Ci.nsIURI ? page : NetUtil.newURI(new URL(page).href);
-  return new Promise(resolve => {
-    PlacesUtils.favicons.getFaviconDataForPage(
-      pageURI,
-      (iconUri, len, data, mimeType) => {
-        resolve({ data, mimeType });
-      },
-      width
-    );
-  });
-}
-
-/**
  * Asynchronously compares contents from 2 favicon urls.
  */
 async function compareFavicons(icon1, icon2, msg) {

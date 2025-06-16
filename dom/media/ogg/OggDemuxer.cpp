@@ -87,7 +87,9 @@ OggDemuxer::nsAutoOggSyncState::~nsAutoOggSyncState() {
 rlbox_sandbox_ogg* OggDemuxer::CreateSandbox() {
   rlbox_sandbox_ogg* sandbox = new rlbox_sandbox_ogg();
 #ifdef MOZ_WASM_SANDBOXING_OGG
-  bool success = sandbox->create_sandbox(false /* infallible */);
+  bool success = sandbox->create_sandbox(/* shouldAbortOnFailure = */ false,
+                                         /* custom capacity = */ nullptr,
+                                         "rlbox_wasm2c_ogg");
 #else
   bool success = sandbox->create_sandbox();
 #endif
@@ -1456,7 +1458,7 @@ RefPtr<OggTrackDemuxer::SamplesPromise> OggTrackDemuxer::GetSamples(
       return SamplesPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_DEMUXER_ERR,
                                              __func__);
     }
-    samples->AppendSample(sample);
+    samples->AppendSample(std::move(sample));
     aNumSamples--;
   }
 

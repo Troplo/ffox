@@ -4,11 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::{RefCell, RefMut},
     collections::HashMap,
+    fmt::{self, Display, Formatter},
     path::PathBuf,
     rc::Rc,
     time::Instant,
@@ -43,8 +42,8 @@ pub struct Http3Server {
     events: Http3ServerEvents,
 }
 
-impl ::std::fmt::Display for Http3Server {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Http3Server {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Http3 server ")
     }
 }
@@ -118,7 +117,11 @@ impl Http3Server {
         self.process(None::<Datagram>, now)
     }
 
-    pub fn process(&mut self, dgram: Option<Datagram<impl AsRef<[u8]>>>, now: Instant) -> Output {
+    pub fn process(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+    ) -> Output {
         qtrace!("[{self}] Process");
         let out = self.server.process(dgram, now);
         self.process_http3(now);
@@ -135,9 +138,10 @@ impl Http3Server {
     /// Process HTTP3 layer.
     fn process_http3(&mut self, now: Instant) {
         qtrace!("[{self}] Process http3 internal");
-        // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable
-        // types.
-        #[allow(clippy::mutable_key_type)]
+        #[expect(
+            clippy::mutable_key_type,
+            reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."
+        )]
         let mut active_conns = self.server.active_connections();
         active_conns.extend(
             self.http3_handlers
@@ -147,12 +151,19 @@ impl Http3Server {
                 .cloned(),
         );
 
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over active connections in an undefined order."
+        )]
         for conn in active_conns {
             self.process_events(&conn, now);
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Function is mostly a match statement."
+    )]
     fn process_events(&mut self, conn: &ConnectionRef, now: Instant) {
         let mut remove = false;
         let http3_parameters = &self.http3_parameters;
@@ -410,8 +421,12 @@ mod tests {
 
     fn connect_transport(server: &mut Http3Server, client: &mut Connection, resume: bool) {
         let c1 = client.process_output(now());
-        let s1 = server.process(c1.dgram(), now());
+        let c11 = client.process_output(now());
+        _ = server.process(c1.dgram(), now());
+        let s1 = server.process(c11.dgram(), now());
         let c2 = client.process(s1.dgram(), now());
+        let s2 = server.process(c2.dgram(), now());
+        let c2 = client.process(s2.dgram(), now());
         let needs_auth = client
             .events()
             .any(|e| e == ConnectionEvent::AuthenticationNeeded);
@@ -430,8 +445,7 @@ mod tests {
         assert!(client.state().connected());
         let s2 = server.process(c2.dgram(), now());
         assert_connected(server);
-        let c3 = client.process(s2.dgram(), now());
-        assert!(c3.dgram().is_none());
+        _ = client.process(s2.dgram(), now());
     }
 
     // Start a client/server and check setting frame.

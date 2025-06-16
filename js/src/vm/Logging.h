@@ -87,10 +87,12 @@ class LogModule {
 #define FOR_EACH_JS_LOG_MODULE(_)                                            \
   _(debug)                /* A predefined log module for casual debugging */ \
   _(wasmPerf)             /* Wasm performance statistics */                  \
+  _(wasmApi)              /* Wasm JS-API tracing */                          \
   _(fuseInvalidation)     /* Invalidation triggered by a fuse  */            \
   _(thenable)             /* Thenable on standard proto*/                    \
   _(startup)              /* engine startup logging */                       \
   _(teleporting)          /* Shape Teleporting */                            \
+  _(selfHosted)           /* self-hosted script logging */                   \
   JITSPEW_CHANNEL_LIST(_) /* A module for each JitSpew channel. */
 
 // Declare Log modules
@@ -106,6 +108,9 @@ FOR_EACH_JS_LOG_MODULE(DECLARE_MODULE);
 
 // The core logging macro for the JS Engine.
 #ifdef JS_LOGGING
+#  define JS_SHOULD_LOG(name, log_level) \
+    name##Module.shouldLog(LogLevel::log_level)
+
 #  define JS_LOG(name, log_level, ...)                                     \
     do {                                                                   \
       if (name##Module.shouldLog(LogLevel::log_level)) {                   \
@@ -113,8 +118,17 @@ FOR_EACH_JS_LOG_MODULE(DECLARE_MODULE);
                                         LogLevel::log_level, __VA_ARGS__); \
       }                                                                    \
     } while (0);
+#  define JS_LOG_FMT(name, log_level, fmt, ...)                             \
+    do {                                                                    \
+      if (name##Module.shouldLog(LogLevel::log_level)) {                    \
+        name##Module.interface.logPrintFmt(name##Module.logger,             \
+                                           LogLevel::log_level,             \
+                                           FMT_STRING(fmt), ##__VA_ARGS__); \
+      }                                                                     \
+    } while (0);
 #else
 #  define JS_LOG(module, log_level, ...)
+#  define JS_LOG_FMT(module, log_level, fmt, ...)
 #endif
 
 #undef JS_LOGGING

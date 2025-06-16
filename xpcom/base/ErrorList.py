@@ -89,6 +89,7 @@ modules["ERRORRESULT"] = Mod(43)
 # see Bug 1686041.
 modules["WIN32"] = Mod(44)
 modules["WDBA"] = Mod(45)
+modules["DOM_QM"] = Mod(46)
 
 # NS_ERROR_MODULE_GENERAL should be used by modules that do not
 # care if return code values overlap. Callers of methods that
@@ -463,6 +464,9 @@ with modules["NETWORK"]:
     # Generic error for non-specific failures during service worker interception
     errors["NS_ERROR_INTERCEPTION_FAILED"] = FAILURE(100)
 
+    # WebTransport Session Limit (mWebTransportMaxSessions) Exceeded
+    errors["NS_ERROR_WEBTRANSPORT_SESSION_LIMIT_EXCEEDED"] = FAILURE(199)
+
     errors["NS_ERROR_WEBTRANSPORT_CODE_BASE"] = FAILURE(200)
     errors["NS_ERROR_WEBTRANSPORT_CODE_END"] = (
         errors["NS_ERROR_WEBTRANSPORT_CODE_BASE"] + 255
@@ -586,27 +590,14 @@ with modules["LAYOUT"]:
 # =======================================================================
 with modules["HTMLPARSER"]:
     errors["NS_ERROR_HTMLPARSER_CONTINUE"] = errors["NS_OK"]
-
     errors["NS_ERROR_HTMLPARSER_EOF"] = FAILURE(1000)
-    errors["NS_ERROR_HTMLPARSER_UNKNOWN"] = FAILURE(1001)
-    errors["NS_ERROR_HTMLPARSER_CANTPROPAGATE"] = FAILURE(1002)
-    errors["NS_ERROR_HTMLPARSER_CONTEXTMISMATCH"] = FAILURE(1003)
-    errors["NS_ERROR_HTMLPARSER_BADFILENAME"] = FAILURE(1004)
     errors["NS_ERROR_HTMLPARSER_BADURL"] = FAILURE(1005)
     errors["NS_ERROR_HTMLPARSER_INVALIDPARSERCONTEXT"] = FAILURE(1006)
     errors["NS_ERROR_HTMLPARSER_INTERRUPTED"] = FAILURE(1007)
     errors["NS_ERROR_HTMLPARSER_BLOCK"] = FAILURE(1008)
-    errors["NS_ERROR_HTMLPARSER_BADTOKENIZER"] = FAILURE(1009)
-    errors["NS_ERROR_HTMLPARSER_BADATTRIBUTE"] = FAILURE(1010)
     errors["NS_ERROR_HTMLPARSER_UNRESOLVEDDTD"] = FAILURE(1011)
-    errors["NS_ERROR_HTMLPARSER_MISPLACEDTABLECONTENT"] = FAILURE(1012)
-    errors["NS_ERROR_HTMLPARSER_BADDTD"] = FAILURE(1013)
-    errors["NS_ERROR_HTMLPARSER_BADCONTEXT"] = FAILURE(1014)
     errors["NS_ERROR_HTMLPARSER_STOPPARSING"] = FAILURE(1015)
-    errors["NS_ERROR_HTMLPARSER_UNTERMINATEDSTRINGLITERAL"] = FAILURE(1016)
     errors["NS_ERROR_HTMLPARSER_HIERARCHYTOODEEP"] = FAILURE(1017)
-    errors["NS_ERROR_HTMLPARSER_FAKE_ENDTAG"] = FAILURE(1018)
-    errors["NS_ERROR_HTMLPARSER_INVALID_COMMENT"] = FAILURE(1019)
 
 
 # =======================================================================
@@ -1247,6 +1238,11 @@ with modules["WDBA"]:
     errors["NS_ERROR_WDBA_REJECTED"] = FAILURE(3)
     errors["NS_ERROR_WDBA_BUILD"] = FAILURE(4)
 
+# =======================================================================
+# 46: NS_ERROR_MODULE_DOM_QM
+# =======================================================================
+with modules["DOM_QM"]:
+    errors["NS_ERROR_DOM_QM_CLIENT_INIT_ORIGIN_UNINITIALIZED"] = FAILURE(1)
 
 # =======================================================================
 # 51: NS_ERROR_MODULE_GENERAL
@@ -1304,14 +1300,14 @@ def error_list_h(output):
 """
     )
 
-    output.write("#define NS_ERROR_MODULE_BASE_OFFSET {}\n".format(MODULE_BASE_OFFSET))
+    output.write(f"#define NS_ERROR_MODULE_BASE_OFFSET {MODULE_BASE_OFFSET}\n")
 
     for mod, val in modules.items():
-        output.write("#define NS_ERROR_MODULE_{} {}\n".format(mod, val.num))
+        output.write(f"#define NS_ERROR_MODULE_{mod} {val.num}\n")
 
     items = []
     for error, val in errors.items():
-        items.append("  {} = 0x{:X}".format(error, val))
+        items.append(f"  {error} = 0x{val:X}")
     output.write(
         """
 enum class nsresult : uint32_t
@@ -1326,7 +1322,7 @@ enum class nsresult : uint32_t
 
     items = []
     for error, val in errors.items():
-        items.append("  {0} = nsresult::{0}".format(error))
+        items.append(f"  {error} = nsresult::{error}")
 
     output.write(
         """
@@ -1370,7 +1366,7 @@ GetErrorNameInternal(nsresult rv)
     seen = set()
     for error, val in errors.items():
         if val not in seen:
-            output.write('  case nsresult::{0}: return "{0}";\n'.format(error))
+            output.write(f'  case nsresult::{error}: return "{error}";\n')
         seen.add(val)
 
     output.write(
@@ -1397,20 +1393,16 @@ use super::nsresult;
     )
 
     output.write(
-        "pub const NS_ERROR_MODULE_BASE_OFFSET: nsresult = nsresult({});\n".format(
-            MODULE_BASE_OFFSET
-        )
+        f"pub const NS_ERROR_MODULE_BASE_OFFSET: nsresult = nsresult({MODULE_BASE_OFFSET});\n"
     )
 
     for mod, val in modules.items():
         output.write(
-            "pub const NS_ERROR_MODULE_{}: nsresult = nsresult({});\n".format(
-                mod, val.num
-            )
+            f"pub const NS_ERROR_MODULE_{mod}: nsresult = nsresult({val.num});\n"
         )
 
     for error, val in errors.items():
-        output.write("pub const {}: nsresult = nsresult(0x{:X});\n".format(error, val))
+        output.write(f"pub const {error}: nsresult = nsresult(0x{val:X});\n")
 
 
 def gen_jinja(output, input_filename):

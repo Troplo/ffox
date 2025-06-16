@@ -20,7 +20,7 @@ add_task(async function test_panel_closes_on_toggle_never_translate_site() {
     openFromAppMenu: true,
     expectedFromLanguage: "es",
     expectedToLanguage: "en",
-    onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewDefault,
+    onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewIntro,
   });
 
   await FullPageTranslationsTestUtils.openTranslationsSettingsMenu();
@@ -60,11 +60,11 @@ add_task(
       openFromAppMenu: true,
       expectedFromLanguage: "es",
       expectedToLanguage: "en",
-      onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewDefault,
+      onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewIntro,
     });
     await FullPageTranslationsTestUtils.openTranslationsSettingsMenu();
 
-    await FullPageTranslationsTestUtils.assertPageIsUntranslated(runInPage);
+    await FullPageTranslationsTestUtils.assertPageIsNotTranslated(runInPage);
     await FullPageTranslationsTestUtils.assertIsAlwaysTranslateLanguage("es", {
       checked: false,
     });
@@ -75,12 +75,14 @@ add_task(
       checked: true,
     });
 
-    await FullPageTranslationsTestUtils.assertPageIsTranslated({
-      fromLanguage: "es",
-      toLanguage: "en",
-      runInPage,
-      message: "The page should be automatically translated.",
-    });
+    await FullPageTranslationsTestUtils.assertOnlyIntersectingNodesAreTranslated(
+      {
+        fromLanguage: "es",
+        toLanguage: "en",
+        runInPage,
+        message: "The page should be automatically translated.",
+      }
+    );
 
     await FullPageTranslationsTestUtils.openPanel({
       expectedToLanguage: "en",
@@ -128,7 +130,7 @@ add_task(
       openFromAppMenu: true,
       expectedFromLanguage: "es",
       expectedToLanguage: "en",
-      onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewDefault,
+      onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewIntro,
     });
 
     await FullPageTranslationsTestUtils.openTranslationsSettingsMenu();
@@ -145,7 +147,7 @@ add_task(
       openFromAppMenu: true,
       expectedFromLanguage: "es",
       expectedToLanguage: "en",
-      onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewDefault,
+      onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewIntro,
     });
     await FullPageTranslationsTestUtils.openTranslationsSettingsMenu();
 

@@ -150,6 +150,18 @@ var gIdentityHandler = {
     );
   },
 
+  get _isSecurelyConnectedAboutNetErrorPage() {
+    let { documentURI } = gBrowser.selectedBrowser;
+    if (documentURI?.scheme != "about" || documentURI.filePath != "neterror") {
+      return false;
+    }
+
+    let error = new URLSearchParams(documentURI.query).get("e");
+
+    // Bug 1944993 - A list of neterrors without connection issues
+    return error === "httpErrorPage" || error === "serverError";
+  },
+
   get _isAboutNetErrorPage() {
     let { documentURI } = gBrowser.selectedBrowser;
     return documentURI?.scheme == "about" && documentURI.filePath == "neterror";
@@ -206,12 +218,6 @@ var gIdentityHandler = {
       },
       "identity-popup-remove-cert-exception": () => {
         this.removeCertException();
-      },
-      "identity-popup-disable-mixed-content-blocking": () => {
-        this.disableMixedContentProtection();
-      },
-      "identity-popup-enable-mixed-content-blocking": () => {
-        this.enableMixedContentProtection();
       },
       "identity-popup-more-info": event => {
         this.handleMoreInfoClick(event);
@@ -478,49 +484,6 @@ var gIdentityHandler = {
     Services.focus.clearFocus(window);
   },
 
-  disableMixedContentProtection() {
-    // Use telemetry to measure how often unblocking happens
-    const kMIXED_CONTENT_UNBLOCK_EVENT = 2;
-    Glean.mixedContent.unblockCounter.accumulateSingleSample(
-      kMIXED_CONTENT_UNBLOCK_EVENT
-    );
-
-    SitePermissions.setForPrincipal(
-      gBrowser.contentPrincipal,
-      "mixed-content",
-      SitePermissions.ALLOW,
-      SitePermissions.SCOPE_SESSION
-    );
-
-    // Reload the page with the content unblocked
-    BrowserCommands.reloadWithFlags(
-      Ci.nsIWebNavigation.LOAD_FLAGS_BYPASS_CACHE
-    );
-    if (this._popupInitialized) {
-      PanelMultiView.hidePopup(this._identityPopup);
-    }
-  },
-
-  // This is needed for some tests which need the permission reset, but which
-  // then reuse the browser and would race between the reload and the next
-  // load.
-  enableMixedContentProtectionNoReload() {
-    this.enableMixedContentProtection(false);
-  },
-
-  enableMixedContentProtection(reload = true) {
-    SitePermissions.removeFromPrincipal(
-      gBrowser.contentPrincipal,
-      "mixed-content"
-    );
-    if (reload) {
-      BrowserCommands.reload();
-    }
-    if (this._popupInitialized) {
-      PanelMultiView.hidePopup(this._identityPopup);
-    }
-  },
-
   removeCertException() {
     if (!this._uriHasHost) {
       console.error(
@@ -654,6 +617,9 @@ var gIdentityHandler = {
       if (this._popupInitialized) {
         PanelMultiView.hidePopup(this._identityPopup);
       }
+      // Ensure the browser is focused again, otherwise we may not trigger the
+      // security delay on a potential error page following this reload.
+      gBrowser.selectedBrowser.focus();
       return;
     }
     // Otherwise we just refresh the interface
@@ -1005,7 +971,12 @@ var gIdentityHandler = {
       "identity-popup-mainView"
     );
     identityPopupPanelView.removeAttribute("footerVisible");
-    if (this._uriHasHost && !this._pageExtensionPolicy) {
+    // Bug 1754172 - Only show the clear site data footer if we're not in private browsing.
+    if (
+      !PrivateBrowsingUtils.isWindowPrivate(window) &&
+      this._uriHasHost &&
+      !this._pageExtensionPolicy
+    ) {
       SiteDataManager.hasSiteData(this._uri.asciiHost).then(hasData => {
         this._clearSiteDataFooter.hidden = !hasData;
         identityPopupPanelView.setAttribute("footerVisible", hasData);
@@ -1035,6 +1006,8 @@ var gIdentityHandler = {
       connection = "https-only-error-page";
     } else if (this._isAboutBlockedPage) {
       connection = "not-secure";
+    } else if (this._isSecurelyConnectedAboutNetErrorPage) {
+      connection = "secure";
     } else if (this._isAboutNetErrorPage) {
       connection = "net-error-page";
     } else if (this._isAssociatedIdentity) {
@@ -1220,8 +1193,12 @@ var gIdentityHandler = {
   },
 
   setURI(uri) {
-    if (uri instanceof Ci.nsINestedURI) {
-      uri = uri.QueryInterface(Ci.nsINestedURI).innermostURI;
+    // Unnest the URI, turning "view-source:https://example.com" into
+    // "https://example.com" for example. "about:" URIs are a special exception
+    // here, as some of them have a hidden moz-safe-about inner URI we do not
+    // want to unnest.
+    while (uri instanceof Ci.nsINestedURI && !uri.schemeIs("about")) {
+      uri = uri.QueryInterface(Ci.nsINestedURI).innerURI;
     }
     this._uri = uri;
 
@@ -1232,7 +1209,7 @@ var gIdentityHandler = {
       this._uriHasHost = false;
     }
 
-    if (uri.schemeIs("about") || uri.schemeIs("moz-safe-about")) {
+    if (uri.schemeIs("about")) {
       let module = E10SUtils.getAboutModule(uri);
       if (module) {
         let flags = module.getURIFlags(uri);

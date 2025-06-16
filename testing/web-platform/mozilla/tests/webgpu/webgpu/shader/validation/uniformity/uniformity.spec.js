@@ -313,9 +313,6 @@ combineWithParams(kConditions).
 combine('op', kSubgroupOps).
 combine('stage', ['compute', 'fragment'])
 ).
-beforeAllSubcases((t) => {
-  t.selectDeviceOrSkipTestCase('subgroups');
-}).
 fn((t) => {
   let code = `
  enable subgroups;
@@ -399,10 +396,6 @@ beforeAllSubcases((t) => {
     t.isCompatibility && ['sample_index', 'sample_mask'].includes(t.params.builtin),
     'compatibility mode does not support sample_index or sample_mask'
   );
-  const builtin = t.params.builtin;
-  if (builtin.includes('subgroup')) {
-    t.selectDeviceOrSkipTestCase('subgroups');
-  }
 }).
 fn((t) => {
   let cond = ``;
@@ -486,11 +479,6 @@ const kComputeBuiltinValues = [
 g.test('compute_builtin_values').
 desc(`Test uniformity of compute built-in values`).
 params((u) => u.combineWithParams(kComputeBuiltinValues).beginSubcases()).
-beforeAllSubcases((t) => {
-  if (t.params.builtin.includes('subgroup')) {
-    t.selectDeviceOrSkipTestCase('subgroups');
-  }
-}).
 fn((t) => {
   let cond = ``;
   switch (t.params.type) {
@@ -589,6 +577,11 @@ const kPointerCases = {
   wg_uniform_load_is_uniform: {
     code: `let test_val = workgroupUniformLoad(&wg_scalar);`,
     check: `contents`,
+    uniform: true
+  },
+  wg_uniform_load_atomic_is_uniform: {
+    code: `let ptr = &wg_atomic;`,
+    check: `address`,
     uniform: true
   },
   contents_scalar_uniform1: {
@@ -950,6 +943,7 @@ fn((t) => {
   const code = `
 var<workgroup> wg_scalar : u32;
 var<workgroup> wg_array : array<u32, 16>;
+var<workgroup> wg_atomic : atomic<u32>;
 
 struct Inner {
   x : array<u32, 4>
@@ -2819,9 +2813,6 @@ u.
 combine('op', ['subgroupShuffleUp', 'subgroupShuffleDown', 'subgroupShuffleXor']).
 combine('uniform', [false, true])
 ).
-beforeAllSubcases((t) => {
-  t.selectDeviceOrSkipTestCase('subgroups');
-}).
 fn((t) => {
   const wgsl = `
 enable subgroups;

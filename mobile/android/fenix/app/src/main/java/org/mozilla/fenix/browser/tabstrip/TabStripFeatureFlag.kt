@@ -6,21 +6,17 @@ package org.mozilla.fenix.browser.tabstrip
 
 import android.content.Context
 import mozilla.components.support.ktx.android.content.doesDeviceHaveHinge
-import org.mozilla.fenix.Config
-import org.mozilla.fenix.ReleaseChannel
+import org.mozilla.fenix.nimbus.FxNimbus
 import org.mozilla.fenix.utils.isLargeScreenSize
 
 /**
  * Returns true if the tab strip is enabled.
  */
 fun Context.isTabStripEnabled(): Boolean =
-    Config.channel.isTabStripChannel() && isTabStripEligible()
+    isTabStripEligible() && tabStripExperimentEnabled()
 
-/**
- * Returns true for channels that have the tab strip enabled.
- */
-private fun ReleaseChannel.isTabStripChannel(): Boolean =
-    isBeta || isNightlyOrDebug
+private fun tabStripExperimentEnabled(): Boolean =
+    FxNimbus.features.tabStrip.value().enabled
 
 /**
  * Returns true if the the device has the prerequisites to enable the tab strip.

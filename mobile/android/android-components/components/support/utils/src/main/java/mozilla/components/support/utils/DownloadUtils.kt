@@ -7,6 +7,8 @@ package mozilla.components.support.utils
 import android.net.Uri
 import android.os.Environment
 import android.webkit.MimeTypeMap
+import mozilla.components.support.utils.DownloadUtils.CONTENT_DISPOSITION_TYPE
+import mozilla.components.support.utils.DownloadUtils.fileNameAsteriskContentDispositionPattern
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.UnsupportedEncodingException
@@ -23,7 +25,7 @@ object DownloadUtils {
      * optional whitespaces characters followed by a comma.
      *
      */
-    private const val contentDispositionType = "(inline|attachment)\\s*;"
+    private const val CONTENT_DISPOSITION_TYPE = "(inline|attachment)\\s*;"
 
     /**
      * This is the regular expression to match filename* parameter segment.
@@ -50,16 +52,16 @@ object DownloadUtils {
      * it's where we are going to have the filename.
      *
      */
-    private const val contentDispositionFileNameAsterisk =
+    private const val CONTENT_DISPOSITION_FILE_NAME_ASTERISK =
         "\\s*filename\\*\\s*=\\s*(utf-8|iso-8859-1)'[^']*'([^;\\s]*)"
 
     /**
      * Format as defined in RFC 2616 and RFC 5987
      * Both inline and attachment types are supported.
      * More details can be found
-     * https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Disposition
+     * https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Disposition
      *
-     * The first segment is the [contentDispositionType], there you can find the documentation,
+     * The first segment is the [CONTENT_DISPOSITION_TYPE], there you can find the documentation,
      * Next, it's the filename segment, where we have a filename="filename.ext"
      * For example, all of these could be possible in this section:
      * filename="filename.jpg"
@@ -95,9 +97,9 @@ object DownloadUtils {
      * attachment; filename="_.jpg"; filename*=iso-8859-1'en'file%27%20%27name.jpg
      */
     private val contentDispositionPattern = Pattern.compile(
-        contentDispositionType +
+        CONTENT_DISPOSITION_TYPE +
             "\\s*filename\\s*=\\s*(\"((?:\\\\.|[^\"\\\\])*)\"|[^;]*)\\s*" +
-            "(?:;$contentDispositionFileNameAsterisk)?",
+            "(?:;$CONTENT_DISPOSITION_FILE_NAME_ASTERISK)?",
         Pattern.CASE_INSENSITIVE,
     )
 
@@ -105,8 +107,8 @@ object DownloadUtils {
      * This is an alternative content disposition pattern where only filename* is available
      */
     private val fileNameAsteriskContentDispositionPattern = Pattern.compile(
-        contentDispositionType +
-            contentDispositionFileNameAsterisk,
+        CONTENT_DISPOSITION_TYPE +
+            CONTENT_DISPOSITION_FILE_NAME_ASTERISK,
         Pattern.CASE_INSENSITIVE,
     )
 
@@ -337,8 +339,9 @@ object DownloadUtils {
 
     private fun parseContentDisposition(contentDisposition: String): String? {
         return try {
-            parseContentDispositionWithFileName(contentDisposition)
+            val fileName = parseContentDispositionWithFileName(contentDisposition)
                 ?: parseContentDispositionWithFileNameAsterisk(contentDisposition)
+            Uri.decode(fileName)
         } catch (ex: IllegalStateException) {
             // This function is defined as returning null when it can't parse the header
             null

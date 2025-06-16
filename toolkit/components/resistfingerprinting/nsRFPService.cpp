@@ -32,6 +32,7 @@
 #include "mozilla/HelperMacros.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Logging.h"
+#include "mozilla/LookAndFeel.h"
 #include "mozilla/MacroForEach.h"
 #include "mozilla/OriginAttributes.h"
 #include "mozilla/Preferences.h"
@@ -106,6 +107,8 @@ static mozilla::LazyLogModule gFingerprinterDetection("FingerprinterDetection");
 
 static mozilla::LazyLogModule gTimestamps("Timestamps");
 
+#define RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_BASE_PREF \
+  "privacy.baselineFingerprintingProtection.overrides"
 #define RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_PREF \
   "privacy.fingerprintingProtection.overrides"
 #define GLEAN_DATA_SUBMISSION_PREF "datareporting.healthreport.uploadEnabled"
@@ -116,6 +119,7 @@ static mozilla::LazyLogModule gTimestamps("Timestamps");
 #define LAST_PB_SESSION_EXITED_TOPIC "last-pb-context-exited"
 #define IDLE_TOPIC "browser-idle-startup-tasks-finished"
 #define COMPOSITOR_CREATED "compositor:created"
+#define FONT_LIST_INITIALIZED "font-list-initialized"
 #define USER_CHARACTERISTICS_TEST_REQUEST \
   "user-characteristics-testing-please-populate-data"
 
@@ -137,6 +141,10 @@ static constexpr uint32_t kVideoDroppedRatio = 1;
 #  define ANDROID_DEFAULT(name)
 #  define DESKTOP_DEFAULT(name) RFPTarget::name,
 #endif
+
+MOZ_CONSTINIT const RFPTargetSet kDefaultFingerprintingProtectionsBase = {
+#include "RFPTargetsDefaultBaseline.inc"
+};
 
 MOZ_RUNINIT const RFPTargetSet kDefaultFingerprintingProtections = {
 #include "RFPTargetsDefault.inc"
@@ -160,6 +168,8 @@ static bool sInitialized = false;
 
 // Actually enabled fingerprinting protections.
 static StaticMutex sEnabledFingerprintingProtectionsMutex;
+MOZ_CONSTINIT static RFPTargetSet sEnabledFingerprintingProtectionsBase
+    MOZ_GUARDED_BY(sEnabledFingerprintingProtectionsMutex);
 MOZ_CONSTINIT static RFPTargetSet sEnabledFingerprintingProtections
     MOZ_GUARDED_BY(sEnabledFingerprintingProtectionsMutex);
 
@@ -182,6 +192,7 @@ already_AddRefed<nsRFPService> nsRFPService::GetOrCreate() {
 }
 
 static const char* gCallbackPrefs[] = {
+    RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_BASE_PREF,
     RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_PREF,
     GLEAN_DATA_SUBMISSION_PREF,
     nullptr,
@@ -211,6 +222,9 @@ nsresult nsRFPService::Init() {
     rv = obs->AddObserver(this, COMPOSITOR_CREATED, false);
     NS_ENSURE_SUCCESS(rv, rv);
 
+    rv = obs->AddObserver(this, FONT_LIST_INITIALIZED, false);
+    NS_ENSURE_SUCCESS(rv, rv);
+
     rv = obs->AddObserver(this, USER_CHARACTERISTICS_TEST_REQUEST, false);
     NS_ENSURE_SUCCESS(rv, rv);
   }
@@ -228,72 +242,140 @@ nsresult nsRFPService::Init() {
   return rv;
 }
 
+// Very simple helper functions to improve readability.
+
 /* static */
 bool nsRFPService::IsRFPPrefEnabled(bool aIsPrivateMode) {
-  if (StaticPrefs::privacy_resistFingerprinting_DoNotUseDirectly() ||
-      (aIsPrivateMode &&
-       StaticPrefs::privacy_resistFingerprinting_pbmode_DoNotUseDirectly())) {
-    return true;
+  return StaticPrefs::privacy_resistFingerprinting_DoNotUseDirectly() ||
+         (aIsPrivateMode &&
+          StaticPrefs::privacy_resistFingerprinting_pbmode_DoNotUseDirectly());
+}
+
+/* static */
+bool IsBaselineFPPEnabled() {
+  return StaticPrefs::
+      privacy_baselineFingerprintingProtection_DoNotUseDirectly();
+}
+
+/* static */
+bool IsFPPEnabled(bool aIsPrivateMode) {
+  return StaticPrefs::privacy_fingerprintingProtection_DoNotUseDirectly() ||
+         (aIsPrivateMode &&
+          StaticPrefs::
+              privacy_fingerprintingProtection_pbmode_DoNotUseDirectly());
+}
+
+nsRFPService::FingerprintingProtectionType
+nsRFPService::GetFingerprintingProtectionType(bool aIsPrivateMode) {
+  if (nsRFPService::IsRFPPrefEnabled(aIsPrivateMode)) {
+    return FingerprintingProtectionType::RFP;
   }
-  return false;
+
+  if (IsFPPEnabled(aIsPrivateMode)) {
+    return FingerprintingProtectionType::FPP;
+  }
+
+  if (IsBaselineFPPEnabled()) {
+    return FingerprintingProtectionType::Baseline;
+  }
+
+  return FingerprintingProtectionType::None;
+}
+
+Maybe<bool> nsRFPService::HandleExeptionalRFPTargets(
+    RFPTarget aTarget, bool aIsPrivateMode,
+    FingerprintingProtectionType aMode) {
+  MOZ_ASSERT(GetFingerprintingProtectionType(aIsPrivateMode) !=
+             FingerprintingProtectionType::None);
+
+  // IsAlwaysEnabledForPrecompute is used to enable fingerprinting protections.
+  // It isn't included in the RFPTargetSet.
+  if (aTarget == RFPTarget::IsAlwaysEnabledForPrecompute) {
+    return Some(true);
+  }
+
+  // We only spoof language if the user has explicitly agreed to the
+  // prompt we show when privacy.spoof_english is set to 0.
+  if (aTarget == RFPTarget::JSLocale) {
+    return Some(IsTargetActiveForMode(aTarget, aMode) &&
+                StaticPrefs::privacy_spoof_english_DoNotUseDirectly() == 2);
+  }
+
+  // We don't spoof the pointerId on multi-touch devices.
+#if SPOOFED_MAX_TOUCH_POINTS > 0
+  if (aTarget == RFPTarget::PointerId) {
+    return Some(false);
+  }
+#endif
+
+  return Nothing();
+}
+
+bool nsRFPService::IsTargetActiveForMode(RFPTarget aTarget,
+                                         FingerprintingProtectionType aMode) {
+  StaticMutexAutoLock lock(sEnabledFingerprintingProtectionsMutex);
+  switch (aMode) {
+    case FingerprintingProtectionType::FPP:
+      return sEnabledFingerprintingProtections.contains(aTarget);
+    case FingerprintingProtectionType::Baseline:
+      return sEnabledFingerprintingProtectionsBase.contains(aTarget);
+    case FingerprintingProtectionType::RFP:
+      return true;
+    default:
+      MOZ_CRASH("Unexpected FingerprintingProtectionType");
+      return false;
+  }
 }
 
 /* static */
 bool nsRFPService::IsRFPEnabledFor(
     bool aIsPrivateMode, RFPTarget aTarget,
-    const Maybe<RFPTargetSet>& aOverriddenFingerprintingSettings,
-    bool aSkipChromePrincipalCheck /* = false */) {
+    const Maybe<RFPTargetSet>& aOverriddenFingerprintingSettings) {
   MOZ_ASSERT(aTarget != RFPTarget::AllTargets);
 
-#if SPOOFED_MAX_TOUCH_POINTS > 0
-  if (aTarget == RFPTarget::PointerId) {
+  FingerprintingProtectionType mode =
+      GetFingerprintingProtectionType(aIsPrivateMode);
+  if (mode == FingerprintingProtectionType::None) {
     return false;
   }
-#endif
 
-  if (StaticPrefs::privacy_resistFingerprinting_DoNotUseDirectly() ||
-      (aIsPrivateMode &&
-       StaticPrefs::privacy_resistFingerprinting_pbmode_DoNotUseDirectly())) {
-    if (aTarget == RFPTarget::JSLocale) {
-      return StaticPrefs::privacy_spoof_english() == 2;
-    }
+  if (Maybe<bool> result =
+          HandleExeptionalRFPTargets(aTarget, aIsPrivateMode, mode)) {
+    return *result;
+  }
+
+  if (mode == FingerprintingProtectionType::RFP) {
     return true;
   }
 
-  if (StaticPrefs::privacy_fingerprintingProtection_DoNotUseDirectly() ||
-      (aIsPrivateMode &&
-       StaticPrefs::
-           privacy_fingerprintingProtection_pbmode_DoNotUseDirectly())) {
-    if (aTarget == RFPTarget::IsAlwaysEnabledForPrecompute) {
-      return true;
-    }
-
-    if (aOverriddenFingerprintingSettings) {
-      return aOverriddenFingerprintingSettings.ref().contains(aTarget);
-    }
-
-    StaticMutexAutoLock lock(sEnabledFingerprintingProtectionsMutex);
-    return sEnabledFingerprintingProtections.contains(aTarget);
+  if (aOverriddenFingerprintingSettings) {
+    return aOverriddenFingerprintingSettings.ref().contains(aTarget);
   }
 
-  return false;
+  return IsTargetActiveForMode(aTarget, mode);
 }
 
 void nsRFPService::UpdateFPPOverrideList() {
-  nsAutoString targetOverrides;
-  nsresult rv = Preferences::GetString(
-      RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_PREF, targetOverrides);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    MOZ_LOG(gResistFingerprintingLog, LogLevel::Warning,
-            ("Could not get fingerprinting override pref value"));
-    return;
-  }
-
-  RFPTargetSet enabled = CreateOverridesFromText(
-      targetOverrides, kDefaultFingerprintingProtections);
-
   StaticMutexAutoLock lock(sEnabledFingerprintingProtectionsMutex);
-  sEnabledFingerprintingProtections = enabled;
+  std::tuple<const char*, RFPTargetSet&, const RFPTargetSet&> prefs[] = {
+      {RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_PREF,
+       sEnabledFingerprintingProtections, kDefaultFingerprintingProtections},
+      {RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_BASE_PREF,
+       sEnabledFingerprintingProtectionsBase,
+       kDefaultFingerprintingProtectionsBase},
+  };
+
+  for (const auto& [pref, targetSet, defaultSet] : prefs) {
+    nsAutoString targetOverrides;
+    nsresult rv = Preferences::GetString(pref, targetOverrides);
+    if (NS_FAILED(rv)) {
+      MOZ_LOG(gResistFingerprintingLog, LogLevel::Warning,
+              ("Could not get fingerprinting override pref (%s) value", pref));
+      continue;
+    }
+
+    targetSet = CreateOverridesFromText(targetOverrides, defaultSet);
+  }
 }
 
 /* static */
@@ -321,6 +403,7 @@ void nsRFPService::StartShutdown() {
       obs->RemoveObserver(this, OBSERVER_TOPIC_IDLE_DAILY);
       obs->RemoveObserver(this, IDLE_TOPIC);
       obs->RemoveObserver(this, COMPOSITOR_CREATED);
+      obs->RemoveObserver(this, FONT_LIST_INITIALIZED);
       obs->RemoveObserver(this, USER_CHARACTERISTICS_TEST_REQUEST);
     }
   }
@@ -343,7 +426,8 @@ void nsRFPService::PrefChanged(const char* aPref) {
           ("Pref Changed: %s", aPref));
   nsDependentCString pref(aPref);
 
-  if (pref.EqualsLiteral(RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_PREF)) {
+  if (pref.EqualsLiteral(RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_PREF) ||
+      pref.EqualsLiteral(RESIST_FINGERPRINTINGPROTECTION_OVERRIDE_BASE_PREF)) {
     UpdateFPPOverrideList();
   } else if (pref.EqualsLiteral(GLEAN_DATA_SUBMISSION_PREF)) {
     if (XRE_IsParentProcess() &&
@@ -360,8 +444,7 @@ void nsRFPService::PrefChanged(const char* aPref) {
 NS_IMETHODIMP
 nsRFPService::Observe(nsISupports* aObject, const char* aTopic,
                       const char16_t* aMessage) {
-  const int kNumTopicsForUserCharacteristics = 2;
-  static int seenTopicsForUserCharacteristics = 0;
+  static uint8_t bitsetForUserCharacteristics = 0;
 
   if (strcmp(NS_XPCOM_SHUTDOWN_OBSERVER_ID, aTopic) == 0) {
     StartShutdown();
@@ -375,12 +458,19 @@ nsRFPService::Observe(nsISupports* aObject, const char* aTopic,
     ClearBrowsingSessionKey(pattern);
   }
 
-  if (!strcmp(IDLE_TOPIC, aTopic) || !strcmp(COMPOSITOR_CREATED, aTopic)) {
-    seenTopicsForUserCharacteristics++;
+  if (!strcmp(IDLE_TOPIC, aTopic)) {
+    bitsetForUserCharacteristics |= 1 << 0;
+  } else if (!strcmp(COMPOSITOR_CREATED, aTopic)) {
+    bitsetForUserCharacteristics |= 1 << 1;
+  } else if (!strcmp(FONT_LIST_INITIALIZED, aTopic)) {
+    bitsetForUserCharacteristics |= 1 << 2;
+  }
 
-    if (seenTopicsForUserCharacteristics == kNumTopicsForUserCharacteristics) {
-      nsUserCharacteristics::MaybeSubmitPing();
-    }
+  if (bitsetForUserCharacteristics == 0b111) {
+    nsUserCharacteristics::MaybeSubmitPing();
+    // Set 4th bit to 1 to make sure bitset is never 0b111 again.
+    // This is to ensure that we only submit the ping once.
+    bitsetForUserCharacteristics |= 1 << 3;
   }
 
   if (!strcmp(USER_CHARACTERISTICS_TEST_REQUEST, aTopic) &&
@@ -785,7 +875,7 @@ TimerPrecisionType nsRFPService::GetTimerPrecisionType(
   }
 
   if (aRTPCallerType == RTPCallerType::ResistFingerprinting) {
-    return RFP;
+    return TimerPrecisionType::RFP;
   }
 
   if (StaticPrefs::privacy_reduceTimerPrecision() &&
@@ -808,7 +898,7 @@ TimerPrecisionType nsRFPService::GetTimerPrecisionType(
 TimerPrecisionType nsRFPService::GetTimerPrecisionTypeRFPOnly(
     RTPCallerType aRTPCallerType) {
   if (aRTPCallerType == RTPCallerType::ResistFingerprinting) {
-    return RFP;
+    return TimerPrecisionType::RFP;
   }
 
   if (StaticPrefs::privacy_reduceTimerPrecision_unconditional() &&
@@ -910,13 +1000,14 @@ uint32_t nsRFPService::GetSpoofedPresentedFrames(double aTime, uint32_t aWidth,
 // User-Agent/Version Stuff
 
 /* static */
-void nsRFPService::GetSpoofedUserAgent(nsACString& userAgent) {
+void nsRFPService::GetSpoofedUserAgent(nsACString& userAgent,
+                                       bool aAndroidDesktopMode /* = false */) {
   // This function generates the spoofed value of User Agent.
   // We spoof the values of the platform and Firefox version, which could be
   // used as fingerprinting sources to identify individuals.
   // Reference of the format of User Agent:
   // https://developer.mozilla.org/en-US/docs/Web/API/NavigatorID/userAgent
-  // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/User-Agent
+  // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/User-Agent
 
   // These magic numbers are the lengths of the UA string literals below.
   // Assume three-digit Firefox version numbers so we have room to grow.
@@ -926,16 +1017,30 @@ void nsRFPService::GetSpoofedUserAgent(nsACString& userAgent) {
 
   // "Mozilla/5.0 (%s; rv:%d.0) Gecko/%d Firefox/%d.0"
   userAgent.AssignLiteral("Mozilla/5.0 (");
-  userAgent.AppendLiteral(SPOOFED_UA_OS);
+  if (aAndroidDesktopMode) {
+    userAgent.AppendLiteral(SPOOFED_UA_OS_OTHER);
+  } else {
+    userAgent.AppendLiteral(SPOOFED_UA_OS);
+  }
   userAgent.AppendLiteral("; rv:" MOZILLA_UAVERSION ") Gecko/");
 #if defined(ANDROID)
-  userAgent.AppendLiteral(MOZILLA_UAVERSION);
+  if (aAndroidDesktopMode) {
+    userAgent.AppendLiteral(LEGACY_UA_GECKO_TRAIL);
+  } else {
+    userAgent.AppendLiteral(MOZILLA_UAVERSION);
+  }
 #else
   userAgent.AppendLiteral(LEGACY_UA_GECKO_TRAIL);
 #endif
   userAgent.AppendLiteral(" Firefox/" MOZILLA_UAVERSION);
 
   MOZ_ASSERT(userAgent.Length() <= preallocatedLength);
+}
+
+NS_IMETHODIMP nsRFPService::GetSpoofedUserAgentService(bool aDesktopMode,
+                                                       nsACString& aUserAgent) {
+  nsRFPService::GetSpoofedUserAgent(aUserAgent, aDesktopMode);
+  return NS_OK;
 }
 
 /* static */
@@ -1988,6 +2093,10 @@ nsresult nsRFPService::CreateOverrideDomainKey(
   nsresult rv = aOverride->GetFirstPartyDomain(firstPartyDomain);
   NS_ENSURE_SUCCESS(rv, rv);
 
+  bool isBaseline = false;
+  rv = aOverride->GetIsBaseline(&isBaseline);
+  NS_ENSURE_SUCCESS(rv, rv);
+
   // The first party domain shouldn't be empty. And it shouldn't contain a comma
   // because we use a comma as a delimiter.
   if (firstPartyDomain.IsEmpty() ||
@@ -2017,6 +2126,9 @@ nsresult nsRFPService::CreateOverrideDomainKey(
     aDomainKey.Append(FP_OVERRIDES_DOMAIN_KEY_DELIMITER);
     aDomainKey.Append(thirdPartyDomain);
   }
+
+  aDomainKey.Append(FP_OVERRIDES_DOMAIN_KEY_DELIMITER);
+  aDomainKey.Append(isBaseline ? "1" : "0");
 
   return NS_OK;
 }
@@ -2078,8 +2190,9 @@ nsRFPService::SetFingerprintingOverrides(
     const nsTArray<RefPtr<nsIFingerprintingOverride>>& aOverrides) {
   MOZ_ASSERT(XRE_IsParentProcess());
   // Clear all overrides before importing.
-  mFingerprintingOverrides.Clear();
+  CleanAllOverrides();
 
+  StaticMutexAutoLock lock(sEnabledFingerprintingProtectionsMutex);
   for (const auto& fpOverride : aOverrides) {
     nsAutoCString domainKey;
 
@@ -2093,12 +2206,18 @@ nsRFPService::SetFingerprintingOverrides(
     rv = fpOverride->GetOverrides(overridesText);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    StaticMutexAutoLock lock(sEnabledFingerprintingProtectionsMutex);
+    bool isBaseline = false;
+    rv = fpOverride->GetIsBaseline(&isBaseline);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    RFPTargetSet baseOverrides = isBaseline
+                                     ? sEnabledFingerprintingProtectionsBase
+                                     : sEnabledFingerprintingProtections;
     RFPTargetSet targets = nsRFPService::CreateOverridesFromText(
         NS_ConvertUTF8toUTF16(overridesText),
         mFingerprintingOverrides.Contains(domainKey)
             ? mFingerprintingOverrides.Get(domainKey)
-            : sEnabledFingerprintingProtections);
+            : baseOverrides);
 
     // The newly added one will replace the existing one for the given domain
     // key.
@@ -2112,6 +2231,18 @@ nsRFPService::SetFingerprintingOverrides(
 
     obs->NotifyObservers(nullptr, "fpp-test:set-overrides-finishes", nullptr);
   }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsRFPService::GetEnabledFingerprintingProtectionsBaseline(
+    nsIRFPTargetSetIDL** aProtections) {
+  StaticMutexAutoLock lock(sEnabledFingerprintingProtectionsMutex);
+  RFPTargetSet enabled = sEnabledFingerprintingProtectionsBase;
+
+  nsCOMPtr<nsIRFPTargetSetIDL> protections = new nsRFPTargetSetIDL(enabled);
+  protections.forget(aProtections);
 
   return NS_OK;
 }
@@ -2175,9 +2306,11 @@ Maybe<RFPTargetSet> nsRFPService::GetOverriddenFingerprintingSettingsForChannel(
     return Nothing();
   }
 
+  bool isPrivate = loadInfo->GetOriginAttributes().IsPrivateBrowsing();
+
   // The channel is for the first-party load.
   if (!AntiTrackingUtils::IsThirdPartyChannel(aChannel)) {
-    return GetOverriddenFingerprintingSettingsForURI(uri, nullptr);
+    return GetOverriddenFingerprintingSettingsForURI(uri, nullptr, isPrivate);
   }
 
   // The channel is for the third-party load. We get the first-party URI from
@@ -2230,7 +2363,7 @@ Maybe<RFPTargetSet> nsRFPService::GetOverriddenFingerprintingSettingsForChannel(
     rv = NS_NewURI(getter_AddRefs(topURI), scheme + u"://"_ns + domain);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
 
-    return GetOverriddenFingerprintingSettingsForURI(topURI, uri);
+    return GetOverriddenFingerprintingSettingsForURI(topURI, uri, isPrivate);
   }
 
   nsCOMPtr<nsIPrincipal> topPrincipal = topWGP->DocumentPrincipal();
@@ -2282,12 +2415,12 @@ Maybe<RFPTargetSet> nsRFPService::GetOverriddenFingerprintingSettingsForChannel(
                     attrsForeignByAncestor.mPartitionKey.Equals(partitionKey));
 #endif
 
-  return GetOverriddenFingerprintingSettingsForURI(topURI, uri);
+  return GetOverriddenFingerprintingSettingsForURI(topURI, uri, isPrivate);
 }
 
 /* static */
 Maybe<RFPTargetSet> nsRFPService::GetOverriddenFingerprintingSettingsForURI(
-    nsIURI* aFirstPartyURI, nsIURI* aThirdPartyURI) {
+    nsIURI* aFirstPartyURI, nsIURI* aThirdPartyURI, bool aIsPrivate) {
   MOZ_ASSERT(aFirstPartyURI);
   MOZ_ASSERT(XRE_IsParentProcess());
 
@@ -2301,9 +2434,17 @@ Maybe<RFPTargetSet> nsRFPService::GetOverriddenFingerprintingSettingsForURI(
   // will take over {first-party domain, *} because the latter one has a smaller
   // scope.
 
+  bool isBaseline = !IsFPPEnabled(aIsPrivate);
+  auto addIsBaseline = [](nsAutoCString& aKey, bool aIsBaseline) {
+    aKey.Append(FP_OVERRIDES_DOMAIN_KEY_DELIMITER);
+    aKey.Append(aIsBaseline ? "1" : "0");
+  };
+
   // First, we get the overrides that applies to every context.
-  Maybe<RFPTargetSet> result =
-      service->mFingerprintingOverrides.MaybeGet("*"_ns);
+  nsAutoCString key;
+  key.Assign("*"_ns);
+  addIsBaseline(key, isBaseline);
+  Maybe<RFPTargetSet> result = service->mFingerprintingOverrides.MaybeGet(key);
 
   nsCOMPtr<nsIEffectiveTLDService> eTLDService =
       mozilla::components::EffectiveTLD::Service();
@@ -2326,11 +2467,10 @@ Maybe<RFPTargetSet> nsRFPService::GetOverriddenFingerprintingSettingsForURI(
   //   first-party domain.
   if (!aThirdPartyURI) {
     // Test the {first-party domain, *} scope.
-    nsAutoCString key;
     key.Assign(firstPartyDomain);
     key.Append(FP_OVERRIDES_DOMAIN_KEY_DELIMITER);
-    key.Append("*");
-
+    key.Append("*"_ns);
+    addIsBaseline(key, isBaseline);
     Maybe<RFPTargetSet> fpOverrides =
         service->mFingerprintingOverrides.MaybeGet(key);
     if (fpOverrides) {
@@ -2338,7 +2478,9 @@ Maybe<RFPTargetSet> nsRFPService::GetOverriddenFingerprintingSettingsForURI(
     }
 
     // Test the {first-party domain} scope.
-    fpOverrides = service->mFingerprintingOverrides.MaybeGet(firstPartyDomain);
+    key.Assign(firstPartyDomain);
+    addIsBaseline(key, isBaseline);
+    fpOverrides = service->mFingerprintingOverrides.MaybeGet(key);
     if (fpOverrides) {
       result = fpOverrides;
     }
@@ -2362,10 +2504,10 @@ Maybe<RFPTargetSet> nsRFPService::GetOverriddenFingerprintingSettingsForURI(
   }
 
   // Test {first-party domain, *} scope.
-  nsAutoCString key;
   key.Assign(firstPartyDomain);
   key.Append(FP_OVERRIDES_DOMAIN_KEY_DELIMITER);
-  key.Append("*");
+  key.Append("*"_ns);
+  addIsBaseline(key, isBaseline);
   Maybe<RFPTargetSet> fpOverrides =
       service->mFingerprintingOverrides.MaybeGet(key);
   if (fpOverrides) {
@@ -2376,6 +2518,7 @@ Maybe<RFPTargetSet> nsRFPService::GetOverriddenFingerprintingSettingsForURI(
   key.Assign("*");
   key.Append(FP_OVERRIDES_DOMAIN_KEY_DELIMITER);
   key.Append(thirdPartyDomain);
+  addIsBaseline(key, isBaseline);
   fpOverrides = service->mFingerprintingOverrides.MaybeGet(key);
   if (fpOverrides) {
     result = fpOverrides;
@@ -2385,6 +2528,7 @@ Maybe<RFPTargetSet> nsRFPService::GetOverriddenFingerprintingSettingsForURI(
   key.Assign(firstPartyDomain);
   key.Append(FP_OVERRIDES_DOMAIN_KEY_DELIMITER);
   key.Append(thirdPartyDomain);
+  addIsBaseline(key, isBaseline);
   fpOverrides = service->mFingerprintingOverrides.MaybeGet(key);
   if (fpOverrides) {
     result = fpOverrides;
@@ -2463,7 +2607,66 @@ float nsRFPService::GetDefaultPixelDensity() { return 2.0f; }
 
 /* static */
 double nsRFPService::GetDevicePixelRatioAtZoom(float aZoom) {
-  return double(AppUnitsPerCSSPixel()) /
-         double(NSToIntRound(AppUnitsPerCSSPixel() / GetDefaultPixelDensity() /
-                             aZoom));
+  // nsPresContext includes system zoom settings into its zoom factor.
+  // Even at 100% zoom shown in the UI, aZoom is not 1.0f, it is 1.0f *
+  // SystemZoom See
+  // https://searchfox.org/mozilla-central/rev/5bea6ede57be43d450ecc24af7a535288c9a9f7d/layout/base/nsPresContext.cpp#994
+  aZoom /= LookAndFeel::SystemZoomSettings().mFullZoom;
+
+  // Use the same logic as UpdateAppUnitsForFullZoom and ApplyFullZoom from
+  // nsDeviceContext.cpp.
+  int32_t unzoomedAppUnits =
+      NS_lround(AppUnitsPerCSSPixel() / GetDefaultPixelDensity());
+  int32_t appUnitsPerDevPixel =
+      aZoom == 1.0f
+          ? unzoomedAppUnits
+          : std::max(1, NSToIntRound(float(unzoomedAppUnits) / aZoom));
+  return double(AppUnitsPerCSSPixel()) / double(appUnitsPerDevPixel);
+}
+
+nsCString* nsRFPService::sExemptedDomainsLowercase = nullptr;
+
+/* static */
+void nsRFPService::GetExemptedDomainsLowercase(nsCString& aExemptedDomains) {
+#define EXEMPTED_DOMAINS_PREF_NAME \
+  "privacy.resistFingerprinting.exemptedDomains"
+
+  static bool sInited = false;
+  if (!sInited) {
+    sInited = true;
+    sExemptedDomainsLowercase = new nsCString();
+    ClearOnShutdown(sExemptedDomainsLowercase);
+    Preferences::GetCString(EXEMPTED_DOMAINS_PREF_NAME,
+                            *sExemptedDomainsLowercase);
+    Preferences::RegisterCallback(
+        [](const char* aPref, void* aData) {
+          Preferences::GetCString(EXEMPTED_DOMAINS_PREF_NAME,
+                                  *sExemptedDomainsLowercase);
+        },
+        EXEMPTED_DOMAINS_PREF_NAME);
+  }
+
+  aExemptedDomains = *sExemptedDomainsLowercase;
+
+#undef EXEMPTED_DOMAINS_PREF_NAME
+}
+
+/* static */
+CSSIntRect nsRFPService::GetSpoofedScreenAvailSize(const nsRect& aRect,
+                                                   float aScale,
+                                                   bool aIsFullscreen) {
+  int spoofedHeightOffset = aIsFullscreen ? 0 :
+#ifdef XP_WIN
+                                          48;
+#elif defined(XP_MACOSX)
+                                          76;
+#else
+                                          // Linux, Android and other platforms
+                                0;
+#endif
+  spoofedHeightOffset =
+      NS_lround(float(spoofedHeightOffset) / aScale * AppUnitsPerCSSPixel());
+
+  return CSSIntRect::FromAppUnitsRounded(
+      nsRect{0, 0, aRect.width, aRect.height - spoofedHeightOffset});
 }

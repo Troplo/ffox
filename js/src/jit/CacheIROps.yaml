@@ -315,6 +315,14 @@
     obj: ObjId
     clasp: RawPointerField
 
+- name: HasShapeResult
+  shared: false
+  transpile: true
+  cost_estimate: 1
+  args:
+    obj: ObjId
+    shape: ShapeField
+
 - name: CallRegExpMatcherResult
   shared: false
   transpile: true
@@ -400,21 +408,6 @@
   args:
     str: StringId
     separator: StringId
-
-- name: RegExpPrototypeOptimizableResult
-  shared: true
-  transpile: true
-  cost_estimate: 4
-  args:
-    proto: ObjId
-
-- name: RegExpInstanceOptimizableResult
-  shared: true
-  transpile: true
-  cost_estimate: 4
-  args:
-    regexp: ObjId
-    proto: ObjId
 
 - name: GetFirstDollarIndexResult
   shared: true
@@ -3263,11 +3256,12 @@
 
 - name: NewFunctionCloneResult
   shared: false
-  transpile: false
+  transpile: true
   cost_estimate: 4
   args:
     canonical: ObjectField
     allocKind: AllocKindImm
+    site: AllocSiteField
 
 - name: ConcatStringsResult
   shared: true

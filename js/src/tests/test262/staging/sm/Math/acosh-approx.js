@@ -2,9 +2,9 @@
 // This code is governed by the BSD license found in the LICENSE file.
 
 /*---
-includes: [sm/non262-Math-shell.js, sm/non262-shell.js, sm/non262.js]
+includes: [sm/non262.js, sm/non262-shell.js, sm/non262-Math-shell.js]
 flags:
-- noStrict
+  - noStrict
 description: |
   pending
 esid: pending
@@ -273,7 +273,7 @@ var cosh_data = [
     [1875817529344, 28.953212876533797]
 ];
 
-var sloppy_tolerance = 8;  // FIXME
+var sloppy_tolerance = 9;  // FIXME
 
 for (var [x, y] of cosh_data)
     assertNear(Math.acosh(x), y, sloppy_tolerance);

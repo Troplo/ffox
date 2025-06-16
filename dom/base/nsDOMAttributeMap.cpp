@@ -176,8 +176,8 @@ Attr* nsDOMAttributeMap::GetNamedItem(const nsAString& aAttrName) {
   return NamedGetter(aAttrName, dummy);
 }
 
-already_AddRefed<Attr> nsDOMAttributeMap::SetNamedItemNS(Attr& aAttr,
-                                                         ErrorResult& aError) {
+already_AddRefed<Attr> nsDOMAttributeMap::SetNamedItemNS(
+    Attr& aAttr, nsIPrincipal* aSubjectPrincipal, ErrorResult& aError) {
   NS_ENSURE_TRUE(mContent, nullptr);
 
   // XXX should check same-origin between mContent and aAttr however
@@ -207,8 +207,8 @@ already_AddRefed<Attr> nsDOMAttributeMap::SetNamedItemNS(Attr& aAttr,
   nsCOMPtr<Element> element = mContent;
   const nsAString* compliantString =
       TrustedTypeUtils::GetTrustedTypesCompliantAttributeValue(
-          *element, nameAtom, ni->NamespaceID(), value, compliantStringHolder,
-          aError);
+          *element, nameAtom, ni->NamespaceID(), value, aSubjectPrincipal,
+          compliantStringHolder, aError);
   if (aError.Failed()) {
     return nullptr;
   }
@@ -314,8 +314,10 @@ Attr* nsDOMAttributeMap::IndexedGetter(uint32_t aIndex, bool& aFound) {
   aFound = false;
   NS_ENSURE_TRUE(mContent, nullptr);
 
-  const nsAttrName* name = mContent->GetAttrNameAt(aIndex);
-  NS_ENSURE_TRUE(name, nullptr);
+  const nsAttrName* name;
+  if (!mContent->GetAttrNameAt(aIndex, &name)) {
+    return nullptr;
+  }
 
   aFound = true;
   // Don't use the nodeinfo even if one exists since it can have the wrong

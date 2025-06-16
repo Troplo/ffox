@@ -15,6 +15,7 @@ values and then checks the result to test the adapter for basic functionality.
 `;
 
 import { Fixture } from '../../../../common/framework/fixture.js';
+import { globalTestConfig } from '../../../../common/framework/test_config.js';
 import { makeTestGroup } from '../../../../common/framework/test_group.js';
 import { getGPU } from '../../../../common/util/navigator_gpu.js';
 import { assert, objectEquals, iterRange } from '../../../../common/util/util.js';
@@ -114,12 +115,16 @@ g.test('requestAdapter')
       ...(forceFallbackAdapter !== undefined && { forceFallbackAdapter }),
     });
 
-    // failing to create an adapter when forceFallbackAdapter is true is ok.
-    if (forceFallbackAdapter && !adapter) {
-      t.skip('No adapter available');
+    if (!adapter) {
+      // Failing to create an adapter is only OK when forceFallbackAdapter is true.
+      t.expect(forceFallbackAdapter === true);
+
+      // Mark the test as skipped (as long as nothing else failed before this point).
+      t.skip('No fallback adapter available');
       return;
     }
 
+    t.expect(adapter.info.isFallbackAdapter === Boolean(forceFallbackAdapter));
     await testAdapter(t, adapter);
   });
 
@@ -128,6 +133,11 @@ g.test('requestAdapter_invalid_featureLevel')
   .params(u => u.combine('featureLevel', [...validFeatureLevels, ...invalidFeatureLevels]))
   .fn(async t => {
     const { featureLevel } = t.params;
+    t.skipIf(
+      globalTestConfig.compatibility && (featureLevel === undefined || featureLevel === 'core'),
+      'core adapters are not available in compat-only'
+    );
+
     const adapter = await getGPU(t.rec).requestAdapter({ featureLevel });
 
     if (!validFeatureLevels.includes(featureLevel)) {

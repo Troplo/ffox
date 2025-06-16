@@ -19,7 +19,6 @@ import { toggleBreakpoints } from "./breakpoints/index";
 import { copyToTheClipboard } from "../utils/clipboard";
 import { isFulfilled } from "../utils/async-value";
 import { primaryPaneTabs } from "../constants";
-import { features } from "../utils/prefs";
 
 export function setPrimaryPaneTab(tabName) {
   return { type: "SET_PRIMARY_PANE_TAB", tabName };
@@ -195,10 +194,14 @@ export function closeConditionalPanel() {
 }
 
 export function updateViewport() {
-  const editor = getEditor(features.codemirrorNext);
+  const editor = getEditor();
   return {
     type: "SET_VIEWPORT",
-    viewport: editor.getLocationsInViewport(),
+    // The viewport locations are set and used for rendering  column breakpoints
+    // markers correctly within the viewport.
+    // The offsets value represents an allowance of characters or lines offscreen to improve
+    // perceived performance of column breakpoint rendering.
+    viewport: editor.getLocationsInViewport(100, 20),
   };
 }
 

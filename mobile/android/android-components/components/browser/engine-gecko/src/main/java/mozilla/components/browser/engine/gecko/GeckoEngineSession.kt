@@ -4,10 +4,10 @@
 
 package mozilla.components.browser.engine.gecko
 
-import android.net.Uri
 import android.os.Build
 import android.view.WindowManager
 import androidx.annotation.VisibleForTesting
+import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -53,7 +53,6 @@ import mozilla.components.support.base.facts.Action
 import mozilla.components.support.base.facts.Fact
 import mozilla.components.support.base.facts.collect
 import mozilla.components.support.base.log.logger.Logger
-import mozilla.components.support.ktx.kotlin.decode
 import mozilla.components.support.ktx.kotlin.isEmail
 import mozilla.components.support.ktx.kotlin.isExtensionUrl
 import mozilla.components.support.ktx.kotlin.isGeoLocation
@@ -175,10 +174,11 @@ class GeckoEngineSession(
         flags: LoadUrlFlags,
         additionalHeaders: Map<String, String>?,
         originalInput: String?,
+        textDirectiveUserActivation: Boolean,
     ) {
         notifyObservers { onLoadUrl() }
 
-        val scheme = Uri.parse(url).normalizeScheme().scheme
+        val scheme = url.toUri().normalizeScheme().scheme
         if (BLOCKED_SCHEMES.contains(scheme) && !shouldLoadJSSchemes(scheme, flags)) {
             logger.error("URL scheme not allowed. Aborting load.")
             return
@@ -192,6 +192,7 @@ class GeckoEngineSession(
             .uri(url)
             .flags(flags.getGeckoFlags())
             .originalInput(originalInput)
+            .textDirectiveUserActivation(textDirectiveUserActivation)
 
         if (additionalHeaders != null) {
             val headerFilter = if (flags.contains(ALLOW_ADDITIONAL_HEADERS)) {
@@ -459,6 +460,9 @@ class GeckoEngineSession(
 
         val newViewportMode = if (enable) {
             overrideUrl = currentUrl?.let { checkForMobileSite(it) }
+            if (overrideUrl == null && pageLoadingUrl != currentUrl) {
+                overrideUrl = pageLoadingUrl
+            }
             GeckoSessionSettings.VIEWPORT_MODE_DESKTOP
         } else {
             GeckoSessionSettings.VIEWPORT_MODE_MOBILE
@@ -519,7 +523,7 @@ class GeckoEngineSession(
         val mPrefix = "m."
         val mobilePrefix = "mobile."
 
-        val uri = Uri.parse(url)
+        val uri = url.toUri()
         val authority = uri.authority?.lowercase(Locale.ROOT) ?: return null
 
         val foundPrefix = when {
@@ -529,7 +533,7 @@ class GeckoEngineSession(
         }
 
         foundPrefix?.let {
-            val mobileUri = Uri.parse(url).buildUpon().authority(authority.substring(it.length))
+            val mobileUri = url.toUri().buildUpon().authority(authority.substring(it.length))
             overrideUrl = mobileUri.toString()
         }
 
@@ -602,6 +606,13 @@ class GeckoEngineSession(
             WebAppManifest.DisplayMode.STANDALONE -> GeckoSessionSettings.DISPLAY_MODE_STANDALONE
             else -> GeckoSessionSettings.DISPLAY_MODE_BROWSER
         }
+    }
+
+    /**
+     * See [EngineSession.onPipModeChanged].
+     */
+    override fun onPipModeChanged(enabled: Boolean) {
+        geckoSession.compositorController.onPipModeChanged(enabled)
     }
 
     /**
@@ -682,6 +693,27 @@ class GeckoEngineSession(
     }
 
     /**
+     * See [EngineSession.sendMoreWebCompatInfo].
+     */
+    override fun sendMoreWebCompatInfo(
+        info: JSONObject,
+        onResult: () -> Unit,
+        onException: (Throwable) -> Unit,
+    ) {
+        geckoSession.sendMoreWebCompatInfo(info).then(
+            {
+                onResult()
+                GeckoResult<Void>()
+            },
+            { throwable ->
+                logger.error("Sending more web compat info failed.", throwable)
+                onException(throwable)
+                GeckoResult()
+            },
+        )
+    }
+
+    /**
      * See [EngineSession.requestTranslate]
      */
     override fun requestTranslate(
@@ -711,8 +743,7 @@ class GeckoEngineSession(
                 onTranslateComplete(TranslationOperation.TRANSLATE)
             }
             GeckoResult<Void>()
-        }, {
-                throwable ->
+        }, { throwable ->
             logger.error("Request for translation failed: ", throwable)
             notifyObservers {
                 onTranslateException(
@@ -743,8 +774,7 @@ class GeckoEngineSession(
                 onTranslateComplete(TranslationOperation.RESTORE)
             }
             GeckoResult<Void>()
-        }, {
-                throwable ->
+        }, { throwable ->
             logger.error("Request for translation failed: ", throwable)
             notifyObservers {
                 onTranslateException(TranslationOperation.RESTORE, throwable.intoTranslationError())
@@ -765,8 +795,7 @@ class GeckoEngineSession(
             return
         }
 
-        geckoSession.sessionTranslation!!.neverTranslateSiteSetting.then({
-                response ->
+        geckoSession.sessionTranslation!!.neverTranslateSiteSetting.then({ response ->
             if (response == null) {
                 logger.error("Did not receive a site setting response.")
                 onException(
@@ -776,8 +805,7 @@ class GeckoEngineSession(
             }
             onResult(response)
             GeckoResult<Boolean>()
-        }, {
-                throwable ->
+        }, { throwable ->
             logger.error("Request for site translation preference failed: ", throwable)
             onException(throwable.intoTranslationError())
             GeckoResult()
@@ -800,8 +828,7 @@ class GeckoEngineSession(
         geckoSession.sessionTranslation!!.setNeverTranslateSiteSetting(setting).then({
             onResult()
             GeckoResult<Boolean>()
-        }, {
-                throwable ->
+        }, { throwable ->
             logger.error("Request for setting site translation preference failed: ", throwable)
             onException(throwable.intoTranslationError())
             GeckoResult()
@@ -996,7 +1023,12 @@ class GeckoEngineSession(
                         is InterceptionResponse.AppIntent -> {
                             appRedirectUrl = lastLoadRequestUri
                             notifyObservers {
-                                onLaunchIntentRequest(url = url, appIntent = appIntent)
+                                onLaunchIntentRequest(
+                                    url = url,
+                                    appIntent = appIntent,
+                                    fallbackUrl = fallbackUrl,
+                                    appName = appName,
+                                )
                             }
                         }
 
@@ -1259,7 +1291,7 @@ class GeckoEngineSession(
                         url = url,
                         contentLength = contentLength,
                         contentType = DownloadUtils.sanitizeMimeType(contentType),
-                        fileName = fileName.sanitizeFileName().decode(),
+                        fileName = fileName.sanitizeFileName(),
                         response = response,
                         isPrivate = privateMode,
                         openInApp = webResponse.requestExternalApp,
@@ -1437,7 +1469,7 @@ class GeckoEngineSession(
             val geckoResult = GeckoResult<Int>()
             val uri = geckoContentPermission.uri
             val type = geckoContentPermission.permission
-            val request = GeckoPermissionRequest.Content(uri, type, geckoContentPermission, geckoResult)
+            val request = GeckoPermissionRequest.Content(uri, type, geckoContentPermission, mutableListOf(geckoResult))
             notifyObservers { onContentPermissionRequest(request) }
             return geckoResult
         }

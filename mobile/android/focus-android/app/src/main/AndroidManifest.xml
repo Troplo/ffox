@@ -56,6 +56,10 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- Needed to support Credential Manager with Android 14 and later. -->
+    <uses-permission android:name="android.permission.CREDENTIAL_MANAGER_SET_ORIGIN" />
+    <uses-permission android:name="android.permission.CREDENTIAL_MANAGER_QUERY_CANDIDATE_CREDENTIALS" />
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -63,7 +67,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.App.Starting"
         android:name=".FocusApplication"
-        android:usesCleartextTraffic="true">
+        android:enableOnBackInvokedCallback="false"
+        android:usesCleartextTraffic="true"
+        tools:ignore="UnusedAttribute">
 
         <activity
             android:name=".activity.IntentReceiverActivity"

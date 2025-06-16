@@ -52,14 +52,14 @@ nsresult nsMathMLmpaddedFrame::AttributeChanged(int32_t aNameSpaceID,
     } else if (aAttribute == nsGkAtoms::height) {
       mHeight.mState = Attribute::ParsingState::Dirty;
       hasDirtyAttributes = true;
-    } else if (aAttribute == nsGkAtoms::depth_) {
+    } else if (aAttribute == nsGkAtoms::depth) {
       mDepth.mState = Attribute::ParsingState::Dirty;
       hasDirtyAttributes = true;
-    } else if (aAttribute == nsGkAtoms::lspace_) {
+    } else if (aAttribute == nsGkAtoms::lspace) {
       mLeadingSpace.mState = Attribute::ParsingState::Dirty;
       hasDirtyAttributes = true;
       intrinsicDirty = IntrinsicDirty::FrameAndAncestors;
-    } else if (aAttribute == nsGkAtoms::voffset_) {
+    } else if (aAttribute == nsGkAtoms::voffset) {
       mVerticalOffset.mState = Attribute::ParsingState::Dirty;
       hasDirtyAttributes = true;
     }
@@ -230,7 +230,7 @@ void nsMathMLmpaddedFrame::UpdateValue(const Attribute& aAttribute,
                                        Attribute::PseudoUnit aSelfUnit,
                                        const ReflowOutput& aDesiredSize,
                                        nscoord& aValueToUpdate,
-                                       float aFontSizeInflation) const {
+                                       float aFontSizeInflation) {
   nsCSSUnit unit = aAttribute.mValue.GetUnit();
   if (aAttribute.IsValid() && eCSSUnit_Null != unit) {
     nscoord scaler = 0, amount = 0;
@@ -268,8 +268,7 @@ void nsMathMLmpaddedFrame::UpdateValue(const Attribute& aAttribute,
       amount =
           NSToCoordRound(float(scaler) * aAttribute.mValue.GetPercentValue());
     } else {
-      amount = CalcLength(PresContext(), mComputedStyle, aAttribute.mValue,
-                          aFontSizeInflation);
+      amount = CalcLength(aAttribute.mValue, aFontSizeInflation, this);
     }
 
     switch (aAttribute.mSign) {
@@ -346,20 +345,20 @@ nsresult nsMathMLmpaddedFrame::Place(DrawTarget* aDrawTarget,
   height = std::max(0, height);
 
   // update "depth" (this is the descent in the terminology of the REC)
-  ParseAttribute(nsGkAtoms::depth_, mDepth);
+  ParseAttribute(nsGkAtoms::depth, mDepth);
   UpdateValue(mDepth, Attribute::PseudoUnit::Depth, aDesiredSize, depth,
               fontSizeInflation);
   depth = std::max(0, depth);
 
   // update lspace
-  ParseAttribute(nsGkAtoms::lspace_, mLeadingSpace);
+  ParseAttribute(nsGkAtoms::lspace, mLeadingSpace);
   if (mLeadingSpace.mPseudoUnit != Attribute::PseudoUnit::ItSelf) {
     UpdateValue(mLeadingSpace, Attribute::PseudoUnit::Unspecified, aDesiredSize,
                 lspace, fontSizeInflation);
   }
 
   // update voffset
-  ParseAttribute(nsGkAtoms::voffset_, mVerticalOffset);
+  ParseAttribute(nsGkAtoms::voffset, mVerticalOffset);
   if (mVerticalOffset.mPseudoUnit != Attribute::PseudoUnit::ItSelf) {
     UpdateValue(mVerticalOffset, Attribute::PseudoUnit::Unspecified,
                 aDesiredSize, voffset, fontSizeInflation);

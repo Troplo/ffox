@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 use crate::RemoteSettingsContext;
 use firefox_versioning::compare::version_compare;
 use jexl_eval::Evaluator;
@@ -25,11 +29,7 @@ impl JexlFilter {
     /// evaluated as `true` by default.
     pub(crate) fn new(context: Option<RemoteSettingsContext>) -> Self {
         let env_context = match context {
-            Some(ctx) => {
-                let serialized_context =
-                    serde_json::to_value(ctx).expect("Failed to serialize RemoteSettingsContext");
-                json!({ "env": serialized_context })
-            }
+            Some(ctx) => json!({ "env": ctx.into_env() }),
             None => json!({ "env": {} }),
         };
 

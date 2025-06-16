@@ -54,7 +54,6 @@ class HomeActivityTestRule(
         isHomeOnboardingDialogEnabled: Boolean = settings.showHomeOnboardingDialog &&
             FenixOnboarding(appContext).userHasBeenOnboarded(),
         isPocketEnabled: Boolean = settings.showPocketRecommendationsFeature,
-        isNavigationBarCFREnabled: Boolean = settings.shouldShowNavigationBarCFR,
         isRecentTabsFeatureEnabled: Boolean = settings.showRecentTabsFeature,
         isRecentlyVisitedFeatureEnabled: Boolean = settings.historyMetadataUIFeature,
         isPWAsPromptEnabled: Boolean = !settings.userKnowsAboutPwas,
@@ -62,20 +61,16 @@ class HomeActivityTestRule(
         isDeleteSitePermissionsEnabled: Boolean = settings.deleteSitePermissions,
         isOpenInAppBannerEnabled: Boolean = settings.shouldShowOpenInAppBanner,
         etpPolicy: ETPPolicy = getETPPolicy(settings),
-        composeTopSitesEnabled: Boolean = false,
         isLocationPermissionEnabled: SitePermissionsRules.Action = getFeaturePermission(PhoneFeature.LOCATION, settings),
-        isNavigationToolbarEnabled: Boolean = false,
         isMenuRedesignEnabled: Boolean = false,
         isMenuRedesignCFREnabled: Boolean = false,
-        isNewBookmarksEnabled: Boolean = false,
         isPageLoadTranslationsPromptEnabled: Boolean = false,
         isMicrosurveyEnabled: Boolean = settings.microsurveyFeatureEnabled,
-        isSetAsDefaultBrowserPromptEnabled: Boolean = settings.setAsDefaultBrowserPromptForExistingUsersEnabled,
         shouldUseBottomToolbar: Boolean = settings.shouldUseBottomToolbar,
+        isComposeHomepageEnabled: Boolean = true,
     ) : this(initialTouchMode, launchActivity, skipOnboarding) {
         this.isHomeOnboardingDialogEnabled = isHomeOnboardingDialogEnabled
         this.isPocketEnabled = isPocketEnabled
-        this.isNavigationBarCFREnabled = isNavigationBarCFREnabled
         this.isRecentTabsFeatureEnabled = isRecentTabsFeatureEnabled
         this.isRecentlyVisitedFeatureEnabled = isRecentlyVisitedFeatureEnabled
         this.isPWAsPromptEnabled = isPWAsPromptEnabled
@@ -83,16 +78,13 @@ class HomeActivityTestRule(
         this.isDeleteSitePermissionsEnabled = isDeleteSitePermissionsEnabled
         this.isOpenInAppBannerEnabled = isOpenInAppBannerEnabled
         this.etpPolicy = etpPolicy
-        this.composeTopSitesEnabled = composeTopSitesEnabled
         this.isLocationPermissionEnabled = isLocationPermissionEnabled
-        this.isNavigationToolbarEnabled = isNavigationToolbarEnabled
         this.isMenuRedesignEnabled = isMenuRedesignEnabled
         this.isMenuRedesignCFREnabled = isMenuRedesignCFREnabled
-        this.isNewBookmarksEnabled = isNewBookmarksEnabled
         this.enableOrDisablePageLoadTranslationsPrompt(isPageLoadTranslationsPromptEnabled)
         this.isMicrosurveyEnabled = isMicrosurveyEnabled
-        this.isSetAsDefaultBrowserPromptEnabled = isSetAsDefaultBrowserPromptEnabled
         this.shouldUseBottomToolbar = shouldUseBottomToolbar
+        this.isComposeHomepageEnabled = isComposeHomepageEnabled
     }
 
     /**
@@ -139,7 +131,6 @@ class HomeActivityTestRule(
             initialTouchMode: Boolean = false,
             launchActivity: Boolean = true,
             skipOnboarding: Boolean = false,
-            composeTopSitesEnabled: Boolean = false,
         ) = HomeActivityTestRule(
             initialTouchMode = initialTouchMode,
             launchActivity = launchActivity,
@@ -147,9 +138,7 @@ class HomeActivityTestRule(
             isPWAsPromptEnabled = false,
             isWallpaperOnboardingEnabled = false,
             isOpenInAppBannerEnabled = false,
-            composeTopSitesEnabled = composeTopSitesEnabled,
             isMicrosurveyEnabled = false,
-            isSetAsDefaultBrowserPromptEnabled = false,
             // workaround for toolbar at top position by default
             // remove with https://bugzilla.mozilla.org/show_bug.cgi?id=1917640
             shouldUseBottomToolbar = true,
@@ -182,7 +171,6 @@ class HomeActivityIntentTestRule internal constructor(
         isHomeOnboardingDialogEnabled: Boolean = settings.showHomeOnboardingDialog &&
             FenixOnboarding(appContext).userHasBeenOnboarded(),
         isPocketEnabled: Boolean = settings.showPocketRecommendationsFeature,
-        isNavigationBarCFREnabled: Boolean = settings.shouldShowNavigationBarCFR,
         isRecentTabsFeatureEnabled: Boolean = settings.showRecentTabsFeature,
         isRecentlyVisitedFeatureEnabled: Boolean = settings.historyMetadataUIFeature,
         isPWAsPromptEnabled: Boolean = !settings.userKnowsAboutPwas,
@@ -190,20 +178,17 @@ class HomeActivityIntentTestRule internal constructor(
         isDeleteSitePermissionsEnabled: Boolean = settings.deleteSitePermissions,
         isOpenInAppBannerEnabled: Boolean = settings.shouldShowOpenInAppBanner,
         etpPolicy: ETPPolicy = getETPPolicy(settings),
-        composeTopSitesEnabled: Boolean = false,
         isLocationPermissionEnabled: SitePermissionsRules.Action = getFeaturePermission(PhoneFeature.LOCATION, settings),
-        isNavigationToolbarEnabled: Boolean = false,
         isMenuRedesignEnabled: Boolean = false,
         isMenuRedesignCFREnabled: Boolean = false,
-        isNewBookmarksEnabled: Boolean = false,
         isPageLoadTranslationsPromptEnabled: Boolean = false,
         isMicrosurveyEnabled: Boolean = settings.microsurveyFeatureEnabled,
-        isSetAsDefaultBrowserPromptEnabled: Boolean = settings.setAsDefaultBrowserPromptForExistingUsersEnabled,
         shouldUseBottomToolbar: Boolean = settings.shouldUseBottomToolbar,
+        onboardingFeatureEnabled: Boolean = true,
+        isComposeHomepageEnabled: Boolean = true,
     ) : this(initialTouchMode, launchActivity, skipOnboarding) {
         this.isHomeOnboardingDialogEnabled = isHomeOnboardingDialogEnabled
         this.isPocketEnabled = isPocketEnabled
-        this.isNavigationBarCFREnabled = isNavigationBarCFREnabled
         this.isRecentTabsFeatureEnabled = isRecentTabsFeatureEnabled
         this.isRecentlyVisitedFeatureEnabled = isRecentlyVisitedFeatureEnabled
         this.isPWAsPromptEnabled = isPWAsPromptEnabled
@@ -211,16 +196,14 @@ class HomeActivityIntentTestRule internal constructor(
         this.isDeleteSitePermissionsEnabled = isDeleteSitePermissionsEnabled
         this.isOpenInAppBannerEnabled = isOpenInAppBannerEnabled
         this.etpPolicy = etpPolicy
-        this.composeTopSitesEnabled = composeTopSitesEnabled
         this.isLocationPermissionEnabled = isLocationPermissionEnabled
-        this.isNavigationToolbarEnabled = isNavigationToolbarEnabled
         this.isMenuRedesignEnabled = isMenuRedesignEnabled
         this.isMenuRedesignCFREnabled = isMenuRedesignCFREnabled
-        this.isNewBookmarksEnabled = isNewBookmarksEnabled
         this.enableOrDisablePageLoadTranslationsPrompt(isPageLoadTranslationsPromptEnabled)
         this.isMicrosurveyEnabled = isMicrosurveyEnabled
-        this.isSetAsDefaultBrowserPromptEnabled = isSetAsDefaultBrowserPromptEnabled
         this.shouldUseBottomToolbar = shouldUseBottomToolbar
+        this.onboardingFeatureEnabled = onboardingFeatureEnabled
+        this.isComposeHomepageEnabled = isComposeHomepageEnabled
     }
 
     private val longTapUserPreference = getLongPressTimeout()
@@ -279,7 +262,6 @@ class HomeActivityIntentTestRule internal constructor(
         isHomeOnboardingDialogEnabled =
             settings.showHomeOnboardingDialog && FenixOnboarding(appContext).userHasBeenOnboarded()
         isPocketEnabled = settings.showPocketRecommendationsFeature
-        isNavigationBarCFREnabled = settings.shouldShowNavigationBarCFR
         isRecentTabsFeatureEnabled = settings.showRecentTabsFeature
         isRecentlyVisitedFeatureEnabled = settings.historyMetadataUIFeature
         isPWAsPromptEnabled = !settings.userKnowsAboutPwas
@@ -288,13 +270,11 @@ class HomeActivityIntentTestRule internal constructor(
         isOpenInAppBannerEnabled = settings.shouldShowOpenInAppBanner
         etpPolicy = getETPPolicy(settings)
         isLocationPermissionEnabled = getFeaturePermission(PhoneFeature.LOCATION, settings)
-        isNavigationToolbarEnabled = settings.navigationToolbarEnabled
         isMenuRedesignEnabled = settings.enableMenuRedesign
         isMenuRedesignCFREnabled = settings.shouldShowMenuCFR
-        isNewBookmarksEnabled = settings.useNewBookmarks
         isMicrosurveyEnabled = settings.microsurveyFeatureEnabled
-        isSetAsDefaultBrowserPromptEnabled = settings.setAsDefaultBrowserPromptForExistingUsersEnabled
         shouldUseBottomToolbar = settings.shouldUseBottomToolbar
+        isComposeHomepageEnabled = settings.enableComposeHomepage
     }
 
     companion object {
@@ -310,7 +290,6 @@ class HomeActivityIntentTestRule internal constructor(
             initialTouchMode: Boolean = false,
             launchActivity: Boolean = true,
             skipOnboarding: Boolean = false,
-            composeTopSitesEnabled: Boolean = false,
         ) = HomeActivityIntentTestRule(
             initialTouchMode = initialTouchMode,
             launchActivity = launchActivity,
@@ -318,9 +297,7 @@ class HomeActivityIntentTestRule internal constructor(
             isPWAsPromptEnabled = false,
             isWallpaperOnboardingEnabled = false,
             isOpenInAppBannerEnabled = false,
-            composeTopSitesEnabled = composeTopSitesEnabled,
             isMicrosurveyEnabled = false,
-            isSetAsDefaultBrowserPromptEnabled = false,
             // workaround for toolbar at top position by default
             // remove with https://bugzilla.mozilla.org/show_bug.cgi?id=1917640
             shouldUseBottomToolbar = true,
@@ -353,7 +330,7 @@ private fun skipOnboardingBeforeLaunch() {
     FenixOnboarding(appContext).finish()
     // As we are disabling the onboarding we need to initialize glean manually,
     // as it runs after the onboarding finishes
-    Handler(Looper.getMainLooper()).post() {
+    Handler(Looper.getMainLooper()).post {
         appContext.components.strictMode.resetAfter(StrictMode.allowThreadDiskReads()) {
             initializeGlean(
                 applicationContext = appContext,

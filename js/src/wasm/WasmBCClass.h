@@ -170,13 +170,16 @@ enum class PreBarrierKind {
 };
 
 enum class PostBarrierKind {
+  // Add a store buffer entry if the new value requires it, but do not attempt
+  // to remove a pre-existing entry.
+  Imprecise,
   // Remove an existing store buffer entry if the new value does not require
   // one. This is required to preserve invariants with HeapPtr when used for
   // movable storage.
   Precise,
-  // Add a store buffer entry if the new value requires it, but do not attempt
-  // to remove a pre-existing entry.
-  Imprecise,
+  // Add a store buffer entry for the entire cell (e.g. the entire struct or
+  // array who now has a field pointing into the nursery).
+  WholeCell,
 };
 
 struct BranchIfRefSubtypeRegisters {
@@ -1348,28 +1351,53 @@ struct BaseCompiler final {
   // update.  This function preserves that register.
   void emitPreBarrier(RegPtr valueAddr);
 
-  // This emits a GC post-write barrier. The post-barrier is needed when we
+  // These emit GC post-write barriers. The post-barrier is needed when we
   // replace a member field with a new value, the new value is in the nursery,
-  // and the containing object is a tenured object. The field must then be
-  // added to the store buffer so that the nursery can be correctly collected.
-  // The field might belong to an object or be a stack slot or a register or a
-  // heap allocated value.
+  // and the containing object is a tenured object. The field (or the entire
+  // containing object) must then be added to the store buffer so that the
+  // nursery can be correctly collected. The field might belong to an object or
+  // be a stack slot or a register or a heap allocated value.
   //
   // For the difference between 'precise' and 'imprecise', look at the
   // documentation on PostBarrierKind.
+
+  // Emits a post-write barrier that creates a whole-cell store buffer entry.
+  // See above for details.
   //
-  // `object` is a pointer to the object that contains the field. It is used, if
-  // present, to skip adding a store buffer entry when the containing object is
-  // in the nursery. This register is preserved by this function.
-  // `valueAddr` is the address of the location that we are writing to. This
-  // register is consumed by this function.
-  // `prevValue` is the value that existed in the field before `value` was
-  // stored. This register is consumed by this function.
-  // `value` is the value that was stored in the field. This register is
-  // preserved by this function.
-  [[nodiscard]] bool emitPostBarrierImprecise(
+  // - `object` is a pointer to the object that contains the field. This
+  //   register is preserved by this function.
+  // - `value` is the value that was stored in the field. This register is
+  //   preserved by this function.
+  // - `temp` is clobbered by this function.
+  [[nodiscard]] bool emitPostBarrierWholeCell(RegRef object, RegRef value,
+                                              RegPtr temp);
+
+  // Emits a post-write barrier of type WasmAnyRefEdge, imprecisely. See above
+  // for details.
+  //
+  // - `object` is a pointer to the object that contains the field. It is used,
+  //   if present, to skip adding a store buffer entry when the containing
+  //   object is in the nursery. This register is preserved by this function.
+  // - `valueAddr` is the address of the location that we are writing to. This
+  //   register is consumed by this function.
+  // - `value` is the value that was stored in the field. This register is
+  //   preserved by this function.
+  [[nodiscard]] bool emitPostBarrierEdgeImprecise(
       const mozilla::Maybe<RegRef>& object, RegPtr valueAddr, RegRef value);
-  [[nodiscard]] bool emitPostBarrierPrecise(
+
+  // Emits a post-write barrier of type WasmAnyRefEdge, precisely. See above for
+  // details.
+  //
+  // - `object` is a pointer to the object that contains the field. It is used,
+  //   if present, to skip adding a store buffer entry when the containing
+  //   object is in the nursery. This register is preserved by this function.
+  // - `valueAddr` is the address of the location that we are writing to. This
+  //   register is consumed by this function.
+  // - `prevValue` is the value that existed in the field before `value` was
+  //   stored. This register is consumed by this function.
+  // - `value` is the value that was stored in the field. This register is
+  //   preserved by this function.
+  [[nodiscard]] bool emitPostBarrierEdgePrecise(
       const mozilla::Maybe<RegRef>& object, RegPtr valueAddr, RegRef prevValue,
       RegRef value);
 
@@ -1405,7 +1433,7 @@ struct BaseCompiler final {
   // Jump to the given branch, passing results, if the WasmGcObject, `object`,
   // is a subtype of `destType`.
   [[nodiscard]] bool jumpConditionalWithResults(BranchState* b, RegRef object,
-                                                RefType sourceType,
+                                                MaybeRefType sourceType,
                                                 RefType destType,
                                                 bool onSuccess);
   template <typename Cond>
@@ -1727,7 +1755,8 @@ struct BaseCompiler final {
   [[nodiscard]] bool emitBrOnCastCommon(bool onSuccess,
                                         uint32_t labelRelativeDepth,
                                         const ResultType& labelType,
-                                        RefType sourceType, RefType destType);
+                                        MaybeRefType sourceType,
+                                        RefType destType);
   [[nodiscard]] bool emitBrOnCast(bool onSuccess);
   [[nodiscard]] bool emitAnyConvertExtern();
   [[nodiscard]] bool emitExternConvertAny();
@@ -1745,8 +1774,12 @@ struct BaseCompiler final {
                              TrapMachineInsn tmi);
   };
 
-  // Load a pointer to the TypeDefInstanceData for a given type index
-  RegPtr loadTypeDefInstanceData(uint32_t typeIndex);
+  // Load a pointer to the AllocSite for current bytecode offset
+  RegPtr loadAllocSiteInstanceData(uint32_t allocSiteIndex);
+
+  // Gets alloc site allociated with current instruction
+  [[nodiscard]] bool readAllocSiteIndex(uint32_t* index);
+
   // Load a pointer to the SuperTypeVector for a given type index
   RegPtr loadSuperTypeVector(uint32_t typeIndex);
 
@@ -1755,15 +1788,17 @@ struct BaseCompiler final {
   // allocated and must be freed.
   template <bool ZeroFields>
   bool emitStructAlloc(uint32_t typeIndex, RegRef* object,
-                       bool* isOutlineStruct, RegPtr* outlineBase);
+                       bool* isOutlineStruct, RegPtr* outlineBase,
+                       uint32_t allocSiteIndex);
   // Emits allocation code for a dynamically-sized GC array.
   template <bool ZeroFields>
   bool emitArrayAlloc(uint32_t typeIndex, RegRef object, RegI32 numElements,
-                      uint32_t elemSize);
+                      uint32_t elemSize, uint32_t allocSiteIndex);
   // Emits allocation code for a fixed-size GC array.
   template <bool ZeroFields>
   bool emitArrayAllocFixed(uint32_t typeIndex, RegRef object,
-                           uint32_t numElements, uint32_t elemSize);
+                           uint32_t numElements, uint32_t elemSize,
+                           uint32_t allocSiteIndex);
 
   template <typename NullCheckPolicy>
   RegPtr emitGcArrayGetData(RegRef rp);

@@ -39,6 +39,7 @@ DIRS += [
     "crashes",
     "crashmonitor",
     "credentialmanagement",
+    "doh",
     "downloads",
     "enterprisepolicies",
     "extensions",
@@ -51,6 +52,7 @@ DIRS += [
     "httpsonlyerror",
     "jsoncpp/src/lib_json",
     "kvstore",
+    "media",
     "mediasniffer",
     "ml",
     "mozintl",
@@ -72,7 +74,6 @@ DIRS += [
     "search",
     "sessionstore",
     "shell",
-    "shopping",
     "startup",
     "statusfilter",
     "telemetry",
@@ -134,7 +135,7 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] not in ("android", "windows"):
     DIRS += ["aboutwebauthn"]
 
 if CONFIG["MOZ_BUILD_APP"] == "browser":
-    DIRS += ["featuregates", "messaging-system", "normandy"]
+    DIRS += ["messaging-system", "normandy"]
 
 DIRS += ["nimbus"]
 

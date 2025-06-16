@@ -66,6 +66,10 @@ add_setup(async function () {
   sinon.stub(NimbusFeatures.searchConfiguration, "ready").resolves();
   await test.setup();
 
+  // This is needed to make sure the search settings can be loaded
+  // when the search service is initialized.
+  do_get_profile();
+
   registerCleanupFunction(async () => {
     sinon.restore();
   });
@@ -82,13 +86,17 @@ add_task(async function test_searchConfig_google_with_pref_param() {
       locale: "en-US",
       region: "US",
       pref: "google_channel_us",
-      expected: "us_param",
+      // On ESR, the channel parameter is always `entpr`
+      expected:
+        SearchUtils.MODIFIED_APP_CHANNEL == "esr" ? "entpr" : "us_param",
     },
     {
       locale: "en-US",
       region: "GB",
       pref: "google_channel_row",
-      expected: "row_param",
+      // On ESR, the channel parameter is always `entpr`
+      expected:
+        SearchUtils.MODIFIED_APP_CHANNEL == "esr" ? "entpr" : "row_param",
     },
   ];
 
@@ -132,12 +140,18 @@ add_task(async function test_searchConfig_google_with_nimbus() {
     {
       locale: "en-US",
       region: "US",
-      expected: "nimbus_us_param",
+      // On ESR, the channel parameter is always `entpr`
+      expected:
+        SearchUtils.MODIFIED_APP_CHANNEL == "esr" ? "entpr" : "nimbus_us_param",
     },
     {
       locale: "en-US",
       region: "GB",
-      expected: "nimbus_row_param",
+      // On ESR, the channel parameter is always `entpr`
+      expected:
+        SearchUtils.MODIFIED_APP_CHANNEL == "esr"
+          ? "entpr"
+          : "nimbus_row_param",
     },
   ];
 

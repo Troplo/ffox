@@ -74,47 +74,40 @@ TrampolinePtr MacroAssembler::preBarrierTrampoline(MIRType type) {
 }
 
 template <typename T>
-static void StoreToTypedFloatArray(MacroAssembler& masm, Scalar::Type arrayType,
-                                   FloatRegister value, const T& dest,
-                                   Register temp,
-                                   LiveRegisterSet volatileLiveRegs) {
+void MacroAssembler::storeToTypedFloatArray(Scalar::Type arrayType,
+                                            FloatRegister value, const T& dest,
+                                            Register temp,
+                                            LiveRegisterSet volatileLiveRegs) {
   switch (arrayType) {
     case Scalar::Float16:
-      masm.storeFloat16(value, dest, temp, volatileLiveRegs);
+      storeFloat16(value, dest, temp, volatileLiveRegs);
       break;
     case Scalar::Float32: {
       if (value.isDouble()) {
-        ScratchFloat32Scope fpscratch(masm);
-        masm.convertDoubleToFloat32(value, fpscratch);
-        masm.storeFloat32(fpscratch, dest);
+        ScratchFloat32Scope fpscratch(*this);
+        convertDoubleToFloat32(value, fpscratch);
+        storeFloat32(fpscratch, dest);
       } else {
         MOZ_ASSERT(value.isSingle());
-        masm.storeFloat32(value, dest);
+        storeFloat32(value, dest);
       }
       break;
     }
     case Scalar::Float64:
       MOZ_ASSERT(value.isDouble());
-      masm.storeDouble(value, dest);
+      storeDouble(value, dest);
       break;
     default:
       MOZ_CRASH("Invalid typed array type");
   }
 }
 
-void MacroAssembler::storeToTypedFloatArray(Scalar::Type arrayType,
-                                            FloatRegister value,
-                                            const BaseIndex& dest,
-                                            Register temp,
-                                            LiveRegisterSet volatileLiveRegs) {
-  StoreToTypedFloatArray(*this, arrayType, value, dest, temp, volatileLiveRegs);
-}
-void MacroAssembler::storeToTypedFloatArray(Scalar::Type arrayType,
-                                            FloatRegister value,
-                                            const Address& dest, Register temp,
-                                            LiveRegisterSet volatileLiveRegs) {
-  StoreToTypedFloatArray(*this, arrayType, value, dest, temp, volatileLiveRegs);
-}
+template void MacroAssembler::storeToTypedFloatArray(
+    Scalar::Type arrayType, FloatRegister value, const BaseIndex& dest,
+    Register temp, LiveRegisterSet volatileLiveRegs);
+template void MacroAssembler::storeToTypedFloatArray(
+    Scalar::Type arrayType, FloatRegister value, const Address& dest,
+    Register temp, LiveRegisterSet volatileLiveRegs);
 
 void MacroAssembler::boxUint32(Register source, ValueOperand dest,
                                Uint32Mode mode, Label* fail) {
@@ -438,7 +431,8 @@ void MacroAssembler::allocateObject(Register result, Register temp,
 void MacroAssembler::createGCObject(Register obj, Register temp,
                                     const TemplateObject& templateObj,
                                     gc::Heap initialHeap, Label* fail,
-                                    bool initContents /* = true */) {
+                                    bool initContents /* = true */,
+                                    const AllocSiteInput& allocSite) {
   gc::AllocKind allocKind = templateObj.getAllocKind();
   MOZ_ASSERT(gc::IsObjectAllocKind(allocKind));
 
@@ -449,7 +443,8 @@ void MacroAssembler::createGCObject(Register obj, Register temp,
     nDynamicSlots = ntemplate.numDynamicSlots();
   }
 
-  allocateObject(obj, temp, allocKind, nDynamicSlots, initialHeap, fail);
+  allocateObject(obj, temp, allocKind, nDynamicSlots, initialHeap, fail,
+                 allocSite);
   initGCThing(obj, temp, templateObj, initContents);
 }
 
@@ -548,7 +543,8 @@ void MacroAssembler::createArrayWithFixedElements(
 
 void MacroAssembler::createFunctionClone(Register result, Register canonical,
                                          Register envChain, Register temp,
-                                         gc::AllocKind allocKind, Label* fail) {
+                                         gc::AllocKind allocKind, Label* fail,
+                                         const AllocSiteInput& allocSite) {
   MOZ_ASSERT(allocKind == gc::AllocKind::FUNCTION ||
              allocKind == gc::AllocKind::FUNCTION_EXTENDED);
   MOZ_ASSERT(result != temp);
@@ -556,7 +552,8 @@ void MacroAssembler::createFunctionClone(Register result, Register canonical,
   // Allocate object.
   size_t numDynamicSlots = 0;
   gc::Heap initialHeap = gc::Heap::Default;
-  allocateObject(result, temp, allocKind, numDynamicSlots, initialHeap, fail);
+  allocateObject(result, temp, allocKind, numDynamicSlots, initialHeap, fail,
+                 allocSite);
 
   // Initialize shape field.
   loadPtr(Address(canonical, JSObject::offsetOfShape()), temp);
@@ -575,6 +572,7 @@ void MacroAssembler::createFunctionClone(Register result, Register canonical,
   // Initialize NativeFuncOrInterpretedEnvSlot.
   storeValue(JSVAL_TYPE_OBJECT, envChain,
              Address(result, JSFunction::offsetOfEnvironment()));
+
 #ifdef DEBUG
   // The new function must be allocated in the nursery if the nursery is
   // enabled. Assert no post-barrier is needed.
@@ -5317,36 +5315,6 @@ void MacroAssembler::minMaxArrayNumber(Register array, FloatRegister result,
   bind(&done);
 }
 
-void MacroAssembler::branchIfNotRegExpPrototypeOptimizable(
-    Register proto, Register temp, const GlobalObject* maybeGlobal,
-    Label* fail) {
-  if (maybeGlobal) {
-    movePtr(ImmGCPtr(maybeGlobal), temp);
-    loadPrivate(Address(temp, GlobalObject::offsetOfGlobalDataSlot()), temp);
-  } else {
-    loadGlobalObjectData(temp);
-  }
-  size_t offset = GlobalObjectData::offsetOfRegExpRealm() +
-                  RegExpRealm::offsetOfOptimizableRegExpPrototypeShape();
-  loadPtr(Address(temp, offset), temp);
-  branchTestObjShapeUnsafe(Assembler::NotEqual, proto, temp, fail);
-}
-
-void MacroAssembler::branchIfNotRegExpInstanceOptimizable(
-    Register regexp, Register temp, const GlobalObject* maybeGlobal,
-    Label* label) {
-  if (maybeGlobal) {
-    movePtr(ImmGCPtr(maybeGlobal), temp);
-    loadPrivate(Address(temp, GlobalObject::offsetOfGlobalDataSlot()), temp);
-  } else {
-    loadGlobalObjectData(temp);
-  }
-  size_t offset = GlobalObjectData::offsetOfRegExpRealm() +
-                  RegExpRealm::offsetOfOptimizableRegExpInstanceShape();
-  loadPtr(Address(temp, offset), temp);
-  branchTestObjShapeUnsafe(Assembler::NotEqual, regexp, temp, label);
-}
-
 void MacroAssembler::loadRegExpLastIndex(Register regexp, Register string,
                                          Register lastIndex,
                                          Label* notFoundZeroLastIndex) {
@@ -5680,8 +5648,7 @@ void MacroAssembler::wasmTrap(wasm::Trap trap,
   MOZ_ASSERT_IF(!oom(),
                 currentOffset() - fco.get() == WasmTrapInstructionLength);
 
-  append(trap,
-         wasm::TrapSite(wasm::TrapMachineInsn::OfficialUD, fco, trapSiteDesc));
+  append(trap, wasm::TrapMachineInsn::OfficialUD, fco.get(), trapSiteDesc);
 }
 
 std::pair<CodeOffset, uint32_t> MacroAssembler::wasmReserveStackChecked(
@@ -6568,9 +6535,8 @@ void MacroAssembler::wasmCallRef(const wasm::CallSiteDesc& desc,
   static_assert(FunctionExtended::WASM_INSTANCE_SLOT < wasm::NullPtrGuardSize);
   FaultingCodeOffset fco =
       loadPtr(Address(calleeFnObj, instanceSlotOffset), newInstanceTemp);
-  append(wasm::Trap::NullPointerDereference,
-         wasm::TrapSite(wasm::TrapMachineInsnForLoadWord(), fco,
-                        desc.toTrapSiteDesc()));
+  append(wasm::Trap::NullPointerDereference, wasm::TrapMachineInsnForLoadWord(),
+         fco.get(), desc.toTrapSiteDesc());
   branchPtr(Assembler::Equal, InstanceReg, newInstanceTemp, &fastCall);
 
   storePtr(InstanceReg,
@@ -6634,9 +6600,8 @@ void MacroAssembler::wasmReturnCallRef(
   static_assert(FunctionExtended::WASM_INSTANCE_SLOT < wasm::NullPtrGuardSize);
   FaultingCodeOffset fco =
       loadPtr(Address(calleeFnObj, instanceSlotOffset), newInstanceTemp);
-  append(wasm::Trap::NullPointerDereference,
-         wasm::TrapSite(wasm::TrapMachineInsnForLoadWord(), fco,
-                        desc.toTrapSiteDesc()));
+  append(wasm::Trap::NullPointerDereference, wasm::TrapMachineInsnForLoadWord(),
+         fco.get(), desc.toTrapSiteDesc());
   branchPtr(Assembler::Equal, InstanceReg, newInstanceTemp, &fastCall);
 
   storePtr(InstanceReg,
@@ -6712,17 +6677,17 @@ BranchWasmRefIsSubtypeRegisters MacroAssembler::regsForBranchWasmRefIsSubtype(
       return BranchWasmRefIsSubtypeRegisters{
           .needSuperSTV = type.isTypeRef(),
           .needScratch1 = !type.isNone() && !type.isAny(),
-          .needScratch2 =
-              type.isTypeRef() && type.typeDef()->subTypingDepth() >=
-                                      wasm::MinSuperTypeVectorLength,
+          .needScratch2 = type.isTypeRef() && !type.typeDef()->isFinal() &&
+                          type.typeDef()->subTypingDepth() >=
+                              wasm::MinSuperTypeVectorLength,
       };
     case wasm::RefTypeHierarchy::Func:
       return BranchWasmRefIsSubtypeRegisters{
           .needSuperSTV = type.isTypeRef(),
           .needScratch1 = type.isTypeRef(),
-          .needScratch2 =
-              type.isTypeRef() && type.typeDef()->subTypingDepth() >=
-                                      wasm::MinSuperTypeVectorLength,
+          .needScratch2 = type.isTypeRef() && !type.typeDef()->isFinal() &&
+                          type.typeDef()->subTypingDepth() >=
+                              wasm::MinSuperTypeVectorLength,
       };
     case wasm::RefTypeHierarchy::Extern:
     case wasm::RefTypeHierarchy::Exn:
@@ -6737,23 +6702,28 @@ BranchWasmRefIsSubtypeRegisters MacroAssembler::regsForBranchWasmRefIsSubtype(
 }
 
 void MacroAssembler::branchWasmRefIsSubtype(
-    Register ref, wasm::RefType sourceType, wasm::RefType destType,
+    Register ref, wasm::MaybeRefType sourceType, wasm::RefType destType,
     Label* label, bool onSuccess, Register superSTV, Register scratch1,
     Register scratch2) {
   switch (destType.hierarchy()) {
     case wasm::RefTypeHierarchy::Any: {
-      branchWasmRefIsSubtypeAny(ref, sourceType, destType, label, onSuccess,
-                                superSTV, scratch1, scratch2);
+      branchWasmRefIsSubtypeAny(ref, sourceType.valueOr(wasm::RefType::any()),
+                                destType, label, onSuccess, superSTV, scratch1,
+                                scratch2);
     } break;
     case wasm::RefTypeHierarchy::Func: {
-      branchWasmRefIsSubtypeFunc(ref, sourceType, destType, label, onSuccess,
-                                 superSTV, scratch1, scratch2);
+      branchWasmRefIsSubtypeFunc(ref, sourceType.valueOr(wasm::RefType::func()),
+                                 destType, label, onSuccess, superSTV, scratch1,
+                                 scratch2);
     } break;
     case wasm::RefTypeHierarchy::Extern: {
-      branchWasmRefIsSubtypeExtern(ref, sourceType, destType, label, onSuccess);
+      branchWasmRefIsSubtypeExtern(ref,
+                                   sourceType.valueOr(wasm::RefType::extern_()),
+                                   destType, label, onSuccess);
     } break;
     case wasm::RefTypeHierarchy::Exn: {
-      branchWasmRefIsSubtypeExn(ref, sourceType, destType, label, onSuccess);
+      branchWasmRefIsSubtypeExn(ref, sourceType.valueOr(wasm::RefType::exn()),
+                                destType, label, onSuccess);
     } break;
     default:
       MOZ_CRASH("unknown type hierarchy for wasm cast");
@@ -6780,6 +6750,19 @@ void MacroAssembler::branchWasmRefIsSubtypeAny(
   Label* failLabel = onSuccess ? &fallthrough : label;
   Label* nullLabel = destType.isNullable() ? successLabel : failLabel;
 
+  auto finishSuccess = [&]() {
+    if (successLabel != &fallthrough) {
+      jump(successLabel);
+    }
+    bind(&fallthrough);
+  };
+  auto finishFail = [&]() {
+    if (failLabel != &fallthrough) {
+      jump(failLabel);
+    }
+    bind(&fallthrough);
+  };
+
   // Check for null.
   if (sourceType.isNullable()) {
     branchWasmAnyRefIsNull(true, ref, nullLabel);
@@ -6788,15 +6771,13 @@ void MacroAssembler::branchWasmRefIsSubtypeAny(
   // The only value that can inhabit 'none' is null. So, early out if we got
   // not-null.
   if (destType.isNone()) {
-    jump(failLabel);
-    bind(&fallthrough);
+    finishFail();
     return;
   }
 
   if (destType.isAny()) {
     // No further checks for 'any'
-    jump(successLabel);
-    bind(&fallthrough);
+    finishSuccess();
     return;
   }
 
@@ -6810,8 +6791,7 @@ void MacroAssembler::branchWasmRefIsSubtypeAny(
 
     if (destType.isI31()) {
       // No further checks for 'i31'
-      jump(failLabel);
-      bind(&fallthrough);
+      finishFail();
       return;
     }
   }
@@ -6826,8 +6806,7 @@ void MacroAssembler::branchWasmRefIsSubtypeAny(
 
   if (destType.isEq()) {
     // No further checks for 'eq'
-    jump(successLabel);
-    bind(&fallthrough);
+    finishSuccess();
     return;
   }
 
@@ -6842,23 +6821,21 @@ void MacroAssembler::branchWasmRefIsSubtypeAny(
   loadPtr(Address(ref, int32_t(WasmGcObject::offsetOfSuperTypeVector())),
           scratch1);
   if (destType.isTypeRef()) {
-    // concrete type, do superTypeVector check
-    branchWasmSTVIsSubtype(scratch1, superSTV, scratch2,
-                           destType.typeDef()->subTypingDepth(), successLabel,
-                           true);
-  } else {
-    // abstract type, do kind check
-    loadPtr(Address(scratch1,
-                    int32_t(wasm::SuperTypeVector::offsetOfSelfTypeDef())),
-            scratch1);
-    load8ZeroExtend(Address(scratch1, int32_t(wasm::TypeDef::offsetOfKind())),
-                    scratch1);
-    branch32(Assembler::Equal, scratch1, Imm32(int32_t(destType.typeDefKind())),
-             successLabel);
+    // Concrete type, do superTypeVector check.
+    branchWasmSTVIsSubtype(scratch1, superSTV, scratch2, destType.typeDef(),
+                           label, onSuccess);
+    bind(&fallthrough);
+    return;
   }
 
-  // The cast failed.
-  jump(failLabel);
+  // Abstract type, do kind check
+  loadPtr(
+      Address(scratch1, int32_t(wasm::SuperTypeVector::offsetOfSelfTypeDef())),
+      scratch1);
+  load8ZeroExtend(Address(scratch1, int32_t(wasm::TypeDef::offsetOfKind())),
+                  scratch1);
+  branch32(onSuccess ? Assembler::Equal : Assembler::NotEqual, scratch1,
+           Imm32(int32_t(destType.typeDefKind())), label);
   bind(&fallthrough);
 }
 
@@ -6882,6 +6859,19 @@ void MacroAssembler::branchWasmRefIsSubtypeFunc(
   Label* failLabel = onSuccess ? &fallthrough : label;
   Label* nullLabel = destType.isNullable() ? successLabel : failLabel;
 
+  auto finishSuccess = [&]() {
+    if (successLabel != &fallthrough) {
+      jump(successLabel);
+    }
+    bind(&fallthrough);
+  };
+  auto finishFail = [&]() {
+    if (failLabel != &fallthrough) {
+      jump(failLabel);
+    }
+    bind(&fallthrough);
+  };
+
   // Check for null.
   if (sourceType.isNullable()) {
     branchTestPtr(Assembler::Zero, ref, ref, nullLabel);
@@ -6890,15 +6880,13 @@ void MacroAssembler::branchWasmRefIsSubtypeFunc(
   // The only value that can inhabit 'nofunc' is null. So, early out if we got
   // not-null.
   if (destType.isNoFunc()) {
-    jump(failLabel);
-    bind(&fallthrough);
+    finishFail();
     return;
   }
 
   if (destType.isFunc()) {
     // No further checks for 'func' (any func)
-    jump(successLabel);
-    bind(&fallthrough);
+    finishSuccess();
     return;
   }
 
@@ -6906,12 +6894,8 @@ void MacroAssembler::branchWasmRefIsSubtypeFunc(
   // remaining cases.
   loadPrivate(Address(ref, int32_t(FunctionExtended::offsetOfWasmSTV())),
               scratch1);
-  branchWasmSTVIsSubtype(scratch1, superSTV, scratch2,
-                         destType.typeDef()->subTypingDepth(), successLabel,
-                         true);
-
-  // If we didn't branch away, the cast failed.
-  jump(failLabel);
+  branchWasmSTVIsSubtype(scratch1, superSTV, scratch2, destType.typeDef(),
+                         label, onSuccess);
   bind(&fallthrough);
 }
 
@@ -6930,6 +6914,19 @@ void MacroAssembler::branchWasmRefIsSubtypeExtern(Register ref,
   Label* failLabel = onSuccess ? &fallthrough : label;
   Label* nullLabel = destType.isNullable() ? successLabel : failLabel;
 
+  auto finishSuccess = [&]() {
+    if (successLabel != &fallthrough) {
+      jump(successLabel);
+    }
+    bind(&fallthrough);
+  };
+  auto finishFail = [&]() {
+    if (failLabel != &fallthrough) {
+      jump(failLabel);
+    }
+    bind(&fallthrough);
+  };
+
   // Check for null.
   if (sourceType.isNullable()) {
     branchTestPtr(Assembler::Zero, ref, ref, nullLabel);
@@ -6938,14 +6935,12 @@ void MacroAssembler::branchWasmRefIsSubtypeExtern(Register ref,
   // The only value that can inhabit 'noextern' is null. So, early out if we got
   // not-null.
   if (destType.isNoExtern()) {
-    jump(failLabel);
-    bind(&fallthrough);
+    finishFail();
     return;
   }
 
   // There are no other possible types except externref, so succeed!
-  jump(successLabel);
-  bind(&fallthrough);
+  finishSuccess();
 }
 
 void MacroAssembler::branchWasmRefIsSubtypeExn(Register ref,
@@ -6962,6 +6957,19 @@ void MacroAssembler::branchWasmRefIsSubtypeExn(Register ref,
   Label* failLabel = onSuccess ? &fallthrough : label;
   Label* nullLabel = destType.isNullable() ? successLabel : failLabel;
 
+  auto finishSuccess = [&]() {
+    if (successLabel != &fallthrough) {
+      jump(successLabel);
+    }
+    bind(&fallthrough);
+  };
+  auto finishFail = [&]() {
+    if (failLabel != &fallthrough) {
+      jump(failLabel);
+    }
+    bind(&fallthrough);
+  };
+
   // Check for null.
   if (sourceType.isNullable()) {
     branchTestPtr(Assembler::Zero, ref, ref, nullLabel);
@@ -6970,44 +6978,52 @@ void MacroAssembler::branchWasmRefIsSubtypeExn(Register ref,
   // The only value that can inhabit 'noexn' is null. So, early out if we got
   // not-null.
   if (destType.isNoExn()) {
-    jump(failLabel);
-    bind(&fallthrough);
+    finishFail();
     return;
   }
 
   // There are no other possible types except exnref, so succeed!
-  jump(successLabel);
-  bind(&fallthrough);
+  finishSuccess();
 }
 
 void MacroAssembler::branchWasmSTVIsSubtype(Register subSTV, Register superSTV,
                                             Register scratch,
-                                            uint32_t superDepth, Label* label,
-                                            bool onSuccess) {
-  MOZ_ASSERT_IF(superDepth >= wasm::MinSuperTypeVectorLength,
-                scratch != Register::Invalid());
-  Label fallthrough;
-  Label* failed = onSuccess ? &fallthrough : label;
+                                            const wasm::TypeDef* destType,
+                                            Label* label, bool onSuccess) {
+  if (destType->isFinal()) {
+    // A final type cannot have subtypes, and therefore a simple equality check
+    // is sufficient.
+    MOZ_ASSERT(scratch == Register::Invalid());
+    branchPtr(onSuccess ? Assembler::Equal : Assembler::NotEqual, subSTV,
+              superSTV, label);
+    return;
+  }
 
-  // At this point, we could generate a fast success check which jumps to
-  // `success` if `subSTV == superSTV`.  However,
-  // profiling of Barista-3 seems to show this is hardly worth anything,
-  // whereas it is worth us generating smaller code and in particular one
-  // fewer conditional branch.
+  MOZ_ASSERT((destType->subTypingDepth() >= wasm::MinSuperTypeVectorLength) ==
+             (scratch != Register::Invalid()));
+
+  Label fallthrough;
+  Label* successLabel = onSuccess ? label : &fallthrough;
+  Label* failLabel = onSuccess ? &fallthrough : label;
+
+  // Emit a fast success path for if subSTV == superSTV.
+  // If they are unequal, they still may be subtypes.
+  branchPtr(Assembler::Equal, subSTV, superSTV, successLabel);
 
   // Emit a bounds check if the super type depth may be out-of-bounds.
-  if (superDepth >= wasm::MinSuperTypeVectorLength) {
+  if (destType->subTypingDepth() >= wasm::MinSuperTypeVectorLength) {
     load32(Address(subSTV, wasm::SuperTypeVector::offsetOfLength()), scratch);
-    branch32(Assembler::BelowOrEqual, scratch, Imm32(superDepth), failed);
+    branch32(Assembler::BelowOrEqual, scratch,
+             Imm32(destType->subTypingDepth()), failLabel);
   }
 
   // Load the `superTypeDepth` entry from subSTV. This will be `superSTV` if
   // `subSTV` is indeed a subtype.
-  loadPtr(
-      Address(subSTV, wasm::SuperTypeVector::offsetOfSTVInVector(superDepth)),
-      subSTV);
+  loadPtr(Address(subSTV, wasm::SuperTypeVector::offsetOfSTVInVector(
+                              destType->subTypingDepth())),
+          subSTV);
 
-  // We succeed iff the entries are equal
+  // We succeed iff the entries are equal.
   branchPtr(onSuccess ? Assembler::Equal : Assembler::NotEqual, subSTV,
             superSTV, label);
 
@@ -7266,58 +7282,12 @@ void MacroAssembler::branchObjectIsWasmGcObject(bool isGcObject, Register src,
 }
 
 void MacroAssembler::wasmNewStructObject(Register instance, Register result,
-                                         Register typeDefData, Register temp1,
-                                         Register temp2, Label* fail,
-                                         gc::AllocKind allocKind,
+                                         Register allocSite, Register temp,
+                                         size_t offsetOfTypeDefData,
+                                         Label* fail, gc::AllocKind allocKind,
                                          bool zeroFields) {
-  // Don't execute the inline path if GC probes are built in.
-#ifdef JS_GC_PROBES
-  jump(fail);
-#endif
+  MOZ_ASSERT(instance != result);
 
-#ifdef JS_GC_ZEAL
-  // Don't execute the inline path if gc zeal or tracing are active.
-  loadPtr(Address(instance, wasm::Instance::offsetOfAddressOfGCZealModeBits()),
-          temp1);
-  loadPtr(Address(temp1, 0), temp1);
-  branch32(Assembler::NotEqual, temp1, Imm32(0), fail);
-#endif
-
-  // If the alloc site is long lived, immediately fall back to the OOL path,
-  // which will handle that.
-  loadPtr(Address(typeDefData, wasm::TypeDefInstanceData::offsetOfAllocSite()),
-          temp1);
-  branchTestPtr(Assembler::NonZero,
-                Address(temp1, gc::AllocSite::offsetOfScriptAndState()),
-                Imm32(gc::AllocSite::LONG_LIVED_BIT), fail);
-
-  size_t sizeBytes = gc::Arena::thingSize(allocKind);
-  wasmBumpPointerAllocate(instance, result, typeDefData, temp1, temp2, fail,
-                          sizeBytes);
-  loadPtr(Address(typeDefData, wasm::TypeDefInstanceData::offsetOfShape()),
-          temp1);
-  loadPtr(Address(typeDefData,
-                  wasm::TypeDefInstanceData::offsetOfSuperTypeVector()),
-          temp2);
-  storePtr(temp1, Address(result, WasmStructObject::offsetOfShape()));
-  storePtr(temp2, Address(result, WasmStructObject::offsetOfSuperTypeVector()));
-  storePtr(ImmWord(0),
-           Address(result, WasmStructObject::offsetOfOutlineData()));
-
-  if (zeroFields) {
-    MOZ_ASSERT(sizeBytes % sizeof(void*) == 0);
-    for (size_t i = WasmStructObject::offsetOfInlineData(); i < sizeBytes;
-         i += sizeof(void*)) {
-      storePtr(ImmWord(0), Address(result, i));
-    }
-  }
-}
-
-void MacroAssembler::wasmNewArrayObject(Register instance, Register result,
-                                        Register numElements,
-                                        Register typeDefData, Register temp,
-                                        Label* fail, uint32_t elemSize,
-                                        bool zeroFields) {
   // Don't execute the inline path if GC probes are built in.
 #ifdef JS_GC_PROBES
   jump(fail);
@@ -7333,10 +7303,58 @@ void MacroAssembler::wasmNewArrayObject(Register instance, Register result,
 
   // If the alloc site is long lived, immediately fall back to the OOL path,
   // which will handle that.
-  loadPtr(Address(typeDefData, wasm::TypeDefInstanceData::offsetOfAllocSite()),
-          temp);
   branchTestPtr(Assembler::NonZero,
-                Address(temp, gc::AllocSite::offsetOfScriptAndState()),
+                Address(allocSite, gc::AllocSite::offsetOfScriptAndState()),
+                Imm32(gc::AllocSite::LONG_LIVED_BIT), fail);
+
+  size_t sizeBytes = gc::Arena::thingSize(allocKind);
+  wasmBumpPointerAllocate(instance, result, allocSite, temp, fail, sizeBytes);
+
+  loadPtr(Address(instance, offsetOfTypeDefData +
+                                wasm::TypeDefInstanceData::offsetOfShape()),
+          temp);
+  storePtr(temp, Address(result, WasmArrayObject::offsetOfShape()));
+  loadPtr(Address(instance,
+                  offsetOfTypeDefData +
+                      wasm::TypeDefInstanceData::offsetOfSuperTypeVector()),
+          temp);
+  storePtr(temp, Address(result, WasmArrayObject::offsetOfSuperTypeVector()));
+  storePtr(ImmWord(0),
+           Address(result, WasmStructObject::offsetOfOutlineData()));
+
+  if (zeroFields) {
+    MOZ_ASSERT(sizeBytes % sizeof(void*) == 0);
+    for (size_t i = WasmStructObject::offsetOfInlineData(); i < sizeBytes;
+         i += sizeof(void*)) {
+      storePtr(ImmWord(0), Address(result, i));
+    }
+  }
+}
+
+void MacroAssembler::wasmNewArrayObject(Register instance, Register result,
+                                        Register numElements,
+                                        Register allocSite, Register temp,
+                                        size_t offsetOfTypeDefData, Label* fail,
+                                        uint32_t elemSize, bool zeroFields) {
+  MOZ_ASSERT(instance != result);
+
+  // Don't execute the inline path if GC probes are built in.
+#ifdef JS_GC_PROBES
+  jump(fail);
+#endif
+
+#ifdef JS_GC_ZEAL
+  // Don't execute the inline path if gc zeal or tracing are active.
+  loadPtr(Address(instance, wasm::Instance::offsetOfAddressOfGCZealModeBits()),
+          temp);
+  loadPtr(Address(temp, 0), temp);
+  branch32(Assembler::NotEqual, temp, Imm32(0), fail);
+#endif
+
+  // If the alloc site is long lived, immediately fall back to the OOL path,
+  // which will handle that.
+  branchTestPtr(Assembler::NonZero,
+                Address(allocSite, gc::AllocSite::offsetOfScriptAndState()),
                 Imm32(gc::AllocSite::LONG_LIVED_BIT), fail);
 
   // Ensure that the numElements is small enough to fit in inline storage.
@@ -7383,15 +7401,17 @@ void MacroAssembler::wasmNewArrayObject(Register instance, Register result,
   static_assert(sizeof(gc::slotsToAllocKindBytes[0]) == 4);
   load32(BaseIndex(temp, numElements, Scale::TimesFour), numElements);
 
-  wasmBumpPointerAllocateDynamic(instance, result, typeDefData,
+  wasmBumpPointerAllocateDynamic(instance, result, allocSite,
                                  /*size=*/numElements, temp, &popAndFail);
 
   // Initialize the shape and STV
-  loadPtr(Address(typeDefData, wasm::TypeDefInstanceData::offsetOfShape()),
+  loadPtr(Address(instance, offsetOfTypeDefData +
+                                wasm::TypeDefInstanceData::offsetOfShape()),
           temp);
   storePtr(temp, Address(result, WasmArrayObject::offsetOfShape()));
-  loadPtr(Address(typeDefData,
-                  wasm::TypeDefInstanceData::offsetOfSuperTypeVector()),
+  loadPtr(Address(instance,
+                  offsetOfTypeDefData +
+                      wasm::TypeDefInstanceData::offsetOfSuperTypeVector()),
           temp);
   storePtr(temp, Address(result, WasmArrayObject::offsetOfSuperTypeVector()));
 
@@ -7468,13 +7488,12 @@ void MacroAssembler::wasmNewArrayObject(Register instance, Register result,
   bind(&done);
 }
 
-void MacroAssembler::wasmNewArrayObjectFixed(Register instance, Register result,
-                                             Register typeDefData,
-                                             Register temp1, Register temp2,
-                                             Label* fail, uint32_t numElements,
-                                             uint32_t storageBytes,
-                                             bool zeroFields) {
+void MacroAssembler::wasmNewArrayObjectFixed(
+    Register instance, Register result, Register allocSite, Register temp1,
+    Register temp2, size_t offsetOfTypeDefData, Label* fail,
+    uint32_t numElements, uint32_t storageBytes, bool zeroFields) {
   MOZ_ASSERT(storageBytes <= WasmArrayObject_MaxInlineBytes);
+  MOZ_ASSERT(instance != result);
 
   // Don't execute the inline path if GC probes are built in.
 #ifdef JS_GC_PROBES
@@ -7491,20 +7510,20 @@ void MacroAssembler::wasmNewArrayObjectFixed(Register instance, Register result,
 
   // If the alloc site is long lived, immediately fall back to the OOL path,
   // which will handle that.
-  loadPtr(Address(typeDefData, wasm::TypeDefInstanceData::offsetOfAllocSite()),
-          temp1);
   branchTestPtr(Assembler::NonZero,
-                Address(temp1, gc::AllocSite::offsetOfScriptAndState()),
+                Address(allocSite, gc::AllocSite::offsetOfScriptAndState()),
                 Imm32(gc::AllocSite::LONG_LIVED_BIT), fail);
 
   gc::AllocKind allocKind = WasmArrayObject::allocKindForIL(storageBytes);
   uint32_t totalSize = gc::Arena::thingSize(allocKind);
-  wasmBumpPointerAllocate(instance, result, typeDefData, temp1, temp2, fail,
-                          totalSize);
-  loadPtr(Address(typeDefData, wasm::TypeDefInstanceData::offsetOfShape()),
+  wasmBumpPointerAllocate(instance, result, allocSite, temp1, fail, totalSize);
+
+  loadPtr(Address(instance, offsetOfTypeDefData +
+                                wasm::TypeDefInstanceData::offsetOfShape()),
           temp1);
-  loadPtr(Address(typeDefData,
-                  wasm::TypeDefInstanceData::offsetOfSuperTypeVector()),
+  loadPtr(Address(instance,
+                  offsetOfTypeDefData +
+                      wasm::TypeDefInstanceData::offsetOfSuperTypeVector()),
           temp2);
   storePtr(temp1, Address(result, WasmArrayObject::offsetOfShape()));
   storePtr(temp2, Address(result, WasmArrayObject::offsetOfSuperTypeVector()));
@@ -7542,8 +7561,7 @@ void MacroAssembler::wasmNewArrayObjectFixed(Register instance, Register result,
 }
 
 void MacroAssembler::wasmBumpPointerAllocate(Register instance, Register result,
-                                             Register typeDefData,
-                                             Register temp1, Register temp2,
+                                             Register allocSite, Register temp1,
                                              Label* fail, uint32_t size) {
   MOZ_ASSERT(size >= gc::MinCellSize);
 
@@ -7554,12 +7572,9 @@ void MacroAssembler::wasmBumpPointerAllocate(Register instance, Register result,
   int32_t endOffset = Nursery::offsetOfCurrentEndFromPosition();
 
   // Bail to OOL code if the alloc site needs to be pushed onto the active
-  // list. Keep allocCount in temp2 for later.
-  computeEffectiveAddress(
-      Address(typeDefData, wasm::TypeDefInstanceData::offsetOfAllocSite()),
-      temp1);
-  load32(Address(temp1, gc::AllocSite::offsetOfNurseryAllocCount()), temp2);
-  branch32(Assembler::Equal, temp2,
+  // list.
+  load32(Address(allocSite, gc::AllocSite::offsetOfNurseryAllocCount()), temp1);
+  branch32(Assembler::Equal, temp1,
            Imm32(js::gc::NormalSiteAttentionThreshold - 1), fail);
 
   // Bump allocate in the nursery, bailing if there is not enough room.
@@ -7573,19 +7588,16 @@ void MacroAssembler::wasmBumpPointerAllocate(Register instance, Register result,
 
   // Increment the alloc count in the allocation site and store pointer in the
   // nursery cell header. See NurseryCellHeader::MakeValue.
-  computeEffectiveAddress(
-      Address(typeDefData, wasm::TypeDefInstanceData::offsetOfAllocSite()),
-      temp1);
-  add32(Imm32(1), temp2);
-  store32(temp2, Address(temp1, gc::AllocSite::offsetOfNurseryAllocCount()));
+  add32(Imm32(1),
+        Address(allocSite, gc::AllocSite::offsetOfNurseryAllocCount()));
   // Because JS::TraceKind::Object is zero, there is no need to explicitly set
   // it in the nursery cell header.
   static_assert(int(JS::TraceKind::Object) == 0);
-  storePtr(temp1, Address(result, -js::Nursery::nurseryCellHeaderSize()));
+  storePtr(allocSite, Address(result, -js::Nursery::nurseryCellHeaderSize()));
 }
 
 void MacroAssembler::wasmBumpPointerAllocateDynamic(
-    Register instance, Register result, Register typeDefData, Register size,
+    Register instance, Register result, Register allocSite, Register size,
     Register temp1, Label* fail) {
 #ifdef DEBUG
   // Replaces MOZ_ASSERT(size >= gc::MinCellSize);
@@ -7603,9 +7615,7 @@ void MacroAssembler::wasmBumpPointerAllocateDynamic(
   int32_t endOffset = Nursery::offsetOfCurrentEndFromPosition();
 
   // Bail to OOL code if the alloc site needs to be initialized.
-  load32(Address(typeDefData, wasm::TypeDefInstanceData::offsetOfAllocSite() +
-                                  gc::AllocSite::offsetOfNurseryAllocCount()),
-         temp1);
+  load32(Address(allocSite, gc::AllocSite::offsetOfNurseryAllocCount()), temp1);
   branch32(Assembler::Equal, temp1,
            Imm32(js::gc::NormalSiteAttentionThreshold - 1), fail);
 
@@ -7622,17 +7632,13 @@ void MacroAssembler::wasmBumpPointerAllocateDynamic(
 
   // Increment the alloc count in the allocation site and store pointer in the
   // nursery cell header. See NurseryCellHeader::MakeValue.
-  int32_t offsetOfNurseryAllocCount =
-      wasm::TypeDefInstanceData::offsetOfAllocSite() +
-      gc::AllocSite::offsetOfNurseryAllocCount();
-  add32(Imm32(1), Address(typeDefData, offsetOfNurseryAllocCount));
+
+  add32(Imm32(1),
+        Address(allocSite, gc::AllocSite::offsetOfNurseryAllocCount()));
   // Because JS::TraceKind::Object is zero, there is no need to explicitly set
   // it in the nursery cell header.
   static_assert(int(JS::TraceKind::Object) == 0);
-  computeEffectiveAddress(
-      Address(typeDefData, wasm::TypeDefInstanceData::offsetOfAllocSite()),
-      temp1);
-  storePtr(temp1, Address(result, -js::Nursery::nurseryCellHeaderSize()));
+  storePtr(allocSite, Address(result, -js::Nursery::nurseryCellHeaderSize()));
 }
 
 // Unboxing is branchy and contorted because of Spectre mitigations - we don't
@@ -7949,9 +7955,8 @@ void MacroAssembler::loadWasmPinnedRegsFromInstance(
   FaultingCodeOffset fco = loadPtr(
       Address(InstanceReg, wasm::Instance::offsetOfMemory0Base()), HeapReg);
   if (trapSiteDesc) {
-    append(
-        wasm::Trap::IndirectCallToNull,
-        wasm::TrapSite(wasm::TrapMachineInsnForLoadWord(), fco, *trapSiteDesc));
+    append(wasm::Trap::IndirectCallToNull, wasm::TrapMachineInsnForLoadWord(),
+           fco.get(), *trapSiteDesc);
   }
 #else
   MOZ_ASSERT(!trapSiteDesc);
@@ -8370,9 +8375,8 @@ void MacroAssembler::storeFloat16(FloatRegister src, const T& dest,
 
   if (src.isDouble()) {
     if (MacroAssembler::SupportsFloat64To16()) {
-      canonicalizeDoubleIfDeterministic(src);
       convertDoubleToFloat16(src, fpscratch);
-      storeUncanonicalizedFloat16(fpscratch, dest, temp);
+      storeFloat16(fpscratch, dest, temp);
       return;
     }
 
@@ -8382,13 +8386,11 @@ void MacroAssembler::storeFloat16(FloatRegister src, const T& dest,
   MOZ_ASSERT(src.isSingle());
 
   if (MacroAssembler::SupportsFloat32To16()) {
-    canonicalizeFloatIfDeterministic(src);
     convertFloat32ToFloat16(src, fpscratch);
-    storeUncanonicalizedFloat16(fpscratch, dest, temp);
+    storeFloat16(fpscratch, dest, temp);
     return;
   }
 
-  canonicalizeFloatIfDeterministic(src);
   moveFloat16ToGPR(src, temp, volatileLiveRegs);
   store16(temp, dest);
 }
@@ -9308,6 +9310,90 @@ void MacroAssembler::registerIterator(Register enumeratorsList, Register iter,
 
   // list->prev = iter
   storePtr(iter, Address(enumeratorsList, NativeIterator::offsetOfPrev()));
+}
+
+void MacroAssembler::prepareOOBStoreElement(Register object, Register index,
+                                            Register elements,
+                                            Register maybeTemp, Label* failure,
+                                            LiveRegisterSet volatileLiveRegs) {
+  Address length(elements, ObjectElements::offsetOfLength());
+  Address initLength(elements, ObjectElements::offsetOfInitializedLength());
+  Address capacity(elements, ObjectElements::offsetOfCapacity());
+  Address flags(elements, ObjectElements::offsetOfFlags());
+
+  // If index < capacity, we can add a dense element inline. If not, we
+  // need to allocate more elements.
+  Label allocElement, enoughCapacity;
+  spectreBoundsCheck32(index, capacity, maybeTemp, &allocElement);
+  jump(&enoughCapacity);
+
+  bind(&allocElement);
+
+  // We currently only support storing one past the current capacity.
+  // We could add support for stores beyond that point by calling a different
+  // function, but then we'd have to think carefully about when to go sparse.
+  branch32(Assembler::NotEqual, capacity, index, failure);
+
+  volatileLiveRegs.takeUnchecked(elements);
+  if (maybeTemp != InvalidReg) {
+    volatileLiveRegs.takeUnchecked(maybeTemp);
+  }
+  PushRegsInMask(volatileLiveRegs);
+
+  // Use `elements` as a scratch register because we're about to reallocate it.
+  using Fn = bool (*)(JSContext* cx, NativeObject* obj);
+  setupUnalignedABICall(elements);
+  loadJSContext(elements);
+  passABIArg(elements);
+  passABIArg(object);
+  callWithABI<Fn, NativeObject::addDenseElementPure>();
+  storeCallPointerResult(elements);
+
+  PopRegsInMask(volatileLiveRegs);
+  branchIfFalseBool(elements, failure);
+
+  // Load the reallocated elements pointer.
+  loadPtr(Address(object, NativeObject::offsetOfElements()), elements);
+
+  bind(&enoughCapacity);
+
+  // If our caller couldn't give us a temp register, use `object`.
+  Register temp;
+  if (maybeTemp == InvalidReg) {
+    push(object);
+    temp = object;
+  } else {
+    temp = maybeTemp;
+  }
+
+  // Load the index of the first uninitialized element into `temp`.
+  load32(initLength, temp);
+
+  // If it is not `index`, mark this elements array as non-packed.
+  Label noHoles, loop, done;
+  branch32(Assembler::Equal, temp, index, &noHoles);
+  or32(Imm32(ObjectElements::NON_PACKED), flags);
+
+  // Loop over intermediate elements and fill them with the magic hole value.
+  bind(&loop);
+  storeValue(MagicValue(JS_ELEMENTS_HOLE), BaseValueIndex(elements, temp));
+  add32(Imm32(1), temp);
+  branch32(Assembler::NotEqual, temp, index, &loop);
+
+  bind(&noHoles);
+
+  // The new initLength is index + 1. Update it.
+  add32(Imm32(1), temp);
+  store32(temp, initLength);
+
+  // If necessary, update length as well.
+  branch32(Assembler::Above, length, temp, &done);
+  store32(temp, length);
+  bind(&done);
+
+  if (maybeTemp == InvalidReg) {
+    pop(object);
+  }
 }
 
 void MacroAssembler::toHashableNonGCThing(ValueOperand value,

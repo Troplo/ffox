@@ -22,21 +22,8 @@ add_task(
       "The button is available."
     );
 
-    await FullPageTranslationsTestUtils.assertPageIsUntranslated(runInPage);
+    await FullPageTranslationsTestUtils.assertPageIsNotTranslated(runInPage);
 
-    await TestTranslationsTelemetry.assertCounter(
-      "RequestCount",
-      Glean.translations.requestsCount,
-      0
-    );
-    await TestTranslationsTelemetry.assertRate(
-      "ErrorRate",
-      Glean.translations.errorRate,
-      {
-        expectedNumerator: 0,
-        expectedDenominator: 0,
-      }
-    );
     await TestTranslationsTelemetry.assertEvent(
       Glean.translations.translationRequest,
       {
@@ -47,7 +34,7 @@ add_task(
     await FullPageTranslationsTestUtils.openPanel({
       expectedFromLanguage: "es",
       expectedToLanguage: "en",
-      onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewDefault,
+      onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewIntro,
     });
 
     await TestTranslationsTelemetry.assertEvent(Glean.translationsPanel.open, {
@@ -66,7 +53,7 @@ add_task(
       onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewError,
     });
 
-    await FullPageTranslationsTestUtils.assertPageIsUntranslated(runInPage);
+    await FullPageTranslationsTestUtils.assertPageIsNotTranslated(runInPage);
 
     await TestTranslationsTelemetry.assertEvent(Glean.translationsPanel.open, {
       expectedEventCount: 2,
@@ -89,19 +76,6 @@ add_task(
       expectedEventCount: 1,
       expectNewFlowId: false,
     });
-    await TestTranslationsTelemetry.assertCounter(
-      "RequestCount",
-      Glean.translations.requestsCount,
-      1
-    );
-    await TestTranslationsTelemetry.assertRate(
-      "ErrorRate",
-      Glean.translations.errorRate,
-      {
-        expectedNumerator: 1,
-        expectedDenominator: 1,
-      }
-    );
     await TestTranslationsTelemetry.assertEvent(Glean.translations.error, {
       expectedEventCount: 1,
       expectNewFlowId: false,
@@ -156,21 +130,8 @@ add_task(async function test_translations_telemetry_auto_translation_failure() {
     onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewError,
   });
 
-  await FullPageTranslationsTestUtils.assertPageIsUntranslated(runInPage);
+  await FullPageTranslationsTestUtils.assertPageIsNotTranslated(runInPage);
 
-  await TestTranslationsTelemetry.assertCounter(
-    "RequestCount",
-    Glean.translations.requestsCount,
-    1
-  );
-  await TestTranslationsTelemetry.assertRate(
-    "ErrorRate",
-    Glean.translations.errorRate,
-    {
-      expectedNumerator: 1,
-      expectedDenominator: 1,
-    }
-  );
   await TestTranslationsTelemetry.assertEvent(Glean.translationsPanel.open, {
     expectedEventCount: 1,
     expectNewFlowId: true,

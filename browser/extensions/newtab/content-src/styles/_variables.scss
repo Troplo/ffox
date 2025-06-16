@@ -26,6 +26,7 @@ $black: #000;
 $black-10: rgba($black, 0.1);
 $black-15: rgba($black, 0.15);
 $black-20: rgba($black, 0.2);
+$black-25: rgba($black, 0.25);
 $black-30: rgba($black, 0.3);
 $black-40: rgba($black, 0.4);
 
@@ -65,9 +66,6 @@ $newtab-background-card-dark: rgb(66, 65, 77, 80%);
 // Photon transitions from http://design.firefox.com/photon/motion/duration-and-easing.html
 $photon-easing: cubic-bezier(0.07, 0.95, 0, 1);
 
-$border-radius: 3px;
-$border-radius-new: 8px;
-
 // Grid related styles
 $base-gutter: 32px;
 $section-horizontal-padding: 25px;
@@ -100,7 +98,8 @@ $scrollbar-width: 16px;
 
 // Breakpoints
 // If updating these breakpoints, don't forget to update uses of DSImage, which
-// might choose the right image src to use depending on the viewport size.
+// might choose the right image src to use depending on the viewport size
+// and the $debug-breakpoints list below
 $break-point-small: 510px;
 $break-point-medium: $wrapper-max-width-medium + $base-gutter * 2 + $scrollbar-width; // 610px
 // A temporary breakpoint for a new layout experiment.
@@ -108,11 +107,32 @@ $break-point-layout-variant: 724px;
 $break-point-large: $wrapper-max-width-large + $base-gutter * 2 + $scrollbar-width; // 866px
 $break-point-widest: $wrapper-max-width-widest + $base-gutter * 2 + $scrollbar-width; // 1122px
 // temporary breakpoint for sections experiment
-$break-point-sections-variant: 1310px + $base-gutter * 2 + $scrollbar-width;
+$break-point-sections-variant: 1310px + $base-gutter * 2 + $scrollbar-width; // 1374px
 $break-point-weather: $wrapper-max-width-weather + $base-gutter * 2 + $scrollbar-width; // 1506px
 $break-point-ultra-wide: $wrapper-max-width-ultra-wide + $base-gutter * 2 + $scrollbar-width; // 1698px
 
-$section-title-font-size: 17px;
+// Used for @include debug-breakpoints in mixins.scss
+$debug-breakpoints: (
+  small: $break-point-small,
+  medium: $break-point-medium,
+  large: $break-point-large,
+  widest: $break-point-widest,
+  sections-variant: $break-point-sections-variant,
+  weather: $break-point-weather,
+  ultra-wide: $break-point-ultra-wide
+);
+
+$debug-breakpoint-colors: (
+  small: red,
+  medium: orange,
+  large: yellow,
+  widest: green,
+  sections-variant: blue,
+  weather: purple,
+  ultra-wide: violet
+);
+
+$section-title-font-size: var(--font-size-large);
 
 $card-width: $grid-unit-small * 2 + $base-gutter;
 
@@ -135,13 +155,13 @@ $topic-margin-top: 12px;
 $context-menu-button-size: 27px;
 $context-menu-button-boxshadow: 0 2px $grey-90-10;
 $context-menu-shadow: 0 5px 10px $black-30, 0 0 0 1px $black-20;
-$context-menu-font-size: 14px;
-$context-menu-border-radius: 5px;
+$context-menu-font-size: inherit;
+
+// $context-menu-border-radius: 5px;
 $context-menu-outer-padding: 5px;
 $context-menu-item-padding: 3px 12px;
 
-$error-fallback-font-size: 12px;
-$error-fallback-line-height: 1.5;
+$error-fallback-font-size: var(--font-size-small);
 
 $image-path: 'chrome://newtab/content/data/content/assets/';
 
@@ -175,7 +195,7 @@ $customize-menu-border-tint: 1px solid rgba(0, 0, 0, 15%);
     border: 0;
     outline: $border-primary;
     outline-width: 0;
-    border-radius: 100%;
+    border-radius: var(--border-radius-circle);
     cursor: pointer;
     color: var(--button-text-color);
     fill: var(--newtab-button-text);

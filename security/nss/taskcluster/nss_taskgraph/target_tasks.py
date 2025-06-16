@@ -24,12 +24,15 @@ PLATFORM_ALIASES = {
     "win-make": "windows2022-32",
     "win64": "windows2022-64",
     "win": "windows2022-32",
+    "mac": "macosx64",
 }
 
 
 def filter_platform(platform, task):
     if "build_platform" not in task.attributes:
         return False
+    if platform == "all":
+        return True
     task_platform = task.attributes["build_platform"]
     # Check the platform name.
     keep = task_platform == PLATFORM_ALIASES.get(platform, platform)

@@ -11,7 +11,6 @@
 
   <stringbundleset id="stringbundleset">
     <stringbundle id="bundle_brand" src="chrome://branding/locale/brand.properties"/>
-    <stringbundle id="bundle_shell" src="chrome://browser/locale/shellservice.properties"/>
   </stringbundleset>
 
   <!-- The event listeners are defined by _initCommandSet in browser-init.js -->
@@ -96,6 +95,7 @@
     <command id="Tools:Search" />
     <command id="Tools:Downloads" />
     <command id="Tools:Addons" />
+    <command id="cmd_openUnifiedExtensionsPanel" />
     <command id="Tools:Sanitize" />
     <command id="Tools:PrivateBrowsing" />
     <command id="Browser:Screenshot" />

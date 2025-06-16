@@ -49,7 +49,6 @@
   <string name="menu_settings">అమరికలు</string>
   <string name="menu_about">గురించి</string>
   <string name="menu_help">సహాయం</string>
-  <string name="menu_rights" moz:removedIn="137">మీ హక్కులు</string>
   <!--
     Menu item: This is the label for a menu entry that shows how many trackers have been blocked
     for the currently loaded website. The number of blocked trackers is shown below this label.
@@ -381,11 +380,6 @@
     item in the list of browsers. Clicking it will open the app store installed on the device (usually that's Google Play).
   -->
   <string name="download_firefox" tools:ignore="BrandUsage">Firefoxను దింపుకోండి</string>
-  <!--
-    Text shown in the "Your rights" screen.
-    %1$s will be replaced with the name of the app (e.g. Firefox Focus)
-  -->
-  <string name="your_rights_content1" moz:removedIn="137">%1$s అనేది మొజిల్లా, ఇతర తోడ్పాటుదార్లు తయారుచేసిన స్వేచ్ఛా, ఓపెన్ సోర్సు సాఫ్ట్‌వేరు.</string>
   <!-- Text shown in prompts for GeckoView -->
   <string name="gv_prompt_username_hint">వాడుకరి పేరు</string>
   <string name="gv_prompt_password_hint">సంకేతపదం</string>
@@ -447,11 +441,11 @@
   <!-- Label that indicates that a permission must be asked always -->
   <string name="preference_option_phone_feature_ask_to_allow">అనుమతిని అడుగు</string>
   <!-- Preference for studies -->
-  <string name="preference_studies">అధ్యయనాలు</string>
+  <string name="preference_studies" moz:removedIn="140">అధ్యయనాలు</string>
   <!-- Learn more link for studies, links to an article for more information about studies. -->
-  <string name="studies_learn_more">ఇంకా తెలుసుకోండి</string>
+  <string name="studies_learn_more" moz:removedIn="140">ఇంకా తెలుసుకోండి</string>
   <!-- Title of the remove studies button -->
-  <string name="studies_remove">తీసివేయి</string>
+  <string name="studies_remove" moz:removedIn="140">తీసివేయి</string>
   <!-- Preference to enable remote debugging of the app via USB or Wi-Fi -->
   <string name="preference_remote_debugging">USB/Wi-Fi ద్వారా రిమోట్ డీబగ్గింగ్</string>
   <!-- Description for the fingerprint authentication image. Used for accessibility purposes. -->

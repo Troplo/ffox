@@ -6,36 +6,41 @@ import { LinkMenu } from "content-src/components/LinkMenu/LinkMenu";
 import { ContextMenuButton } from "content-src/components/ContextMenu/ContextMenuButton";
 import { actionCreators as ac } from "common/Actions.mjs";
 import React from "react";
+import { connect } from "react-redux";
 
-export class DSLinkMenu extends React.PureComponent {
+export class _DSLinkMenu extends React.PureComponent {
   render() {
     const { index, dispatch } = this.props;
-    let pocketMenuOptions = [];
-    let TOP_STORIES_CONTEXT_MENU_OPTIONS = [
-      "OpenInNewWindow",
-      "OpenInPrivateWindow",
-    ];
-    if (!this.props.isRecentSave) {
-      // Show Pocket context menu options if applicable.
-      // Additionally, show these menu options for all section cards.
-      if (
-        this.props.pocket_button_enabled &&
-        (this.props.saveToPocketCard || this.props.isSectionsCard)
-      ) {
-        pocketMenuOptions = ["CheckSavedToPocket"];
-      }
+    let TOP_STORIES_CONTEXT_MENU_OPTIONS;
+    const PREF_REPORT_ADS_ENABLED = "discoverystream.reportAds.enabled";
+    const prefs = this.props.Prefs.values;
+    const showAdsReporting = prefs[PREF_REPORT_ADS_ENABLED];
+    const isSpoc = this.props.card_type === "spoc";
+
+    if (isSpoc) {
+      TOP_STORIES_CONTEXT_MENU_OPTIONS = [
+        "BlockUrl",
+        ...(showAdsReporting ? ["ReportAd"] : []),
+        "ManageSponsoredContent",
+        "OurSponsorsAndYourPrivacy",
+      ];
+    } else {
+      const saveToPocketOptions = this.props.pocket_button_enabled
+        ? ["CheckArchiveFromPocket", "CheckSavedToPocket"]
+        : [];
+
       TOP_STORIES_CONTEXT_MENU_OPTIONS = [
         "CheckBookmark",
-        "CheckArchiveFromPocket",
-        ...pocketMenuOptions,
+        ...saveToPocketOptions,
         "Separator",
         "OpenInNewWindow",
         "OpenInPrivateWindow",
         "Separator",
         "BlockUrl",
-        ...(this.props.showPrivacyInfo ? ["ShowPrivacyInfo"] : []),
+        ...(this.props.section ? ["ReportContent"] : []),
       ];
     }
+
     const type = this.props.type || "DISCOVERY_STREAM";
     const title = this.props.title || this.props.source;
 
@@ -69,15 +74,18 @@ export class DSLinkMenu extends React.PureComponent {
               recommendation_id: this.props.recommendation_id,
               corpus_item_id: this.props.corpus_item_id,
               scheduled_corpus_item_id: this.props.scheduled_corpus_item_id,
+              firstVisibleTimestamp: this.props.firstVisibleTimestamp,
               recommended_at: this.props.recommended_at,
               received_rank: this.props.received_rank,
+              topic: this.props.topic,
               is_list_card: this.props.is_list_card,
+              position: index,
               ...(this.props.format ? { format: this.props.format } : {}),
               ...(this.props.section
                 ? {
                     section: this.props.section,
                     section_position: this.props.section_position,
-                    is_secton_followed: this.props.is_secton_followed,
+                    is_section_followed: this.props.is_section_followed,
                   }
                 : {}),
             }}
@@ -87,3 +95,7 @@ export class DSLinkMenu extends React.PureComponent {
     );
   }
 }
+
+export const DSLinkMenu = connect(state => ({
+  Prefs: state.Prefs,
+}))(_DSLinkMenu);

@@ -731,21 +731,6 @@ nscoord StyleCalcLengthPercentage::Resolve(nscoord aBasis,
   return aRounder(result * AppUnitsPerCSSPixel());
 }
 
-nscoord StyleCalcLengthPercentage::ResolveWithAnchor(
-    nscoord aBasis, mozilla::StylePhysicalAxis aAxis,
-    mozilla::StylePositionProperty aProp) const {
-  float value{};
-  bool unused{};
-  bool result = Servo_ResolveCalcLengthPercentageWithAnchorFunctions(
-      this, CSSPixel::FromAppUnits(aBasis), aAxis, aProp, &value, &unused);
-  if (!result) {
-    MOZ_ASSERT_UNREACHABLE(
-        "Was expecting initial anchor resolution to determine validity");
-    return 0;
-  }
-  return detail::DefaultPercentLengthToAppUnits(value * AppUnitsPerCSSPixel());
-}
-
 template <>
 void StyleCalcNode::ScaleLengthsBy(float);
 
@@ -801,23 +786,6 @@ nscoord LengthPercentage::Resolve(nscoord aPercentageBasis,
   return Resolve([aPercentageBasis] { return aPercentageBasis; }, aRounder);
 }
 
-nscoord LengthPercentage::ResolveWithAnchor(
-    nscoord aPercentageBasis, mozilla::StylePhysicalAxis aAxis,
-    mozilla::StylePositionProperty aProp) const {
-  if (ConvertsToLength()) {
-    return ToLength();
-  }
-  if (IsPercentage()) {
-    const auto percent = AsPercentage()._0;
-    if (percent == 0.0f) {
-      return 0;
-    }
-    return detail::DefaultPercentLengthToAppUnits(
-        static_cast<float>(aPercentageBasis) * percent);
-  }
-  return AsCalc().ResolveWithAnchor(aPercentageBasis, aAxis, aProp);
-}
-
 void LengthPercentage::ScaleLengthsBy(float aScale) {
   if (IsLength()) {
     AsLength().ScaleBy(aScale);
@@ -864,8 +832,24 @@ IMPL_LENGTHPERCENTAGE_FORWARDS(StyleInset)
 IMPL_LENGTHPERCENTAGE_FORWARDS(StyleMargin)
 
 template <>
-inline bool StyleInset::IsAnchorPositioningFunction() const {
-  return IsAnchorFunction() || IsAnchorSizeFunction();
+inline bool StyleInset::HasAnchorPositioningFunction() const {
+  return IsAnchorFunction() || IsAnchorSizeFunction() ||
+         IsAnchorContainingCalcFunction();
+}
+
+template <>
+inline bool StyleMargin::HasAnchorPositioningFunction() const {
+  return IsAnchorSizeFunction() || IsAnchorContainingCalcFunction();
+}
+
+template <>
+inline bool StyleSize::HasAnchorPositioningFunction() const {
+  return IsAnchorSizeFunction() || IsAnchorContainingCalcFunction();
+}
+
+template <>
+inline bool StyleMaxSize::HasAnchorPositioningFunction() const {
+  return IsAnchorSizeFunction() || IsAnchorContainingCalcFunction();
 }
 
 #undef IMPL_LENGTHPERCENTAGE_FORWARDS
@@ -1289,18 +1273,34 @@ inline gfx::Point StyleCoordinatePair<LengthPercentage>::ToGfxPoint(
                     y.ResolveToCSSPixels(aBasis->Height()));
 }
 
-inline StylePhysicalAxis GetStylePhysicalAxis(mozilla::Side aSide) {
-  return aSide == mozilla::Side::eSideTop || aSide == mozilla::Side::eSideBottom
-             ? StylePhysicalAxis::Vertical
-             : StylePhysicalAxis::Horizontal;
+inline StylePhysicalSide ToStylePhysicalSide(mozilla::Side aSide) {
+  // TODO(dshin): Should look into merging these two types...
+  static_assert(static_cast<uint8_t>(mozilla::Side::eSideLeft) ==
+                    static_cast<uint8_t>(StylePhysicalSide::Left),
+                "Left side doesn't match");
+  static_assert(static_cast<uint8_t>(mozilla::Side::eSideRight) ==
+                    static_cast<uint8_t>(StylePhysicalSide::Right),
+                "Left side doesn't match");
+  static_assert(static_cast<uint8_t>(mozilla::Side::eSideTop) ==
+                    static_cast<uint8_t>(StylePhysicalSide::Top),
+                "Left side doesn't match");
+  static_assert(static_cast<uint8_t>(mozilla::Side::eSideBottom) ==
+                    static_cast<uint8_t>(StylePhysicalSide::Bottom),
+                "Left side doesn't match");
+  return static_cast<StylePhysicalSide>(static_cast<uint8_t>(aSide));
 }
 
-inline StylePhysicalAxis ToStylePhysicalAxis(PhysicalAxis aAxis) {
-  // TODO(dhsin): Should look into merging these two values...
-  // Assert for this casting lives in `nsStyleStruct.cpp` since
-  // `PhysicalAxis` is a forward decl here.
-  return static_cast<StylePhysicalAxis>(static_cast<uint8_t>(aAxis));
-}
+#define DEFINE_LENGTH_PERCENTAGE_CTOR(ty_)                               \
+  template <>                                                            \
+  inline Style##ty_::StyleGeneric##ty_(const StyleLengthPercentage& aLP) \
+      : tag{Tag::LengthPercentage} {                                     \
+    ::new (&length_percentage._0)(StyleLengthPercentage)(aLP);           \
+  }
+
+DEFINE_LENGTH_PERCENTAGE_CTOR(Inset)
+DEFINE_LENGTH_PERCENTAGE_CTOR(Margin)
+DEFINE_LENGTH_PERCENTAGE_CTOR(Size)
+DEFINE_LENGTH_PERCENTAGE_CTOR(MaxSize)
 
 }  // namespace mozilla
 

@@ -91,7 +91,6 @@
 namespace {
 
 using namespace mozilla;
-using mozilla::dom::AutoJSAPI;
 using mozilla::dom::Promise;
 using mozilla::Telemetry::CombinedStacks;
 using mozilla::Telemetry::EventExtraEntry;
@@ -665,239 +664,6 @@ TelemetryImpl::GetAreUntrustedModuleLoadEventsReady(bool* ret) {
 #else
   return NS_ERROR_NOT_IMPLEMENTED;
 #endif
-}
-
-#if defined(MOZ_GECKO_PROFILER)
-class GetLoadedModulesResultRunnable final : public Runnable {
-  nsMainThreadPtrHandle<Promise> mPromise;
-  SharedLibraryInfo mRawModules;
-  nsCOMPtr<nsIThread> mWorkerThread;
-#  if defined(XP_WIN)
-  nsTHashMap<nsStringHashKey, nsString> mCertSubjects;
-#  endif  // defined(XP_WIN)
-
- public:
-  GetLoadedModulesResultRunnable(const nsMainThreadPtrHandle<Promise>& aPromise,
-                                 const SharedLibraryInfo& rawModules)
-      : mozilla::Runnable("GetLoadedModulesResultRunnable"),
-        mPromise(aPromise),
-        mRawModules(rawModules),
-        mWorkerThread(do_GetCurrentThread()) {
-    MOZ_ASSERT(!NS_IsMainThread());
-#  if defined(XP_WIN)
-    ObtainCertSubjects();
-#  endif  // defined(XP_WIN)
-  }
-
-  NS_IMETHOD
-  Run() override {
-    MOZ_ASSERT(NS_IsMainThread());
-
-    mWorkerThread->Shutdown();
-
-    AutoJSAPI jsapi;
-    if (NS_WARN_IF(!jsapi.Init(mPromise->GetGlobalObject()))) {
-      mPromise->MaybeReject(NS_ERROR_FAILURE);
-      return NS_OK;
-    }
-
-    JSContext* cx = jsapi.cx();
-
-    JS::Rooted<JSObject*> moduleArray(cx, JS::NewArrayObject(cx, 0));
-    if (!moduleArray) {
-      mPromise->MaybeReject(NS_ERROR_FAILURE);
-      return NS_OK;
-    }
-
-    for (unsigned int i = 0, n = mRawModules.GetSize(); i != n; i++) {
-      const SharedLibrary& info = mRawModules.GetEntry(i);
-
-      JS::Rooted<JSObject*> moduleObj(cx, JS_NewPlainObject(cx));
-      if (!moduleObj) {
-        mPromise->MaybeReject(NS_ERROR_FAILURE);
-        return NS_OK;
-      }
-
-      // Module name.
-      JS::Rooted<JSString*> moduleName(
-          cx,
-          JS_NewUCStringCopyZ(
-              cx, NS_ConvertUTF8toUTF16(info.GetModuleName().c_str()).get()));
-      if (!moduleName || !JS_DefineProperty(cx, moduleObj, "name", moduleName,
-                                            JSPROP_ENUMERATE)) {
-        mPromise->MaybeReject(NS_ERROR_FAILURE);
-        return NS_OK;
-      }
-
-      // Module debug name.
-      JS::Rooted<JS::Value> moduleDebugName(cx);
-
-      if (!info.GetDebugName().empty()) {
-        JS::Rooted<JSString*> str_moduleDebugName(
-            cx,
-            JS_NewUCStringCopyZ(
-                cx, NS_ConvertUTF8toUTF16(info.GetDebugName().c_str()).get()));
-        if (!str_moduleDebugName) {
-          mPromise->MaybeReject(NS_ERROR_FAILURE);
-          return NS_OK;
-        }
-        moduleDebugName.setString(str_moduleDebugName);
-      } else {
-        moduleDebugName.setNull();
-      }
-
-      if (!JS_DefineProperty(cx, moduleObj, "debugName", moduleDebugName,
-                             JSPROP_ENUMERATE)) {
-        mPromise->MaybeReject(NS_ERROR_FAILURE);
-        return NS_OK;
-      }
-
-      // Module Breakpad identifier.
-      JS::Rooted<JS::Value> id(cx);
-
-      if (!info.GetBreakpadId().empty()) {
-        JS::Rooted<JSString*> str_id(
-            cx, JS_NewStringCopyZ(cx, info.GetBreakpadId().c_str()));
-        if (!str_id) {
-          mPromise->MaybeReject(NS_ERROR_FAILURE);
-          return NS_OK;
-        }
-        id.setString(str_id);
-      } else {
-        id.setNull();
-      }
-
-      if (!JS_DefineProperty(cx, moduleObj, "debugID", id, JSPROP_ENUMERATE)) {
-        mPromise->MaybeReject(NS_ERROR_FAILURE);
-        return NS_OK;
-      }
-
-      // Module version.
-      JS::Rooted<JS::Value> version(cx);
-
-      if (!info.GetVersion().empty()) {
-        JS::Rooted<JSString*> v(
-            cx, JS_NewStringCopyZ(cx, info.GetVersion().c_str()));
-        if (!v) {
-          mPromise->MaybeReject(NS_ERROR_FAILURE);
-          return NS_OK;
-        }
-        version.setString(v);
-      } else {
-        version.setNull();
-      }
-
-      if (!JS_DefineProperty(cx, moduleObj, "version", version,
-                             JSPROP_ENUMERATE)) {
-        mPromise->MaybeReject(NS_ERROR_FAILURE);
-        return NS_OK;
-      }
-
-#  if defined(XP_WIN)
-      // Cert Subject.
-      if (auto subject = mCertSubjects.Lookup(
-              NS_ConvertUTF8toUTF16(info.GetModulePath().c_str()))) {
-        JS::Rooted<JSString*> jsOrg(cx, ToJSString(cx, *subject));
-        if (!jsOrg) {
-          mPromise->MaybeReject(NS_ERROR_FAILURE);
-          return NS_OK;
-        }
-
-        JS::Rooted<JS::Value> certSubject(cx);
-        certSubject.setString(jsOrg);
-
-        if (!JS_DefineProperty(cx, moduleObj, "certSubject", certSubject,
-                               JSPROP_ENUMERATE)) {
-          mPromise->MaybeReject(NS_ERROR_FAILURE);
-          return NS_OK;
-        }
-      }
-#  endif  // defined(XP_WIN)
-
-      if (!JS_DefineElement(cx, moduleArray, i, moduleObj, JSPROP_ENUMERATE)) {
-        mPromise->MaybeReject(NS_ERROR_FAILURE);
-        return NS_OK;
-      }
-    }
-
-    mPromise->MaybeResolve(moduleArray);
-    return NS_OK;
-  }
-
- private:
-#  if defined(XP_WIN)
-  void ObtainCertSubjects() {
-    MOZ_ASSERT(!NS_IsMainThread());
-
-    // NB: Currently we cannot lower this down to the profiler layer due to
-    // differing startup dependencies between the profiler and DllServices.
-    RefPtr<DllServices> dllSvc(DllServices::Get());
-
-    for (unsigned int i = 0, n = mRawModules.GetSize(); i != n; i++) {
-      const SharedLibrary& info = mRawModules.GetEntry(i);
-
-      auto orgName = dllSvc->GetBinaryOrgName(
-          NS_ConvertUTF8toUTF16(info.GetModulePath().c_str()).get());
-      if (orgName) {
-        mCertSubjects.InsertOrUpdate(
-            NS_ConvertUTF8toUTF16(info.GetModulePath().c_str()),
-            nsDependentString(orgName.get()));
-      }
-    }
-  }
-#  endif  // defined(XP_WIN)
-};
-
-class GetLoadedModulesRunnable final : public Runnable {
-  nsMainThreadPtrHandle<Promise> mPromise;
-
- public:
-  explicit GetLoadedModulesRunnable(
-      const nsMainThreadPtrHandle<Promise>& aPromise)
-      : mozilla::Runnable("GetLoadedModulesRunnable"), mPromise(aPromise) {}
-
-  NS_IMETHOD
-  Run() override {
-    nsCOMPtr<nsIRunnable> resultRunnable = new GetLoadedModulesResultRunnable(
-        mPromise, SharedLibraryInfo::GetInfoForSelf());
-    return NS_DispatchToMainThread(resultRunnable);
-  }
-};
-#endif  // MOZ_GECKO_PROFILER
-
-NS_IMETHODIMP
-TelemetryImpl::GetLoadedModules(JSContext* cx, Promise** aPromise) {
-#if defined(MOZ_GECKO_PROFILER)
-  nsIGlobalObject* global = xpc::CurrentNativeGlobal(cx);
-  if (NS_WARN_IF(!global)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  ErrorResult result;
-  RefPtr<Promise> promise = Promise::Create(global, result);
-  if (NS_WARN_IF(result.Failed())) {
-    return result.StealNSResult();
-  }
-
-  nsCOMPtr<nsIThread> getModulesThread;
-  nsresult rv =
-      NS_NewNamedThread("TelemetryModule", getter_AddRefs(getModulesThread));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    promise->MaybeReject(NS_ERROR_FAILURE);
-    return NS_OK;
-  }
-
-  nsMainThreadPtrHandle<Promise> mainThreadPromise(
-      new nsMainThreadPtrHolder<Promise>(
-          "TelemetryImpl::GetLoadedModules::Promise", promise));
-  nsCOMPtr<nsIRunnable> runnable =
-      new GetLoadedModulesRunnable(mainThreadPromise);
-  promise.forget(aPromise);
-
-  return getModulesThread->Dispatch(runnable, nsIEventTarget::DISPATCH_NORMAL);
-#else   // MOZ_GECKO_PROFILER
-  return NS_ERROR_NOT_IMPLEMENTED;
-#endif  // MOZ_GECKO_PROFILER
 }
 
 static bool IsValidBreakpadId(const std::string& breakpadId) {
@@ -1658,20 +1424,6 @@ TelemetryImpl::GetAllStores(JSContext* aCx,
 ////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////
 //
-// EXTERNALLY VISIBLE FUNCTIONS in no name space
-// These are NOT listed in Telemetry.h
-
-/**
- * The XRE_TelemetryAdd function is to be used by embedding applications
- * that can't use mozilla::Telemetry::Accumulate() directly.
- */
-void XRE_TelemetryAccumulate(int aID, uint32_t aSample) {
-  mozilla::Telemetry::Accumulate((mozilla::Telemetry::HistogramID)aID, aSample);
-}
-
-////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////
-//
 // EXTERNALLY VISIBLE FUNCTIONS in mozilla::
 // These are NOT listed in Telemetry.h
 
@@ -1759,49 +1511,10 @@ void RecordShutdownEndTimeStamp() {
 
 namespace mozilla::Telemetry {
 
-void Accumulate(HistogramID aHistogram, uint32_t aSample) {
-  TelemetryHistogram::Accumulate(aHistogram, aSample);
-}
-
-void Accumulate(HistogramID aHistogram, const nsTArray<uint32_t>& aSamples) {
-  TelemetryHistogram::Accumulate(aHistogram, aSamples);
-}
-
 void Accumulate(HistogramID aID, const nsCString& aKey, uint32_t aSample) {
   TelemetryHistogram::Accumulate(aID, aKey, aSample);
 }
 
-void Accumulate(HistogramID aID, const nsCString& aKey,
-                const nsTArray<uint32_t>& aSamples) {
-  TelemetryHistogram::Accumulate(aID, aKey, aSamples);
-}
-
-void Accumulate(const char* name, uint32_t sample) {
-  TelemetryHistogram::Accumulate(name, sample);
-}
-
-void Accumulate(const char* name, const nsCString& key, uint32_t sample) {
-  TelemetryHistogram::Accumulate(name, key, sample);
-}
-
-void AccumulateCategorical(HistogramID id, const nsCString& label) {
-  TelemetryHistogram::AccumulateCategorical(id, label);
-}
-
-void AccumulateCategorical(HistogramID id, const nsTArray<nsCString>& labels) {
-  TelemetryHistogram::AccumulateCategorical(id, labels);
-}
-
-void AccumulateTimeDelta(HistogramID aHistogram, TimeStamp start,
-                         TimeStamp end) {
-  Accumulate(aHistogram, static_cast<uint32_t>((end - start).ToMilliseconds()));
-}
-
-void AccumulateTimeDelta(HistogramID aHistogram, const nsCString& key,
-                         TimeStamp start, TimeStamp end) {
-  Accumulate(aHistogram, key,
-             static_cast<uint32_t>((end - start).ToMilliseconds()));
-}
 const char* GetHistogramName(HistogramID id) {
   return TelemetryHistogram::GetHistogramName(id);
 }

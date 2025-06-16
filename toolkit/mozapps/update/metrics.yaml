@@ -1464,3 +1464,104 @@ update:
       - bytesized@mozilla.com
     expires: never
     telemetry_mirror: h#UPDATE_NOTIFICATION_MAIN_ACTION_MENU
+
+  langpack_overtime:
+    type: timing_distribution
+    description: >
+      Update: How much longer langpacks took to download than the app update in
+      seconds.
+
+      This metric was generated to correspond to the Legacy Telemetry linear
+      histogram UPDATE_LANGPACK_OVERTIME.
+    time_unit: second
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1656994
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1656994
+    notification_emails:
+      - application-update-telemetry-alerts@mozilla.com
+      - dtownsend@mozilla.com
+    expires: never
+    telemetry_mirror: UPDATE_LANGPACK_OVERTIME
+
+
+updater:
+  available:
+    type: boolean
+    lifetime: application
+    description: |
+      Whether the app was built with the updater binary.
+      Corresponds to the value of the `MOZ_UPDATER` define.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950386
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950386
+    notification_emails:
+      - bytesized@mozilla.com
+    data_sensitivity:
+      - technical
+    expires: never
+
+
+update.settings:
+  channel:
+    type: string
+    lifetime: application
+    description: |
+      The update channel according to defaults,
+      including partner bits.
+      e.g. "nightly-cck"
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950397
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950397
+    data_sensitivity:
+      - technical
+    notification_emails:
+      - application-update-telemetry-alerts@mozilla.com
+    expires: never
+
+  enabled:
+    type: boolean
+    lifetime: application
+    description: |
+      Whether updates are available.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950397
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950397
+    data_sensitivity:
+      - technical
+    notification_emails:
+      - application-update-telemetry-alerts@mozilla.com
+    expires: never
+
+  auto_download:
+    type: boolean
+    lifetime: application
+    description: |
+      Whether app updates are set to auto-download.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950397
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950397
+    data_sensitivity:
+      - technical
+    notification_emails:
+      - application-update-telemetry-alerts@mozilla.com
+    expires: never
+
+  background:
+    type: boolean
+    lifetime: application
+    description: |
+      Whether updates can be delivered in the background.
+    bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950397
+    data_reviews:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1950397
+    data_sensitivity:
+      - technical
+    notification_emails:
+      - application-update-telemetry-alerts@mozilla.com
+    expires: never

@@ -58,6 +58,7 @@ export function bootstrapStore(client, workers, panel, initialState) {
   registerStoreObserver(store, updatePrefs);
 
   const actions = bindActionCreators(
+    // eslint-disable-next-line mozilla/reject-relative-requires
     require("../actions/index").default,
     store.dispatch
   );
@@ -145,5 +146,10 @@ function updatePrefs(state, oldState) {
 
   if (hasChanged(selectors.getBlackBoxRanges)) {
     asyncStore.blackboxedRanges = selectors.getBlackBoxRanges(state);
+  }
+
+  if (hasChanged(selectors.getMainThreadProjectDirectoryRoots)) {
+    asyncStore.directoryRoots =
+      selectors.getMainThreadProjectDirectoryRoots(state);
   }
 }

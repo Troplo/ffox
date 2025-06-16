@@ -59,14 +59,6 @@ pub enum PseudoElement {
     ServoAnonymousTable,
     ServoAnonymousTableCell,
     ServoAnonymousTableRow,
-    ServoLegacyText,
-    ServoLegacyInputText,
-    ServoLegacyTableWrapper,
-    ServoLegacyAnonymousTableWrapper,
-    ServoLegacyAnonymousTable,
-    ServoLegacyAnonymousBlock,
-    ServoLegacyInlineBlockWrapper,
-    ServoLegacyInlineAbsolute,
     ServoTableGrid,
     ServoTableWrapper,
 }
@@ -91,14 +83,6 @@ impl ToCss for PseudoElement {
             ServoAnonymousTable => "::-servo-anonymous-table",
             ServoAnonymousTableCell => "::-servo-anonymous-table-cell",
             ServoAnonymousTableRow => "::-servo-anonymous-table-row",
-            ServoLegacyText => "::-servo-legacy-text",
-            ServoLegacyInputText => "::-servo-legacy-input-text",
-            ServoLegacyTableWrapper => "::-servo-legacy-table-wrapper",
-            ServoLegacyAnonymousTableWrapper => "::-servo-legacy-anonymous-table-wrapper",
-            ServoLegacyAnonymousTable => "::-servo-legacy-anonymous-table",
-            ServoLegacyAnonymousBlock => "::-servo-legacy-anonymous-block",
-            ServoLegacyInlineBlockWrapper => "::-servo-legacy-inline-block-wrapper",
-            ServoLegacyInlineAbsolute => "::-servo-legacy-inline-absolute",
             ServoTableGrid => "::-servo-table-grid",
             ServoTableWrapper => "::-servo-table-wrapper",
         })
@@ -241,14 +225,6 @@ impl PseudoElement {
             PseudoElement::ServoAnonymousTable |
             PseudoElement::ServoAnonymousTableCell |
             PseudoElement::ServoAnonymousTableRow |
-            PseudoElement::ServoLegacyText |
-            PseudoElement::ServoLegacyInputText |
-            PseudoElement::ServoLegacyTableWrapper |
-            PseudoElement::ServoLegacyAnonymousTableWrapper |
-            PseudoElement::ServoLegacyAnonymousTable |
-            PseudoElement::ServoLegacyAnonymousBlock |
-            PseudoElement::ServoLegacyInlineBlockWrapper |
-            PseudoElement::ServoLegacyInlineAbsolute |
             PseudoElement::ServoTableGrid |
             PseudoElement::ServoTableWrapper => PseudoElementCascadeType::Precomputed,
         }
@@ -319,6 +295,9 @@ pub enum NonTSPseudoClass {
     Lang(Lang),
     Link,
     Modal,
+    MozMeterOptimum,
+    MozMeterSubOptimum,
+    MozMeterSubSubOptimum,
     Optional,
     OutOfRange,
     PlaceholderShown,
@@ -389,6 +368,9 @@ impl ToCss for NonTSPseudoClass {
             Self::Invalid => ":invalid",
             Self::Link => ":link",
             Self::Modal => ":modal",
+            Self::MozMeterOptimum => ":-moz-meter-optimum",
+            Self::MozMeterSubOptimum => ":-moz-meter-sub-optimum",
+            Self::MozMeterSubSubOptimum => ":-moz-meter-sub-sub-optimum",
             Self::Optional => ":optional",
             Self::OutOfRange => ":out-of-range",
             Self::PlaceholderShown => ":placeholder-shown",
@@ -430,6 +412,9 @@ impl NonTSPseudoClass {
             Self::Invalid => ElementState::INVALID,
             Self::Link => ElementState::UNVISITED,
             Self::Modal => ElementState::MODAL,
+            Self::MozMeterOptimum => ElementState::OPTIMUM,
+            Self::MozMeterSubOptimum => ElementState::SUB_OPTIMUM,
+            Self::MozMeterSubSubOptimum => ElementState::SUB_SUB_OPTIMUM,
             Self::Optional => ElementState::OPTIONAL_,
             Self::OutOfRange => ElementState::OUTOFRANGE,
             Self::PlaceholderShown => ElementState::PLACEHOLDER_SHOWN,
@@ -556,6 +541,9 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
             "user-valid" => NonTSPseudoClass::UserValid,
             "valid" => NonTSPseudoClass::Valid,
             "visited" => NonTSPseudoClass::Visited,
+            "-moz-meter-optimum" => NonTSPseudoClass::MozMeterOptimum,
+            "-moz-meter-sub-optimum" => NonTSPseudoClass::MozMeterSubOptimum,
+            "-moz-meter-sub-sub-optimum" => NonTSPseudoClass::MozMeterSubSubOptimum,
             "-servo-nonzero-border" => {
                 if !self.in_user_agent_stylesheet() {
                     return Err(location.new_custom_error(
@@ -616,36 +604,6 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
                 }
                 ServoAnonymousBox
             },
-            "-servo-legacy-text" => {
-                if !self.in_user_agent_stylesheet() {
-                    return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-                }
-                ServoLegacyText
-            },
-            "-servo-legacy-input-text" => {
-                if !self.in_user_agent_stylesheet() {
-                    return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-                }
-                ServoLegacyInputText
-            },
-            "-servo-legacy-table-wrapper" => {
-                if !self.in_user_agent_stylesheet() {
-                    return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-                }
-                ServoLegacyTableWrapper
-            },
-            "-servo-legacy-anonymous-table-wrapper" => {
-                if !self.in_user_agent_stylesheet() {
-                    return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-                }
-                ServoLegacyAnonymousTableWrapper
-            },
-            "-servo-legacy-anonymous-table" => {
-                if !self.in_user_agent_stylesheet() {
-                    return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-                }
-                ServoLegacyAnonymousTable
-            },
             "-servo-anonymous-table" => {
                 if !self.in_user_agent_stylesheet() {
                     return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
@@ -663,24 +621,6 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
                     return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
                 }
                 ServoAnonymousTableCell
-            },
-            "-servo-legacy-anonymous-block" => {
-                if !self.in_user_agent_stylesheet() {
-                    return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-                }
-                ServoLegacyAnonymousBlock
-            },
-            "-servo-legacy-inline-block-wrapper" => {
-                if !self.in_user_agent_stylesheet() {
-                    return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-                }
-                ServoLegacyInlineBlockWrapper
-            },
-            "-servo-legacy-inline-absolute" => {
-                if !self.in_user_agent_stylesheet() {
-                    return Err(location.new_custom_error(SelectorParseErrorKind::UnexpectedIdent(name.clone())))
-                }
-                ServoLegacyInlineAbsolute
             },
             "-servo-table-grid" => {
                 if !self.in_user_agent_stylesheet() {
@@ -710,6 +650,10 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
     }
 
     fn parse_host(&self) -> bool {
+        true
+    }
+
+    fn parse_slotted(&self) -> bool {
         true
     }
 }

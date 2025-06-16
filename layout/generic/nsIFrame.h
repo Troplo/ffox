@@ -2268,7 +2268,7 @@ class nsIFrame : public nsQueryFrame {
                       nsSelectionAmount aBeginAmountType,
                       nsSelectionAmount aEndAmountType, uint32_t aSelectFlags);
 
-  MOZ_CAN_RUN_SCRIPT nsresult PeekBackwardAndForward(
+  MOZ_CAN_RUN_SCRIPT nsresult PeekBackwardAndForwardForSelection(
       nsSelectionAmount aAmountBack, nsSelectionAmount aAmountForward,
       int32_t aStartPos, bool aJumpLines, uint32_t aSelectFlags);
 
@@ -2357,8 +2357,7 @@ class nsIFrame : public nsQueryFrame {
   int16_t DetermineDisplaySelection();
 
  public:
-  virtual nsresult GetContentForEvent(const mozilla::WidgetEvent* aEvent,
-                                      nsIContent** aContent);
+  virtual nsIContent* GetContentForEvent(const mozilla::WidgetEvent*) const;
 
   // This structure keeps track of the content node and offsets associated with
   // a point; there is a primary and a secondary offset associated with any
@@ -3161,8 +3160,7 @@ class nsIFrame : public nsQueryFrame {
   void FinishReflowWithAbsoluteFrames(nsPresContext* aPresContext,
                                       ReflowOutput& aDesiredSize,
                                       const ReflowInput& aReflowInput,
-                                      nsReflowStatus& aStatus,
-                                      bool aConstrainBSize = true);
+                                      nsReflowStatus& aStatus);
 
   /**
    * Updates the overflow areas of the frame. This can be called if an
@@ -3280,8 +3278,9 @@ class nsIFrame : public nsQueryFrame {
   // Returns true iff this frame's computed block-size property is one of the
   // intrinsic-sizing keywords.
   bool HasIntrinsicKeywordForBSize() const {
-    const auto& bSize = StylePosition()->BSize(GetWritingMode());
-    return IsIntrinsicKeyword(bSize);
+    const auto bSize =
+        StylePosition()->BSize(GetWritingMode(), StyleDisplay()->mPosition);
+    return IsIntrinsicKeyword(*bSize);
   }
 
  protected:
@@ -3464,6 +3463,19 @@ class nsIFrame : public nsQueryFrame {
   bool IsHiddenByContentVisibilityOnAnyAncestor(
       const mozilla::EnumSet<IncludeContentVisibility>& =
           IncludeAllContentVisibility()) const;
+
+  /**
+   * @brief Returns true if the frame is hidden=until-found or in a closed
+   *        <details> element.
+   *
+   * The frame is considered hidden=until-found, if all parent frames are either
+   * visible or hidden=until-found. If a hidden=until-found element is inside a
+   * content-visibility:hidden element (or vice versa), this returns false.
+   *
+   * Similarly, if the frame is inside a closed details element, and it is not
+   * hidden, this also returns true.
+   */
+  bool IsHiddenUntilFoundOrClosedDetails() const;
 
   /**
    * Returns true is this frame is hidden by its first unskipped in flow
@@ -3694,6 +3706,13 @@ class nsIFrame : public nsQueryFrame {
    * Note that very few frames are, so default to false.
    */
   virtual bool IsFloatContainingBlock() const { return false; }
+
+  /**
+   * If this frame is absolute positioned, attempts to lookup and return the
+   * Archor Positioning anchor given by aAnchorSpec.
+   * https://drafts.csswg.org/css-anchor-position-1/#target
+   */
+  nsIFrame* FindAnchorPosAnchor(const nsAtom* aAnchorSpec) const;
 
   /**
    * Marks all display items created by this frame as needing a repaint,
@@ -4138,12 +4157,15 @@ class nsIFrame : public nsQueryFrame {
    * @param aDirection the direction to move in (eDirPrevious or eDirNext)
    * @param aOptions the other options which is same as
    * PeekOffsetStruct::mOptions.
+   * @param aAncestorLimiter if set, this refers only the frames for its
+   * descendants.
    * FIXME: Due to the include hell, we cannot use the alias, PeekOffsetOptions
    * is not available in this header file.
    */
   SelectablePeekReport GetFrameFromDirection(
       nsDirection aDirection,
-      const mozilla::EnumSet<mozilla::PeekOffsetOption>& aOptions);
+      const mozilla::EnumSet<mozilla::PeekOffsetOption>& aOptions,
+      const mozilla::dom::Element* aAncestorLimiter);
   SelectablePeekReport GetFrameFromDirection(
       const mozilla::PeekOffsetStruct& aPos);
 
@@ -4541,8 +4563,7 @@ class nsIFrame : public nsQueryFrame {
   void ReflowAbsoluteFrames(nsPresContext* aPresContext,
                             ReflowOutput& aDesiredSize,
                             const ReflowInput& aReflowInput,
-                            nsReflowStatus& aStatus,
-                            bool aConstrainBSize = true);
+                            nsReflowStatus& aStatus);
 
  private:
   nscoord ComputeISizeValueFromAspectRatio(
@@ -4678,6 +4699,13 @@ class nsIFrame : public nsQueryFrame {
   inline bool IsFlexOrGridContainer() const;
 
   /**
+   * Is this flex container emulating legacy display:-webkit-{inline-}box?
+   *
+   * @note only valid to call on nsFlexContainerFrames.
+   */
+  inline bool IsLegacyWebkitBox() const;
+
+  /**
    * Return true if this frame has masonry layout in aAxis.
    * @note only valid to call on nsGridContainerFrames
    */
@@ -4695,6 +4723,8 @@ class nsIFrame : public nsQueryFrame {
   inline bool IsAbsPosContainingBlock() const;
   inline bool IsFixedPosContainingBlock() const;
   inline bool IsRelativelyOrStickyPositioned() const;
+  // TODO: create implicit anchor and explicit anchor versions of this method:
+  inline bool HasAnchorPosName() const;
 
   // Note: In general, you'd want to call IsRelativelyOrStickyPositioned()
   // unless you want to deal with "position:relative" and "position:sticky"
@@ -5619,8 +5649,10 @@ class nsIFrame : public nsQueryFrame {
   /**
    * Dump the frame tree beginning from the root frame.
    */
-  void DumpFrameTree(bool aListOnlyDeterministic = false) const;
-  void DumpFrameTreeInCSSPixels(bool aListOnlyDeterministic = false) const;
+  void DumpFrameTree() const;
+  void DumpFrameTree(bool aListOnlyDeterministic) const;
+  void DumpFrameTreeInCSSPixels() const;
+  void DumpFrameTreeInCSSPixels(bool aListOnlyDeterministic) const;
 
   /**
    * Dump the frame tree beginning from ourselves.

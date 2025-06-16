@@ -10,6 +10,7 @@
 
 const path = require("path");
 const globals = require("globals");
+const { allFileExtensions, turnOff } = require("./helpers.js");
 
 const { name, version } = require(path.join(__dirname, "..", "package.json"));
 
@@ -90,6 +91,8 @@ const plugin = {
     "valid-services-property": require("./rules/valid-services-property"),
     "var-only-at-top-level": require("./rules/var-only-at-top-level"),
   },
+  allFileExtensions,
+  turnOff,
 };
 
 const configurations = [
@@ -114,6 +117,9 @@ const configurations = [
  */
 function cloneLegacySection(section) {
   let config = structuredClone(section);
+
+  // The legacy config doesn't support names, so get rid of those.
+  delete config.name;
 
   if (config.overrides) {
     for (let overridesSection of config.overrides) {
@@ -150,16 +156,27 @@ function cloneFlatSection(section) {
     "no-unsanitized": require("eslint-plugin-no-unsanitized"),
     "@microsoft/sdl": require("@microsoft/eslint-plugin-sdl"),
     promise: require("eslint-plugin-promise"),
+    jsdoc: require("eslint-plugin-jsdoc"),
   };
   if (!config.languageOptions) {
     config.languageOptions = {};
   }
 
+  if (config.globals) {
+    config.languageOptions.globals = { ...config.globals };
+    delete config.globals;
+  }
+
   // Handle changing the location of the sourceType.
   if (config.parserOptions?.sourceType) {
     config.languageOptions.sourceType = config.parserOptions.sourceType;
-    delete config.parserOptions;
   }
+  if (config.parserOptions?.ecmaFeatures) {
+    config.languageOptions.parserOptions = {
+      ecmaFeatures: config.parserOptions.ecmaFeatures,
+    };
+  }
+  delete config.parserOptions;
 
   // Convert any environments into a list of globals.
   for (let [key, value] of Object.entries(config.env ?? {})) {

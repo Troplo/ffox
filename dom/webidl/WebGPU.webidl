@@ -70,6 +70,9 @@ interface GPUAdapterInfo {
     readonly attribute DOMString architecture;
     readonly attribute DOMString device;
     readonly attribute DOMString description;
+    readonly attribute unsigned long subgroupMinSize;
+    readonly attribute unsigned long subgroupMaxSize;
+    readonly attribute boolean isFallbackAdapter;
 
     // Non-standard; see <https://bugzilla.mozilla.org/show_bug.cgi?id=1831994>.
     [ChromeOnly] readonly attribute DOMString wgpuName;
@@ -101,8 +104,10 @@ interface GPU {
 };
 
 dictionary GPURequestAdapterOptions {
+    DOMString featureLevel = "core";
     GPUPowerPreference powerPreference;
     boolean forceFallbackAdapter = false;
+    boolean xrCompatible = false;
 };
 
 enum GPUPowerPreference {
@@ -136,8 +141,10 @@ enum GPUFeatureName {
     "depth-clip-control",
     "depth32float-stencil8",
     "texture-compression-bc",
+    "texture-compression-bc-sliced-3d",
     "texture-compression-etc2",
     "texture-compression-astc",
+    "texture-compression-astc-sliced-3d",
     "timestamp-query",
     "indirect-first-instance",
     "shader-f16",
@@ -147,6 +154,10 @@ enum GPUFeatureName {
     "float32-blendable",
     "clip-distances",
     "dual-source-blending",
+    "subgroups",
+    // Not standard yet, but proposed with some roadmap already set aside for implementing it:
+    // <https://bugzilla.mozilla.org/show_bug.cgi?id=webgpu-compatibility-mode>
+    "core-features-and-limits",
 };
 
 [Func="mozilla::webgpu::Instance::PrefEnabled",
@@ -443,6 +454,12 @@ enum GPUTextureFormat {
 
 [Func="mozilla::webgpu::Instance::PrefEnabled",
  Exposed=(Window, Worker), SecureContext]
+interface GPUExternalTexture {
+};
+GPUExternalTexture includes GPUObjectBase;
+
+[Func="mozilla::webgpu::Instance::PrefEnabled",
+ Exposed=(Window, Worker), SecureContext]
 interface GPUSampler {
 };
 GPUSampler includes GPUObjectBase;
@@ -456,7 +473,7 @@ dictionary GPUSamplerDescriptor
     GPUFilterMode minFilter = "nearest";
     GPUMipmapFilterMode mipmapFilter = "nearest";
     float lodMinClamp = 0;
-    float lodMaxClamp = 1000.0; // TODO: What should this be?
+    float lodMaxClamp = 32;
     GPUCompareFunction compare;
     [Clamp] unsigned short maxAnisotropy = 1;
 };
@@ -644,6 +661,22 @@ interface GPUCompilationMessage {
 interface GPUCompilationInfo {
     [Cached, Frozen, Pure]
     readonly attribute sequence<GPUCompilationMessage> messages;
+};
+
+[Func="mozilla::webgpu::Instance::PrefEnabled",
+ Exposed=(Window, Worker), SecureContext]
+interface GPUPipelineError : DOMException {
+    constructor(optional DOMString message = "", GPUPipelineErrorInit options);
+    readonly attribute GPUPipelineErrorReason reason;
+};
+
+dictionary GPUPipelineErrorInit {
+    required GPUPipelineErrorReason reason;
+};
+
+enum GPUPipelineErrorReason {
+    "validation",
+    "internal",
 };
 
 enum GPUAutoLayoutMode {
@@ -924,6 +957,7 @@ dictionary GPUCopyExternalImageDestInfo
 };
 
 typedef (ImageBitmap or
+         HTMLImageElement or
          HTMLCanvasElement or
          OffscreenCanvas) GPUCopyExternalImageSource;
 
@@ -997,8 +1031,14 @@ dictionary GPUCommandEncoderDescriptor
 };
 
 interface mixin GPUBindingCommandsMixin {
+    [Throws]
     undefined setBindGroup(GPUIndex32 index, GPUBindGroup? bindGroup,
         optional sequence<GPUBufferDynamicOffset> dynamicOffsets = []);
+    [Throws]
+    undefined setBindGroup(GPUIndex32 index, GPUBindGroup? bindGroup,
+        Uint32Array dynamicOffsetsData,
+        GPUSize64 dynamicOffsetsDataStart,
+        GPUSize32 dynamicOffsetsDataLength);
 };
 
 interface mixin GPUDebugCommandsMixin {
@@ -1073,6 +1113,7 @@ dictionary GPURenderPassDescriptor
 
 dictionary GPURenderPassColorAttachment {
     required GPUTextureView view;
+    GPUIntegerCoordinate depthSlice;
     GPUTextureView resolveTarget;
 
     GPUColor clearValue;
@@ -1114,8 +1155,8 @@ dictionary GPURenderPassLayout
 interface mixin GPURenderCommandsMixin {
     undefined setPipeline(GPURenderPipeline pipeline);
 
-    undefined setIndexBuffer(GPUBuffer buffer, GPUIndexFormat indexFormat, optional GPUSize64 offset = 0, optional GPUSize64 size = 0);
-    undefined setVertexBuffer(GPUIndex32 slot, GPUBuffer buffer, optional GPUSize64 offset = 0, optional GPUSize64 size = 0);
+    undefined setIndexBuffer(GPUBuffer buffer, GPUIndexFormat indexFormat, optional GPUSize64 offset = 0, optional GPUSize64 size);
+    undefined setVertexBuffer(GPUIndex32 slot, GPUBuffer buffer, optional GPUSize64 offset = 0, optional GPUSize64 size);
 
     undefined draw(GPUSize32 vertexCount, optional GPUSize32 instanceCount = 1,
         optional GPUSize32 firstVertex = 0, optional GPUSize32 firstInstance = 0);
@@ -1124,9 +1165,7 @@ interface mixin GPURenderCommandsMixin {
         optional GPUSignedOffset32 baseVertex = 0,
         optional GPUSize32 firstInstance = 0);
 
-    [Pref="dom.webgpu.indirect-draw.enabled"]
     undefined drawIndirect(GPUBuffer indirectBuffer, GPUSize64 indirectOffset);
-    [Pref="dom.webgpu.indirect-draw.enabled"]
     undefined drawIndexedIndirect(GPUBuffer indirectBuffer, GPUSize64 indirectOffset);
 };
 
@@ -1161,10 +1200,6 @@ dictionary GPUQueueDescriptor
          : GPUObjectDescriptorBase {
 };
 
-//TODO: use [AllowShared] on BufferSource
-// https://bugzilla.mozilla.org/show_bug.cgi?id=1696216
-// https://github.com/heycam/webidl/issues/961
-
 [Func="mozilla::webgpu::Instance::PrefEnabled",
  Exposed=(Window, Worker), SecureContext]
 interface GPUQueue {
@@ -1177,14 +1212,14 @@ interface GPUQueue {
     undefined writeBuffer(
         GPUBuffer buffer,
         GPUSize64 bufferOffset,
-        BufferSource data,
+        AllowSharedBufferSource data,
         optional GPUSize64 dataOffset = 0,
         optional GPUSize64 size);
 
     [Throws]
     undefined writeTexture(
         GPUTexelCopyTextureInfo destination,
-        BufferSource data,
+        AllowSharedBufferSource data,
         GPUTexelCopyBufferLayout dataLayout,
         GPUExtent3D size);
 
@@ -1222,9 +1257,11 @@ enum GPUQueryType {
 interface GPUCanvasContext {
     readonly attribute (HTMLCanvasElement or OffscreenCanvas) canvas;
 
+    [Throws]
     undefined configure(GPUCanvasConfiguration configuration);
     undefined unconfigure();
 
+    GPUCanvasConfiguration? getConfiguration();
     [Throws]
     GPUTexture getCurrentTexture();
 };
@@ -1239,7 +1276,8 @@ dictionary GPUCanvasConfiguration {
     required GPUTextureFormat format;
     GPUTextureUsageFlags usage = 0x10;  // GPUTextureUsage.RENDER_ATTACHMENT
     sequence<GPUTextureFormat> viewFormats = [];
-    //GPUPredefinedColorSpace colorSpace = "srgb"; //TODO
+    //GPUPredefinedColorSpace colorSpace = "srgb"; //TODO bug 1834395
+    //GPUCanvasToneMapping toneMapping = {}; //TODO bug 1834395
     GPUCanvasAlphaMode alphaMode = "opaque";
 };
 

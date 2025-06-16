@@ -1,6 +1,7 @@
 /* Copyright (c) 2002-2008 Jean-Marc Valin
    Copyright (c) 2007-2008 CSIRO
    Copyright (c) 2007-2009 Xiph.Org Foundation
+   Copyright (c) 2024 Arm Limited
    Written by Jean-Marc Valin */
 /**
    @file mathops.h
@@ -35,6 +36,7 @@
 #include "config.h"
 #endif
 
+#include "float_cast.h"
 #include "mathops.h"
 
 /*Compute floor(sqrt(_val)) with exact arithmetic.
@@ -215,3 +217,36 @@ opus_val32 celt_rcp(opus_val32 x)
 }
 
 #endif
+
+#ifndef DISABLE_FLOAT_API
+
+void celt_float2int16_c(const float * OPUS_RESTRICT in, short * OPUS_RESTRICT out, int cnt)
+{
+   int i;
+   for (i = 0; i < cnt; i++)
+   {
+      out[i] = FLOAT2INT16(in[i]);
+   }
+}
+
+int opus_limit2_checkwithin1_c(float * samples, int cnt)
+{
+   int i;
+   if (cnt <= 0)
+   {
+      return 1;
+   }
+
+   for (i = 0; i < cnt; i++)
+   {
+      float clippedVal = samples[i];
+      clippedVal = FMAX(-2.0f, clippedVal);
+      clippedVal = FMIN(2.0f, clippedVal);
+      samples[i] = clippedVal;
+   }
+
+   /* C implementation can't provide quick hint. Assume it might exceed -1/+1. */
+   return 0;
+}
+
+#endif /* DISABLE_FLOAT_API */

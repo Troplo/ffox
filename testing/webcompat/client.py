@@ -74,6 +74,52 @@ class Client:
             element,
         )
 
+    async def send_apz_scroll_gesture(
+        self, units, element=None, offset=None, coords=None
+    ):
+        if coords is None:
+            if element is None:
+                raise ValueError("require coords and/or element")
+            coords = self.get_element_screen_position(element)
+        if offset is not None:
+            coords[0] += offset[0]
+            coords[1] += offset[1]
+        with self.using_context("chrome"):
+            return self.execute_async_script(
+                """
+                const [units, coords, done] = arguments;
+                const { devicePixelRatio, windowUtils } = window;
+                const resolution = windowUtils.getResolution();
+                const toScreenCoords = x => x * devicePixelRatio * resolution;
+
+                // based on nativeVerticalWheelEventMsg()
+                let msg = 4; // linux default
+                switch (Services.appinfo.OS) {
+                  case "WINNT":
+                    msg = 0x0115; // WM_VSCROLL
+                    break;
+                  case "Darwin":
+                    msg = 1; // use a gesture; don't synthesize a wheel scroll
+                    break;
+                }
+
+                windowUtils.sendNativeMouseScrollEvent(
+                    toScreenCoords(coords[0]),
+                    toScreenCoords(coords[1]),
+                    msg,
+                    0,
+                    units,
+                    0,
+                    0,
+                    0,
+                    document.documentElement,
+                    () => { done(); },
+                );
+            """,
+                units,
+                coords,
+            )
+
     async def send_apz_mouse_event(
         self, event_type, coords=None, element=None, button=0
     ):
@@ -203,7 +249,7 @@ class Client:
             return "\ue009"  # control
 
     def inline(self, doc):
-        return "data:text/html;charset=utf-8,{}".format(quote(doc))
+        return f"data:text/html;charset=utf-8,{quote(doc)}"
 
     async def top_context(self):
         contexts = await self.session.bidi_session.browsing_context.get_tree()
@@ -221,7 +267,7 @@ class Client:
             else:
                 self.subscriptions[event] += 1
 
-        if len(must_sub):
+        if must_sub:
             await self.session.bidi_session.session.subscribe(events=must_sub)
 
     async def unsubscribe(self, events):
@@ -234,7 +280,7 @@ class Client:
             if not self.subscriptions[event]:
                 must_unsub.append(event)
 
-        if len(must_unsub):
+        if must_unsub:
             try:
                 await self.session.bidi_session.session.unsubscribe(events=must_unsub)
             except (InvalidArgumentException, NoSuchFrameException):
@@ -339,37 +385,36 @@ class Client:
     def await_script(self, script, *args, **kwargs):
         return self.run_script(script, *args, **kwargs, await_promise=True)
 
-    def await_interventions_started(self):
-        with self.using_context("chrome"):
-            interventionsOn = self.request.node.get_closest_marker("with_interventions")
-            shimsOn = self.request.node.get_closest_marker("with_shims")
+    async def await_interventions_started(self):
+        interventionsOn = self.request.node.get_closest_marker("with_interventions")
+        shimsOn = self.request.node.get_closest_marker("with_shims")
 
-            if not interventionsOn and not shimsOn:
-                print("Not waiting for interventions/shims")
-                return
+        if not interventionsOn and not shimsOn:
+            print("Not waiting for interventions/shims")
+            return
 
-            expectedMsg = (
-                "WebCompatTests:InterventionsStatus"
-                if interventionsOn
-                else "WebCompatTests:ShimsStatus"
-            )
+        waitFor = "interventions" if interventionsOn else "shims"
 
-            print("Waiting for", expectedMsg, 'to be "active"')
-            self.execute_async_script(
-                """
-                const [expectedMsg, done] = arguments;
-                const timer = setInterval(() => {
-                  if (Services.ppmm.sharedData.get(expectedMsg) === "active") {
-                    clearInterval(timer);
-                    done();
-                  }
-                }, 100);
-            """,
-                expectedMsg,
-            )
+        print("Waiting for", waitFor, "to be ready")
+        context = await self.session.bidi_session.browsing_context.create(
+            type_hint="tab", background=True
+        )
+        await self.session.bidi_session.browsing_context.navigate(
+            context=context["context"],
+            url="about:compat",
+            wait="interactive",
+        )
+        await self.session.bidi_session.script.evaluate(
+            expression=f"window.browser.extension.getBackgroundPage().{waitFor}.ready()",
+            target=ContextTarget(context["context"]),
+            await_promise=True,
+        )
+        await self.session.bidi_session.browsing_context.close(
+            context=context["context"]
+        )
 
     async def navigate(self, url, timeout=90, no_skip=False, **kwargs):
-        self.await_interventions_started()
+        await self.await_interventions_started()
         try:
             return await asyncio.wait_for(
                 asyncio.ensure_future(self._navigate(url, **kwargs)), timeout=timeout
@@ -379,8 +424,7 @@ class Client:
                 raise t
                 return
             pytest.skip(
-                "%s: Timed out navigating to site after %s seconds. Please try again later."
-                % (self.request.fspath.basename, timeout)
+                f"{self.request.fspath.basename}: Timed out navigating to site after {timeout} seconds. Please try again later."
             )
         except webdriver.bidi.error.UnknownErrorException as e:
             if no_skip:
@@ -389,14 +433,17 @@ class Client:
             s = str(e)
             if "Address rejected" in s:
                 pytest.skip(
-                    "%s: Site not responding. Please try again later."
-                    % self.request.fspath.basename
+                    f"{self.request.fspath.basename}: Site not responding. Please try again later."
+                )
+                return
+            elif "NS_ERROR_UNKNOWN_HOST" in s:
+                pytest.skip(
+                    f"{self.request.fspath.basename}: Site appears to be down. Please try again later."
                 )
                 return
             elif "NS_ERROR_REDIRECT_LOOP" in s:
                 pytest.skip(
-                    "%s: Site is stuck in a redirect loop. Please try again later."
-                    % self.request.fspath.basename
+                    f"{self.request.fspath.basename}: Site is stuck in a redirect loop. Please try again later."
                 )
                 return
             raise e
@@ -871,15 +918,15 @@ class Client:
 
     def clear_all_cookies(self):
         self.session.transport.send(
-            "DELETE", "session/%s/cookie" % self.session.session_id
+            "DELETE", f"session/{self.session.session_id}/cookie"
         )
 
     def send_element_command(self, element, method, uri, body=None):
-        url = "element/%s/%s" % (element.id, uri)
+        url = f"element/{element.id}/{uri}"
         return self.session.send_session_command(method, url, body)
 
     def get_element_attribute(self, element, name):
-        return self.send_element_command(element, "GET", "attribute/%s" % name)
+        return self.send_element_command(element, "GET", f"attribute/{name}")
 
     def _do_is_displayed_check(self, ele, is_displayed):
         if ele is None:
@@ -978,6 +1025,8 @@ class Client:
                     if len(result):
                         if condition:
                             result = self.session.execute_script(condition, [result])
+                            if not len(result):
+                                continue
                         found[i] = result[0] if not all else result
                         return found
                 except webdriver.error.NoSuchElementException as e:
@@ -1063,7 +1112,7 @@ class Client:
         left_to_try = list(popup_close_button_finders)
         closed_one = False
         num_intercepted = 0
-        while len(left_to_try):
+        while left_to_try:
             finder = left_to_try.pop(0)
             try:
                 if self.try_closing_popup(finder, timeout=timeout):
@@ -1178,46 +1227,11 @@ class Client:
         yield
         fastclick_preload_script.stop()
 
-    async def test_nicochannel_like_site(self, url, shouldPass=True):
-        CONSENT = self.css(".MuiDialog-container button.MuiButton-containedPrimary")
-        BLOCKED = self.text("このブラウザはサポートされていません。")
-        PLAY = self.css(".nfcp-overlay-play-lg")
+    async def ensure_InstallTrigger_defined(self):
+        return await self.make_preload_script("window.InstallTrigger = function() {}")
 
-        await self.navigate(url)
-
-        while True:
-            consent, blocked, play = self.await_first_element_of(
-                [
-                    CONSENT,
-                    BLOCKED,
-                    PLAY,
-                ],
-                is_displayed=True,
-                timeout=30,
-            )
-            if not consent:
-                break
-            consent.click()
-            self.await_element_hidden(CONSENT)
-            continue
-        if shouldPass:
-            assert play
-        else:
-            assert blocked
-
-    async def test_entrata_banner_hidden(self, url, iframe_css=None):
-        # some sites take a while to load, but they always have the browser
-        # warning popup, it just isn't shown until the page finishes loading.
-        await self.navigate(url, wait="none")
-        if iframe_css:
-            frame = self.await_css(iframe_css)
-            self.switch_frame(frame)
-        self.await_css("#browser-warning-popup", timeout=120)
-        try:
-            self.await_css("#browser-warning-popup", is_displayed=True, timeout=2)
-            return False
-        except webdriver.error.NoSuchElementException:
-            return True
+    async def ensure_InstallTrigger_undefined(self):
+        return await self.make_preload_script("delete InstallTrigger")
 
     def test_future_plc_trending_scrollbar(self, shouldFail=False):
         trending_list = self.await_css(".trending__list")
@@ -1327,16 +1341,19 @@ class Client:
         if element is None:
             return False
 
-        return self.session.execute_script(
-            """
-              const e = arguments[0],
-                    s = window.getComputedStyle(e),
-                    v = s.visibility === "visible",
-                    o = Math.abs(parseFloat(s.opacity));
-              return e.getClientRects().length > 0 && v && (isNaN(o) || o === 1.0);
-          """,
-            args=[element],
-        )
+        try:
+            return self.session.execute_script(
+                """
+                  const e = arguments[0],
+                  s = window.getComputedStyle(e),
+                  v = s.visibility === "visible",
+                  o = Math.abs(parseFloat(s.opacity));
+                  return e.getClientRects().length > 0 && v && (isNaN(o) || o === 1.0);
+              """,
+                args=[element],
+            )
+        except webdriver.error.StaleElementReferenceException:
+            return False
 
     def is_one_solid_color(self, element, max_fuzz=8):
         # max_fuzz is needed as screenshots can have slight color bleeding/fringing

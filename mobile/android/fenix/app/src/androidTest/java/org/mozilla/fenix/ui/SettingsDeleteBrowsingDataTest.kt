@@ -6,9 +6,11 @@ package org.mozilla.fenix.ui
 
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.test.filters.SdkSuppress
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.R
+import org.mozilla.fenix.customannotations.SkipLeaks
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.AppAndSystemHelper.setNetworkEnabled
 import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
@@ -20,6 +22,7 @@ import org.mozilla.fenix.helpers.TestHelper.exitMenu
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.restartApp
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.browserScreen
 import org.mozilla.fenix.ui.robots.clickPageObject
 import org.mozilla.fenix.ui.robots.homeScreen
@@ -39,6 +42,9 @@ class SettingsDeleteBrowsingDataTest : TestSetup() {
                 skipOnboarding = true,
             ),
         ) { it.activity }
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/937561
     @Test
@@ -184,6 +190,7 @@ class SettingsDeleteBrowsingDataTest : TestSetup() {
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/416041
     @SmokeTest
     @Test
+    @SkipLeaks
     fun deleteCookiesAndSiteDataTest() {
         val genericPage = TestAssetHelper.getGenericAsset(mockWebServer, 1)
         val storageWritePage = getStorageTestAsset(mockWebServer, "storage_write.html").url
@@ -225,6 +232,7 @@ class SettingsDeleteBrowsingDataTest : TestSetup() {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/416042
+    @Ignore("Failing, see https://bugzilla.mozilla.org/show_bug.cgi?id=1964989")
     @SdkSuppress(minSdkVersion = 34)
     @SmokeTest
     @Test
@@ -232,8 +240,8 @@ class SettingsDeleteBrowsingDataTest : TestSetup() {
         val pocketTopArticles = getStringResource(R.string.pocket_pinned_top_articles)
 
         homeScreen {
-            verifyExistingTopSitesTabs(pocketTopArticles)
-        }.openTopSiteTabWithTitle(pocketTopArticles) {
+            verifyExistingTopSitesTabs(composeTestRule, pocketTopArticles)
+        }.openTopSiteTabWithTitle(composeTestRule, pocketTopArticles) {
             verifyPocketPageContent()
         }.openTabDrawer(composeTestRule) {
         }.openNewTab {

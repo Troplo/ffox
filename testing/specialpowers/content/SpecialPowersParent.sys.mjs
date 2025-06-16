@@ -194,10 +194,21 @@ export class SpecialPowersParent extends JSWindowActorParent {
         esModuleURI: "resource://testing-common/SpecialPowersParent.sys.mjs",
       },
     });
+    ChromeUtils.registerProcessActor("SpecialPowersProcessActor", {
+      child: {
+        esModuleURI:
+          "resource://testing-common/SpecialPowersProcessActor.sys.mjs",
+      },
+      parent: {
+        esModuleURI:
+          "resource://testing-common/SpecialPowersProcessActor.sys.mjs",
+      },
+    });
   }
 
   static unregisterActor() {
     ChromeUtils.unregisterWindowActor("SpecialPowers");
+    ChromeUtils.unregisterProcessActor("SpecialPowersProcessActor");
   }
 
   init() {
@@ -809,6 +820,8 @@ export class SpecialPowersParent extends JSWindowActorParent {
       { imports }
     );
 
+    // If more variables are made available, don't forget to update
+    // tools/lint/eslint/eslint-plugin-mozilla/lib/rules/import-content-task-globals.js.
     for (let [global, prop] of Object.entries({
       windowGlobalParent: "manager",
       browsingContext: "browsingContext",
@@ -1259,6 +1272,9 @@ export class SpecialPowersParent extends JSWindowActorParent {
           extension.on("test-eq", resultListener);
           extension.on("test-log", resultListener);
           extension.on("test-done", resultListener);
+          // Web Platform Test subtest started and finished events.
+          extension.on("test-task-start", resultListener);
+          extension.on("test-task-done", resultListener);
 
           extension.on("test-message", messageListener);
 

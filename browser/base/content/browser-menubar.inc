@@ -205,6 +205,7 @@
                          placespopup="true"
                          is="places-popup"
 #endif
+                         needsgutter="always"
                          tooltip="bhTooltip"
                          popupsinherittooltip="true">
                 <menuitem id="menu_showAllHistory"
@@ -263,6 +264,7 @@
                placespopup="true"
                is="places-popup"
 #endif
+               needsgutter="always"
                context="placesContext"
                openInTabs="children"
                tooltip="bhTooltip" popupsinherittooltip="true">
@@ -335,7 +337,7 @@
                         command="Tools:Downloads" data-l10n-id="menu-tools-downloads"/>
               <menuitem id="menu_openAddons"
                         key="key_openAddons"
-                        command="Tools:Addons" data-l10n-id="menu-tools-addons-and-themes"/>
+                        command="Tools:Addons" data-l10n-id="menu-tools-extensions-and-themes"/>
 
               <!-- only one of sync-setup, sync-enable, sync-unverifieditem, sync-syncnowitem or sync-reauthitem will be showing at once -->
               <menuitem id="sync-setup"
@@ -426,8 +428,8 @@
                 <menuitem id="help_reportBrokenSite"
                           command="cmd_reportBrokenSite"
                           data-l10n-id="menu-report-broken-site"
-                          hidden="true"
-                          appmenu-data-l10n-id="menu-report-broken-site"/>
+                          disabled="true"
+                          appmenu-data-l10n-id="appmenuitem-report-broken-site"/>
                 <menuitem id="feedbackPage"
                           data-l10n-id="menu-help-share-ideas"
                           appmenu-data-l10n-id="appmenu-help-share-ideas"/>
@@ -437,10 +439,6 @@
                 <menuitem id="troubleShooting"
                           data-l10n-id="menu-help-more-troubleshooting-info"
                           appmenu-data-l10n-id="appmenu-help-more-troubleshooting-info"/>
-                <menuitem id="help_reportSiteIssue"
-                          data-l10n-id="menu-help-report-site-issue"
-                          appmenu-data-l10n-id="appmenu-help-report-site-issue"
-                          hidden="true"/>
                 <menuitem id="menu_HelpPopup_reportPhishingtoolmenu"
                           disabled="true"
                           hidden="true"

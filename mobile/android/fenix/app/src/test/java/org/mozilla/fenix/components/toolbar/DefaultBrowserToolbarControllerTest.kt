@@ -46,7 +46,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.fenix.GleanMetrics.Events
-import org.mozilla.fenix.GleanMetrics.NavigationBar
 import org.mozilla.fenix.GleanMetrics.ReaderMode
 import org.mozilla.fenix.GleanMetrics.Translations
 import org.mozilla.fenix.HomeActivity
@@ -60,12 +59,13 @@ import org.mozilla.fenix.browser.readermode.ReaderModeController
 import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.AppAction.SnackbarAction
 import org.mozilla.fenix.components.menu.MenuAccessPoint
+import org.mozilla.fenix.components.usecases.FenixBrowserUseCases
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.directionsEq
 import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.helpers.FenixRobolectricTestRunner
-import org.mozilla.fenix.home.HomeFragment
 import org.mozilla.fenix.home.HomeScreenViewModel
+import org.mozilla.fenix.home.HomeScreenViewModel.Companion.ALL_PRIVATE_TABS
 import org.mozilla.fenix.utils.Settings
 
 @RunWith(FenixRobolectricTestRunner::class)
@@ -90,6 +90,9 @@ class DefaultBrowserToolbarControllerTest {
 
     @RelaxedMockK
     private lateinit var tabsUseCases: TabsUseCases
+
+    @RelaxedMockK
+    private lateinit var fenixBrowserUseCases: FenixBrowserUseCases
 
     @RelaxedMockK
     private lateinit var browserAnimator: BrowserAnimator
@@ -391,7 +394,7 @@ class DefaultBrowserToolbarControllerTest {
         controller.handleEraseButtonClick()
 
         verify {
-            homeViewModel.sessionToDelete = HomeFragment.ALL_PRIVATE_TABS
+            homeViewModel.sessionToDelete = ALL_PRIVATE_TABS
             navController.navigate(BrowserFragmentDirections.actionGlobalHome())
         }
         assertNotNull(Events.browserToolbarEraseTapped.testGetValue())
@@ -415,8 +418,7 @@ class DefaultBrowserToolbarControllerTest {
     }
 
     @Test
-    fun `WHEN new tab button is clicked and navigation bar is enabled THEN navigate to homepage`() {
-        every { activity.settings().navigationToolbarEnabled } returns true
+    fun `WHEN new tab button is clicked THEN navigate to homepage`() {
         val controller = createController()
         controller.handleNewTabButtonClick()
 
@@ -426,10 +428,12 @@ class DefaultBrowserToolbarControllerTest {
             )
         }
 
-        assertNotNull(NavigationBar.browserNewTabTapped.testGetValue())
-        val recordedEvents = NavigationBar.browserNewTabTapped.testGetValue()!!
+        assertNotNull(Events.browserToolbarAction.testGetValue())
+        val recordedEvents = Events.browserToolbarAction.testGetValue()!!
+        val eventExtra = recordedEvents.single().extra
         assertEquals(1, recordedEvents.size)
-        assertEquals(null, recordedEvents.single().extra)
+        assertNotNull(eventExtra)
+        assertEquals(eventExtra?.get("item"), "new_tab")
     }
 
     @Test
@@ -440,9 +444,7 @@ class DefaultBrowserToolbarControllerTest {
         controller.handleNewTabButtonClick()
 
         verify {
-            tabsUseCases.addTab.invoke(
-                url = "about:home",
-                startLoading = false,
+            fenixBrowserUseCases.addNewHomepageTab(
                 private = false,
             )
 
@@ -453,15 +455,16 @@ class DefaultBrowserToolbarControllerTest {
     }
 
     @Test
-    fun `WHEN new tab button is long clicked and navigation toolbar enabled THEN record the navigation bar telemetry event`() {
-        every { activity.settings().navigationToolbarEnabled } returns true
+    fun `WHEN new tab button is long clicked THEN record the navigation bar telemetry event`() {
         val controller = createController()
         controller.handleNewTabButtonLongClick()
 
-        assertNotNull(NavigationBar.browserNewTabLongTapped.testGetValue())
-        val recordedEvents = NavigationBar.browserNewTabLongTapped.testGetValue()!!
+        assertNotNull(Events.browserToolbarAction.testGetValue())
+        val recordedEvents = Events.browserToolbarAction.testGetValue()!!
+        val eventExtra = recordedEvents.single().extra
         assertEquals(1, recordedEvents.size)
-        assertEquals(null, recordedEvents.single().extra)
+        assertNotNull(eventExtra)
+        assertEquals(eventExtra?.get("item"), "new_tab_long_press")
     }
 
     @Test
@@ -561,6 +564,7 @@ class DefaultBrowserToolbarControllerTest {
         store = store,
         appStore = appStore,
         tabsUseCases = tabsUseCases,
+        fenixBrowserUseCases = fenixBrowserUseCases,
         activity = activity,
         settings = settings,
         navController = navController,

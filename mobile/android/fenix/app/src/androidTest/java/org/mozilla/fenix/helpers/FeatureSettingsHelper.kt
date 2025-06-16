@@ -24,12 +24,6 @@ interface FeatureSettingsHelper {
     var isPocketEnabled: Boolean
 
     /**
-     * Whether the "Navigation bar" CFR should be shown or not.
-     * It should appear on the first visit to homescreen given that there is a navigation bar.
-     */
-    var isNavigationBarCFREnabled: Boolean
-
-    /**
      * Whether the onboarding dialog for choosing wallpapers should be shown or not.
      */
     var isWallpaperOnboardingEnabled: Boolean
@@ -69,19 +63,9 @@ interface FeatureSettingsHelper {
     var isOpenInAppBannerEnabled: Boolean
 
     /**
-     * Enable or disable the Top Sites to Compose rewrite.
-     */
-    var composeTopSitesEnabled: Boolean
-
-    /**
      * Enable or disable all location permission requests.
      */
     var isLocationPermissionEnabled: SitePermissionsRules.Action
-
-    /**
-     * Enable or disable the new navigation toolbar.
-     */
-    var isNavigationToolbarEnabled: Boolean
 
     /**
      * Enable or disable the new main menu.
@@ -94,24 +78,24 @@ interface FeatureSettingsHelper {
     var isMenuRedesignCFREnabled: Boolean
 
     /**
-     * Enable or disable the new bookmarks UI.
-     */
-    var isNewBookmarksEnabled: Boolean
-
-    /**
      * Enable or disable the new microsurvey feature.
      */
     var isMicrosurveyEnabled: Boolean
 
     /**
-     * Enable or disable the "Set as default browser" dialog.
-     */
-    var isSetAsDefaultBrowserPromptEnabled: Boolean
-
-    /**
      * Enable or disable bottom toolbar position.
      */
     var shouldUseBottomToolbar: Boolean
+
+    /**
+     * Enable or disable the onboarding feature.
+     */
+    var onboardingFeatureEnabled: Boolean
+
+    /**
+     * Enable or disable the compose home screen feature.
+     */
+    var isComposeHomepageEnabled: Boolean
 
     /**
      * Enable or disable the translations prompt after a page that can be translated is loaded.

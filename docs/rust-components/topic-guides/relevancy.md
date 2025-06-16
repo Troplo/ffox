@@ -1,8 +1,3 @@
----
-myst:
-  enable_extensions: ["colon_fence"]
----
-
 # Relevancy
 
 The `relevancy` component tracks the user's interests locally, without sharing any data over the network. The component currently supports building an interest vector based on the URLs they visit.
@@ -41,7 +36,7 @@ let store = RelevancyStore(dbPath: "path/to/database")
 
 ```js
 ChromeUtils.defineESModuleGetters(lazy, {
-  RelevancyStore: "resource://gre/modules/RustSuggest.sys.mjs",
+  RelevancyStore: "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
 });
 
 const store = RelevancyStore.init(dbPath);

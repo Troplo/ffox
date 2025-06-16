@@ -55,7 +55,7 @@
   <string name="menu_settings">ቅንብሮች</string>
   <string name="menu_about">ስለ</string>
   <string name="menu_help">እገዛ</string>
-  <string name="menu_rights" moz:removedIn="137">የእርስዎ መብቶች</string>
+  <string name="menu_terms_of_use">የአጠቃቀም ውል</string>
   <!--
     Menu item: This is the label for a menu entry that shows how many trackers have been blocked
     for the currently loaded website. The number of blocked trackers is shown below this label.
@@ -329,12 +329,18 @@
   <string name="preference_mozilla_telemetry_summary">ተጨማሪ ይወቁ</string>
   <!-- %1$s will be replaced with the name of the app (e.g. Firefox Focus) -->
   <string name="preference_mozilla_telemetry_summary2">ሞዚላ %1$s ለሁሉም ለማቅረብ እና ለማሻሻል የሚያስፈልገንን ብቻ ለመሰብሰብ ይጥራል</string>
+  <!-- Preference switch for daily usage ping data collection -->
+  <string name="preference_daily_usage_ping_title">ዕለታዊ አጠቃቀም ማሳወቂያ</string>
+  <string name="preference_daily_usage_ping_description">ይህ Mozilla ንቁ ተጠቃሚዎችን ለመገመት ይረዳል።</string>
+  <string name="preference_daily_usage_ping_learn_more">ተጨማሪ ይወቁ</string>
   <!-- In-app link (in settings) to Focus privacy notice. -->
   <string name="preference_privacy_notice">የግላዊነት ማሳወቂያ</string>
   <!-- In-app link (in settings) to Focus licensing information. -->
   <string name="preference_licensing_info">የፈቃድ መረጃ</string>
   <!-- Link to Focus licensing information from other libraries that we use. -->
   <string name="preference_libraries_we_use">የምንጠቀማቸው ጥቅሎች</string>
+  <!-- Link to Focus Crash reports list. -->
+  <string name="preference_crashes">ብልሽቶች</string>
   <!-- Open Source Licenses page title. %s is the name of the app (for example "Firefox Focus" or "Firefox Klar"). -->
   <string name="open_source_licenses_title">%s | ክፍት ምንጭ ሶፍትዌር (OSS) ጥቅሎች</string>
   <!-- Item in Preferences that shows the about page. %1$s is the name of the app (for example "Firefox Focus" or "Firefox Klar"). -->
@@ -460,8 +466,30 @@
   <string name="onboarding_first_screen_title">እንኳን ወደ %1$s በደህና መጡ</string>
   <!-- New Onboarding flow first screen subtitle the one that appears under title -->
   <string name="onboarding_first_screen_subtitle">ፈጣን። የግል። ትኩረትን የሚከፋፍሉ ነገሮች የሌለው።</string>
+  <!--
+    New Onboarding flow first screen 'terms of use' text
+
+    %1$s will be replaced by a link using onboarding_first_screen_terms_of_use_link as text
+  -->
+  <string name="onboarding_first_screen_terms_of_use_text" tools:ignore="UnusedResources">በመቀጠል፣ በ%1$s ተስማምተዋል</string>
+  <!--
+    New Onboarding flow first screen 'terms of use link'
+
+    Text for the link used in onboarding_first_screen_terms_of_use_text
+  -->
+  <string name="onboarding_first_screen_terms_of_use_link" tools:ignore="BrandUsage">የFirefox የአጠቃቀም ውል።</string>
+  <!--
+    New Onboarding flow first screen 'privacy notice' text
+
+    %1$s will be replaced by a link using onboarding_first_screen_privacy_notice_link as text
+  -->
+  <string name="onboarding_first_screen_privacy_notice_text" tools:ignore="BrandUsage">Firefox የእርስዎን ግላዊነት ያስባል። በእኛ %1$s ውስጥ የበለጠ ይወቁ</string>
+  <!-- Text for the link used in onboarding_first_screen_privacy_notice_text -->
+  <string name="onboarding_first_screen_privacy_notice_link">የግላዊነት ማስታወቂያ።</string>
   <!-- New Onboarding flow first screen button label -->
-  <string name="onboarding_first_screen_button_text" moz:removedIn="137" tools:ignore="UnusedResources">ይጀምሩ </string>
+  <string name="onboarding_first_screen_button_agree_and_continue" moz:removedIn="140" tools:ignore="UnusedResources">እስማማለሁ እና ቀጥል</string>
+  <!-- In the first screen of new onboarding flow, additional accessibility description for content that contain urls. -->
+  <string name="a11y_link_available">ማገናኛ ይገኛል</string>
   <!--
     Onboarding second screen: Title
 
@@ -539,36 +567,6 @@
     item in the list of browsers. Clicking it will open the app store installed on the device (usually that's Google Play).
   -->
   <string name="download_firefox" tools:ignore="BrandUsage">ፋየርፎክስ አውርድ</string>
-  <!--
-    Text shown in the "Your rights" screen.
-    %1$s will be replaced with the name of the app (e.g. Firefox Focus)
-  -->
-  <string name="your_rights_content1" moz:removedIn="137">%1$s ሞዚላ እና ሌሎች አስተዋፅዖ አድራጊዎች የተሰሩ ነጻ እና ግልጽ ምንጭ ሶፍትዌሮች ናቸው</string>
-  <!--
-    Text shown in the "Your rights" screen.
-    %1$s will be replaced with the name of the app (e.g. Firefox Focus)
-    %2$s will be replaced with a URL linking to the MPL (e.g. https://www.mozilla.org/en-US/MPL/)
-  -->
-  <string name="your_rights_content2" moz:removedIn="137" tools:ignore="IncorrectStraightDoubleQuote">%1$s ለእርስዎ የቀረበው በ&lt;a href="%2$s"&gt;ሞዚላ የሕዝብ ፈቃድ&lt;/a&gt; እና ሌሎች የክፍት ምንጭ ፈቃዶች ውል መሠረት ነው።</string>
-  <!--
-    Text shown in the "Your rights" screen.
-    %1$s will be replaced with the name of the app (e.g. Firefox Focus)
-    %2$s will be replaced with a URL linking to the trademark policy (e.g. https://www.mozilla.org/foundation/trademarks/policy/)
-  -->
-  <string name="your_rights_content3" moz:removedIn="137" tools:ignore="BrandUsage,IncorrectStraightDoubleQuote">የሞዚላ፣ ፋየርፎክስ ወይም %1$s ስሞችን ወይም ዓርማዎችን ጨምሮ የሞዚላ ፋውንዴሽን ወይም የማንኛውም አካል የንግድ ምልክቶች ምንም ዓይነት መብት ወይም ፍቃድ አልተሰጠዎትም። ተጨማሪ መረጃ &lt;a href="%2$s"&gt;እዚህ&lt;/a&gt; ሊገኝ ይችላል።</string>
-  <!--
-    Text shown in the "Your rights" screen.
-    %1$s will be replaced with the name of the app (e.g. Firefox Focus)
-    %2$s will be replaced with a URL linking to the list of licenses used by the dependencies.
-  -->
-  <string name="your_rights_content4" moz:removedIn="137" tools:ignore="IncorrectStraightDoubleQuote">የ%1$s ተጨማሪ ምንጭ ኮድ በተለያዩ ነፃ እና ክፍት ምንጭ &lt;a href="%2$s"&gt;ፈቃዶች&lt;/a&gt; ስር ይገኛል።</string>
-  <!--
-    Text shown in the "Your rights" screen.
-    %1$s will be replaced with the name of the app (e.g. Firefox Focus)
-    %2$s will be replaced with a URL linking to the GPL
-    %3$s will be replaced with a URL linking to the tracking protection wiki page (e.g. https://wiki.mozilla.org/Security/Tracking_protection#Lists)
-  -->
-  <string name="your_rights_content5" moz:removedIn="137" tools:ignore="IncorrectStraightDoubleQuote">%1$s በተጨማሪም በ Disconnect, Inc. የሚቀርቡ የእግድ ዝርዝሮችን በ&lt;a href="%2$s"&gt;በጂኤንዩ አጠቃላይ የህዝብ ፍቃድ v3&lt;/a&gt; ስር እንደ ገለልተኛ ስራዎች ይጠቀማል፤ እና &lt;a href="%3$s"&gt;እዚህ&lt;/a&gt; ይገኛል።</string>
   <!-- Text shown in prompts for GeckoView -->
   <string name="gv_prompt_username_hint">የተጠቃሚ ስም</string>
   <string name="gv_prompt_password_hint">የይለፍ ቃል</string>
@@ -710,19 +708,17 @@
   <!-- Preference for block autoplay audio and video -->
   <string name="preference_block_autoplay_audio_video">ድምፅ እና ተንቀሳቃሽ ምሥል አግድ</string>
   <!-- Preference for studies -->
-  <string name="preference_studies">ጥናቶች</string>
+  <string name="preference_studies" moz:removedIn="140">ጥናቶች</string>
   <!-- Preference for studies summary -->
-  <string name="preference_studies_summary" tools:ignore="BrandUsage">ፋየርፎክስ ከጊዜ ወደ ጊዜ ጥናቶችን ሊጭን እና ሊያሄድ ይችላል።</string>
+  <string name="preference_studies_summary" tools:ignore="BrandUsage" moz:removedIn="140">ፋየርፎክስ ከጊዜ ወደ ጊዜ ጥናቶችን ሊጭን እና ሊያሄድ ይችላል።</string>
   <!-- Learn more link for studies, links to an article for more information about studies. -->
-  <string name="studies_learn_more">ተጨማሪ ይወቁ</string>
-  <!-- Dialog message shown when some changes are made on studies -->
-  <string name="studies_restart_app" moz:removedIn="137">ለውጦችን ለመተግበር መተግበርያው ያቆማል</string>
+  <string name="studies_learn_more" moz:removedIn="140">ተጨማሪ ይወቁ</string>
   <!-- Title of the remove studies button -->
-  <string name="studies_remove">አስወግድ</string>
+  <string name="studies_remove" moz:removedIn="140">አስወግድ</string>
   <!-- Title of the active section on the studies list -->
-  <string name="studies_active">ንቁ</string>
+  <string name="studies_active" moz:removedIn="140">ንቁ</string>
   <!-- Title of the completed section on the studies list -->
-  <string name="studies_completed">የተጠናቀቀ</string>
+  <string name="studies_completed" moz:removedIn="140">የተጠናቀቀ</string>
   <!-- Preference to enable remote debugging of the app via USB or Wi-Fi -->
   <string name="preference_remote_debugging">በUSB/Wi-Fi በኩል የርቀት ማረም</string>
   <!-- Text Button for show biometric prompt -->

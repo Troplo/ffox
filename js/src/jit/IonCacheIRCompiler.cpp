@@ -2304,6 +2304,11 @@ bool IonCacheIRCompiler::emitHasClassResult(ObjOperandId objId,
   MOZ_CRASH("Call ICs not used in ion");
 }
 
+bool IonCacheIRCompiler::emitHasShapeResult(ObjOperandId objId,
+                                            uint32_t shapeOffset) {
+  MOZ_CRASH("Call ICs not used in ion");
+}
+
 bool IonCacheIRCompiler::emitSameValueResult(ValOperandId lhs,
                                              ValOperandId rhs) {
   MOZ_CRASH("Call ICs not used in ion");
@@ -2339,7 +2344,8 @@ bool IonCacheIRCompiler::emitNewPlainObjectResult(uint32_t numFixedSlots,
 }
 
 bool IonCacheIRCompiler::emitNewFunctionCloneResult(uint32_t canonicalOffset,
-                                                    gc::AllocKind allocKind) {
+                                                    gc::AllocKind allocKind,
+                                                    uint32_t siteOffset) {
   MOZ_CRASH("Lambda ICs not used in ion");
 }
 

@@ -20,7 +20,6 @@
  * JavaScript code in this page
  */
 
-var __webpack_exports__ = {};
 
 ;// ./src/scripting_api/constants.js
 const Border = Object.freeze({
@@ -1213,8 +1212,8 @@ class AForm {
       AVG: args => args.reduce((acc, value) => acc + value, 0) / args.length,
       SUM: args => args.reduce((acc, value) => acc + value, 0),
       PRD: args => args.reduce((acc, value) => acc * value, 1),
-      MIN: args => args.reduce((acc, value) => Math.min(acc, value), Number.MAX_VALUE),
-      MAX: args => args.reduce((acc, value) => Math.max(acc, value), Number.MIN_VALUE)
+      MIN: args => Math.min(...args),
+      MAX: args => Math.max(...args)
     };
     if (!(cFunction in actions)) {
       throw new TypeError("Invalid function in AFSimple_Calculate");
@@ -1829,8 +1828,9 @@ class App extends PDFObject {
     callbackId,
     interval
   }) {
+    const documentObj = this._document.obj;
     if (callbackId === USERACTIVATION_CALLBACKID) {
-      this._document.obj._userActivation = false;
+      documentObj._userActivation = false;
       return;
     }
     const expr = this._timeoutCallbackIds.get(callbackId);
@@ -1838,7 +1838,10 @@ class App extends PDFObject {
       this._unregisterTimeoutCallback(callbackId);
     }
     if (expr) {
+      const saveUserActivation = documentObj._userActivation;
+      documentObj._userActivation = false;
       this._globalEval(expr);
+      documentObj._userActivation = saveUserActivation;
     }
   }
   _registerTimeout(callbackId, interval) {
@@ -1934,18 +1937,15 @@ class App extends PDFObject {
     this._document.obj.calculate = calculate;
   }
   get constants() {
-    if (!this._constants) {
-      this._constants = Object.freeze({
-        align: Object.freeze({
-          left: 0,
-          center: 1,
-          right: 2,
-          top: 3,
-          bottom: 4
-        })
-      });
-    }
-    return this._constants;
+    return this._constants ??= Object.freeze({
+      align: Object.freeze({
+        left: 0,
+        center: 1,
+        right: 2,
+        top: 3,
+        bottom: 4
+      })
+    });
   }
   set constants(_) {
     throw new Error("app.constants is read-only");
@@ -2189,6 +2189,10 @@ class App extends PDFObject {
   popUpMenuEx() {}
   removeToolButton() {}
   response(cQuestion, cTitle = "", cDefault = "", bPassword = "", cLabel = "") {
+    if (!this._document.obj._userActivation) {
+      return null;
+    }
+    this._document.obj._userActivation = false;
     if (cQuestion && typeof cQuestion === "object") {
       cDefault = cQuestion.cDefault;
       cQuestion = cQuestion.cQuestion;
@@ -4043,8 +4047,8 @@ function initSandbox(params) {
 
 ;// ./src/pdf.scripting.js
 
-const pdfjsVersion = "5.0.254";
-const pdfjsBuild = "3103747c8";
+const pdfjsVersion = "5.2.183";
+const pdfjsBuild = "3f1ecc1ba";
 globalThis.pdfjsScripting = {
   initSandbox: initSandbox
 };

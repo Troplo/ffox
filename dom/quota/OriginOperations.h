@@ -26,6 +26,7 @@ class OriginAttributesPattern;
 
 namespace dom::quota {
 
+struct ClientMetadata;
 class EstimateParams;
 class GetFullOriginMetadataParams;
 class NormalOriginOperationBase;
@@ -45,7 +46,7 @@ RefPtr<OriginOperationBase> CreateFinalizeOriginEvictionOp(
     MovingNotNull<RefPtr<QuotaManager>> aQuotaManager,
     nsTArray<RefPtr<OriginDirectoryLock>>&& aLocks);
 
-RefPtr<NormalOriginOperationBase> CreateSaveOriginAccessTimeOp(
+RefPtr<ResolvableNormalOriginOp<bool>> CreateSaveOriginAccessTimeOp(
     MovingNotNull<RefPtr<QuotaManager>> aQuotaManager,
     const OriginMetadata& aOriginMetadata, int64_t aTimestamp);
 
@@ -116,14 +117,13 @@ RefPtr<ResolvableNormalOriginOp<bool>> CreateInitializeTemporaryOriginOp(
 
 RefPtr<ResolvableNormalOriginOp<bool>> CreateInitializePersistentClientOp(
     MovingNotNull<RefPtr<QuotaManager>> aQuotaManager,
-    const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
-    const Client::Type aClientType);
+    const ClientMetadata& aClientMetadata,
+    RefPtr<UniversalDirectoryLock> aDirectoryLock);
 
 RefPtr<ResolvableNormalOriginOp<bool>> CreateInitializeTemporaryClientOp(
     MovingNotNull<RefPtr<QuotaManager>> aQuotaManager,
-    const PersistenceType aPersistenceType,
-    const mozilla::ipc::PrincipalInfo& aPrincipalInfo,
-    const Client::Type aClientType);
+    const ClientMetadata& aClientMetadata, bool aCreateIfNonExistent,
+    RefPtr<UniversalDirectoryLock> aDirectoryLock);
 
 RefPtr<QuotaRequestBase> CreateGetFullOriginMetadataOp(
     MovingNotNull<RefPtr<QuotaManager>> aQuotaManager,

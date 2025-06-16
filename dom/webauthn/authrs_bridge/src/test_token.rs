@@ -26,8 +26,8 @@ use authenticator::ctap2::{
     },
     preflight::CheckKeyHandle,
     server::{
-        AuthenticatorAttachment, PublicKeyCredentialDescriptor, PublicKeyCredentialUserEntity,
-        RelyingParty,
+        AuthenticatorAttachment, CredentialProtectionPolicy, PublicKeyCredentialDescriptor,
+        PublicKeyCredentialUserEntity, RelyingParty,
     },
 };
 use authenticator::errors::{AuthenticatorError, CommandError, HIDError, U2FTokenError};
@@ -62,6 +62,7 @@ struct TestTokenCredential {
     sign_count: AtomicU32,
     is_discoverable_credential: bool,
     rp: RelyingParty,
+    credential_protection_policy: CredentialProtectionPolicy,
 }
 
 impl TestTokenCredential {
@@ -153,6 +154,7 @@ impl TestToken {
         is_discoverable_credential: bool,
         user_handle: &[u8],
         sign_count: u32,
+        credential_protection_policy: CredentialProtectionPolicy,
     ) {
         let c = TestTokenCredential {
             id: id.to_vec(),
@@ -161,6 +163,7 @@ impl TestToken {
             is_discoverable_credential,
             user_handle: user_handle.to_vec(),
             sign_count: AtomicU32::new(sign_count),
+            credential_protection_policy,
         };
 
         let mut credlist = self.credentials.borrow_mut();
@@ -425,6 +428,13 @@ impl VirtualFidoDevice for TestToken {
             // 11. Non-discoverable credential case
             // return at most one assertion matching an allowed credential ID
             for credential in eligible_cred_iter {
+                if !self.is_user_verified
+                    && credential.credential_protection_policy
+                        == CredentialProtectionPolicy::UserVerificationRequired
+                {
+                    // Enforce the credential protection policy given that we have an allow list.
+                    continue;
+                }
                 if req.allow_list.iter().any(|x| x.id == credential.id) {
                     let mut assertion: GetAssertionResponse =
                         credential.assert(&req.client_data_hash, flags)?;
@@ -453,6 +463,13 @@ impl VirtualFidoDevice for TestToken {
             // 12. Discoverable credential case
             // return any number of assertions from credentials bound to this RP ID
             for credential in eligible_cred_iter.filter(|x| x.is_discoverable_credential) {
+                if !(self.is_user_verified
+                    || credential.credential_protection_policy
+                        == CredentialProtectionPolicy::UserVerificationOptional)
+                {
+                    // Enforce the credential protection policy given that we do not have an allow list.
+                    continue;
+                }
                 let mut assertion: GetAssertionResponse =
                     credential.assert(&req.client_data_hash, flags)?.into();
                 assertion.auth_data.extensions = Extension::default();
@@ -593,6 +610,7 @@ impl VirtualFidoDevice for TestToken {
             extensions.min_pin_length = Some(4);
         }
 
+        extensions.cred_protect = req.extensions.cred_protect;
         if let Some(req_hmac_or_prf) = &req.extensions.hmac_secret {
             match req_hmac_or_prf {
                 HmacCreateSecretOrPrf::HmacCreateSecret(true) | HmacCreateSecretOrPrf::Prf => {
@@ -625,6 +643,9 @@ impl VirtualFidoDevice for TestToken {
             req.options.resident_key.unwrap_or(false),
             &req.user.clone().unwrap_or_default().id,
             counter,
+            req.extensions
+                .cred_protect
+                .unwrap_or(CredentialProtectionPolicy::UserVerificationOptional),
         );
 
         // 19. Generate attestation statement
@@ -751,7 +772,7 @@ impl WebAuthnAutoFillEntry {
 
 #[derive(Default)]
 pub(crate) struct TestTokenManager {
-    state: Arc<Mutex<HashMap<u64, TestToken>>>,
+    state: Arc<Mutex<HashMap<String, TestToken>>>,
 }
 
 impl TestTokenManager {
@@ -767,7 +788,7 @@ impl TestTokenManager {
         has_user_verification: bool,
         is_user_consenting: bool,
         is_user_verified: bool,
-    ) -> Result<u64, nsresult> {
+    ) -> Result<String, nsresult> {
         let mut guard = self.state.lock().map_err(|_| NS_ERROR_FAILURE)?;
         let token = TestToken::new(
             vec![protocol],
@@ -778,8 +799,10 @@ impl TestTokenManager {
             is_user_verified,
         );
         loop {
-            let id = rand::random::<u64>() & 0x1f_ffff_ffff_ffffu64; // Make the id safe for JS (53 bits)
-            match guard.deref_mut().entry(id) {
+            let mut id = [0u8; 32];
+            thread_rng().fill_bytes(&mut id);
+            let id = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&id);
+            match guard.deref_mut().entry(id.clone()) {
                 Entry::Occupied(_) => continue,
                 Entry::Vacant(v) => {
                     v.insert(token);
@@ -789,18 +812,18 @@ impl TestTokenManager {
         }
     }
 
-    pub fn remove_virtual_authenticator(&self, authenticator_id: u64) -> Result<(), nsresult> {
+    pub fn remove_virtual_authenticator(&self, authenticator_id: &str) -> Result<(), nsresult> {
         let mut guard = self.state.lock().map_err(|_| NS_ERROR_FAILURE)?;
         guard
             .deref_mut()
-            .remove(&authenticator_id)
+            .remove(authenticator_id)
             .ok_or(NS_ERROR_INVALID_ARG)?;
         Ok(())
     }
 
     pub fn add_credential(
         &self,
-        authenticator_id: u64,
+        authenticator_id: &str,
         id: &[u8],
         privkey: &[u8],
         user_handle: &[u8],
@@ -811,7 +834,7 @@ impl TestTokenManager {
         let mut guard = self.state.lock().map_err(|_| NS_ERROR_FAILURE)?;
         let token = guard
             .deref_mut()
-            .get_mut(&authenticator_id)
+            .get_mut(authenticator_id)
             .ok_or(NS_ERROR_INVALID_ARG)?;
         let rp = RelyingParty::from(rp_id);
         token.insert_credential(
@@ -821,17 +844,18 @@ impl TestTokenManager {
             is_resident_credential,
             user_handle,
             sign_count,
+            CredentialProtectionPolicy::UserVerificationOptional,
         );
         Ok(())
     }
 
     pub fn get_credentials(
         &self,
-        authenticator_id: u64,
+        authenticator_id: &str,
     ) -> Result<ThinVec<Option<RefPtr<nsICredentialParameters>>>, nsresult> {
         let mut guard = self.state.lock().map_err(|_| NS_ERROR_FAILURE)?;
         let token = guard
-            .get_mut(&authenticator_id)
+            .get_mut(authenticator_id)
             .ok_or(NS_ERROR_INVALID_ARG)?;
         let credentials = token.get_credentials();
         let mut credentials_parameters = ThinVec::with_capacity(credentials.len());
@@ -852,11 +876,11 @@ impl TestTokenManager {
         Ok(credentials_parameters)
     }
 
-    pub fn remove_credential(&self, authenticator_id: u64, id: &[u8]) -> Result<(), nsresult> {
+    pub fn remove_credential(&self, authenticator_id: &str, id: &[u8]) -> Result<(), nsresult> {
         let mut guard = self.state.lock().map_err(|_| NS_ERROR_FAILURE)?;
         let token = guard
             .deref_mut()
-            .get_mut(&authenticator_id)
+            .get_mut(authenticator_id)
             .ok_or(NS_ERROR_INVALID_ARG)?;
         if token.delete_credential(id) {
             Ok(())
@@ -865,11 +889,11 @@ impl TestTokenManager {
         }
     }
 
-    pub fn remove_all_credentials(&self, authenticator_id: u64) -> Result<(), nsresult> {
+    pub fn remove_all_credentials(&self, authenticator_id: &str) -> Result<(), nsresult> {
         let mut guard = self.state.lock().map_err(|_| NS_ERROR_FAILURE)?;
         let token = guard
             .deref_mut()
-            .get_mut(&authenticator_id)
+            .get_mut(authenticator_id)
             .ok_or(NS_ERROR_INVALID_ARG)?;
         token.delete_all_credentials();
         Ok(())
@@ -877,13 +901,13 @@ impl TestTokenManager {
 
     pub fn set_user_verified(
         &self,
-        authenticator_id: u64,
+        authenticator_id: &str,
         is_user_verified: bool,
     ) -> Result<(), nsresult> {
         let mut guard = self.state.lock().map_err(|_| NS_ERROR_FAILURE)?;
         let token = guard
             .deref_mut()
-            .get_mut(&authenticator_id)
+            .get_mut(authenticator_id)
             .ok_or(NS_ERROR_INVALID_ARG)?;
         token.is_user_verified = is_user_verified;
         Ok(())

@@ -79,12 +79,6 @@ class SyncedTabsInSidebar extends SidebarPage {
 
   handleCommandEvent(e) {
     switch (e.target.id) {
-      case "sidebar-synced-tabs-context-bookmark-tab":
-        this.topWindow.PlacesCommandHook.bookmarkLink(
-          this.triggerNode.url,
-          this.triggerNode.title
-        );
-        break;
       case "sidebar-context-menu-close-remote-tab":
         this.requestOrRemoveTabToClose(
           this.triggerNode.url,
@@ -185,7 +179,7 @@ class SyncedTabsInSidebar extends SidebarPage {
         .searchQuery=${this.controller.searchQuery}
         @fxview-tab-list-primary-action=${navigateToLink}
         @fxview-tab-list-secondary-action=${this.onSecondaryAction}
-      />
+      ></sidebar-tab-list>
     </moz-card>`;
   }
 

@@ -164,7 +164,6 @@ HebrewCalendar::HebrewCalendar(const Locale& aLocale, UErrorCode& success)
 :   Calendar(TimeZone::forLocaleOrDefault(aLocale), aLocale, success)
 
 {
-    setTimeInMillis(getNow(), success); // Call this again now that the vtable is set up properly.
 }
 
 
@@ -446,9 +445,8 @@ int32_t startOfYear(int32_t year, UErrorCode &status)
         if (wd == 2 || wd == 4 || wd == 6) {
             // If the 1st is on Sun, Wed, or Fri, postpone to the next day
             day += 1;
-            wd = (day % 7);
         }
-        if (wd == 1 && frac > 15*HOUR_PARTS+204 && !HebrewCalendar::isLeapYear(year) ) {
+        else if (wd == 1 && frac > 15*HOUR_PARTS+204 && !HebrewCalendar::isLeapYear(year) ) {
             // If the new moon falls after 3:11:20am (15h204p from the previous noon)
             // on a Tuesday and it is not a leap year, postpone by 2 days.
             // This prevents 356-day years.
@@ -591,13 +589,8 @@ int32_t HebrewCalendar::handleGetMonthLength(int32_t extendedYear, int32_t month
 * Returns the number of days in the given Hebrew year
 * @internal
 */
-int32_t HebrewCalendar::handleGetYearLength(int32_t eyear) const {
-    UErrorCode status = U_ZERO_ERROR;
-    int32_t len = daysInYear(eyear, status);
-    if (U_FAILURE(status)) {
-        return 12;
-    }
-    return len;
+int32_t HebrewCalendar::handleGetYearLength(int32_t eyear, UErrorCode& status) const {
+    return daysInYear(eyear, status);
 }
 
 void HebrewCalendar::validateField(UCalendarDateFields field, UErrorCode &status) {

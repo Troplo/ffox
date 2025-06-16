@@ -4,9 +4,9 @@
 
 package org.mozilla.fenix.tabstray.ext
 
+import mozilla.components.compose.base.menu.MenuItem
+import mozilla.components.compose.base.text.Text
 import org.mozilla.fenix.R
-import org.mozilla.fenix.compose.menu.MenuItem
-import org.mozilla.fenix.compose.text.Text
 import org.mozilla.fenix.tabstray.Page
 import org.mozilla.fenix.tabstray.TabsTrayState.Mode
 import org.mozilla.fenix.tabstray.TabsTrayTestTag
@@ -118,32 +118,32 @@ private fun generateTabPageBannerMenuItems(
 ): List<MenuItem> {
     val tabSettingsItem = MenuItem.TextItem(
         text = Text.Resource(R.string.tab_tray_menu_tab_settings),
-        testTag = TabsTrayTestTag.tabSettings,
+        testTag = TabsTrayTestTag.TAB_SETTINGS,
         onClick = onTabSettingsClick,
     )
     val recentlyClosedTabsItem = MenuItem.TextItem(
         text = Text.Resource(R.string.tab_tray_menu_recently_closed),
-        testTag = TabsTrayTestTag.recentlyClosedTabs,
+        testTag = TabsTrayTestTag.RECENTLY_CLOSED_TABS,
         onClick = onRecentlyClosedClick,
     )
     val enterSelectModeItem = MenuItem.TextItem(
         text = Text.Resource(R.string.tabs_tray_select_tabs),
-        testTag = TabsTrayTestTag.selectTabs,
+        testTag = TabsTrayTestTag.SELECT_TABS,
         onClick = onEnterMultiselectModeClick,
     )
     val shareAllTabsItem = MenuItem.TextItem(
         text = Text.Resource(R.string.tab_tray_menu_item_share),
-        testTag = TabsTrayTestTag.shareAllTabs,
+        testTag = TabsTrayTestTag.SHARE_ALL_TABS,
         onClick = onShareAllTabsClick,
     )
     val deleteAllTabsItem = MenuItem.TextItem(
         text = Text.Resource(R.string.tab_tray_menu_item_close),
-        testTag = TabsTrayTestTag.closeAllTabs,
+        testTag = TabsTrayTestTag.CLOSE_ALL_TABS,
         onClick = onDeleteAllTabsClick,
     )
     val accountSettingsItem = MenuItem.TextItem(
         text = Text.Resource(R.string.tab_tray_menu_account_settings),
-        testTag = TabsTrayTestTag.accountSettings,
+        testTag = TabsTrayTestTag.ACCOUNT_SETTINGS,
         onClick = onAccountSettingsClick,
     )
     return when {

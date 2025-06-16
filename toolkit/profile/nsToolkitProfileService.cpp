@@ -200,8 +200,7 @@ nsresult RemoveProfileFiles(nsIFile* aRootDir, nsIFile* aLocalDir,
   // Retry loop if something was not deleted
   if (undeletedFiles.Length() > 0) {
     uint32_t retries = 1;
-    // XXX: Until bug 1716291 is fixed we just make one retry
-    while (undeletedFiles.Length() > 0 && retries <= 1) {
+    while (undeletedFiles.Length() > 0 && retries <= 10) {
       Unused << PR_Sleep(PR_MillisecondsToInterval(10 * retries));
       for (auto&& file :
            std::exchange(undeletedFiles, nsTArray<nsCOMPtr<nsIFile>>{})) {
@@ -213,8 +212,6 @@ nsresult RemoveProfileFiles(nsIFile* aRootDir, nsIFile* aLocalDir,
     }
   }
 
-#ifdef DEBUG
-  // XXX: Until bug 1716291 is fixed, we do not want to spam release
   if (undeletedFiles.Length() > 0) {
     NS_WARNING("Unable to remove all files from the profile directory:");
     // Log the file names of those we could not remove
@@ -225,9 +222,7 @@ nsresult RemoveProfileFiles(nsIFile* aRootDir, nsIFile* aLocalDir,
       }
     }
   }
-#endif
-  // XXX: Activate this assert once bug 1716291 is fixed
-  // MOZ_ASSERT(undeletedFiles.Length() == 0);
+  MOZ_ASSERT(undeletedFiles.Length() == 0);
 
   // Now we can unlock the profile safely.
   lock->Unlock();
@@ -691,35 +686,22 @@ void nsToolkitProfileService::CompleteStartup() {
   nsresult rv;
   bool needsFlush = false;
 
-  // If we started into an unmanaged profile in a profile group, set the group
-  // profile to be the managed profile belonging to the group.
   nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID);
-  if (!mCurrent) {
-    nsCString storeID;
-    rv = prefs->GetCharPref(STORE_ID_PREF, storeID);
-    if (NS_SUCCEEDED(rv) && !storeID.IsEmpty()) {
+  nsCString storeID;
+  rv = prefs->GetCharPref(STORE_ID_PREF, storeID);
+
+  if (NS_SUCCEEDED(rv) && !storeID.IsEmpty()) {
+    // We have a storeID from prefs.
+    if (!mCurrent) {
+      // We started into an unmanaged profile. Try to set the group profile to
+      // be the managed profile belonging to the group.
       mGroupProfile = GetProfileByStoreID(storeID);
     }
-  } else {
-    // Otherwise, if the current profile has a storeID, then it must be the
-    // profile for some group.
-    if (!mCurrent->mStoreID.IsVoid()) {
-      mGroupProfile = mCurrent;
-      rv = prefs->SetCharPref(STORE_ID_PREF, mCurrent->mStoreID);
-      NS_ENSURE_SUCCESS_VOID(rv);
-    } else {
-      // Otherwise if the current profile has a store ID set in prefs but not in
-      // the database then restore it. This can happen if a version of Firefox
-      // prior to 67 has overwritten the database.
-      nsCString storeID;
-      rv = prefs->GetCharPref(STORE_ID_PREF, storeID);
-      if (NS_SUCCEEDED(rv) && !storeID.IsEmpty()) {
-        rv = mCurrent->SetStoreID(storeID);
-        if (NS_SUCCEEDED(rv)) {
-          needsFlush = true;
-        }
-      }
-    }
+  } else if (mCurrent && !mCurrent->mStoreID.IsVoid()) {
+    // No store ID in prefs. If the current profile has one we will use it.
+    mGroupProfile = mCurrent;
+    rv = prefs->SetCharPref(STORE_ID_PREF, mCurrent->mStoreID);
+    NS_ENSURE_SUCCESS_VOID(rv);
   }
 
   if (mMaybeLockProfile) {
@@ -2460,7 +2442,14 @@ nsToolkitProfileService::AsyncFlushGroupProfile(JSContext* aCx,
 #ifndef MOZ_HAS_REMOTE
   return NS_ERROR_FAILURE;
 #else
-  if (!mGroupProfile) {
+  // As of bug 1962531, mGroupProfile may be null; if so, we should currently
+  // be in the toolkit profile for the profile group.
+  RefPtr<nsToolkitProfile> profile = mGroupProfile;
+  if (!profile) {
+    profile = mCurrent;
+  }
+
+  if (!profile) {
     return NS_ERROR_ILLEGAL_VALUE;
   }
 
@@ -2478,11 +2467,11 @@ nsToolkitProfileService::AsyncFlushGroupProfile(JSContext* aCx,
   }
 
   UniquePtr<GroupProfileData> profileData = MakeUnique<GroupProfileData>();
-  profileData->mStoreID = mGroupProfile->mStoreID;
-  profileData->mShowSelector = mGroupProfile->mShowProfileSelector;
+  profileData->mStoreID = profile->mStoreID;
+  profileData->mShowSelector = profile->mShowProfileSelector;
 
   bool isRelative;
-  GetProfileDescriptor(mGroupProfile, profileData->mPath, &isRelative);
+  GetProfileDescriptor(profile, profileData->mPath, &isRelative);
 
   nsCOMPtr<nsIRemoteService> rs = GetRemoteService();
   RefPtr<nsRemoteService> remoteService =

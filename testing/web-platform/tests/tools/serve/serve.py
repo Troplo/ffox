@@ -93,9 +93,7 @@ def inject_script(html, script_tag):
         return html[:offset] + script_tag + html[offset:]
 
 
-class WrapperHandler:
-
-    __meta__ = abc.ABCMeta
+class WrapperHandler(metaclass=abc.ABCMeta):
 
     headers: ClassVar[List[Tuple[str, str]]] = []
 
@@ -207,7 +205,6 @@ class WrapperHandler:
         # a specific metadata key: value pair.
         pass
 
-    @abc.abstractmethod
     def check_exposure(self, request):
         # Raise an exception if this handler shouldn't be exposed after all.
         pass
@@ -1418,10 +1415,7 @@ def run(config_cls=ConfigBuilder, route_builder=None, mp_context=None, log_handl
     logger = get_logger("INFO", log_handlers)
 
     if mp_context is None:
-        if hasattr(multiprocessing, "get_context"):
-            mp_context = multiprocessing.get_context()
-        else:
-            mp_context = MpContext()
+        mp_context = multiprocessing.get_context("spawn")
 
     with build_config(logger,
                       os.path.join(repo_root, "config.json"),

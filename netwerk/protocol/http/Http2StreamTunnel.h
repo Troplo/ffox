@@ -24,7 +24,7 @@ class Http2StreamTunnel : public Http2StreamBase,
                           public nsISocketTransport,
                           public nsSupportsWeakReference {
  public:
-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_HTTP2STREAMTUNNEL_IID)
+  NS_INLINE_DECL_STATIC_IID(NS_HTTP2STREAMTUNNEL_IID)
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSITRANSPORT
   NS_DECL_NSISOCKETTRANSPORT
@@ -52,6 +52,9 @@ class Http2StreamTunnel : public Http2StreamBase,
   }
   void MakeNonSticky() override {}
 
+  void SetTransactionId(uintptr_t aId) { mId = aId; };
+  uintptr_t GetTransactionId() const { return mId; }
+
  protected:
   ~Http2StreamTunnel();
   nsresult CallToReadData(uint32_t count, uint32_t* countRead) override;
@@ -72,6 +75,8 @@ class Http2StreamTunnel : public Http2StreamBase,
   RefPtr<nsHttpConnectionInfo> mConnectionInfo;
   bool mSendClosed{false};
   nsresult mCondition{NS_OK};
+  // Stores the address of the transaction that created this Http2StreamTunnel.
+  uintptr_t mId{0};
 };
 
 // f9d10060-f5d4-443e-ba59-f84ea975c5f0
@@ -80,7 +85,7 @@ class Http2StreamTunnel : public Http2StreamBase,
 
 class OutputStreamTunnel : public nsIAsyncOutputStream {
  public:
-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_OUTPUTSTREAMTUNNEL_IID)
+  NS_INLINE_DECL_STATIC_IID(NS_OUTPUTSTREAMTUNNEL_IID)
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIOUTPUTSTREAM
   NS_DECL_NSIASYNCOUTPUTSTREAM
@@ -122,9 +127,6 @@ class InputStreamTunnel : public nsIAsyncInputStream {
   nsCOMPtr<nsIInputStreamCallback> mCallback;
   nsresult mCondition{NS_OK};
 };
-
-NS_DEFINE_STATIC_IID_ACCESSOR(Http2StreamTunnel, NS_HTTP2STREAMTUNNEL_IID)
-NS_DEFINE_STATIC_IID_ACCESSOR(OutputStreamTunnel, NS_OUTPUTSTREAMTUNNEL_IID)
 
 class Http2StreamWebSocket : public Http2StreamTunnel {
  public:

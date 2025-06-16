@@ -7,6 +7,7 @@
 #ifndef PerfStats_h
 #define PerfStats_h
 
+#include "mozilla/Atomics.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPtr.h"
@@ -73,7 +74,12 @@
   MACRO(A11Y_RecvCache)                           \
   MACRO(A11Y_ProcessShowEvent)                    \
   MACRO(A11Y_CoalesceEvents)                      \
-  MACRO(A11Y_CoalesceMutationEvents)
+  MACRO(A11Y_CoalesceMutationEvents)              \
+  MACRO(A11Y_ProcessHideEvent)                    \
+  MACRO(A11Y_SendCache)                           \
+  MACRO(A11Y_WillRefresh)                         \
+  MACRO(A11Y_AccessibilityServiceInit)            \
+  MACRO(A11Y_PlatformShowHideEvent)
 
 namespace mozilla {
 
@@ -163,7 +169,7 @@ class PerfStats {
   RefPtr<PerfStatsPromise> CollectPerfStatsJSONInternal();
   nsCString CollectLocalPerfStatsJSONInternal();
 
-  static MetricMask sCollectionMask;
+  static Atomic<MetricMask, MemoryOrdering::Relaxed> sCollectionMask;
   static StaticMutex sMutex MOZ_UNANNOTATED;
   static StaticAutoPtr<PerfStats> sSingleton;
   TimeStamp mRecordedStarts[static_cast<uint64_t>(Metric::Max)];

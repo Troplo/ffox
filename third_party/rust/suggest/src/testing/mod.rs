@@ -5,32 +5,50 @@
 mod client;
 mod data;
 
-pub use client::{MockIcon, MockRemoteSettingsClient};
+pub use client::{MockAttachment, MockIcon, MockRecord, MockRemoteSettingsClient};
 pub use data::*;
 
-use crate::Suggestion;
+use crate::{suggestion::YelpSubjectType, Suggestion};
+
 use parking_lot::Once;
 use serde_json::Value as JsonValue;
 
 pub use serde_json::json;
 pub use sql_support::ConnExt;
 
+use std::{borrow::Borrow, hash::Hash};
+
 /// Trait with utility functions for JSON handling in the tests
 pub trait JsonExt {
     fn merge(self, other: JsonValue) -> JsonValue;
+
+    fn remove<Q>(self, key: &Q) -> JsonValue
+    where
+        String: Borrow<Q>,
+        Q: ?Sized + Ord + Eq + Hash;
 }
 
 impl JsonExt for JsonValue {
     fn merge(mut self, mut other: JsonValue) -> JsonValue {
-        let self_map = match &mut self {
-            JsonValue::Object(obj) => obj,
-            _ => panic!("merge called on non-object: {self:?}"),
+        let JsonValue::Object(self_map) = &mut self else {
+            panic!("merge called on non-object `self`: {self:?}");
         };
-        let other_map = match &mut other {
-            JsonValue::Object(obj) => obj,
-            _ => panic!("merge called on non-object: {other:?}"),
+        let JsonValue::Object(other_map) = &mut other else {
+            panic!("merge called on non-object `other`: {other:?}");
         };
         self_map.append(other_map);
+        self
+    }
+
+    fn remove<Q>(mut self, key: &Q) -> JsonValue
+    where
+        String: Borrow<Q>,
+        Q: ?Sized + Ord + Eq + Hash,
+    {
+        let JsonValue::Object(obj) = &mut self else {
+            panic!("remove called on non-object: {self:?}");
+        };
+        obj.remove(key);
         self
     }
 }
@@ -47,7 +65,7 @@ impl Suggestion {
             Self::Weather { score, .. } => score,
             Self::Wikipedia { .. } => panic!("with_score not valid for wikipedia suggestions"),
             Self::Fakespot { score, .. } => score,
-            Self::Exposure { score, .. } => score,
+            Self::Dynamic { score, .. } => score,
         };
         *current_score = score;
         self
@@ -62,6 +80,7 @@ impl Suggestion {
                 icon_mimetype,
                 score,
                 subject_exact_match,
+                subject_type,
                 location_param,
                 ..
             } => Self::Yelp {
@@ -71,6 +90,7 @@ impl Suggestion {
                 icon_mimetype,
                 score,
                 subject_exact_match,
+                subject_type,
                 location_param,
                 has_location_sign,
             },
@@ -86,6 +106,7 @@ impl Suggestion {
                 icon,
                 icon_mimetype,
                 score,
+                subject_type,
                 has_location_sign,
                 location_param,
                 ..
@@ -96,10 +117,38 @@ impl Suggestion {
                 icon_mimetype,
                 score,
                 subject_exact_match,
+                subject_type,
                 location_param,
                 has_location_sign,
             },
-            _ => panic!("has_location_sign only valid for yelp suggestions"),
+            _ => panic!("subject_exact_match only valid for yelp suggestions"),
+        }
+    }
+
+    pub fn subject_type(self, subject_type: YelpSubjectType) -> Self {
+        match self {
+            Self::Yelp {
+                title,
+                url,
+                icon,
+                icon_mimetype,
+                score,
+                subject_exact_match,
+                has_location_sign,
+                location_param,
+                ..
+            } => Self::Yelp {
+                title,
+                url,
+                icon,
+                icon_mimetype,
+                score,
+                subject_exact_match,
+                subject_type,
+                location_param,
+                has_location_sign,
+            },
+            _ => panic!("subject_type only valid for yelp suggestions"),
         }
     }
 }
@@ -107,8 +156,6 @@ impl Suggestion {
 pub fn before_each() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("trace"))
-            .is_test(true)
-            .init();
+        error_support::init_for_tests_with_level(error_support::Level::Trace);
     });
 }

@@ -192,6 +192,20 @@ void SharedStyleSheetCache::LoadCompletedInternal(
   }
 }
 
+size_t SharedStyleSheetCache::SizeOfIncludingThis(
+    MallocSizeOf aMallocSizeOf) const {
+  size_t n = aMallocSizeOf(this);
+  n += Base::SizeOfExcludingThis(aMallocSizeOf);
+  n += mInlineSheets.ShallowSizeOfExcludingThis(aMallocSizeOf);
+  for (const auto& sheetMap : mInlineSheets) {
+    for (const auto& entry : sheetMap.GetData()) {
+      n += entry.GetKey().SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+      n += entry.GetData()->SizeOfIncludingThis(aMallocSizeOf);
+    }
+  }
+  return n;
+}
+
 NS_IMETHODIMP
 SharedStyleSheetCache::CollectReports(nsIHandleReportCallback* aHandleReport,
                                       nsISupports* aData, bool aAnonymize) {
@@ -204,21 +218,46 @@ SharedStyleSheetCache::CollectReports(nsIHandleReportCallback* aHandleReport,
   return NS_OK;
 }
 
+void SharedStyleSheetCache::ClearInProcess(
+    const Maybe<bool>& aChrome, const Maybe<nsCOMPtr<nsIPrincipal>>& aPrincipal,
+    const Maybe<nsCString>& aSchemelessSite,
+    const Maybe<OriginAttributesPattern>& aPattern,
+    const Maybe<nsCString>& aURL) {
+  Base::ClearInProcess(aChrome, aPrincipal, aSchemelessSite, aPattern, aURL);
+  if (!aChrome && !aPrincipal && !aSchemelessSite && !aURL) {
+    mInlineSheets.Clear();
+  }
+  if (aURL) {
+    // Inline sheets don't have a URL.
+    return;
+  }
+
+  for (auto iter = mInlineSheets.Iter(); !iter.Done(); iter.Next()) {
+    if (SharedSubResourceCacheUtils::ShouldClearEntry(
+            nullptr, iter.Key(), iter.Key(), aChrome, aPrincipal,
+            aSchemelessSite, aPattern, aURL)) {
+      iter.Remove();
+    }
+  }
+}
+
 void SharedStyleSheetCache::Clear(
     const Maybe<bool>& aChrome, const Maybe<nsCOMPtr<nsIPrincipal>>& aPrincipal,
     const Maybe<nsCString>& aSchemelessSite,
-    const Maybe<OriginAttributesPattern>& aPattern) {
+    const Maybe<OriginAttributesPattern>& aPattern,
+    const Maybe<nsCString>& aURL) {
   using ContentParent = dom::ContentParent;
 
   if (XRE_IsParentProcess()) {
     for (auto* cp : ContentParent::AllProcesses(ContentParent::eLive)) {
       Unused << cp->SendClearStyleSheetCache(aChrome, aPrincipal,
-                                             aSchemelessSite, aPattern);
+                                             aSchemelessSite, aPattern, aURL);
     }
   }
 
   if (sSingleton) {
-    sSingleton->ClearInProcess(aChrome, aPrincipal, aSchemelessSite, aPattern);
+    sSingleton->ClearInProcess(aChrome, aPrincipal, aSchemelessSite, aPattern,
+                               aURL);
   }
 }
 

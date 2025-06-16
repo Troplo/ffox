@@ -7,10 +7,9 @@
 use crate::std::{
     cell::RefCell,
     path::PathBuf,
-    process::Command,
     sync::{
         atomic::{AtomicBool, Ordering::Relaxed},
-        Arc, Mutex,
+        Arc, Mutex, Weak,
     },
 };
 use crate::{
@@ -25,6 +24,8 @@ use crate::{
 use anyhow::Context;
 use uuid::Uuid;
 
+pub mod annotations;
+
 /// The main crash reporting logic.
 pub struct ReportCrash {
     pub settings: RefCell<Settings>,
@@ -32,16 +33,13 @@ pub struct ReportCrash {
     extra: serde_json::Value,
     settings_file: PathBuf,
     attempted_to_send: AtomicBool,
-    ui: Option<AsyncTask<ReportCrashUIState>>,
+    ui: Option<Arc<AsyncTask<ReportCrashUIState>>>,
     memtest: RefCell<Option<Memtest>>,
 }
 
 fn modify_extra_for_report(extra: &mut serde_json::Value) {
     if let Some(map) = extra.as_object_mut() {
-        // Remove these entries, they don't need to be sent.
-        map.remove("ProfileDirectory");
-        map.remove("ServerURL");
-        map.remove("StackTraces");
+        map.retain(|k, _| annotations::send_in_report(k));
     }
 
     extra["SubmittedFrom"] = "Client".into();
@@ -357,24 +355,7 @@ impl ReportCrash {
 
     /// Restart the program.
     fn restart_process(&self) {
-        if self.config.restart_command.is_none() {
-            // The restart button should be hidden in this case, so this error should not occur.
-            log::error!("no process configured for restart");
-            return;
-        }
-
-        let mut cmd = Command::new(self.config.restart_command.as_ref().unwrap());
-        cmd.args(&self.config.restart_args)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        if let Some(xul_app_file) = &self.config.app_file {
-            cmd.env("XUL_APP_FILE", xul_app_file);
-        }
-        log::debug!("restarting process: {:?}", cmd);
-        if let Err(e) = cmd.spawn() {
-            log::error!("failed to restart process: {e}");
-        }
+        self.config.restart_process();
     }
 
     /// Run the crash reporting UI.
@@ -403,7 +384,17 @@ impl ReportCrash {
         );
 
         // Set the UI remote queue.
-        self.ui = Some(crash_ui.async_task());
+        let crash_ui_async_task = Arc::new(crash_ui.async_task());
+        struct PanicHandler(Weak<AsyncTask<ReportCrashUIState>>);
+        impl Drop for PanicHandler {
+            fn drop(&mut self) {
+                if let Some(ui) = self.0.upgrade() {
+                    ui.push(|_| panic!("logic thread panicked"));
+                }
+            }
+        }
+        let logic_panic_handler = PanicHandler(Arc::downgrade(&crash_ui_async_task));
+        self.ui = Some(crash_ui_async_task);
 
         // Spawn a separate thread to handle all interactions with `self`. This prevents blocking
         // the UI for any reason.
@@ -418,11 +409,16 @@ impl ReportCrash {
             // when the UI finishes so the scope can exit).
             let _logic_send = logic_send;
             s.spawn(move || {
+                let _logic_panic_handler = logic_panic_handler;
                 barrier.wait();
                 while let Ok(f) = logic_recv.recv() {
                     f(self);
                 }
-                // Clear the UI remote queue, using it after this point is an error.
+                // Save settings after UI is closed
+                self.save_settings();
+
+                // Clear the UI remote queue, using it after this point is an error. This also
+                // prevents the panic handler from engaging.
                 //
                 // NOTE we do this here because the compiler can't reason about `self` being safely
                 // accessible after `thread::scope` returns. This is effectively the same result

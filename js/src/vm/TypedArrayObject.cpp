@@ -349,9 +349,7 @@ static TypedArrayType* NewTypedArrayObject(JSContext* cx, const JSClass* clasp,
                                            gc::AllocKind allocKind,
                                            gc::Heap heap) {
   MOZ_ASSERT(proto);
-
-  MOZ_ASSERT(CanChangeToBackgroundAllocKind(allocKind, clasp));
-  allocKind = ForegroundToBackgroundAllocKind(allocKind);
+  allocKind = gc::GetFinalizedAllocKindForClass(allocKind, clasp);
 
   static_assert(std::is_same_v<TypedArrayType, FixedLengthTypedArrayObject> ||
                 std::is_same_v<TypedArrayType, ResizableTypedArrayObject>);
@@ -1846,40 +1844,6 @@ static bool TypedArray_set(JSContext* cx, unsigned argc, Value* vp) {
   return CallNonGenericMethod<IsTypedArrayObject, TypedArray_set>(cx, args);
 }
 
-/**
- * Convert |value| to an integer and clamp it to a valid integer index within
- * the range `[0..length]`.
- */
-static bool ToIntegerIndex(JSContext* cx, Handle<Value> value, size_t length,
-                           size_t* result) {
-  // Optimize for the common case when |value| is an int32 to avoid unnecessary
-  // floating point computations.
-  if (value.isInt32()) {
-    int32_t relative = value.toInt32();
-
-    if (relative >= 0) {
-      *result = std::min(size_t(relative), length);
-    } else if (mozilla::Abs(relative) <= length) {
-      *result = length - mozilla::Abs(relative);
-    } else {
-      *result = 0;
-    }
-    return true;
-  }
-
-  double relative;
-  if (!ToInteger(cx, value, &relative)) {
-    return false;
-  }
-
-  if (relative >= 0) {
-    *result = size_t(std::min(relative, double(length)));
-  } else {
-    *result = size_t(std::max(relative + double(length), 0.0));
-  }
-  return true;
-}
-
 // ES2020 draft rev dc1e21c454bd316810be1c0e7af0131a2d7f38e9
 // 22.2.3.5 %TypedArray%.prototype.copyWithin ( target, start [ , end ] )
 static bool TypedArray_copyWithin(JSContext* cx, const CallArgs& args) {
@@ -2565,16 +2529,6 @@ static bool TypedArray_lastIndexOf(JSContext* cx, const CallArgs& args) {
       return false;
     }
 
-    // Reacquire the length because side-effects may have detached or resized
-    // the array buffer.
-    len = std::min(len, tarray->length().valueOr(0));
-
-    // Return early if the new length is zero.
-    if (len == 0) {
-      args.rval().setInt32(-1);
-      return true;
-    }
-
     // Steps 6-8.
     if (fromIndex >= 0) {
       k = size_t(std::min(fromIndex, double(len - 1)));
@@ -2585,6 +2539,24 @@ static bool TypedArray_lastIndexOf(JSContext* cx, const CallArgs& args) {
         return true;
       }
       k = size_t(d);
+    }
+    MOZ_ASSERT(k < len);
+
+    // Reacquire the length because side-effects may have detached or resized
+    // the array buffer.
+    size_t currentLength = tarray->length().valueOr(0);
+
+    // Restrict the search index and length if the new length is smaller.
+    if (currentLength < len) {
+      // Return early if the new length is zero.
+      if (currentLength == 0) {
+        args.rval().setInt32(-1);
+        return true;
+      }
+
+      // Otherwise just restrict |k| and |len| to the current length.
+      k = std::min(k, currentLength - 1);
+      len = currentLength;
     }
   }
   MOZ_ASSERT(k < len);
@@ -4827,31 +4799,68 @@ JSNative js::TypedArrayConstructorNative(Scalar::Type type) {
   MOZ_CRASH("unexpected typed array type");
 }
 
-bool js::IsBufferSource(JSObject* object, SharedMem<uint8_t*>* dataPointer,
+bool js::IsBufferSource(JSContext* cx, JSObject* object, bool allowShared,
+                        bool allowResizable, SharedMem<uint8_t*>* dataPointer,
                         size_t* byteLength) {
   if (object->is<TypedArrayObject>()) {
-    TypedArrayObject& view = object->as<TypedArrayObject>();
-    *dataPointer = view.dataPointerEither().cast<uint8_t*>();
-    *byteLength = view.byteLength().valueOr(0);
+    Rooted<TypedArrayObject*> view(cx, &object->as<TypedArrayObject>());
+    if (!allowShared && view->isSharedMemory()) {
+      return false;
+    }
+    if (!allowResizable && JS::IsResizableArrayBufferView(object)) {
+      return false;
+    }
+    // Ensure the pointer we pass out won't move as long as you properly root
+    // it. This is only needed for non-shared memory.
+    if (!view->isSharedMemory() &&
+        !ArrayBufferViewObject::ensureNonInline(cx, view)) {
+      return false;
+    }
+    *dataPointer = view->dataPointerEither().cast<uint8_t*>();
+    *byteLength = view->byteLength().valueOr(0);
     return true;
   }
 
   if (object->is<DataViewObject>()) {
-    DataViewObject& view = object->as<DataViewObject>();
-    *dataPointer = view.dataPointerEither().cast<uint8_t*>();
-    *byteLength = view.byteLength().valueOr(0);
+    Rooted<DataViewObject*> view(cx, &object->as<DataViewObject>());
+    if (!allowShared && view->isSharedMemory()) {
+      return false;
+    }
+    if (!allowResizable && JS::IsResizableArrayBufferView(object)) {
+      return false;
+    }
+    // Ensure the pointer we pass out won't move as long as you properly root
+    // it. This is only needed for non-shared memory.
+    if (!view->isSharedMemory() &&
+        !ArrayBufferViewObject::ensureNonInline(cx, view)) {
+      return false;
+    }
+    *dataPointer = view->dataPointerEither().cast<uint8_t*>();
+    *byteLength = view->byteLength().valueOr(0);
     return true;
   }
 
   if (object->is<ArrayBufferObject>()) {
-    ArrayBufferObject& buffer = object->as<ArrayBufferObject>();
-    *dataPointer = buffer.dataPointerShared();
-    *byteLength = buffer.byteLength();
+    Rooted<ArrayBufferObject*> buffer(cx, &object->as<ArrayBufferObject>());
+    if (!allowResizable && buffer->isResizable()) {
+      return false;
+    }
+    // Ensure the pointer we pass out won't move as long as you properly root
+    // it.
+    if (!ArrayBufferObject::ensureNonInline(cx, buffer)) {
+      return false;
+    }
+    *dataPointer = buffer->dataPointerEither();
+    *byteLength = buffer->byteLength();
     return true;
   }
 
-  if (object->is<SharedArrayBufferObject>()) {
+  if (allowShared && object->is<SharedArrayBufferObject>()) {
     SharedArrayBufferObject& buffer = object->as<SharedArrayBufferObject>();
+    if (!allowResizable && buffer.isResizable()) {
+      return false;
+    }
+    // This will always be locked and out of line.
     *dataPointer = buffer.dataPointerShared();
     *byteLength = buffer.byteLength();
     return true;

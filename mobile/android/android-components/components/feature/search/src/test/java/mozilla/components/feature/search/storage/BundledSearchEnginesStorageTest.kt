@@ -204,7 +204,7 @@ class BundledSearchEnginesStorageTest {
         )
 
         assertEquals(
-            listOf("google-b-vv", "bing", "ddg", "ebay", "wikipedia"),
+            listOf("google-b-vv", "bing-vivo", "ddg", "ebay", "wikipedia"),
             searchEngines,
         )
     }
@@ -221,7 +221,7 @@ class BundledSearchEnginesStorageTest {
         assertEquals(
             listOf(
                 "google-b-vv",
-                "bing",
+                "bing-vivo",
                 "ddg",
                 "ecosia",
                 "qwant",
@@ -242,7 +242,7 @@ class BundledSearchEnginesStorageTest {
         )
 
         assertEquals(
-            listOf("google-b-vv", "bing", "ddg", "wikipedia-es", "ebay-es"),
+            listOf("google-b-vv", "bing-vivo", "ddg", "wikipedia-es", "ebay-es"),
             searchEngines,
         )
     }
@@ -257,7 +257,7 @@ class BundledSearchEnginesStorageTest {
         )
 
         assertEquals(
-            listOf("google-b-vv", "bing", "ddg", "wikipedia-it", "ebay-it"),
+            listOf("google-b-vv", "bing-vivo", "ddg", "wikipedia-it", "ebay-it"),
             searchEngines,
         )
     }
@@ -274,7 +274,7 @@ class BundledSearchEnginesStorageTest {
         assertEquals(
             listOf(
                 "google-b-vv",
-                "bing",
+                "bing-vivo",
                 "ddg",
                 "ecosia",
                 "qwant",
@@ -297,7 +297,7 @@ class BundledSearchEnginesStorageTest {
         assertEquals(
             listOf(
                 "google-b-vv",
-                "bing",
+                "bing-vivo",
                 "ddg",
                 "qwant",
                 "wikipedia-fr",
@@ -319,7 +319,7 @@ class BundledSearchEnginesStorageTest {
         assertEquals(
             listOf(
                 "google-b-vv",
-                "bing",
+                "bing-vivo",
                 "ddg",
                 "mercadolibre-mx",
                 "wikipedia-es",
@@ -338,7 +338,7 @@ class BundledSearchEnginesStorageTest {
         )
 
         assertEquals(
-            listOf("google-b-vv", "bing", "ddg", "wikipedia"),
+            listOf("google-b-vv", "bing-vivo", "ddg", "wikipedia"),
             searchEngines,
         )
     }
@@ -353,7 +353,7 @@ class BundledSearchEnginesStorageTest {
         )
 
         assertEquals(
-            listOf("google-b-vv", "bing", "ddg", "wikipedia"),
+            listOf("google-b-vv", "bing-vivo", "ddg", "wikipedia"),
             searchEngines,
         )
     }
@@ -517,7 +517,7 @@ class BundledSearchEnginesStorageTest {
         )
 
         assertEquals(
-            listOf("google-b-tf", "bing", "ddg", "ebay", "wikipedia"),
+            listOf("google-b-tf", "bing-dt-tele", "ddg", "ebay", "wikipedia"),
             searchEngines,
         )
     }
@@ -534,7 +534,7 @@ class BundledSearchEnginesStorageTest {
         assertEquals(
             listOf(
                 "google-b-tf",
-                "bing",
+                "bing-dt-tele",
                 "ddg",
                 "ecosia",
                 "qwant",
@@ -555,7 +555,7 @@ class BundledSearchEnginesStorageTest {
         )
 
         assertEquals(
-            listOf("google-b-tf", "bing", "ddg", "wikipedia-es", "ebay-es"),
+            listOf("google-b-tf", "bing-dt-tele", "ddg", "wikipedia-es", "ebay-es"),
             searchEngines,
         )
     }
@@ -570,7 +570,7 @@ class BundledSearchEnginesStorageTest {
         )
 
         assertEquals(
-            listOf("google-b-tf", "bing", "ddg", "wikipedia-it", "ebay-it"),
+            listOf("google-b-tf", "bing-dt-tele", "ddg", "wikipedia-it", "ebay-it"),
             searchEngines,
         )
     }
@@ -587,7 +587,7 @@ class BundledSearchEnginesStorageTest {
         assertEquals(
             listOf(
                 "google-b-tf",
-                "bing",
+                "bing-dt-tele",
                 "ddg",
                 "ecosia",
                 "qwant",
@@ -610,7 +610,7 @@ class BundledSearchEnginesStorageTest {
         assertEquals(
             listOf(
                 "google-b-tf",
-                "bing",
+                "bing-dt-tele",
                 "ddg",
                 "qwant",
                 "wikipedia-fr",
@@ -632,7 +632,7 @@ class BundledSearchEnginesStorageTest {
         assertEquals(
             listOf(
                 "google-b-tf",
-                "bing",
+                "bing-dt-tele",
                 "ddg",
                 "mercadolibre-mx",
                 "wikipedia-es",
@@ -651,7 +651,7 @@ class BundledSearchEnginesStorageTest {
         )
 
         assertEquals(
-            listOf("google-b-tf", "bing", "ddg", "wikipedia"),
+            listOf("google-b-tf", "bing-dt-tele", "ddg", "wikipedia"),
             searchEngines,
         )
     }
@@ -666,7 +666,7 @@ class BundledSearchEnginesStorageTest {
         )
 
         assertEquals(
-            listOf("google-b-tf", "bing", "ddg", "wikipedia"),
+            listOf("google-b-tf", "bing-dt-tele", "ddg", "wikipedia"),
             searchEngines,
         )
     }
@@ -697,6 +697,394 @@ class BundledSearchEnginesStorageTest {
 
         assertEquals(
             listOf("google-b-tf", "ddg", "wikipedia-ru"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-002 distributions in US`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "US",
+            localeLang = "en",
+            localeCountry = "US",
+            distribution = "dt-002",
+        )
+
+        assertEquals(
+            listOf("google-b-1-dt", "bing", "ddg", "ebay", "wikipedia"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-002 distributions in Austria`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "AT",
+            localeLang = "de",
+            localeCountry = "AT",
+            distribution = "dt-002",
+        )
+
+        assertEquals(
+            listOf(
+                "google-b-1-dt",
+                "bing",
+                "ddg",
+                "ecosia",
+                "qwant",
+                "wikipedia-de",
+                "ebay-at",
+            ),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-002 distributions in Spain`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "ES",
+            localeLang = "es",
+            localeCountry = "ES",
+            distribution = "dt-002",
+        )
+
+        assertEquals(
+            listOf("google-b-1-dt", "bing", "ddg", "wikipedia-es", "ebay-es"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-002 distributions in Italy`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "IT",
+            localeLang = "it",
+            localeCountry = "IT",
+            distribution = "dt-002",
+        )
+
+        assertEquals(
+            listOf("google-b-1-dt", "bing", "ddg", "wikipedia-it", "ebay-it"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-002 distributions in Germany`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "DE",
+            localeLang = "de",
+            localeCountry = "DE",
+            distribution = "dt-002",
+        )
+
+        assertEquals(
+            listOf(
+                "google-b-1-dt",
+                "bing",
+                "ddg",
+                "ecosia",
+                "qwant",
+                "wikipedia-de",
+                "ebay-de",
+            ),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-002 distributions in France`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "FR",
+            localeLang = "fr",
+            localeCountry = "FR",
+            distribution = "dt-002",
+        )
+
+        assertEquals(
+            listOf(
+                "google-b-1-dt",
+                "bing",
+                "ddg",
+                "qwant",
+                "wikipedia-fr",
+                "ebay-fr",
+            ),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-002 distributions in Mexico`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "MX",
+            localeLang = "es",
+            localeCountry = "MX",
+            distribution = "dt-002",
+        )
+
+        assertEquals(
+            listOf(
+                "google-b-1-dt",
+                "bing",
+                "ddg",
+                "mercadolibre-mx",
+                "wikipedia-es",
+            ),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-002 distributions in Colombia`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "CO",
+            localeLang = "es",
+            localeCountry = "CO",
+            distribution = "dt-002",
+        )
+
+        assertEquals(
+            listOf("google-b-1-dt", "bing", "ddg", "wikipedia"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-002 distributions in an unknown country and language`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "MEEP",
+            localeLang = "beepbeep",
+            localeCountry = "MEEP",
+            distribution = "dt-002",
+        )
+
+        assertEquals(
+            listOf("google-b-1-dt", "bing", "ddg", "wikipedia"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-002 distributions in Russia in russian`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "RU",
+            localeLang = "ru",
+            localeCountry = "RU",
+            distribution = "dt-002",
+        )
+
+        assertEquals(
+            listOf("google-com-nocodes", "ddg", "wikipedia-ru"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-002 distributions in USA in russian`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "US",
+            localeLang = "ru",
+            localeCountry = "US",
+            distribution = "dt-002",
+        )
+
+        assertEquals(
+            listOf("google-b-1-dt", "ddg", "wikipedia-ru"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-003 distributions in US`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "US",
+            localeLang = "en",
+            localeCountry = "US",
+            distribution = "dt-003",
+        )
+
+        assertEquals(
+            listOf("google-b-dt", "bing", "ddg", "ebay", "wikipedia"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-003 distributions in Austria`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "AT",
+            localeLang = "de",
+            localeCountry = "AT",
+            distribution = "dt-003",
+        )
+
+        assertEquals(
+            listOf(
+                "google-b-dt",
+                "bing",
+                "ddg",
+                "ecosia",
+                "qwant",
+                "wikipedia-de",
+                "ebay-at",
+            ),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-003 distributions in Spain`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "ES",
+            localeLang = "es",
+            localeCountry = "ES",
+            distribution = "dt-003",
+        )
+
+        assertEquals(
+            listOf("google-b-dt", "bing", "ddg", "wikipedia-es", "ebay-es"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-003 distributions in Italy`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "IT",
+            localeLang = "it",
+            localeCountry = "IT",
+            distribution = "dt-003",
+        )
+
+        assertEquals(
+            listOf("google-b-dt", "bing", "ddg", "wikipedia-it", "ebay-it"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-003 distributions in Germany`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "DE",
+            localeLang = "de",
+            localeCountry = "DE",
+            distribution = "dt-003",
+        )
+
+        assertEquals(
+            listOf(
+                "google-b-dt",
+                "bing",
+                "ddg",
+                "ecosia",
+                "qwant",
+                "wikipedia-de",
+                "ebay-de",
+            ),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-003 distributions in France`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "FR",
+            localeLang = "fr",
+            localeCountry = "FR",
+            distribution = "dt-003",
+        )
+
+        assertEquals(
+            listOf(
+                "google-b-dt",
+                "bing",
+                "ddg",
+                "qwant",
+                "wikipedia-fr",
+                "ebay-fr",
+            ),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-003 distributions in Mexico`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "MX",
+            localeLang = "es",
+            localeCountry = "MX",
+            distribution = "dt-003",
+        )
+
+        assertEquals(
+            listOf(
+                "google-b-dt",
+                "bing",
+                "ddg",
+                "mercadolibre-mx",
+                "wikipedia-es",
+            ),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-003 distributions in Colombia`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "CO",
+            localeLang = "es",
+            localeCountry = "CO",
+            distribution = "dt-003",
+        )
+
+        assertEquals(
+            listOf("google-b-dt", "bing", "ddg", "wikipedia"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-003 distributions in an unknown country and language`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "MEEP",
+            localeLang = "beepbeep",
+            localeCountry = "MEEP",
+            distribution = "dt-003",
+        )
+
+        assertEquals(
+            listOf("google-b-dt", "bing", "ddg", "wikipedia"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-003 distributions in Russia in russian`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "RU",
+            localeLang = "ru",
+            localeCountry = "RU",
+            distribution = "dt-003",
+        )
+
+        assertEquals(
+            listOf("google-com-nocodes", "ddg", "wikipedia-ru"),
+            searchEngines,
+        )
+    }
+
+    @Test
+    fun `Verify search engines for dt-003 distributions in USA in russian`() = runTest {
+        val searchEngines = loadSearchEngines(
+            region = "US",
+            localeLang = "ru",
+            localeCountry = "US",
+            distribution = "dt-003",
+        )
+
+        assertEquals(
+            listOf("google-b-dt", "ddg", "wikipedia-ru"),
             searchEngines,
         )
     }

@@ -2,14 +2,18 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-
-import json
 import logging
 import os
 import shutil
 import sys
 import time
 from collections import defaultdict
+
+try:
+    import orjson
+except ImportError:
+    orjson = None
+    import json
 
 import yaml
 from redo import retry
@@ -38,7 +42,7 @@ from .try_option_syntax import parse_message
 from .util.backstop import ANDROID_PERFTEST_BACKSTOP_INDEX, BACKSTOP_INDEX, is_backstop
 from .util.bugbug import push_schedules
 from .util.chunking import resolver
-from .util.hg import get_hg_commit_message, get_hg_revision_branch
+from .util.hg import get_hg_commit_message, get_hg_revision_branch, get_hg_revision_info
 from .util.partials import populate_release_history
 from .util.taskcluster import insert_index
 from .util.taskgraph import find_decision_task, find_existing_tasks_from_previous_kinds
@@ -92,9 +96,9 @@ PER_PROJECT_PARAMETERS = {
         "target_tasks_method": "mozilla_release_tasks",
         "release_type": "release",
     },
-    "mozilla-esr128": {
-        "target_tasks_method": "mozilla_esr128_tasks",
-        "release_type": "esr128",
+    "mozilla-esr140": {
+        "target_tasks_method": "mozilla_esr140_tasks",
+        "release_type": "esr140",
     },
     "pine": {
         "target_tasks_method": "pine_tasks",
@@ -118,6 +122,20 @@ PER_PROJECT_PARAMETERS = {
         "target_tasks_method": "default",
     },
 }
+
+
+def load_json(fh):
+    if orjson is not None:
+        return orjson.loads(fh.read())
+    else:
+        return json.load(fh)
+
+
+def dump_json(fh, data):
+    if orjson is not None:
+        fh.write(orjson.dumps(data))
+    else:
+        fh.write(json.dumps(data, separators=(",", ": ")).encode("utf-8"))
 
 
 def full_task_graph_to_runnable_jobs(full_task_json):
@@ -234,6 +252,7 @@ def taskgraph_decision(options, parameters=None):
     # cache run-task, misc/fetch-content & robustcheckout.py
     scripts_root_dir = os.path.join(GECKO, "taskcluster/scripts")
     run_task_file_path = os.path.join(scripts_root_dir, "run-task")
+    test_linux_file_path = os.path.join(scripts_root_dir, "tester", "test-linux.sh")
     fetch_content_file_path = os.path.join(
         GECKO,
         "third_party",
@@ -248,6 +267,7 @@ def taskgraph_decision(options, parameters=None):
         "testing/mozharness/external_tools/robustcheckout.py",
     )
     shutil.copy2(run_task_file_path, ARTIFACTS_DIR)
+    shutil.copy2(test_linux_file_path, ARTIFACTS_DIR)
     shutil.copy2(fetch_content_file_path, ARTIFACTS_DIR)
     shutil.copy2(robustcheckout_path, ARTIFACTS_DIR)
 
@@ -310,6 +330,11 @@ def get_decision_parameters(graph_config, options):
         env_prefix=_get_env_prefix(graph_config),
     )
 
+    if head_git_rev := get_hg_revision_info(
+        GECKO, revision=parameters["head_rev"], info="extras.git_commit"
+    ):
+        parameters["head_git_rev"] = head_git_rev
+
     # Define default filter list, as most configurations shouldn't need
     # custom filters.
     parameters["filters"] = [
@@ -365,9 +390,9 @@ def get_decision_parameters(graph_config, options):
         parameters.update(PER_PROJECT_PARAMETERS[project])
     except KeyError:
         logger.warning(
-            "using default project parameters; add {} to "
-            "PER_PROJECT_PARAMETERS in {} to customize behavior "
-            "for this project".format(project, __file__)
+            f"using default project parameters; add {project} to "
+            f"PER_PROJECT_PARAMETERS in {__file__} to customize behavior "
+            "for this project"
         )
         parameters.update(PER_PROJECT_PARAMETERS["default"])
 
@@ -452,8 +477,8 @@ def get_existing_tasks(rebuild_kinds, parameters, graph_config):
 def set_try_config(parameters, task_config_file):
     if os.path.isfile(task_config_file):
         logger.info(f"using try tasks from {task_config_file}")
-        with open(task_config_file) as fh:
-            task_config = json.load(fh)
+        with open(task_config_file, "rb") as fh:
+            task_config = load_json(fh)
         task_config_version = task_config.pop("version", 1)
         if task_config_version == 1:
             parameters["try_mode"] = "try_task_config"
@@ -500,13 +525,13 @@ def write_artifact(filename, data):
         with open(path, "w") as f:
             yaml.safe_dump(data, f, allow_unicode=True, default_flow_style=False)
     elif filename.endswith(".json"):
-        with open(path, "w") as f:
-            json.dump(data, f, sort_keys=True, indent=2, separators=(",", ": "))
+        with open(path, "wb") as f:
+            dump_json(f, data)
     elif filename.endswith(".json.gz"):
         import gzip
 
         with gzip.open(path, "wb") as f:
-            f.write(json.dumps(data).encode("utf-8"))
+            dump_json(f, data)
     else:
         raise TypeError(f"Don't know how to write to {filename}")
 
@@ -516,13 +541,13 @@ def read_artifact(filename):
     if filename.endswith(".yml"):
         return load_yaml(path, filename)
     if filename.endswith(".json"):
-        with open(path) as f:
-            return json.load(f)
+        with open(path, "rb") as f:
+            return load_json(f)
     if filename.endswith(".json.gz"):
         import gzip
 
         with gzip.open(path, "rb") as f:
-            return json.load(f.decode("utf-8"))
+            return load_json(f)
     else:
         raise TypeError(f"Don't know how to read {filename}")
 

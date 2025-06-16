@@ -317,6 +317,7 @@ std::pair<sRGBColor, sRGBColor> Theme::ComputeButtonColors(
     return aColors.SystemNs(StyleSystemColor::Buttonface);
   }();
 
+  // TODO(emilio): This should probably use Buttonborder or something?
   const sRGBColor borderColor =
       ComputeBorderColor(aState, aColors, OutlineCoversBorder::Yes);
   return std::make_pair(sRGBColor::FromABGR(backgroundColor), borderColor);
@@ -1042,16 +1043,13 @@ void Theme::PaintButton(PaintBackendData& aPaintData,
   }
 }
 
-NS_IMETHODIMP
-Theme::DrawWidgetBackground(gfxContext* aContext, nsIFrame* aFrame,
-                            StyleAppearance aAppearance, const nsRect& aRect,
-                            const nsRect& /* aDirtyRect */,
-                            DrawOverflow aDrawOverflow) {
-  if (!DoDrawWidgetBackground(*aContext->GetDrawTarget(), aFrame, aAppearance,
-                              aRect, aDrawOverflow)) {
-    return NS_ERROR_NOT_IMPLEMENTED;
-  }
-  return NS_OK;
+void Theme::DrawWidgetBackground(gfxContext* aContext, nsIFrame* aFrame,
+                                 StyleAppearance aAppearance,
+                                 const nsRect& aRect,
+                                 const nsRect& /* aDirtyRect */,
+                                 DrawOverflow aDrawOverflow) {
+  DoDrawWidgetBackground(*aContext->GetDrawTarget(), aFrame, aAppearance, aRect,
+                         aDrawOverflow);
 }
 
 bool Theme::CreateWebRenderCommandsForWidget(
@@ -1171,7 +1169,6 @@ bool Theme::DoDrawWidgetBackground(PaintBackendData& aPaintData,
     case StyleAppearance::Listbox:
       PaintListbox(aPaintData, devPxRect, elementState, colors, dpiRatio);
       break;
-    case StyleAppearance::MenulistButton:
     case StyleAppearance::Menulist:
       PaintMenulist(aPaintData, devPxRect, elementState, colors, dpiRatio);
       break;
@@ -1415,9 +1412,9 @@ LayoutDeviceIntMargin Theme::GetWidgetBorder(nsDeviceContext* aContext,
     case StyleAppearance::PasswordInput:
     case StyleAppearance::Listbox:
     case StyleAppearance::Menulist:
-    case StyleAppearance::MenulistButton:
     case StyleAppearance::Button:
     case StyleAppearance::Toolbarbutton:
+    case StyleAppearance::ProgressBar:
       // Return the border size from the UA sheet, even though what we paint
       // doesn't actually match that. We know this is the UA sheet border
       // because we disable native theming when different border widths are
@@ -1475,7 +1472,6 @@ bool Theme::GetWidgetOverflow(nsDeviceContext* aContext, nsIFrame* aFrame,
     case StyleAppearance::PasswordInput:
       outlineOffset = -kTextFieldBorderWidth;
       break;
-    case StyleAppearance::MenulistButton:
     case StyleAppearance::Menulist:
     case StyleAppearance::Button:
     case StyleAppearance::Toolbarbutton:
@@ -1589,9 +1585,6 @@ bool Theme::WidgetAttributeChangeRequiresRepaint(StyleAppearance aAppearance,
          aAttribute == nsGkAtoms::_default || aAttribute == nsGkAtoms::open;
 }
 
-NS_IMETHODIMP
-Theme::ThemeChanged() { return NS_OK; }
-
 bool Theme::WidgetAppearanceDependsOnWindowFocus(StyleAppearance aAppearance) {
   return IsWidgetScrollbarPart(aAppearance);
 }
@@ -1628,7 +1621,6 @@ bool Theme::ThemeSupportsWidget(nsPresContext* aPresContext, nsIFrame* aFrame,
     case StyleAppearance::Toolbarbutton:
     case StyleAppearance::Listbox:
     case StyleAppearance::Menulist:
-    case StyleAppearance::MenulistButton:
     case StyleAppearance::NumberInput:
     case StyleAppearance::PasswordInput:
     case StyleAppearance::MozMenulistArrowButton:

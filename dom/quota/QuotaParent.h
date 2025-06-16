@@ -68,6 +68,9 @@ class Quota final : public PQuotaParent {
   virtual mozilla::ipc::IPCResult RecvInitializePersistentStorage(
       InitializePersistentStorageResolver&& aResolver) override;
 
+  virtual mozilla::ipc::IPCResult RecvInitializeAllTemporaryOrigins(
+      InitializeAllTemporaryOriginsResolver&& aResolver) override;
+
   virtual mozilla::ipc::IPCResult RecvInitializeTemporaryGroup(
       const PrincipalInfo& aPrincipalInfo,
       InitializeTemporaryGroupResolver&& aResolve) override;
@@ -88,6 +91,7 @@ class Quota final : public PQuotaParent {
   virtual mozilla::ipc::IPCResult RecvInitializeTemporaryClient(
       const PersistenceType& aPersistenceType,
       const PrincipalInfo& aPrincipalInfo, const Type& aClientType,
+      const bool& aCreateIfNonExistent,
       InitializeTemporaryClientResolver&& aResolve) override;
 
   virtual mozilla::ipc::IPCResult RecvInitializeTemporaryStorage(

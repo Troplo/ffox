@@ -36,20 +36,29 @@ data class WebCompatReporterState(
      * @property displayStringId The string ID corresponding to the reason.
      */
     enum class BrokenSiteReason(@StringRes val displayStringId: Int) {
+        Load(
+            displayStringId = R.string.webcompat_reporter_reason_load,
+        ),
+        Checkout(
+            displayStringId = R.string.webcompat_reporter_reason_checkout,
+        ),
         Slow(
-            displayStringId = R.string.webcompat_reporter_reason_slow,
+            displayStringId = R.string.webcompat_reporter_reason_slow2,
         ),
         Media(
-            displayStringId = R.string.webcompat_reporter_reason_media,
+            displayStringId = R.string.webcompat_reporter_reason_media2,
         ),
         Content(
-            displayStringId = R.string.webcompat_reporter_reason_content,
+            displayStringId = R.string.webcompat_reporter_reason_content2,
         ),
         Account(
-            displayStringId = R.string.webcompat_reporter_reason_account,
+            displayStringId = R.string.webcompat_reporter_reason_account2,
         ),
         AdBlocker(
-            displayStringId = R.string.webcompat_reporter_reason_ad_blocker,
+            displayStringId = R.string.webcompat_reporter_reason_turn_off_adblocker,
+        ),
+        NotSupported(
+            displayStringId = R.string.webcompat_reporter_reason_notsupported,
         ),
         Other(
             displayStringId = R.string.webcompat_reporter_reason_other,
@@ -127,9 +136,14 @@ sealed class WebCompatReporterAction : Action {
     data object ReportSubmitted : WebCompatReporterAction(), NavigationAction
 
     /**
+     * Dispatched when the WebCompat "Send More Info" report has been submitted.
+     */
+    data object SendMoreInfoSubmitted : WebCompatReporterAction(), NavigationAction
+
+    /**
      * Dispatched when the user requests to send more info.
      */
-    data object SendMoreInfoClicked : WebCompatReporterAction(), WebCompatReporterStorageAction, NavigationAction
+    data object SendMoreInfoClicked : WebCompatReporterAction(), WebCompatReporterStorageAction
 
     /**
      * Dispatched when the user requests to cancel the report.
@@ -160,6 +174,7 @@ private fun reduce(
     is WebCompatReporterAction.StateRestored -> action.restoredState
     is WebCompatReporterAction.NavigationAction -> state
     is WebCompatReporterAction.SendReportClicked -> state
+    WebCompatReporterAction.SendMoreInfoClicked -> state
 }
 
 /**

@@ -69,6 +69,9 @@ document.addEventListener(
         case "context-copylink":
           gContextMenu.copyLink();
           break;
+        case "context-previewlink":
+          gContextMenu.previewLink();
+          break;
         case "context-stripOnShareLink":
           gContextMenu.copyStrippedLink();
           break;
@@ -213,7 +216,16 @@ document.addEventListener(
           gContextMenu.takeScreenshot();
           break;
         case "context-keywordfield":
-          AddKeywordForSearchField();
+          if (!gContextMenu) {
+            throw new Error("Context menu doesn't seem to be open.");
+          }
+          gContextMenu.addKeywordForSearchField();
+          break;
+        case "context-add-engine":
+          if (!gContextMenu) {
+            throw new Error("Context menu doesn't seem to be open.");
+          }
+          gContextMenu.addSearchFieldAsEngine().catch(console.error);
           break;
         case "context-searchselect": {
           let { searchTerms, usePrivate, principal, csp } = event.target;

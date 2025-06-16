@@ -6,9 +6,15 @@ package org.mozilla.fenix.webcompat.middleware
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import mozilla.components.browser.state.state.BrowserState
+import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.lib.state.Middleware
 import mozilla.components.lib.state.MiddlewareContext
+import mozilla.components.support.base.log.logger.Logger
+import org.json.JSONObject
 import org.mozilla.fenix.GleanMetrics.BrokenSiteReport
+import org.mozilla.fenix.GleanMetrics.BrokenSiteReportBrowserInfo
 import org.mozilla.fenix.GleanMetrics.BrokenSiteReportBrowserInfoApp
 import org.mozilla.fenix.GleanMetrics.BrokenSiteReportBrowserInfoGraphics
 import org.mozilla.fenix.GleanMetrics.BrokenSiteReportBrowserInfoPrefs
@@ -26,14 +32,18 @@ import org.mozilla.fenix.webcompat.store.WebCompatReporterState
  * [Middleware] that reacts to submission related [WebCompatReporterAction]s.
  *
  * @param appStore [AppStore] used to dispatch [AppAction]s.
+ * @param browserStore [BrowserStore] used to access [BrowserState].
  * @param webCompatReporterRetrievalService The service that handles submission requests.
  * @param scope The [CoroutineScope] for launching coroutines.
  */
 class WebCompatReporterSubmissionMiddleware(
     private val appStore: AppStore,
+    private val browserStore: BrowserStore,
     private val webCompatReporterRetrievalService: WebCompatReporterRetrievalService,
     private val scope: CoroutineScope,
 ) : Middleware<WebCompatReporterState, WebCompatReporterAction> {
+
+    private val logger = Logger("WebCompatReporterSubmissionMiddleware")
 
     override fun invoke(
         context: MiddlewareContext<WebCompatReporterState, WebCompatReporterAction>,
@@ -67,6 +77,44 @@ class WebCompatReporterSubmissionMiddleware(
                     appStore.dispatch(AppAction.WebCompatAction.WebCompatReportSent)
                 }
             }
+            is WebCompatReporterAction.SendMoreInfoClicked -> {
+                scope.launch {
+                    val selectedTabId = browserStore.state.selectedTabId
+                    val selectedTab = browserStore.state.tabs.find { it.id == selectedTabId }
+                    val engineSession = selectedTab?.engineState?.engineSession
+
+                    val webCompatInfo = webCompatReporterRetrievalService.retrieveInfo()
+                    webCompatInfo?.let {
+                        val json = Json
+                        val info = JSONObject().apply {
+                            put("reason", context.state.reason)
+                            put("description", context.state.problemDescription)
+                            put("endpointUrl", "https://webcompat.com/issues/new")
+                            put("reportUrl", context.state.enteredUrl)
+                            put(
+                                "reporterConfig",
+                                JSONObject().apply {
+                                    put("src", "android-components-reporter")
+                                    put("utm_campaign", "report-site-issue-button")
+                                    put("utm_source", "android-components-reporter")
+                                },
+                            )
+                            put("webcompatInfo", JSONObject(json.encodeToString(webCompatInfo)))
+                        }
+
+                        engineSession?.sendMoreWebCompatInfo(
+                            info = info,
+                            onResult = {
+                                logger.debug("SendMoreWebCompatInfo succeeded")
+                            },
+                            onException = {
+                                logger.error("Error with SendMoreWebCompatInfo", it)
+                            },
+                        )
+                    }
+                    context.store.dispatch(WebCompatReporterAction.SendMoreInfoSubmitted)
+                }
+            }
             else -> {}
         }
     }
@@ -74,6 +122,7 @@ class WebCompatReporterSubmissionMiddleware(
     private fun setTabAntiTrackingMetrics(antiTracking: WebCompatInfoDto.WebCompatAntiTrackingDto) {
         BrokenSiteReportTabInfoAntitracking.blockList.set(antiTracking.blockList)
         BrokenSiteReportTabInfoAntitracking.btpHasPurgedSite.set(antiTracking.btpHasPurgedSite)
+        BrokenSiteReportTabInfoAntitracking.etpCategory.set(antiTracking.etpCategory)
         BrokenSiteReportTabInfoAntitracking.hasMixedActiveContentBlocked.set(
             antiTracking.hasMixedActiveContentBlocked,
         )
@@ -87,6 +136,31 @@ class WebCompatReporterSubmissionMiddleware(
     }
 
     private fun setBrowserInfoMetrics(browserInfo: WebCompatInfoDto.WebCompatBrowserDto) {
+        val addons = BrokenSiteReportBrowserInfo.AddonsObject()
+        for (addon in browserInfo.addons) {
+            addons.add(
+                BrokenSiteReportBrowserInfo.AddonsObjectItem(
+                    id = addon.id,
+                    name = addon.name,
+                    temporary = addon.temporary,
+                    version = addon.version,
+                ),
+            )
+        }
+        BrokenSiteReportBrowserInfo.addons.set(addons)
+
+        val experiments = BrokenSiteReportBrowserInfo.ExperimentsObject()
+        for (experiment in browserInfo.experiments) {
+            experiments.add(
+                BrokenSiteReportBrowserInfo.ExperimentsObjectItem(
+                    branch = experiment.branch,
+                    slug = experiment.slug,
+                    kind = experiment.kind,
+                ),
+            )
+        }
+        BrokenSiteReportBrowserInfo.experiments.set(experiments)
+
         browserInfo.app?.let {
             BrokenSiteReportBrowserInfoApp.defaultUseragentString.set(it.defaultUserAgent)
         }
@@ -151,7 +225,7 @@ class WebCompatReporterSubmissionMiddleware(
 
     private fun setReasonMetrics(reason: WebCompatReporterState.BrokenSiteReason?) {
         reason?.let {
-            BrokenSiteReport.breakageCategory.set(reason.name)
+            BrokenSiteReport.breakageCategory.set(reason.name.lowercase())
         }
     }
 

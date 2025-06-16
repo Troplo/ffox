@@ -72,6 +72,20 @@ gcc-11.4.0:
         strip-components: 1
         add-prefix: gcc-source/
 
+gcc-14.2.0:
+    description: GCC 14.2.0 source code
+    fetch:
+        type: static-url
+        url: https://ftp.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.xz
+        sha256: a7b39bc69cbf9e25826c5a60ab26477001f7c08d85cec04bc0e29cabed6f3cc9
+        size: 92306460
+        gpg-signature:
+            sig-url: "{url}.sig"
+            key-path: build/unix/build-gcc/D3A93CAD751C2AF4F8C7AD516C35B99309B5FA62.key
+        artifact-name: gcc-source.tar.zst
+        strip-components: 1
+        add-prefix: gcc-source/
+
 gmp-6.1.0:
     description: GMP 6.1.0 source code
     fetch:
@@ -141,13 +155,13 @@ nasm-2.14.02:
         sha256: e24ade3e928f7253aa8c14aa44726d1edf3f98643f87c9d72ec1df44b26be8f5
         size: 827620
 
-nasm-2.15.05:
-    description: nasm 2.15.05 source code
+nasm-2.16.03:
+    description: nasm 2.16.03 source code
     fetch:
         type: static-url
-        url: https://www.nasm.us/pub/nasm/releasebuilds/2.15.05/nasm-2.15.05.tar.xz
-        sha256: 3caf6729c1073bf96629b57cee31eeb54f4f8129b01902c73428836550b30a3f
-        size: 995732
+        url: https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/nasm-2.16.03.tar.xz
+        sha256: 1412a1c760bbd05db026b6c0d1657affd6631cd0a63cddb6f73cc6d4aa616148
+        size: 1032388
 
 wix-3.14.0:
     description: wix 3.14.0 binary release
@@ -212,12 +226,19 @@ wine:
         strip-components: 1
         add-prefix: wine-source/
 
-cbindgen-0.26.0:
-    description: cbindgen source code
+cbindgen-0.27.0:
+    description: cbindgen 0.27 source code
     fetch:
         type: git
         repo: https://github.com/mozilla/cbindgen
-        revision: 703b53c06f9fe2dbc0193d67626558cfa84a0f62
+        revision: 58c6156b0d91e82abb03c26187b8d18fa4345ce0
+
+cbindgen:
+    description: cbindgen 0.28 source code
+    fetch:
+        type: git
+        repo: https://github.com/mozilla/cbindgen
+        revision: bd78bbe59b10eda6ef1255e4acda95c56c6d0279
 
 cctools-port:
     description: cctools-port source code
@@ -311,7 +332,7 @@ mingw-w64:
     fetch:
         type: git
         repo: https://git.code.sf.net/p/mingw-w64/mingw-w64
-        revision: 3346c0eb95c34e2ac0c5f157da8965ee292c64e8
+        revision: 2ca6f1348cab58b5b994fd5916ff57445ade22f8
 
 mingw-w64-trunk:
     description: mingw-w64 master branch source code
@@ -362,11 +383,11 @@ clang-19:
         revision: cd708029e0b2869e80abe31ddb175f7c35361f90
 
 clang-20:
-    description: clang 20.1.0-rc2 source code
+    description: clang 20.1.5 source code
     fetch:
         type: git
         repo: https://github.com/llvm/llvm-project
-        revision: 20621e2609ac49dcf01c4353dbfd69626cea3015
+        revision: 7b09d7b446383b71b63d429b21ee45ba389c5134
 
 clang-trunk:
     description: clang main branch source code
@@ -463,11 +484,11 @@ dump-syms:
         revision: ca31661882b190c97a6869c0add73b27000c92c5
 
 rust-minidump:
-    description: rust-minidump 0.23.0 source code (for minidump-stackwalk)
+    description: rust-minidump 0.25.0 source code (for minidump-stackwalk)
     fetch:
         type: git
         repo: https://github.com/rust-minidump/rust-minidump/
-        revision: fdb2c98a659a54b0077e5bad7f7dfa28a55c5f1d
+        revision: 4bc0e1bb3a19f22d5b7c4057112197ac5f6ea2d9
 
 fix-stacks:
     description: fix-stacks source code
@@ -519,9 +540,9 @@ jdk-8-linux64:
     description: Java 8 JDK
     fetch:
         type: static-url
-        url: https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u442-b06/OpenJDK8U-jdk_x64_linux_hotspot_8u442b06.tar.gz
-        sha256: 5b0a0145e7790552a9c8767b4680074c4628ec276e5bb278b61d85cf90facafa
-        size: 103096556
+        url: https://github.com/adoptium/temurin8-binaries/releases/download/jdk8u452-b09/OpenJDK8U-jdk_x64_linux_hotspot_8u452b09.tar.gz
+        sha256: 9448308a21841960a591b47927cf2d44fdc4c0533a5f8111a4b243a6bafb5d27
+        size: 103082903
         artifact-name: jdk-8.tar.zst
         strip-components: 1
         add-prefix: jdk-8/
@@ -544,68 +565,68 @@ nodejs-12-linux64:
         strip-components: 1
         add-prefix: node/
 
-nodejs-18-linux64-arm64:
-    description: nodejs 18 for arm64 linux
+nodejs-22-linux64-arm64:
+    description: nodejs 22 for arm64 linux
     fetch:
         type: static-url
-        url: https://nodejs.org/dist/v18.19.0/node-v18.19.0-linux-arm64.tar.xz
-        sha256: cf94ab72e45b855257545fec1c017bdf30a9e23611561382eaf64576b999e72d
-        size: 23403368
+        url: https://nodejs.org/dist/v22.15.1/node-v22.15.1-linux-arm64.tar.xz
+        sha256: f4ae8ddf7487dfaf7da92fef463ee55cc29d8772d62891361dc3fc8b8e469205
+        size: 28770908
         artifact-name: nodejs.tar.zst
         strip-components: 1
         add-prefix: node/
 
-nodejs-18-macosx64:
-    description: nodejs 18 for x64 macOS
+nodejs-22-macosx64:
+    description: nodejs 22 for x64 macOS
     fetch:
         type: static-url
-        url: https://nodejs.org/dist/v18.19.0/node-v18.19.0-darwin-x64.tar.xz
-        sha256: 4f60b40071c6a67482b99d22a5265839177b8706a2b13b493396f368f0b42b00
-        size: 22496376
+        url: https://nodejs.org/dist/v22.15.1/node-v22.15.1-darwin-x64.tar.xz
+        sha256: 4f7f6dd674ffa4935dba358fe503a396347d918603e3c9657ce586280c702f61
+        size: 26577956
         artifact-name: nodejs.tar.zst
         strip-components: 1
         add-prefix: node/
 
-nodejs-18-macosx64-arm64:
-    description: nodejs 18 for arm64 macOS
+nodejs-22-macosx64-arm64:
+    description: nodejs 22 for arm64 macOS
     fetch:
         type: static-url
-        url: https://nodejs.org/dist/v18.19.0/node-v18.19.0-darwin-arm64.tar.xz
-        sha256: 857885257c586fb13c93d33d326ca82056ba8b7445ce27cf34dd406add04158e
-        size: 20768464
+        url: https://nodejs.org/dist/v22.15.1/node-v22.15.1-darwin-arm64.tar.xz
+        sha256: da2ce4f4616f5adae82de433481e00af86c7e6624a07e5a3c3fdaa1d8a6028fa
+        size: 24580512
         artifact-name: nodejs.tar.zst
         strip-components: 1
         add-prefix: node/
 
-nodejs-18-win32:
-    description: nodejs 18 for x86 Windows
+nodejs-22-win32:
+    description: nodejs 22 for x86 Windows
     fetch:
         type: static-url
-        url: https://nodejs.org/dist/v18.19.0/node-v18.19.0-win-x86.zip
-        sha256: 3171148f735954bdca8adccb2200379e61142e0f5a2bdb4ca6432afb0d9951df
-        size: 27504941
+        url: https://nodejs.org/dist/v22.15.1/node-v22.15.1-win-x86.zip
+        sha256: dd432043e8c90b7f221bd3ba8e6443fb69e7b8273049fad0669a3a7d66939985
+        size: 32541587
         artifact-name: nodejs.tar.zst
         strip-components: 1
         add-prefix: node/
 
-nodejs-18-win64:
-    description: nodejs 18 for x64 Windows
+nodejs-22-win64:
+    description: nodejs 22 for x64 Windows
     fetch:
         type: static-url
-        url: https://nodejs.org/dist/v18.19.0/node-v18.19.0-win-x64.zip
-        sha256: 5311913d45e1fcc3643c58d1e3926eb85437b180f025fe5857413c9f02403645
-        size: 29332158
+        url: https://nodejs.org/dist/v22.15.1/node-v22.15.1-win-x64.zip
+        sha256: 7c7997d6ef2efd9525a54b033fc0be6f22549a5905f5da6573a41e61a436a1b5
+        size: 35136406
         artifact-name: nodejs.tar.zst
         strip-components: 1
         add-prefix: node/
 
-nodejs-18-source:
-    description: nodejs 18 source
+nodejs-22-source:
+    description: nodejs 22 source
     fetch:
         type: static-url
-        url: https://nodejs.org/dist/v18.19.0/node-v18.19.0.tar.xz
-        sha256: f52b41af20596a9abd8ed75241837ec43945468221448bbf841361e2091819b6
-        size: 41248748
+        url: https://nodejs.org/dist/v22.11.0/node-v22.11.0.tar.gz
+        sha256: 24e5130fa7bc1eaab218a0c9cb05e03168fa381bb9e3babddc6a11f655799222
+        size: 96927828
         artifact-name: nodejs.tar.zst
         strip-components: 1
         add-prefix: node/
@@ -658,7 +679,7 @@ symbol-scrapers:
     fetch:
         type: git
         repo: https://github.com/mozilla/symbol-scrapers
-        revision: 04f906fe8585b31d03d8baf6044a01654808c96a
+        revision: c43ef4e27d54f1d548dacea1bc2fbcb16c2fb288
 
 xz-5.4.4:
     description: xz 5.4.4 source code
@@ -770,4 +791,4 @@ dxc-src:
     fetch:
         type: git
         repo: https://github.com/FirefoxGraphics/DirectXShaderCompiler
-        revision: c75bb05c0e040bc09ec012ccf9767b1ec622477f
+        revision: 81378be83a1690cac0e727941e1a963518d67c26

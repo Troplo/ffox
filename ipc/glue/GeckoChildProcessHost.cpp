@@ -15,7 +15,6 @@
 #include "chrome/common/process_watcher.h"
 #ifdef XP_DARWIN
 #  include <mach/mach_traps.h>
-#  include "SharedMemory.h"
 #  include "base/rand_util.h"
 #  include "chrome/common/mach_ipc_mac.h"
 #  include "mozilla/StaticPrefs_media.h"
@@ -39,8 +38,6 @@
 #  include "nsAppDirectoryServiceDefs.h"
 #endif
 
-#include <sys/stat.h>
-
 #include "ProtocolUtils.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/Logging.h"
@@ -53,7 +50,7 @@
 #include "mozilla/StaticMutex.h"
 #include "mozilla/TaskQueue.h"
 #include "mozilla/glean/DomMetrics.h"
-#include "mozilla/Telemetry.h"
+#include "mozilla/glean/IpcMetrics.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/ipc/IOThread.h"
 #include "mozilla/ipc/EnvironmentMap.h"
@@ -443,14 +440,7 @@ GeckoChildProcessHost::~GeckoChildProcessHost() {
 #endif
 
     if (mChildProcessHandle != 0) {
-      ProcessWatcher::EnsureProcessTerminated(
-          mChildProcessHandle
-#ifdef NS_FREE_PERMANENT_DATA
-          // If we're doing leak logging, shutdown can be slow.
-          ,
-          false  // don't "force"
-#endif
-      );
+      ProcessWatcher::EnsureProcessTerminated(mChildProcessHandle);
       mChildProcessHandle = 0;
     }
   }
@@ -499,6 +489,19 @@ void GeckoChildProcessHost::Destroy() {
 
   using Value = ProcessHandlePromise::ResolveOrRejectValue;
   mDestroying = true;
+
+  // Synchronously invoke `delete this` if we're already shutting the IO thread
+  // down to ensure we're cleaned up before the thread dies. This is safe as we
+  // can never resolve `mHandlePromise` after the IO thread goes away.
+  MessageLoop* loop = MessageLoop::current();
+  if (loop && MessageLoop::TYPE_IO == loop->type() &&
+      !loop->IsAcceptingTasks()) {
+    delete this;
+    return;
+  }
+
+  // If we're not in shutdown, do this async, as we may still be waiting for the
+  // child process PID from the launcher thread.
   whenReady->Then(XRE_GetAsyncIOEventTarget(), __func__,
                   [this](const Value&) { delete this; });
 }
@@ -612,10 +615,6 @@ void GeckoChildProcessHost::SetEnv(const char* aKey, const char* aValue) {
 
 bool GeckoChildProcessHost::PrepareLaunch(
     geckoargs::ChildProcessArgs& aExtraOpts) {
-  if (CrashReporter::GetEnabled()) {
-    CrashReporter::OOPInit();
-  }
-
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX)
   if (!SandboxLaunch::Configure(mProcessType, mSandbox, aExtraOpts,
                                 mLaunchOptions.get())) {
@@ -807,10 +806,10 @@ bool GeckoChildProcessHost::AsyncLaunch(
                     << XRE_GeckoProcessTypeToString(mProcessType)
                     << " subprocess @" << aError.FunctionName()
                     << " (Error:" << aError.ErrorCode() << ")";
-                Telemetry::Accumulate(
-                    Telemetry::SUBPROCESS_LAUNCH_FAILURE,
-                    nsDependentCString(
-                        XRE_GeckoProcessTypeToString(mProcessType)));
+                glean::subprocess::launch_failure
+                    .Get(nsDependentCString(
+                        XRE_GeckoProcessTypeToString(mProcessType)))
+                    .Add(1);
                 nsCString telemetryKey = nsPrintfCString(
 #if defined(XP_WIN)
                     "%s,0x%lx,%s",
@@ -1126,13 +1125,20 @@ Result<Ok, LaunchError> BaseProcessLauncher::DoSetup() {
 #if defined(MOZ_WIDGET_COCOA) || defined(XP_WIN)
     geckoargs::sCrashReporter.Put(CrashReporter::GetChildNotificationPipe(),
                                   mChildArgs);
-#elif defined(XP_UNIX)
+#elif defined(XP_UNIX) && !defined(XP_IOS)
     UniqueFileHandle childCrashFd = CrashReporter::GetChildNotificationPipe();
     if (!childCrashFd) {
       return Err(LaunchError("DuplicateFileHandle failed"));
     }
     geckoargs::sCrashReporter.Put(std::move(childCrashFd), mChildArgs);
-#endif
+
+#  if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
+    CrashReporter::ProcessId pid = CrashReporter::GetCrashHelperPid();
+    if (pid != base::kInvalidProcessId) {
+      geckoargs::sCrashHelperPid.Put(pid, mChildArgs);
+    }
+#  endif  // defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
+#endif    // XP_UNIX && !XP_IOS
   }
 
   return Ok();
@@ -1313,9 +1319,12 @@ Result<Ok, LaunchError> PosixProcessLauncher::DoSetup() {
   mChildArgs.mArgs.push_back(ChildProcessType());
 
 #  ifdef MOZ_ENABLE_FORKSERVER
+  // Any unexpected fds given to the fork server could be leaked into
+  // child processes if they aren't closed properly; this assertion is
+  // a reminder to deal with that.
   MOZ_ASSERT(mProcessType != GeckoProcessType_ForkServer ||
-                 mChildArgs.mFiles.size() == 1,
-             "The ForkServer only expects a single FD argument");
+                 mChildArgs.mFiles.size() == 2,
+             "wrong number of FDs for the fork server");
 #  endif
 
 #  if !defined(MOZ_WIDGET_ANDROID)
@@ -1731,8 +1740,8 @@ RefPtr<ProcessLaunchPromise> BaseProcessLauncher::FinishLaunch() {
 
   MOZ_DIAGNOSTIC_ASSERT(mResults.mHandle);
 
-  Telemetry::AccumulateTimeDelta(Telemetry::CHILD_PROCESS_LAUNCH_MS,
-                                 mStartTimeStamp);
+  glean::process::child_launch.AccumulateRawDuration(TimeStamp::Now() -
+                                                     mStartTimeStamp);
 
   return ProcessLaunchPromise::CreateAndResolve(std::move(mResults), __func__);
 }

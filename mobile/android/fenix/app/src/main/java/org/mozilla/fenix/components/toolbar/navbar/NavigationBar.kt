@@ -29,6 +29,7 @@ import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -39,7 +40,8 @@ import mozilla.components.browser.state.selector.privateTabs
 import mozilla.components.browser.state.selector.selectedTab
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.compose.base.Divider
-import mozilla.components.compose.base.annotation.LightDarkPreview
+import mozilla.components.compose.base.button.IconButton
+import mozilla.components.compose.base.button.LongPressIconButton
 import mozilla.components.lib.state.ext.observeAsComposableState
 import mozilla.components.lib.state.ext.observeAsState
 import mozilla.components.ui.tabcounter.TabCounterMenu
@@ -49,8 +51,6 @@ import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.AppState
 import org.mozilla.fenix.components.components
 import org.mozilla.fenix.components.toolbar.NewTabMenu
-import org.mozilla.fenix.compose.IconButton
-import org.mozilla.fenix.compose.LongPressIconButton
 import org.mozilla.fenix.compose.utils.KeyboardState
 import org.mozilla.fenix.compose.utils.keyboardAsState
 import org.mozilla.fenix.perf.MarkersFragmentLifecycleCallbacks
@@ -377,7 +377,7 @@ private fun NavBar(
                     .height(dimensionResource(id = R.dimen.browser_navbar_height))
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .testTag(NavBarTestTags.navbar),
+                    .testTag(NavBarTestTags.NAVBAR),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
                 content = content,
@@ -405,10 +405,11 @@ private fun BackButton(
     LongPressIconButton(
         onClick = onBackButtonClick,
         onLongClick = onBackButtonLongPress,
+        contentDescription = stringResource(R.string.browser_menu_back),
         enabled = enabled,
         modifier = Modifier
             .size(48.dp)
-            .testTag(NavBarTestTags.backButton),
+            .testTag(NavBarTestTags.BACK_BUTTON),
     ) {
         Icon(
             painter = painterResource(R.drawable.mozac_ic_back_24),
@@ -429,10 +430,11 @@ private fun ForwardButton(
     LongPressIconButton(
         onClick = onForwardButtonClick,
         onLongClick = onForwardButtonLongPress,
+        contentDescription = stringResource(R.string.browser_menu_forward),
         enabled = enabled,
         modifier = Modifier
             .size(48.dp)
-            .testTag(NavBarTestTags.forwardButton),
+            .testTag(NavBarTestTags.FORWARD_BUTTON),
     ) {
         Icon(
             painter = painterResource(R.drawable.mozac_ic_forward_24),
@@ -448,8 +450,9 @@ private fun SearchWebButton(
 ) {
     IconButton(
         onClick = onSearchButtonClick,
+        contentDescription = stringResource(R.string.search_hint),
         modifier = Modifier
-            .testTag(NavBarTestTags.searchButton),
+            .testTag(NavBarTestTags.SEARCH_BUTTON),
     ) {
         Icon(
             painter = painterResource(R.drawable.mozac_ic_search_24),
@@ -469,9 +472,10 @@ private fun MenuButton(
     if (isMenuRedesignEnabled) {
         IconButton(
             onClick = onMenuButtonClick,
+            contentDescription = stringResource(R.string.content_description_menu),
             modifier = Modifier
                 .size(48.dp)
-                .testTag(NavBarTestTags.menuButton),
+                .testTag(NavBarTestTags.MENU_BUTTON),
         ) {
             Icon(
                 painter = painterResource(R.drawable.mozac_ic_ellipsis_vertical_24),
@@ -483,7 +487,7 @@ private fun MenuButton(
         AndroidView(
             modifier = Modifier
                 .size(48.dp)
-                .testTag(NavBarTestTags.menuButton),
+                .testTag(NavBarTestTags.MENU_BUTTON),
             factory = { _ ->
                 menuButton.apply {
                     contentDescription = context.getString(R.string.mozac_browser_menu_button)
@@ -509,9 +513,10 @@ private fun OpenInBrowserButton(
 ) {
     IconButton(
         onClick = onOpenInBrowserButtonClick,
+        contentDescription = stringResource(R.string.browser_menu_open_in_fenix, stringResource(R.string.app_name)),
         enabled = enabled,
         modifier = Modifier
-            .testTag(NavBarTestTags.openInBrowserButton),
+            .testTag(NavBarTestTags.OPEN_IN_BROWSER_BUTTON),
     ) {
         Icon(
             painter = painterResource(R.drawable.mozac_ic_open_in),
@@ -633,7 +638,7 @@ private fun CustomTabNavBarPreviewRoot(isPrivateMode: Boolean) {
     )
 }
 
-@LightDarkPreview
+@PreviewLightDark
 @Composable
 private fun HomeNavBarPreview() {
     FirefoxTheme {
@@ -657,7 +662,7 @@ private fun HomeNavBarWithFeltPrivateBrowsingPreview() {
     }
 }
 
-@LightDarkPreview
+@PreviewLightDark
 @Composable
 private fun OpenTabNavBarPreview() {
     FirefoxTheme {
@@ -673,7 +678,7 @@ private fun OpenTabNavBarPrivatePreview() {
     }
 }
 
-@LightDarkPreview
+@PreviewLightDark
 @Composable
 private fun CustomTabNavBarPreview() {
     FirefoxTheme {

@@ -25,15 +25,16 @@ import {
 import { TestDedicatedWorker, TestSharedWorker, TestServiceWorker } from './helper/test_worker.js';
 
 const rootQuerySpec = 'webgpu:*';
-let promptBeforeReload = false;
 let isFullCTS = false;
 
 globalTestConfig.frameworkDebugLog = console.log;
 
-window.onbeforeunload = () => {
-  // Prompt user before reloading if there are any results
-  return promptBeforeReload ? false : undefined;
-};
+// Prompt before reloading to avoid losing test results.
+function enablePromptBeforeReload() {
+  window.addEventListener('beforeunload', () => {
+    return false;
+  });
+}
 
 const kOpenTestLinkAltText = 'Open';
 
@@ -53,6 +54,7 @@ globalTestConfig.enableDebugLogs = options.debug;
 globalTestConfig.unrollConstEvalLoops = options.unrollConstEvalLoops;
 globalTestConfig.compatibility = compatibility;
 globalTestConfig.enforceDefaultLimits = options.enforceDefaultLimits;
+globalTestConfig.blockAllFeatures = options.blockAllFeatures;
 globalTestConfig.logToWebSocket = options.logToWebSocket;
 
 const logger = new Logger();
@@ -85,8 +87,7 @@ stopButtonElem.addEventListener('click', () => {
 if (powerPreference || compatibility || forceFallbackAdapter) {
   setDefaultRequestAdapterOptions({
     ...(powerPreference && { powerPreference }),
-    // MAINTENANCE_TODO: remove compatibilityMode once no longer needed.
-    ...(compatibility && { compatibilityMode: true, featureLevel: 'compatibility' }),
+    ...(compatibility && { featureLevel: 'compatibility' }),
     ...(forceFallbackAdapter && { forceFallbackAdapter: true }),
   });
 }
@@ -283,7 +284,7 @@ function makeSubtreeHTML(n: TestSubtree, parentLevel: TestQueryLevel): Visualize
       progressElem.style.display = '';
       // only prompt if this is the full CTS and we started from the root.
       if (isFullCTS && n.query.filePathParts.length === 0) {
-        promptBeforeReload = true;
+        enablePromptBeforeReload();
       }
     }
     if (stopRequested) {
@@ -698,6 +699,15 @@ void (async () => {
 
   document.getElementById('copyResultsJSON')!.addEventListener('click', () => {
     void navigator.clipboard.writeText(logger.asJSON(2));
+  });
+
+  document.getElementById('saveResultsJSON')!.addEventListener('click', () => {
+    const text = logger.asJSON(2);
+    const blob = new Blob([text], { type: 'text/plain' });
+    const link = document.createElement('a');
+    link.download = 'results-webgpu-cts.json';
+    link.href = window.URL.createObjectURL(blob);
+    link.click();
   });
 
   if (runnow) {

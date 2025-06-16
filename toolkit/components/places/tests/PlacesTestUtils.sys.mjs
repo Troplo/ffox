@@ -168,26 +168,40 @@ export var PlacesTestUtils = Object.freeze({
     isRichIcon = false
   ) {
     return lazy.PlacesUtils.favicons.setFaviconForPage(
-      pageURI instanceof Ci.nsIURI ? pageURI : Services.io.newURI(pageURI),
-      faviconURI instanceof Ci.nsIURI
-        ? faviconURI
-        : Services.io.newURI(faviconURI),
-      faviconDataURL instanceof Ci.nsIURI
-        ? faviconDataURL
-        : Services.io.newURI(faviconDataURL),
+      lazy.PlacesUtils.toURI(pageURI),
+      lazy.PlacesUtils.toURI(faviconURI),
+      lazy.PlacesUtils.toURI(faviconDataURL),
       expiration,
       isRichIcon
+    );
+  },
+
+  /*
+   * Helper function to call PlacesUtils.favicons.getFaviconForPage(). This
+   * function throws an error if the status of
+   * PlacesUtils.favicons.setFaviconForPage() is not success.
+   *
+   * @param {string or URL or nsIURI} pageURI
+   * @param {Number} [optional] preferredWidth
+   * @return {Promise<nsIFavicon>} resolved with favicon data
+   */
+  getFaviconForPage(pageURI, preferredWidth = 0) {
+    return lazy.PlacesUtils.favicons.getFaviconForPage(
+      lazy.PlacesUtils.toURI(pageURI),
+      preferredWidth
     );
   },
 
   /**
    * Get favicon data for given URL from database.
    *
-   * @param {nsIURI} faviconURI
-   *        nsIURI for the favicon
+   * @param {string or nsIURI} faviconURI
+   *        uri for the favicon
    * @return {nsIURI} data URL
    */
   async getFaviconDataURLFromDB(faviconURI) {
+    faviconURI = lazy.PlacesUtils.toURI(faviconURI);
+
     const db = await lazy.PlacesUtils.promiseDBConnection();
     const rows = await db.executeCached(
       `SELECT data, width
@@ -218,7 +232,7 @@ export var PlacesTestUtils = Object.freeze({
   /**
    * Get favicon data for given URL from network.
    *
-   * @param {nsIURI} faviconURI
+   * @param {string or nsIURI} faviconURI
    *        nsIURI for the favicon.
    * @param {nsIPrincipal} [optional] loadingPrincipal
    *        The principal to load from network. If no, use system principal.
@@ -232,6 +246,7 @@ export var PlacesTestUtils = Object.freeze({
     faviconURI,
     loadingPrincipal = Services.scriptSecurityManager.getSystemPrincipal()
   ) {
+    faviconURI = lazy.PlacesUtils.toURI(faviconURI);
     if (faviconURI.schemeIs("data")) {
       return faviconURI;
     }

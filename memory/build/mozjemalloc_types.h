@@ -139,6 +139,7 @@ typedef struct {
   size_t bytes_unused;       // The unallocated bytes across all these bins
   size_t bytes_total;        // The total storage area for runs in this bin,
   size_t bytes_per_run;      // The number of bytes per run, including headers.
+  size_t regions_per_run;    // The number of regions (aka cells) per run.
 } jemalloc_bin_stats_t;
 
 // jemalloc_stats_lite() is not a stable interface.  When using
@@ -219,7 +220,7 @@ enum purge_result_t {
   // Done: No more purge requests are pending.
   Done,
 
-  // There is at least one arena left whose reuse grace period expired and
+  // There may be one or more arenas whose reuse grace period expired and
   // needs purging asap.
   NeedsMore,
 

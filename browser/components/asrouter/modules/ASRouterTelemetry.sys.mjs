@@ -24,7 +24,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ClientID: "resource://gre/modules/ClientID.sys.mjs",
   AboutWelcomeTelemetry:
     "resource:///modules/aboutwelcome/AboutWelcomeTelemetry.sys.mjs",
-  ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
+  EnrollmentType: "resource://nimbus/ExperimentAPI.sys.mjs",
+  NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   TelemetrySession: "resource://gre/modules/TelemetrySession.sys.mjs",
   UpdateUtils: "resource://gre/modules/UpdateUtils.sys.mjs",
 });
@@ -76,14 +77,9 @@ export class ASRouterTelemetry {
    *  @return {bool}
    */
   get isInCFRCohort() {
-    const experimentData = lazy.ExperimentAPI.getExperimentMetaData({
-      featureId: "cfr",
-    });
-    if (experimentData && experimentData.slug) {
-      return true;
-    }
-
-    return false;
+    return !!lazy.NimbusFeatures.cfr.getEnrollmentMetadata(
+      lazy.EnrollmentType.EXPERIMENT
+    );
   }
 
   /**
@@ -124,6 +120,9 @@ export class ASRouterTelemetry {
         break;
       case "asrouter_undesired_event":
         event = this.applyUndesiredEventPolicy(event);
+        break;
+      case "newtab_message_user_event":
+        event = await this.applyNewtabMessagePolicy(event);
         break;
       default:
         event = { ping: event };
@@ -215,6 +214,15 @@ export class ASRouterTelemetry {
     return { ping, pingType: "moments" };
   }
 
+  async applyNewtabMessagePolicy(ping) {
+    ping.client_id = await this.telemetryClientId;
+    ping.browser_session_id = lazy.browserSessionId;
+    ping.addon_version = Services.appinfo.appBuildID;
+    ping.locale = Services.locale.appLocaleAsBCP47;
+    delete ping.action;
+    return { ping, pingType: "newtab_message" };
+  }
+
   applyUndesiredEventPolicy(ping) {
     ping.impression_id = this._impressionId;
     delete ping.action;
@@ -263,6 +271,8 @@ export class ASRouterTelemetry {
       case msg.TOAST_NOTIFICATION_TELEMETRY:
       // Intentional fall-through
       case msg.MENU_MESSAGE_TELEMETRY:
+      // Intentional fall-through
+      case msg.NEWTAB_MESSAGE_TELEMETRY:
       // Intentional fall-through
       case msg.AS_ROUTER_TELEMETRY_USER_EVENT:
         this.handleASRouterUserEvent(action);

@@ -9,6 +9,7 @@ import org.mozilla.fenix.helpers.AppAndSystemHelper.clickSystemHomeScreenShortcu
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.TestAssetHelper.getTextFragmentAsset
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.browserScreen
 import org.mozilla.fenix.ui.robots.homeScreen
 import org.mozilla.fenix.ui.robots.navigationToolbar
@@ -18,6 +19,9 @@ class TextFragmentsTest : TestSetup() {
     val activityTestRule = AndroidComposeTestRule(
         HomeActivityIntentTestRule.withDefaultSettingsOverrides(),
     ) { it.activity }
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2753059
     @SdkSuppress(minSdkVersion = 34)
@@ -79,7 +83,7 @@ class TextFragmentsTest : TestSetup() {
         }
         homeScreen {
         }.openThreeDotMenu {
-        }.openBookmarks {
+        }.openBookmarksMenu(activityTestRule) {
             verifyBookmarkTitle(genericPage.title)
         }.openBookmarkWithTitle(genericPage.title) {
             verifyTextFragmentsPageContent("Firefox")

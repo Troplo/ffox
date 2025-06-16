@@ -28,12 +28,8 @@
 #include "nsIProgressEventSink.h"
 #include "nsIRedirectResultListener.h"
 
-#define DOCUMENT_LOAD_LISTENER_IID                   \
-  {                                                  \
-    0x3b393c56, 0x9e01, 0x11e9, {                    \
-      0xa2, 0xa3, 0x2a, 0x2a, 0xe2, 0xdb, 0xcc, 0xe4 \
-    }                                                \
-  }
+#define DOCUMENT_LOAD_LISTENER_IID \
+  {0x3b393c56, 0x9e01, 0x11e9, {0xa2, 0xa3, 0x2a, 0x2a, 0xe2, 0xdb, 0xcc, 0xe4}}
 
 namespace mozilla {
 namespace dom {
@@ -226,7 +222,7 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
   // Returns true if the channel was finished before we could resume it.
   bool ResumeSuspendedChannel(nsIStreamListener* aListener);
 
-  NS_DECLARE_STATIC_IID_ACCESSOR(DOCUMENT_LOAD_LISTENER_IID)
+  NS_INLINE_DECL_STATIC_IID(DOCUMENT_LOAD_LISTENER_IID)
 
   // Called by the DocumentChannel if cancelled.
   void Cancel(const nsresult& aStatusCode, const nsACString& aReason);
@@ -353,6 +349,7 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
   // channel, and ensures that RedirectToRealChannelFinished is called when
   // this is complete.
   void TriggerRedirectToRealChannel(
+      dom::CanonicalBrowsingContext* aDestinationBrowsingContext,
       const Maybe<dom::ContentParent*>& aDestinationProcess,
       nsTArray<StreamFilterRequest> aStreamFilterRequests);
 
@@ -628,8 +625,6 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
 
   RefPtr<HTTPSFirstDowngradeData> mHTTPSFirstDowngradeData;
 };
-
-NS_DEFINE_STATIC_IID_ACCESSOR(DocumentLoadListener, DOCUMENT_LOAD_LISTENER_IID)
 
 inline nsISupports* ToSupports(DocumentLoadListener* aObj) {
   return static_cast<nsIInterfaceRequestor*>(aObj);

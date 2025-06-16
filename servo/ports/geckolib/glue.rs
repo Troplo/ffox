@@ -103,7 +103,7 @@ use style::invalidation::element::relative_selector::{
 };
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::invalidation::stylesheets::RuleChangeKind;
-use style::logical_geometry::PhysicalAxis;
+use style::logical_geometry::PhysicalSide;
 use style::media_queries::MediaList;
 use style::parser::{Parse, ParserContext};
 #[cfg(feature = "gecko_debug")]
@@ -153,7 +153,7 @@ use style::values::computed::font::{
 use style::values::computed::length::AnchorSizeFunction;
 use style::values::computed::length_percentage::CalcAnchorFunctionResolutionInfo;
 use style::values::computed::position::AnchorFunction;
-use style::values::computed::{self, Context, PositionProperty, ToComputedValue};
+use style::values::computed::{self, ContentVisibility, Context, PositionProperty, ToComputedValue};
 use style::values::distance::ComputeSquaredDistance;
 use style::values::generics::color::ColorMixFlags;
 use style::values::generics::easing::BeforeFlag;
@@ -3252,6 +3252,21 @@ pub unsafe extern "C" fn Servo_FontFaceRule_Clone(
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn Servo_FontFaceRule_Equals(
+    a: &LockedFontFaceRule,
+    b: &LockedFontFaceRule,
+) -> bool {
+    if a as *const _ == b as *const _ {
+        return true;
+    }
+    read_locked_arc_worker(a, |a: &FontFaceRule| {
+        read_locked_arc_worker(b, |b: &FontFaceRule| {
+            a == b
+        })
+    })
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn Servo_FontFaceRule_GetSourceLocation(
     rule: &LockedFontFaceRule,
     line: *mut u32,
@@ -5400,7 +5415,7 @@ pub extern "C" fn Servo_DeclarationBlock_SetKeywordValue(
     declarations: &LockedDeclarationBlock,
     property: nsCSSPropertyID,
     value: i32,
-) {
+) -> bool {
     use num_traits::FromPrimitive;
     use style::properties::longhands;
     use style::properties::PropertyDeclaration;
@@ -5457,10 +5472,19 @@ pub extern "C" fn Servo_DeclarationBlock_SetKeywordValue(
             debug_assert_eq!(value, 0);
             TextTransform::NONE
         },
+        WritingMode => get_from_computed::<longhands::writing_mode::SpecifiedValue>(value),
+        ContentVisibility => get_from_computed::<ContentVisibility>(value),
+        TextOrientation => get_from_computed::<longhands::text_orientation::SpecifiedValue>(value),
+        MixBlendMode => get_from_computed::<longhands::mix_blend_mode::SpecifiedValue>(value),
     };
-    write_locked_arc(declarations, |decls: &mut PropertyDeclarationBlock| {
-        decls.push(prop, Importance::Normal);
-    })
+    let mut source_declarations = SourcePropertyDeclaration::with_one(prop);
+    set_property_to_declarations(
+        Some(long.into()),
+        declarations,
+        &mut source_declarations,
+        NO_MUTATION_CLOSURE,
+        Importance::Normal,
+    )
 }
 
 #[no_mangle]
@@ -5698,6 +5722,51 @@ pub extern "C" fn Servo_DeclarationBlock_SetTransform(
     let v = GenericTransform(ops.iter().map(ToComputedValue::from_computed_value).collect());
     let prop = match_wrap_declared! { long,
         Transform => v,
+    };
+    let mut source_declarations = SourcePropertyDeclaration::with_one(prop);
+    set_property_to_declarations(
+        Some(long.into()),
+        declarations,
+        &mut source_declarations,
+        NO_MUTATION_CLOSURE,
+        Importance::Normal,
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_DeclarationBlock_SetBackdropFilter(
+    declarations: &LockedDeclarationBlock,
+    property: nsCSSPropertyID,
+    filters: &style::OwnedSlice<Filter>,
+) -> bool {
+    use style::properties::longhands::backdrop_filter::SpecifiedValue as BackdropFilters;
+    use style::properties::PropertyDeclaration;
+    let long = get_longhand_from_id!(property);
+    let v = BackdropFilters(filters.iter().map(ToComputedValue::from_computed_value).collect());
+    let prop = match_wrap_declared! { long,
+        BackdropFilter => v,
+    };
+    let mut source_declarations = SourcePropertyDeclaration::with_one(prop);
+    set_property_to_declarations(
+        Some(long.into()),
+        declarations,
+        &mut source_declarations,
+        NO_MUTATION_CLOSURE,
+        Importance::Normal,
+    )
+}
+
+#[no_mangle]
+pub extern "C" fn Servo_DeclarationBlock_SetColorScheme(
+    declarations: &LockedDeclarationBlock,
+    property: nsCSSPropertyID,
+    color_scheme: &style::values::computed::ColorScheme,
+) -> bool {
+    use style::values::specified::ColorScheme;
+    use style::properties::PropertyDeclaration;
+    let long = get_longhand_from_id!(property);
+    let prop = match_wrap_declared! { long,
+        ColorScheme => ColorScheme::from_computed_value(color_scheme),
     };
     let mut source_declarations = SourcePropertyDeclaration::with_one(prop);
     set_property_to_declarations(
@@ -8374,38 +8443,42 @@ pub extern "C" fn Servo_ResolveCalcLengthPercentage(
     calc: &computed::length_percentage::CalcLengthPercentage,
     basis: f32,
 ) -> f32 {
-    calc.resolve(computed::Length::new(basis), None)
-        .unwrap()
-        .result
-        .px()
+    calc.resolve(computed::Length::new(basis)).px()
+}
+
+/// Result of resolving a math function node potentially containing
+/// anchor positioning function.
+#[repr(u8)]
+pub enum CalcAnchorPositioningFunctionResolution {
+    /// Anchor positioning function is used, but at least one of them
+    /// did not resolve to a valid reference - Property using this
+    /// expression is now invalid at computed time.
+    Invalid,
+    /// Anchor positioning function is used, and all of them resolved
+    /// to valid references, or specified a fallback.
+    Valid(computed::LengthPercentage),
 }
 
 #[no_mangle]
-pub extern "C" fn Servo_ResolveCalcLengthPercentageWithAnchorFunctions(
+pub extern "C" fn Servo_ResolveAnchorFunctionsInCalcPercentage(
     calc: &computed::length_percentage::CalcLengthPercentage,
-    basis: f32,
-    axis: PhysicalAxis,
+    side: Option<&PhysicalSide>,
     position_property: PositionProperty,
-    result: &mut f32,
-    percentage_used: &mut bool,
-) -> bool {
-    let resolved = calc.resolve(
-        computed::Length::new(basis),
-        Some(CalcAnchorFunctionResolutionInfo {
-            axis,
-            position_property,
-        }),
-    );
+    out: &mut CalcAnchorPositioningFunctionResolution,
+) {
+    let resolved = calc.resolve_anchor(CalcAnchorFunctionResolutionInfo {
+        side: side.copied(),
+        position_property,
+    });
 
-    let resolved = match resolved {
-        None => return false,
-        Some(v) => v,
+    match resolved {
+        Err(()) => *out = CalcAnchorPositioningFunctionResolution::Invalid,
+        Ok((node, clamping_mode)) => {
+            *out = CalcAnchorPositioningFunctionResolution::Valid(
+                computed::LengthPercentage::new_calc(node, clamping_mode),
+            )
+        },
     };
-
-    *result = resolved.result.px();
-    *percentage_used = resolved.percentage_used;
-
-    true
 }
 
 #[no_mangle]
@@ -8838,7 +8911,6 @@ pub unsafe extern "C" fn Servo_SharedMemoryBuilder_AddStylesheet(
 ) -> *const LockedCssRules {
     // Assert some things we assume when we create a style sheet from shared
     // memory.
-    debug_assert_eq!(contents.origin, Origin::UserAgent);
     debug_assert_eq!(contents.quirks_mode, QuirksMode::NoQuirks);
     debug_assert!(contents.source_map_url.read().is_none());
     debug_assert!(contents.source_url.read().is_none());
@@ -9811,11 +9883,11 @@ impl AnchorPositioningFunctionResolution {
 #[no_mangle]
 pub extern "C" fn Servo_ResolveAnchorFunction(
     func: &AnchorFunction,
-    axis: PhysicalAxis,
+    side: PhysicalSide,
     prop: PositionProperty,
     out: &mut AnchorPositioningFunctionResolution,
 ) {
-    *out = AnchorPositioningFunctionResolution::new(func.resolve(axis, prop));
+    *out = AnchorPositioningFunctionResolution::new(func.resolve(side, prop));
 }
 
 #[no_mangle]

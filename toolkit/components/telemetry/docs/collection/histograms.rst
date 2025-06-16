@@ -35,7 +35,7 @@ The first step to adding a new histogram is to choose the histogram type that be
 
 .. note::
 
-    Only ``flag`` and ``count`` histograms have default values. All other histograms start out empty and are only submitted if a value is recorded.
+    Only ``count`` histograms have default values. All other histograms start out empty and are only submitted if a value is recorded.
 
 ``boolean``
 -----------
@@ -76,14 +76,6 @@ You might use this type of histogram if, for example, you wanted to track the re
 .. note::
 
     Set ``n_values`` to a slightly larger value than needed to allow for new enum values in the future. See `Changing a histogram`_ if you need to add more enums later.
-
-``flag``
---------
-*Deprecated* (please use boolean :doc:`scalars`).
-
-This histogram type allows you to record a single value (`0` or `1`, default `0`). This type is useful if you need to track whether a feature was ever used during a Firefox session. You only need to add a single line of code which sets the flag when the feature is used because the histogram is initialized with a default value of `0`/`false` (flag not set). Thus, recording a value of `0` is not allowed and asserts.
-
-Flag histograms will ignore any changes after the flag is set, so once the flag is set, it cannot be unset.
 
 ``count``
 ---------
@@ -273,16 +265,6 @@ Note that ``nsITelemetry.getHistogramById()`` will throw an ``NS_ERROR_FAILURE``
 
   Adding a new Telemetry probe is not possible with Artifact builds. A full build is needed.
 
-For histograms measuring time, TelemetryStopwatch can be used to avoid working with Dates manually:
-
-.. code-block:: js
-
-  TelemetryStopwatch.start("FX_TAB_SWITCH_TOTAL_E10S_MS");
-  TelemetryStopwatch.finish("FX_TAB_SWITCH_TOTAL_E10S_MS");
-
-  TelemetryStopwatch.start("FX_TAB_SWITCH_TOTAL_MS");
-  TelemetryStopwatch.cancel("FX_TAB_SWITCH_TOTAL_MS");
-
 Adding a C++ Probe
 ==================
 
@@ -348,15 +330,3 @@ Probes in native code can also use the `nsITelemetry <https://searchfox.org/mozi
 .. warning::
 
   Telemetry accumulations are designed to be cheap, not free. If you wish to accumulate values in a performance-sensitive piece of code, store the accumualtions locally and accumulate after the performance-sensitive piece ("hot path") has completed.
-
-The ``Telemetry.h`` header also declares the helper classes ``AutoTimer`` and ``AutoCounter``. Objects of these types automatically record a histogram value when they go out of scope:
-
-.. code-block:: cpp
-
-  nsresult
-  nsPluginHost::StopPluginInstance(nsNPAPIPluginInstance* aInstance)
-  {
-    Telemetry::AutoTimer<Telemetry::PLUGIN_SHUTDOWN_MS> timer;
-    ...
-    return NS_OK;
-  }

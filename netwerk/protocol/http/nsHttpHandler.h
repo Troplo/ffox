@@ -465,8 +465,6 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
     return mFocusedWindowTransactionRatio;
   }
 
-  bool ActiveTabPriority() const { return mActiveTabPriority; }
-
   // Called when an optimization feature affecting active vs background tab load
   // took place.  Called only on the parent process and only updates
   // mLastActiveTabLoadOptimizationHit timestamp to now.
@@ -488,7 +486,7 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
                                 nsIInterfaceRequestor* aCallbacks,
                                 const OriginAttributes& aOriginAttributes);
 
-  bool EchConfigEnabled(bool aIsHttp3 = false) const;
+  static bool EchConfigEnabled(bool aIsHttp3 = false);
   // When EchConfig is enabled and all records with echConfig are failed, this
   // functon indicate whether we can fallback to the origin server.
   // In the case an HTTPS RRSet contains some RRs with echConfig and some
@@ -740,9 +738,6 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
 
   // The ratio for dispatching transactions from the focused window.
   float mFocusedWindowTransactionRatio{0.9f};
-
-  // If true, the transactions from active tab will be dispatched first.
-  bool mActiveTabPriority{true};
 
   HttpTrafficAnalyzer mHttpTrafficAnalyzer;
 

@@ -286,18 +286,22 @@ function generateDocumentation() {
   let string_mapping = {
     BackgroundAppUpdate: "BackgroundAppUpdate2",
     Certificates: "CertificatesDescription",
+    DisableFirefoxAccounts: "DisableFirefoxAccounts1",
     DisableMasterPasswordCreation: "DisablePrimaryPasswordCreation",
-    DisablePocket: "DisablePocket2",
     DisableSetDesktopBackground: "DisableSetAsDesktopBackground",
     FirefoxHome: "FirefoxHome2",
     Permissions: "Permissions2",
     SanitizeOnShutdown: "SanitizeOnShutdown2",
-    WindowsSSO: "Windows10SSO",
     SecurityDevices: "SecurityDevices2",
-    DisableFirefoxAccounts: "DisableFirefoxAccounts1",
+    SkipTermsOfUse: "SkipTermsOfUse2",
+    WindowsSSO: "Windows10SSO",
   };
+  let deprecated_policies = ["DisablePocket"];
 
   for (let policyName in schema.properties) {
+    if (deprecated_policies.includes(policyName)) {
+      continue;
+    }
     let main_tbody = document.createElement("tbody");
     main_tbody.classList.add("collapsible");
     main_tbody.addEventListener("click", function () {

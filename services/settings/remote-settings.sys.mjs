@@ -8,6 +8,8 @@ import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
+  ClientEnvironmentBase:
+    "resource://gre/modules/components-utils/ClientEnvironment.sys.mjs",
   Database: "resource://services-settings/Database.sys.mjs",
   FilterExpressions:
     "resource://gre/modules/components-utils/FilterExpressions.sys.mjs",
@@ -77,9 +79,11 @@ XPCOMUtils.defineLazyPreferenceGetter(
  * where the JEXL expression evaluates into a falsy value.
  * @param {Object}            entry       The Remote Settings entry to be excluded or kept.
  * @param {ClientEnvironment} environment Information about version, language, platform etc.
+ * @param {string}            collectionName
+ *    Which collection includes this entry. This is used for error reporting.
  * @returns {?Object} the entry or null if excluded.
  */
-export async function jexlFilterFunc(entry, environment) {
+export async function jexlFilterFunc(entry, environment, collectionName) {
   const { filter_expression } = entry;
   if (!filter_expression) {
     return entry;
@@ -91,7 +95,7 @@ export async function jexlFilterFunc(entry, environment) {
     };
     result = await lazy.FilterExpressions.eval(filter_expression, context);
   } catch (e) {
-    console.error(e);
+    console.error(e, "Full expression: " + filter_expression, collectionName);
   }
   return result ? entry : null;
 }
@@ -637,6 +641,28 @@ function remoteSettingsFunction() {
       })
     );
 
+    // Turn the JEXL context object into a simple object that can be
+    // serialized into JSON.
+    // Here we only select the fields that are shared between clients
+    // implementations (application-services and Gecko).
+    const jexlContext = {
+      ...["channel", "version", "locale", "country", "formFactor"].reduce(
+        (acc, key) => {
+          acc[key] = lazy.ClientEnvironmentBase[key];
+          return acc;
+        },
+        {}
+      ),
+      os: ["name", "version"].reduce((acc, key) => {
+        acc[key] = lazy.ClientEnvironmentBase.os?.[key];
+        return acc;
+      }, {}),
+      appinfo: ["ID", "OS"].reduce((acc, key) => {
+        acc[key] = lazy.ClientEnvironmentBase.appinfo?.[key];
+        return acc;
+      }, {}),
+    };
+
     return {
       serverURL: lazy.Utils.SERVER_URL,
       pollingEndpoint: lazy.Utils.SERVER_URL + lazy.Utils.CHANGES_PATH,
@@ -653,6 +679,7 @@ function remoteSettingsFunction() {
         [TELEMETRY_SOURCE_SYNC]: await lazy.gSyncHistory.list(),
       },
       isSynchronizationBroken: await isSynchronizationBroken(),
+      jexlContext,
     };
   };
 

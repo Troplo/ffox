@@ -90,11 +90,6 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // "heuristic" result).  We fetch it as fast as possible.
   ["delay", 50],
 
-  // Some performance tests disable this because extending the urlbar needs
-  // layout information that we can't get before the first paint. (Or we could
-  // but this would mean flushing layout.)
-  ["disableExtendForTests", false],
-
   // Ensure we use trailing dots for DNS lookups for single words that could
   // be hosts.
   ["dnsResolveFullyQualifiedNames", true],
@@ -104,6 +99,10 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // "Did you mean to go to 'host'" prompt.
   // 0 - never resolve; 1 - use heuristics (default); 2 - always resolve
   ["dnsResolveSingleWordsAfterSearch", 0],
+
+  // If Suggest is disabled before these seconds from a search, then send a
+  // disable event.
+  ["events.disableSuggest.maxSecondsFromLastSearch", 300],
 
   // Whether we expand the font size when when the urlbar is
   // focused.
@@ -200,12 +199,10 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // should be opened in new tabs by default.
   ["openintab", false],
 
-  // Feature gate pref for Pocket suggestions in the urlbar.
-  ["pocket.featureGate", false],
-
-  // The number of times the user has clicked the "Show less frequently" command
-  // for Pocket suggestions.
-  ["pocket.showLessFrequentlyCount", 0],
+  // Once Perplexity has entered search mode at least once,
+  // we no longer show the Perplexity onboarding callout.
+  // This pref will be set to true when perplexity search mode is detected.
+  ["perplexity.hasBeenInSearchMode", false],
 
   // If disabled, QuickActions will not be included in either the default search
   // mode or the QuickActions search mode.
@@ -231,12 +228,8 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // When non-zero, this is the character-count threshold (inclusive) for
   // showing AMP suggestions as top picks. If an AMP suggestion is triggered by
   // a keyword at least this many characters long, it will be shown as a top
-  // pick. Full keywords will also show AMP suggestions as top picks even if
-  // they have fewer characters than this threshold.
-  ["quicksuggest.ampTopPickCharThreshold", 0],
-
-  // JSON'ed array of blocked quick suggest URL digests.
-  ["quicksuggest.blockedDigests", ""],
+  // pick.
+  ["quicksuggest.ampTopPickCharThreshold", 5],
 
   // Whether the Firefox Suggest data collection opt-in result is enabled.
   ["quicksuggest.contextualOptIn", false],
@@ -275,12 +268,12 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // Whether the user has opted in to data collection for quick suggest.
   ["quicksuggest.dataCollection.enabled", false],
 
+  // Comma-separated list of Suggest dynamic suggestion types to enable.
+  ["quicksuggest.dynamicSuggestionTypes", ""],
+
   // Global toggle for whether the quick suggest feature is enabled, i.e.,
   // sponsored and recommended results related to the user's search string.
   ["quicksuggest.enabled", false],
-
-  // Comma-separated list of Suggest exposure suggestion types to enable.
-  ["quicksuggest.exposureSuggestionTypes", ""],
 
   // Whether non-sponsored quick suggest results are subject to impression
   // frequency caps. This pref is a fallback for the Nimbus variable
@@ -328,6 +321,10 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // the interval used by the desktop remote settings client.
   ["quicksuggest.rustIngestIntervalSeconds", 60 * 60 * 24],
 
+  // Which Suggest settings to show in the settings UI. See
+  // `QuickSuggest.SETTINGS_UI` for values.
+  ["quicksuggest.settingsUi", 0],
+
   // We only show recent searches within the past 3 days by default.
   // Stored as a string as some code handle timestamp sized int's.
   ["recentsearches.expirationMs", (1000 * 60 * 60 * 24 * 3).toString()],
@@ -362,7 +359,7 @@ const PREF_URLBAR_DEFAULTS = new Map([
 
   // A short-circuit pref to enable all the features that are part of a
   // grouped release.
-  ["scotchBonnet.enableOverride", false],
+  ["scotchBonnet.enableOverride", true],
 
   // Allow searchmode to be persisted as the user navigates the
   // search host.
@@ -378,6 +375,9 @@ const PREF_URLBAR_DEFAULTS = new Map([
 
   // Feature gate pref for secondary actions being shown in the urlbar.
   ["secondaryActions.featureGate", false],
+
+  // Maximum number of actions shown.
+  ["secondaryActions.maxActionsShown", 3],
 
   // Alternative switch to tab implementation using secondaryActions.
   ["secondaryActions.switchToTab", false],
@@ -442,10 +442,6 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // Whether results will include switch-to-tab results.
   ["suggest.openpage", true],
 
-  // If `pocket.featureGate` is true, this controls whether Pocket suggestions
-  // are turned on.
-  ["suggest.pocket", true],
-
   // Whether results will include QuickActions in the default search mode.
   ["suggest.quickactions", false],
 
@@ -487,6 +483,9 @@ const PREF_URLBAR_DEFAULTS = new Map([
 
   // How old history results have to be to be deduplicated.
   ["deduplication.thresholdDays", 0],
+
+  // semanticHistory search query minLength threshold to be enabled.
+  ["suggest.semanticHistory.minLength", 5],
 
   // When using switch to tabs, if set to true this will move the tab into the
   // active window.
@@ -543,7 +542,7 @@ const PREF_URLBAR_DEFAULTS = new Map([
   ["unifiedSearchButton.always", false],
 
   // Feature gate pref for weather suggestions in the urlbar.
-  ["weather.featureGate", false],
+  ["weather.featureGate", true],
 
   // The minimum prefix length of a weather keyword the user must type to
   // trigger the suggestion. 0 means the min length should be taken from Nimbus
@@ -569,6 +568,11 @@ const PREF_URLBAR_DEFAULTS = new Map([
   // pref for the `yelpSuggestPriority` Nimbus variable.
   ["yelp.priority", false],
 
+  // Whether to distinguish service type subjects. If true, we show special
+  // titile for the suggestion. This is a fallback pref for the
+  // `yelpServiceResultDistinction` Nimbus variable.
+  ["yelp.serviceResultDistinction", false],
+
   // The number of times the user has clicked the "Show less frequently" command
   // for Yelp suggestions.
   ["yelp.showLessFrequentlyCount", 0],
@@ -590,8 +594,6 @@ const PREF_OTHER_DEFAULTS = new Map([
 const NIMBUS_DEFAULTS = {
   addonsShowLessFrequentlyCap: 0,
   fakespotMinKeywordLength: null,
-  pocketShowLessFrequentlyCap: 0,
-  pocketSuggestIndex: null,
   quickSuggestScoreMap: null,
   weatherKeywordsMinimumLength: null,
   weatherShowLessFrequentlyCap: null,
@@ -723,6 +725,10 @@ function makeResultGroups({ showSearchSuggestionsFirst }) {
             group: lazy.UrlbarUtils.RESULT_GROUP.INPUT_HISTORY,
           },
           {
+            availableSpan: 2,
+            group: lazy.UrlbarUtils.RESULT_GROUP.HISTORY_SEMANTIC,
+          },
+          {
             flexChildren: true,
             children: [
               {
@@ -840,6 +846,19 @@ class Preferences {
   clear(pref) {
     let { clear } = this._getPrefDescriptor(pref);
     clear(pref);
+  }
+
+  /**
+   * Returns whether the given preference has a value on the user branch.
+   *
+   * @param {string} pref
+   *   The name of the preference.
+   * @returns {boolean}
+   *   Whether the pref has a value on the user branch.
+   */
+  hasUserValue(pref) {
+    let { hasUserValue } = this._getPrefDescriptor(pref);
+    return hasUserValue(pref);
   }
 
   /**
@@ -1059,7 +1078,7 @@ class Preferences {
       }
       case "exposureResults":
       case "keywordExposureResults":
-      case "quicksuggest.exposureSuggestionTypes":
+      case "quicksuggest.dynamicSuggestionTypes":
         return new Set(
           this._readPref(pref)
             .split(",")
@@ -1111,6 +1130,7 @@ class Preferences {
       // Float prefs are stored as Char.
       set: branch[`set${type == "Float" ? "Char" : type}Pref`],
       clear: branch.clearUserPref,
+      hasUserValue: branch.prefHasUserValue,
     };
   }
 
@@ -1138,6 +1158,11 @@ class Preferences {
       },
       clear() {
         throw new Error(`'${name}' is a Nimbus value and cannot be cleared`);
+      },
+      hasUserValue() {
+        throw new Error(
+          `'${name}' is a Nimbus value and does not have a user value`
+        );
       },
     };
   }

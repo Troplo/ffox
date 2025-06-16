@@ -3520,6 +3520,27 @@ ssl3_ComputeMasterSecretInt(sslSocket *ss, PK11SymKey *pms,
     CK_TLS12_MASTER_KEY_DERIVE_PARAMS master_params;
     unsigned int master_params_len;
 
+    /* if we are using TLS and we aren't using the extended master secret,
+     * and SEC_OID_TLS_REQUIRE_EMS policy is true, fail. The caller will
+     * send an alert (eventually). In the RSA Server case, the alert
+     * won't happen until Finish time because the upper level code
+     * can't tell a difference between this failure and an RSA decrypt
+     * failure, so it will proceed with a faux key */
+    if (isTLS) {
+        PRUint32 policy;
+        SECStatus rv;
+
+        /* first fetch the policy for this algorithm */
+        rv = NSS_GetAlgorithmPolicy(SEC_OID_TLS_REQUIRE_EMS, &policy);
+        /* we only look at the policy if we can fetch it. */
+        if ((rv == SECSuccess) && (policy & NSS_USE_ALG_IN_SSL_KX)) {
+            /* just set the error, we don't want to map any errors
+             * set by NSS_GetAlgorithmPolicy here */
+            PORT_SetError(SSL_ERROR_MISSING_EXTENDED_MASTER_SECRET);
+            return SECFailure;
+        }
+    }
+
     if (isTLS12) {
         if (isDH)
             master_derive = CKM_TLS12_MASTER_KEY_DERIVE_DH;
@@ -3580,6 +3601,7 @@ tls_ComputeExtendedMasterSecretInt(sslSocket *ss, PK11SymKey *pms,
     ssl3CipherSpec *pwSpec = ss->ssl3.pwSpec;
     CK_NSS_TLS_EXTENDED_MASTER_KEY_DERIVE_PARAMS extended_master_params;
     SSL3Hashes hashes;
+
     /*
      * Determine whether to use the DH/ECDH or RSA derivation modes.
      */
@@ -9496,7 +9518,7 @@ ssl3_HandleClientHelloPart2(sslSocket *ss,
                 if (suite->cipher_suite == sid->u.ssl3.cipherSuite)
                     break;
             }
-            PORT_Assert(j > 0);
+
             if (j == 0)
                 break;
 
@@ -11745,6 +11767,7 @@ ssl3_AuthCertificate(sslSocket *ss)
     SECStatus rv;
     PRBool isServer = ss->sec.isServer;
     int errCode;
+    CERTCertList *peerChain = NULL;
 
     ss->ssl3.hs.authCertificatePending = PR_FALSE;
 
@@ -11773,8 +11796,24 @@ ssl3_AuthCertificate(sslSocket *ss)
     /*
      * Ask caller-supplied callback function to validate cert chain.
      */
+    if (ss->opt.dbLoadCertChain) {
+        /* Imports the certificate chain into the db. Indirectly used by the
+         * authCertificate callback below. */
+        peerChain = SSL_PeerCertificateChain(ss->fd);
+        if (!peerChain) {
+            errCode = PORT_GetError();
+            goto loser;
+        }
+    }
+
     rv = (SECStatus)(*ss->authCertificate)(ss->authCertificateArg, ss->fd,
                                            PR_TRUE, isServer);
+
+    if (ss->opt.dbLoadCertChain && peerChain) {
+        CERT_DestroyCertList(peerChain);
+        peerChain = NULL;
+    }
+
     if (rv != SECSuccess) {
         errCode = PORT_GetError();
         if (errCode == 0) {
@@ -12470,6 +12509,9 @@ ssl3_FillInCachedSID(sslSocket *ss, sslSessionID *sid, PK11SymKey *secret)
     sid->sigScheme = ss->sec.signatureScheme;
     sid->lastAccessTime = sid->creationTime = ssl_Time(ss);
     sid->expirationTime = sid->creationTime + (ssl_ticket_lifetime * PR_USEC_PER_SEC);
+    if (sid->localCert) {
+        CERT_DestroyCertificate(sid->localCert);
+    }
     sid->localCert = CERT_DupCertificate(ss->sec.localCert);
     if (ss->sec.isServer) {
         sid->namedCurve = ss->sec.serverCert->namedCurve;

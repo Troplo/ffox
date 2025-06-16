@@ -13,6 +13,7 @@ interface nsIFile;
 interface nsIPrincipal;
 interface nsILoadInfo;
 interface nsIWebTransport;
+interface nsISuspendableChannelWrapper;
 
 webidl Node;
 
@@ -163,6 +164,14 @@ interface nsIIOService : nsISupports
                           in nsContentPolicyType aContentPolicyType);
 
     /**
+     * Creates a channel that wraps an innerChannel. The
+     * nsISuspendableChannelWrapper can be suspended before asyncOpen is called
+     * on it. Beyond suspend(), resume() and asyncOpen(), all other calls are
+     * forwarded to the innerChannel.
+     */
+    nsISuspendableChannelWrapper newSuspendableChannelWrapper(in nsIChannel innerChannel);
+
+    /**
      * Creates a WebTransport.
      */
     nsIWebTransport newWebTransport();
@@ -190,6 +199,11 @@ interface nsIIOService : nsISupports
      * Returns false if there are no interfaces for a network request
      */
     readonly attribute boolean connectivity;
+
+    /**
+     * This is a method to set connectivity for testing purposes
+     */
+    void setConnectivityForTesting(in boolean connectivity);
 
     /**
      * Checks if a port number is banned. This involves consulting a list of

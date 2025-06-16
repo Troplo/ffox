@@ -11,6 +11,7 @@
 #include "mozilla/dom/IdentityCredential.h"
 #include "mozilla/dom/IdentityCredentialBinding.h"
 #include "mozilla/dom/CredentialManagementBinding.h"
+#include "mozilla/dom/LoginStatusBinding.h"
 
 namespace IPC {
 
@@ -21,7 +22,34 @@ struct ParamTraits<mozilla::dom::IdentityProviderConfig> {
   static void Write(MessageWriter* aWriter, const paramType& aParam) {
     WriteParam(aWriter, aParam.mConfigURL);
     WriteParam(aWriter, aParam.mClientId);
+    WriteParam(aWriter, aParam.mOrigin);
+    WriteParam(aWriter, aParam.mLoginURL);
+    WriteParam(aWriter, aParam.mLoginTarget);
+    WriteParam(aWriter, aParam.mEffectiveQueryURL);
+    WriteParam(aWriter, aParam.mEffectiveType);
+  }
+
+  static bool Read(MessageReader* aReader, paramType* aResult) {
+    return ReadParam(aReader, &aResult->mConfigURL) &&
+           ReadParam(aReader, &aResult->mClientId) &&
+           ReadParam(aReader, &aResult->mOrigin) &&
+           ReadParam(aReader, &aResult->mLoginURL) &&
+           ReadParam(aReader, &aResult->mLoginTarget) &&
+           ReadParam(aReader, &aResult->mEffectiveQueryURL) &&
+           ReadParam(aReader, &aResult->mEffectiveType);
+  }
+};
+
+template <>
+struct ParamTraits<mozilla::dom::IdentityProviderRequestOptions> {
+  typedef mozilla::dom::IdentityProviderRequestOptions paramType;
+
+  static void Write(MessageWriter* aWriter, const paramType& aParam) {
+    WriteParam(aWriter, aParam.mConfigURL);
+    WriteParam(aWriter, aParam.mClientId);
     WriteParam(aWriter, aParam.mNonce);
+    WriteParam(aWriter, aParam.mLoginHint);
+    WriteParam(aWriter, aParam.mDomainHint);
     WriteParam(aWriter, aParam.mOrigin);
     WriteParam(aWriter, aParam.mLoginURL);
     WriteParam(aWriter, aParam.mLoginTarget);
@@ -33,11 +61,30 @@ struct ParamTraits<mozilla::dom::IdentityProviderConfig> {
     return ReadParam(aReader, &aResult->mConfigURL) &&
            ReadParam(aReader, &aResult->mClientId) &&
            ReadParam(aReader, &aResult->mNonce) &&
+           ReadParam(aReader, &aResult->mLoginHint) &&
+           ReadParam(aReader, &aResult->mDomainHint) &&
            ReadParam(aReader, &aResult->mOrigin) &&
            ReadParam(aReader, &aResult->mLoginURL) &&
            ReadParam(aReader, &aResult->mLoginTarget) &&
            ReadParam(aReader, &aResult->mEffectiveQueryURL) &&
            ReadParam(aReader, &aResult->mEffectiveType);
+  }
+};
+
+template <>
+struct ParamTraits<mozilla::dom::IdentityCredentialDisconnectOptions> {
+  typedef mozilla::dom::IdentityCredentialDisconnectOptions paramType;
+
+  static void Write(MessageWriter* aWriter, const paramType& aParam) {
+    WriteParam(aWriter, aParam.mConfigURL);
+    WriteParam(aWriter, aParam.mClientId);
+    WriteParam(aWriter, aParam.mAccountHint);
+  }
+
+  static bool Read(MessageReader* aReader, paramType* aResult) {
+    return ReadParam(aReader, &aResult->mConfigURL) &&
+           ReadParam(aReader, &aResult->mClientId) &&
+           ReadParam(aReader, &aResult->mAccountHint);
   }
 };
 
@@ -57,12 +104,23 @@ struct ParamTraits<mozilla::dom::IdentityCredentialRequestOptions> {
 
   static void Write(MessageWriter* aWriter, const paramType& aParam) {
     WriteParam(aWriter, aParam.mProviders);
+    WriteParam(aWriter, aParam.mMode);
   }
 
   static bool Read(MessageReader* aReader, paramType* aResult) {
-    return ReadParam(aReader, &aResult->mProviders);
+    return ReadParam(aReader, &aResult->mProviders) &&
+           ReadParam(aReader, &aResult->mMode);
   }
 };
+
+template <>
+struct ParamTraits<mozilla::dom::LoginStatus>
+    : public mozilla::dom::WebIDLEnumSerializer<mozilla::dom::LoginStatus> {};
+
+template <>
+struct ParamTraits<mozilla::dom::IdentityCredentialRequestOptionsMode>
+    : public mozilla::dom::WebIDLEnumSerializer<
+          mozilla::dom::IdentityCredentialRequestOptionsMode> {};
 
 }  // namespace IPC
 

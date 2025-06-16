@@ -353,12 +353,6 @@ nsresult Http2StreamBase::ParseHttpRequestHeaders(const char* buf,
   mFlatHttpRequestHeaders.SetLength(endHeader + 2);
   *countUsed = avail - (oldLen - endHeader) + 4;
   mRequestHeadersDone = 1;
-
-  Http2Stream* selfRegularStream = this->GetHttp2Stream();
-  if (selfRegularStream) {
-    return selfRegularStream->CheckPushCache();
-  }
-
   return NS_OK;
 }
 
@@ -959,7 +953,7 @@ void Http2StreamBase::UpdatePriorityDependency() {
 
   mPriorityDependency = GetPriorityDependencyFromTransaction(trans);
 
-  if (gHttpHandler->ActiveTabPriority() &&
+  if (StaticPrefs::network_http_active_tab_priority() &&
       mTransactionBrowserId != mCurrentBrowserId &&
       mPriorityDependency != Http2Session::kUrgentStartGroupID) {
     LOG3(
@@ -989,7 +983,7 @@ void Http2StreamBase::CurrentBrowserIdChanged(uint64_t id) {
 }
 
 void Http2StreamBase::CurrentBrowserIdChangedInternal(uint64_t id) {
-  MOZ_ASSERT(gHttpHandler->ActiveTabPriority());
+  MOZ_ASSERT(StaticPrefs::network_http_active_tab_priority());
   RefPtr<Http2Session> session = Session();
   LOG3(
       ("Http2StreamBase::CurrentBrowserIdChangedInternal "
@@ -1260,8 +1254,7 @@ nsresult Http2StreamBase::OnReadSegment(const char* buf, uint32_t count,
       break;
 
     case UPSTREAM_COMPLETE: {
-      MOZ_ASSERT(this->GetHttp2Stream() &&
-                 this->GetHttp2Stream()->IsReadingFromPushStream());
+      MOZ_ASSERT(this->GetHttp2Stream());
       rv = TransmitFrame(nullptr, nullptr, true);
       break;
     }

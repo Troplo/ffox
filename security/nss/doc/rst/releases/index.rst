@@ -8,6 +8,9 @@ Releases
    :glob:
    :hidden:
 
+   nss_3_112.rst
+   nss_3_111.rst
+   nss_3_110.rst
    nss_3_109.rst
    nss_3_108.rst
    nss_3_101_3.rst
@@ -82,43 +85,30 @@ Releases
 
 .. note::
 
-   **NSS 3.109** is the latest version of NSS.
-   Complete release notes are available here: :ref:`mozilla_projects_nss_nss_3_109_release_notes`
+   **NSS 3.112** is the latest version of NSS.
+   Complete release notes are available here: :ref:`mozilla_projects_nss_nss_3_112_release_notes`
 
    **NSS 3.101.3 (ESR)** is the latest ESR version of NSS.
    Complete release notes are available here: :ref:`mozilla_projects_nss_nss_3_101_3_release_notes`
 
 .. container::
 
-   Changes in 3.109 included in this release:
+   Changes in 3.112 included in this release:
 
-   - Bug 1939512 - Call BL_Init before RNG_RNGInit() so that special SHA instructions can be used if available
-   - Bug 1930807 - NSS policy updates - fix inaccurate key policy issues
-   - Bug 1945883 - SMIME fuzz target
-   - Bug 1914256 - ASN1 decoder fuzz target
-   - Bug 1936001 - Part 2: Revert "Extract testcases from ssl gtests for fuzzing"
-   - Bug 1915155 - Add fuzz/README.md
-   - Bug 1936001 - Part 4: Fix tstclnt arguments script
-   - Bug 1944545 - Extend pkcs7 fuzz target
-   - Bug 1912320 - Extend certDN fuzz target
-   - Bug 1854095 - delete old docker image definitions and task scheduling code  
-   - Bug 1854095 - apply nspr patch in acvp script
-   - Bug 1854095 - parse try syntax on pushes to nss-try
-   - Bug 1854095 - add "fuzz" task kind
-   - Bug 1854095 - add "test" task kind
-   - Bug 1854095 - add "certs" task kind
-   - Bug 1854095 - add "build" task kind
-   - Bug 1854095 - add "tools" task kind
-   - Bug 1854095 - add "fuzz" docker image
-   - Bug 1854095 - add "gcc-4.4" docker image
-   - Bug 1854095 - add "clang-format" docker image
-   - Bug 1854095 - add "acvp" docker image
-   - Bug 1854095 - add "builds" docker image
-   - Bug 1854095 - switch .taskcluster.yml to taskgraph
-   - Bug 1944300 - restore alloca.h include
-   - Bug 1944300 - refactor run_hacl.sh slightly
-   - Bug 1944300 - ignore all libcrux files in run_hacl.sh
-   - Bug 1944300 - use `diff -u` in HACL* consistency check
-   - Bug 1944300 - revert changes to HACL* files from bug 1866841
-   - Bug 1936001 - Part 3: Package frida corpus script
-
+   - Bug 1963792 - Fix alias for mac workers on try.
+   - Bug 1966786 - ensure all options can be configured with SSL_OptionSet and SSL_OptionSetDefault.
+   - Bug 1931930 - ABI/API break in ssl certificate processing
+   - Bug 1955971 - remove unnecessary assertion in sec_asn1d_init_state_based_on_template.
+   - Bug 1965754 - update taskgraph to v14.2.1.
+   - Bug 1964358 - Workflow for automation of the release on GitHub when pushing a tag
+   - Bug 1952860 - fix faulty assertions in SEC_ASN1DecoderUpdate
+   - Bug 1934877 - Renegotiations should use a fresh ECH GREASE buffer.
+   - Bug 1951396 - update taskgraph to v14.1.1
+   - Bug 1962503 - Partial fix for ACVP build CI job
+   - Bug 1961827 - Initialize find in sftk_searchDatabase.
+   - Bug 1963121 - Add clang-18 to extra builds.
+   - Bug 1963044 - Fault tolerant git fetch for fuzzing.
+   - Bug 1962556 - Tolerate intermittent failures in ssl_policy_pkix_ocsp.
+   - Bug 1962770 - fix compiler warnings when DEBUG_ASN1D_STATES or CMSDEBUG are set.
+   - Bug 1961835 - fix content type tag check in NSS_CMSMessage_ContainsCertsOrCrls.
+   - Bug 1963102 - Remove Cryptofuzz CI version check

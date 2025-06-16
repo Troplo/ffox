@@ -26,6 +26,7 @@
 #include "js/friend/DOMProxy.h"       // JS::ExpandoAndGeneration
 #include "proxy/DeadObjectProxy.h"
 #include "proxy/Proxy.h"
+#include "util/DifferentialTesting.h"
 #include "util/Unicode.h"
 #include "vm/PortableBaselineInterpret.h"
 #include "vm/StaticStrings.h"
@@ -1485,6 +1486,23 @@ bool BaselineCacheIRCompiler::emitHasClassResult(ObjOperandId objId,
   Address claspAddr(stubAddress(claspOffset));
   masm.loadObjClassUnsafe(obj, scratch);
   masm.cmpPtrSet(Assembler::Equal, claspAddr, scratch.get(), scratch);
+  masm.tagValue(JSVAL_TYPE_BOOLEAN, scratch, output.valueReg());
+  return true;
+}
+
+bool BaselineCacheIRCompiler::emitHasShapeResult(ObjOperandId objId,
+                                                 uint32_t shapeOffset) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoOutputRegister output(*this);
+  Register obj = allocator.useRegister(masm, objId);
+  AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
+
+  // Note: no Spectre mitigations are needed here because this shape check only
+  // affects correctness.
+  Address shapeAddr(stubAddress(shapeOffset));
+  masm.loadObjShapeUnsafe(obj, scratch);
+  masm.cmpPtrSet(Assembler::Equal, shapeAddr, scratch.get(), scratch);
   masm.tagValue(JSVAL_TYPE_BOOLEAN, scratch, output.valueReg());
   return true;
 }
@@ -4087,8 +4105,9 @@ bool BaselineCacheIRCompiler::emitNewArrayObjectResult(uint32_t arrayLength,
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
 
   gc::AllocKind allocKind = GuessArrayGCKind(arrayLength);
-  MOZ_ASSERT(CanChangeToBackgroundAllocKind(allocKind, &ArrayObject::class_));
-  allocKind = ForegroundToBackgroundAllocKind(allocKind);
+  MOZ_ASSERT(gc::GetObjectFinalizeKind(&ArrayObject::class_) ==
+             gc::FinalizeKind::None);
+  MOZ_ASSERT(!IsFinalizedKind(allocKind));
 
   uint32_t slotCount = GetGCKindSlots(allocKind);
   MOZ_ASSERT(slotCount >= ObjectElements::VALUES_PER_HEADER);
@@ -4201,14 +4220,16 @@ bool BaselineCacheIRCompiler::emitNewPlainObjectResult(uint32_t numFixedSlots,
 }
 
 bool BaselineCacheIRCompiler::emitNewFunctionCloneResult(
-    uint32_t canonicalOffset, gc::AllocKind allocKind) {
+    uint32_t canonicalOffset, gc::AllocKind allocKind, uint32_t siteOffset) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
 
   AutoOutputRegister output(*this);
   AutoScratchRegisterMaybeOutput result(allocator, masm, output);
+  AutoScratchRegisterMaybeOutputType site(allocator, masm, output);
   AutoScratchRegister canonical(allocator, masm);
   AutoScratchRegister envChain(allocator, masm);
   AutoScratchRegister scratch(allocator, masm);
+  MOZ_ASSERT(result.get() != site.get());
 
   // Load the canonical function and the frame's environment chain.
   masm.loadPtr(stubAddress(canonicalOffset), canonical);
@@ -4216,12 +4237,16 @@ bool BaselineCacheIRCompiler::emitNewFunctionCloneResult(
                   BaselineFrame::reverseOffsetOfEnvironmentChain());
   masm.loadPtr(envAddr, envChain);
 
+  Address siteAddr(stubAddress(siteOffset));
+  masm.loadPtr(siteAddr, site);
+
   allocator.discardStack(masm);
 
   // Try to allocate a new function object in JIT code.
   Label done, fail;
+
   masm.createFunctionClone(result, canonical, envChain, scratch, allocKind,
-                           &fail);
+                           &fail, AllocSiteInput(site));
   masm.jump(&done);
 
   {
@@ -4230,11 +4255,13 @@ bool BaselineCacheIRCompiler::emitNewFunctionCloneResult(
     AutoStubFrame stubFrame(*this);
     stubFrame.enter(masm, scratch);
 
+    masm.Push(site);
     masm.Push(envChain);
     masm.Push(canonical);
 
-    using Fn = JSObject* (*)(JSContext*, HandleFunction, HandleObject);
-    callVM<Fn, js::Lambda>(masm);
+    using Fn =
+        JSObject* (*)(JSContext*, HandleFunction, HandleObject, gc::AllocSite*);
+    callVM<Fn, js::LambdaBaselineFallback>(masm);
 
     stubFrame.leave(masm);
     masm.storeCallPointerResult(result);

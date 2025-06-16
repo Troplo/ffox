@@ -17,6 +17,9 @@ const APIS = {
   GetRequestedLocales() {
     return browser.test.getRequestedLocales();
   },
+  ClearUserPref({ pref }) {
+    return browser.test.clearUserPref(pref);
+  },
   GetLinkColor({ tab, selector }) {
     return browser.test.getLinkColor(tab.id, selector);
   },
@@ -91,6 +94,9 @@ const APIS = {
   },
   TriggerLanguageStateChange({ tab, languageState }) {
     return browser.test.triggerLanguageStateChange(tab.id, languageState);
+  },
+  SetHandlingUserInput({ tab, handlingUserInput }) {
+    return browser.test.setHandlingUserInput(tab.id, handlingUserInput);
   },
 };
 

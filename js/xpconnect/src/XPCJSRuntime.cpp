@@ -719,7 +719,7 @@ bool XPCJSRuntime::UsefulToMergeZones() const {
   return false;
 }
 
-void XPCJSRuntime::TraceNativeBlackRoots(JSTracer* trc) {
+void XPCJSRuntime::TraceAdditionalNativeBlackRoots(JSTracer* trc) {
   if (CycleCollectedJSContext* ccx = GetContext()) {
     const auto* cx = static_cast<const XPCJSContext*>(ccx);
     if (AutoMarkingPtr* roots = cx->mAutoRoots) {
@@ -754,10 +754,7 @@ void XPCJSRuntime::UnmarkSkippableJSHolders() {
 }
 
 void XPCJSRuntime::PrepareForForgetSkippable() {
-  nsCOMPtr<nsIObserverService> obs = xpc::GetObserverService();
-  if (obs) {
-    obs->NotifyObservers(nullptr, "cycle-collector-forget-skippable", nullptr);
-  }
+  nsCCUncollectableMarker::CleanupForForgetSkippable();
 }
 
 void XPCJSRuntime::BeginCycleCollectionCallback(CCReason aReason) {
@@ -2586,12 +2583,17 @@ static nsresult JSSizeOfTab(JSObject* objArg, size_t* jsObjectsSize,
 
 }  // namespace xpc
 
+// Temporary workaround until bug 1949494 can land.
+namespace TelemetryHistogram {
+void Accumulate(mozilla::Telemetry::HistogramID aHistogram, uint32_t aSample);
+}
+
 static void AccumulateTelemetryCallback(JSMetric id, uint32_t sample) {
   // clang-format off
   switch (id) {
-#define CASE_ACCUMULATE(NAME, _)                      \
-    case JSMetric::NAME:                              \
-      Telemetry::Accumulate(Telemetry::NAME, sample); \
+#define CASE_ACCUMULATE(NAME, _)                                \
+    case JSMetric::NAME:                                        \
+      TelemetryHistogram::Accumulate(Telemetry::NAME, sample);  \
       break;
 
     FOR_EACH_JS_LEGACY_METRIC(CASE_ACCUMULATE)
@@ -2603,20 +2605,6 @@ static void AccumulateTelemetryCallback(JSMetric id, uint32_t sample) {
   // clang-format on
 
   switch (id) {
-// Disable clone.deserialize metrics on Android for perf (bug 1898515).
-#ifndef MOZ_WIDGET_ANDROID
-    case JSMetric::DESERIALIZE_BYTES:
-      glean::performance_clone_deserialize::size.Accumulate(sample);
-      break;
-    case JSMetric::DESERIALIZE_ITEMS:
-      glean::performance_clone_deserialize::items.AccumulateSingleSample(
-          sample);
-      break;
-    case JSMetric::DESERIALIZE_US:
-      glean::performance_clone_deserialize::time.AccumulateRawDuration(
-          TimeDuration::FromMicroseconds(sample));
-      break;
-#endif  // MOZ_WIDGET_ANDROID
     case JSMetric::GC_MS:
       glean::javascript_gc::total_time.AccumulateRawDuration(
           TimeDuration::FromMilliseconds(sample));
@@ -2863,6 +2851,20 @@ static void AccumulateTelemetryCallback(JSMetric id, uint32_t sample) {
           JS::ExplainGCReason(static_cast<JS::GCReason>(sample)));
       glean::javascript_gc::minor_reason_long.Get(reason).Add(1);
     } break;
+    case JSMetric::GC_GLEAN_SLOW_PHASE: {
+      MOZ_ASSERT(sample < static_cast<uint32_t>(
+                              glean::javascript_gc::SlowPhaseLabel::e__Other__),
+                 "Phase does not exist in the slow_phase labels list.");
+      nsAutoCString phase(JS::GetGCPhaseName(sample));
+      glean::javascript_gc::slow_phase.Get(phase).Add(1);
+    } break;
+    case JSMetric::GC_GLEAN_SLOW_TASK: {
+      MOZ_ASSERT(sample < static_cast<uint32_t>(
+                              glean::javascript_gc::SlowTaskLabel::e__Other__),
+                 "Phase does not exist in the slow_task labels list.");
+      nsAutoCString phase(JS::GetGCPhaseName(sample));
+      glean::javascript_gc::slow_task.Get(phase).Add(1);
+    } break;
 
     default:
       // The rest aren't relayed to Glean.
@@ -2887,6 +2889,12 @@ static void SetUseCounterCallback(JSObject* obj, JSUseCounter counter) {
     case JSUseCounter::OPTIMIZE_GET_ITERATOR_FUSE:
       SetUseCounter(obj, eUseCounter_custom_JS_optimizeGetIterator_fuse);
       return;
+    case JSUseCounter::OPTIMIZE_ARRAY_SPECIES_FUSE:
+      SetUseCounter(obj, eUseCounter_custom_JS_optimizeArraySpecies_fuse);
+      return;
+    case JSUseCounter::OPTIMIZE_PROMISE_LOOKUP_FUSE:
+      SetUseCounter(obj, eUseCounter_custom_JS_optimizePromiseLookup_fuse);
+      return;
     case JSUseCounter::THENABLE_USE:
       SetUseCounter(obj, eUseCounter_custom_JS_thenable);
       return;
@@ -2895,6 +2903,9 @@ static void SetUseCounterCallback(JSObject* obj, JSUseCounter counter) {
       return;
     case JSUseCounter::THENABLE_USE_STANDARD_PROTO:
       SetUseCounter(obj, eUseCounter_custom_JS_thenable_standard_proto);
+      return;
+    case JSUseCounter::THENABLE_USE_OBJECT_PROTO:
+      SetUseCounter(obj, eUseCounter_custom_JS_thenable_object_proto);
       return;
     case JSUseCounter::LEGACY_LANG_SUBTAG:
       SetUseCounter(obj, eUseCounter_custom_JS_legacy_lang_subtag);
@@ -2925,6 +2936,10 @@ static void SetUseCounterCallback(JSObject* obj, JSUseCounter counter) {
       return;
     case JSUseCounter::DATEPARSE_IMPL_DEF:
       SetUseCounter(obj, eUseCounter_custom_JS_dateparse_impl_def);
+      return;
+    case JSUseCounter::REGEXP_SYMBOL_PROTOCOL_ON_PRIMITIVE:
+      SetUseCounter(obj,
+                    eUseCounter_custom_JS_regexp_symbol_protocol_on_primitive);
       return;
     case JSUseCounter::COUNT:
       break;

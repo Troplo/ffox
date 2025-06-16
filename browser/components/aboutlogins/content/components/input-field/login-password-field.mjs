@@ -48,8 +48,8 @@ class LoginPasswordField extends MozLitElement {
 
   #revealIconSrc(concealed) {
     return concealed
-      ? "chrome://browser/content/aboutlogins/icons/password-hide.svg"
-      : "chrome://browser/content/aboutlogins/icons/password.svg";
+      ? "chrome://global/skin/icons/eye-slash.svg"
+      : "chrome://global/skin/icons/eye.svg";
   }
 
   updated(changedProperties) {
@@ -70,7 +70,7 @@ class LoginPasswordField extends MozLitElement {
         onFocus: this.handleFocus,
         onBlur: this.handleBlur,
         labelL10nId: "login-item-password-label",
-        noteL10nId: "passwords-password-tooltip",
+        noteL10nId: "contextual-manager-passwords-password-tooltip",
       })}
       <moz-button
         data-l10n-id=${this.visible

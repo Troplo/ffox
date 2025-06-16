@@ -35,17 +35,17 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import mozilla.components.compose.base.Divider
-import mozilla.components.compose.base.annotation.LightDarkPreview
+import mozilla.components.compose.base.menu.DropdownMenu
+import mozilla.components.compose.base.menu.MenuItem
+import mozilla.components.compose.base.modifier.thenConditional
+import mozilla.components.compose.base.text.Text
 import mozilla.components.support.ktx.kotlin.trimmed
 import org.mozilla.fenix.R
-import org.mozilla.fenix.compose.ext.thenConditional
 import org.mozilla.fenix.compose.list.FaviconListItem
 import org.mozilla.fenix.compose.list.IconListItem
-import org.mozilla.fenix.compose.menu.DropdownMenu
-import org.mozilla.fenix.compose.menu.MenuItem
-import org.mozilla.fenix.compose.text.Text
 import org.mozilla.fenix.home.recentvisits.RecentlyVisitedItem
 import org.mozilla.fenix.home.recentvisits.RecentlyVisitedItem.RecentHistoryGroup
 import org.mozilla.fenix.home.recentvisits.RecentlyVisitedItem.RecentHistoryHighlight
@@ -244,7 +244,7 @@ private fun RecentlyVisitedHistoryHighlight(
 }
 
 @Composable
-@LightDarkPreview
+@PreviewLightDark
 private fun RecentlyVisitedMultipleColumnsPreview() {
     FirefoxTheme {
         Box(
@@ -267,7 +267,7 @@ private fun RecentlyVisitedMultipleColumnsPreview() {
 }
 
 @Composable
-@LightDarkPreview
+@PreviewLightDark
 private fun RecentlyVisitedSingleColumnPreview() {
     FirefoxTheme {
         Box(

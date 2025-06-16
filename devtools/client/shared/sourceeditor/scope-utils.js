@@ -12,21 +12,29 @@
  * @returns {Boolean}
  */
 function containsPosition(functionLocation, position) {
+  // Start
   return (
-    functionLocation.startLine <= position.line &&
-    functionLocation.endLine >= position.line
+    (functionLocation.start.line < position.line ||
+      // If the start line is equal check the columns
+      (functionLocation.start.line == position.line &&
+        functionLocation.start.column <= position.column)) &&
+    // End
+    (functionLocation.end.line > position.line ||
+      // If the end line is equal check the columns
+      (functionLocation.end.line == position.line &&
+        functionLocation.end.column >= position.column))
   );
 }
 
 function containsLocation(parentLocation, childLocation) {
   return (
-    parentLocation.startLine <= childLocation.startLine &&
-    parentLocation.endLine >= childLocation.endLine
+    containsPosition(parentLocation, childLocation.start) &&
+    containsPosition(parentLocation, childLocation.end)
   );
 }
 
 function getInnerLocations(locations, position) {
-  // First, find the function which  directly contains the specified position (line / column)
+  // First, find the function which directly contains the specified position (line / column)
   let parentIndex;
   for (let i = locations.length - 1; i >= 0; i--) {
     if (containsPosition(locations[i], position)) {

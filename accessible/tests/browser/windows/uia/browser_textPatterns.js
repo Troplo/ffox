@@ -1,4 +1,5 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -21,6 +22,7 @@ addUiaTask(
 <div><input id="input" value="input"></div>
 <textarea id="textarea">textarea</textarea>
 <div id="contentEditable" contenteditable><p>content</p><p>editable</p></div>
+<p id="p">p</p>
 <a id="link" href="#">link</a>
   `,
   async function testTextDocumentRange() {
@@ -31,7 +33,7 @@ addUiaTask(
     if (gIsUiaEnabled) {
       is(
         await runPython(`pattern.DocumentRange.GetText(-1)`),
-        "inputtextareacontenteditablelink",
+        "inputtextareacontenteditableplink",
         "document DocumentRange Text correct"
       );
     }
@@ -67,7 +69,39 @@ addUiaTask(
       );
     }
 
+    await testPatternAbsent("p", "Text");
+    // The IA2 -> UIA proxy doesn't expose the Text pattern on this text leaf.
+    if (gIsUiaEnabled) {
+      await runPython(`
+        global pLeaf
+        p = findUiaByDomId(doc, "p")
+        pLeaf = uiaClient.RawViewWalker.GetFirstChildElement(p)
+      `);
+      await definePyVar("pattern", `getUiaPattern(pLeaf, "Text")`);
+      ok(await runPython(`bool(pattern)`), "pLeaf has Text pattern");
+      is(
+        await runPython(`pattern.DocumentRange.GetText(-1)`),
+        "p",
+        "pLeaf DocumentRange Text correct"
+      );
+    }
+
     await testPatternAbsent("link", "Text");
+    // The IA2 -> UIA proxy doesn't expose this text leaf at all.
+    if (gIsUiaEnabled) {
+      await runPython(`
+        global linkLeaf
+        link = findUiaByDomId(doc, "link")
+        linkLeaf = uiaClient.RawViewWalker.GetFirstChildElement(link)
+      `);
+      await definePyVar("pattern", `getUiaPattern(linkLeaf, "Text")`);
+      ok(await runPython(`bool(pattern)`), "linkLeaf has Text pattern");
+      is(
+        await runPython(`pattern.DocumentRange.GetText(-1)`),
+        "link",
+        "linkLeaf DocumentRange Text correct"
+      );
+    }
   }
 );
 
@@ -1053,6 +1087,50 @@ addUiaTask(
 );
 
 /**
+ * Test the GetAttributeValue method when backspacing a character at the end of
+ * a document.
+ */
+addUiaTask(
+  `a<input id="input" value="bc">`,
+  async function testTextRangeGetAttributeValueBackspaceAtDocEnd(
+    browser,
+    docAcc
+  ) {
+    const input = findAccessibleChildByID(docAcc, "input");
+    info("Focusing input");
+    let moved = waitForEvent(EVENT_TEXT_CARET_MOVED, input);
+    input.takeFocus();
+    await moved;
+    info("Pressing end");
+    moved = waitForEvent(EVENT_TEXT_CARET_MOVED, input);
+    EventUtils.synthesizeKey("KEY_End");
+    await moved;
+    await runPython(`
+      global doc, range
+      doc = getDocUia()
+      input = findUiaByDomId(doc, "input")
+      text = getUiaPattern(input, "Text")
+      range = text.GetSelection().GetElement(0)
+    `);
+    // `range` is collapsed at the end of the input, after "c".
+    is(
+      await runPython(`range.GetAttributeValue(UIA_IsReadOnlyAttributeId)`),
+      false,
+      "IsReadOnly correct"
+    );
+    info("Backspacing c");
+    moved = waitForEvent(EVENT_TEXT_CARET_MOVED, input);
+    EventUtils.synthesizeKey("KEY_Backspace");
+    await moved;
+    is(
+      await runPython(`range.GetAttributeValue(UIA_IsReadOnlyAttributeId)`),
+      false,
+      "IsReadOnly correct"
+    );
+  }
+);
+
+/**
  * Test the TextRange pattern's Move method.
  */
 addUiaTask(
@@ -1364,6 +1442,7 @@ body {
 }
 </style>
 <input id="input">
+<p id="p">p</p>
   `,
   async function testTextSupportedTextSelection() {
     let result = await runPython(`
@@ -1378,13 +1457,57 @@ body {
       SupportedTextSelection_Multiple,
       "input SupportedTextSelection correct"
     );
-    // The IA2 -> UIA bridge doesn't understand that text isn't selectable in
-    // this document.
     if (gIsUiaEnabled) {
+      // The IA2 -> UIA proxy doesn't expose the Text pattern on this text leaf.
+      is(
+        await runPython(`
+          p = findUiaByDomId(doc, "p")
+          pLeaf = uiaClient.RawViewWalker.GetFirstChildElement(p)
+          text = getUiaPattern(pLeaf, "Text")
+          return text.SupportedTextSelection
+        `),
+        SupportedTextSelection_None,
+        "pLeaf SupportedTextSelection correct"
+      );
+      // The IA2 -> UIA proxy doesn't understand that text isn't selectable in
+      // this document.
       is(
         await runPython(`getUiaPattern(doc, "Text").SupportedTextSelection`),
         SupportedTextSelection_None,
         "doc SupportedTextSelection correct"
+      );
+    }
+  }
+);
+
+/**
+ * Test the Text pattern's SupportedTextSelection property on a document with a
+ * selectable body.
+ */
+addUiaTask(
+  `<p id="p">p</p>`,
+  async function testTextSupportedTextSelectionSelectableBody() {
+    is(
+      await runPython(`
+        global doc
+        doc = getDocUia()
+        text = getUiaPattern(doc, "Text")
+        return text.SupportedTextSelection
+      `),
+      SupportedTextSelection_Multiple,
+      "doc SupportedTextSelection correct"
+    );
+    // The IA2 -> UIA proxy doesn't expose the Text pattern on this text leaf.
+    if (gIsUiaEnabled) {
+      is(
+        await runPython(`
+          p = findUiaByDomId(doc, "p")
+          pLeaf = uiaClient.RawViewWalker.GetFirstChildElement(p)
+          text = getUiaPattern(pLeaf, "Text")
+          return text.SupportedTextSelection
+        `),
+        SupportedTextSelection_Multiple,
+        "pLeaf SupportedTextSelection correct"
       );
     }
   }
@@ -1404,7 +1527,9 @@ addUiaTask(
     `);
     is(await runPython(`text.GetSelection().Length`), 0, "No selection");
     info("Focusing textarea");
-    const textarea = findAccessibleChildByID(docAcc, "textarea");
+    const textarea = findAccessibleChildByID(docAcc, "textarea", [
+      nsIAccessibleText,
+    ]);
     let moved = waitForEvent(EVENT_TEXT_CARET_MOVED, textarea);
     textarea.takeFocus();
     await moved;
@@ -1468,6 +1593,36 @@ addUiaTask(
     await definePyVar("range", `text.GetSelection().GetElement(0)`);
     await runPython(`range.ExpandToEnclosingUnit(TextUnit_Line)`);
     is(await runPython(`range.GetText(-1)`), "cd", "range text correct");
+
+    info("Clicking mouse at b");
+    // BrowserTestUtils.synthesizeMouseAtPoint takes coordinates relative to the document.
+    const docX = {};
+    const docY = {};
+    docAcc.getBounds(docX, docY, {}, {});
+    let charX = {};
+    let charY = {};
+    textarea.getCharacterExtents(
+      1,
+      charX,
+      charY,
+      {},
+      {},
+      COORDTYPE_SCREEN_RELATIVE
+    );
+    moved = waitForEvent(EVENT_TEXT_CARET_MOVED, textarea);
+    await BrowserTestUtils.synthesizeMouseAtPoint(
+      charX.value - docX.value,
+      charY.value - docY.value,
+      {},
+      docAcc.browsingContext
+    );
+    await moved;
+    is(await runPython(`text.GetSelection().Length`), 1, "1 selection");
+    await definePyVar("range", `text.GetSelection().GetElement(0)`);
+    ok(await runPython(`bool(range)`), "Got selection range 0");
+    info("Expanding to character");
+    await runPython(`range.ExpandToEnclosingUnit(TextUnit_Character)`);
+    is(await runPython(`range.GetText(-1)`), "b", "range text correct");
   }
 );
 
@@ -1582,7 +1737,14 @@ addUiaTask(
  * Test the TextRange pattern's GetEnclosingElement method.
  */
 addUiaTask(
-  `<div id="editable" contenteditable role="textbox">ab <mark id="cdef"><span>cd</span> <a id="ef" href="/">ef</a></mark> <img id="g" src="https://example.com/a11y/accessible/tests/mochitest/moz.png" alt="g"></div>`,
+  `
+<div id="editable" contenteditable role="textbox">
+  ab
+  <mark id="cdef"><span>cd</span> <a id="ef" href="/">ef</a></mark>
+  <a href="/"><img id="g" src="https://example.com/a11y/accessible/tests/mochitest/moz.png" alt="g"></a>
+  <p><button id="h">h</button></p>
+</div>
+  `,
   async function testTextRangeGetEnclosingElement() {
     info("Getting editable DocumentRange");
     await runPython(`
@@ -1645,23 +1807,34 @@ addUiaTask(
     await runPython(
       `range.MoveEndpointByUnit(TextPatternRangeEndpoint_End, TextUnit_Character, -1)`
     );
-    // Range is now "ef".
+    // Range is now "ef". The innermost element is the text leaf, but "ef" is a
+    // link and that's what Narrator wants.
     is(
-      await runPython(`range.GetEnclosingElement().CurrentName`),
+      await runPython(`range.GetEnclosingElement().CurrentAutomationId`),
       "ef",
-      "EnclosingElement is ef text leaf"
+      "EnclosingElement is ef"
     );
+    // The IA2 -> UIA proxy gets the rest of this wrong.
+    if (!gIsUiaEnabled) {
+      return;
+    }
     info("Moving 1 word");
     await runPython(`range.Move(TextUnit_Word, 1)`);
     // Range is now the embedded object character for the img (g).
-    // The IA2 -> UIA proxy gets this wrong.
-    if (gIsUiaEnabled) {
-      is(
-        await runPython(`range.GetEnclosingElement().CurrentAutomationId`),
-        "g",
-        "EnclosingElement is g"
-      );
-    }
+    is(
+      await runPython(`range.GetEnclosingElement().CurrentAutomationId`),
+      "g",
+      "EnclosingElement is g"
+    );
+    info("Moving 1 word");
+    await runPython(`range.Move(TextUnit_Word, 1)`);
+    // Range is now "h". "h" is a button and buttons prune their children, so
+    // UIA doesn't see the text leaf.
+    is(
+      await runPython(`range.GetEnclosingElement().CurrentAutomationId`),
+      "h",
+      "EnclosingElement is h"
+    );
   }
 );
 
@@ -1884,6 +2057,176 @@ addUiaTask(
 );
 
 /**
+ * Test char bounds with the TextRange pattern's GetBoundingRectangles method.
+ */
+addUiaTask(
+  `<div id="test">abc</div>`,
+  async function testTextRangeGetBoundingRectanglesChar(browser, docAcc) {
+    const testAcc = findAccessibleChildByID(docAcc, "test", [
+      nsIAccessibleText,
+    ]);
+    const charX = {};
+    const charY = {};
+    const charW = {};
+    const charH = {};
+    testAcc.getCharacterExtents(
+      0,
+      charX,
+      charY,
+      charW,
+      charH,
+      COORDTYPE_SCREEN_RELATIVE
+    );
+
+    await runPython(`
+      global doc, docText, testAcc, range
+      doc = getDocUia()
+      docText = getUiaPattern(doc, "Text")
+      testAcc = findUiaByDomId(doc, "test")
+      range = docText.RangeFromChild(testAcc)
+      range.ExpandToEnclosingUnit(TextUnit_Character)
+    `);
+    is(await runPython(`range.GetText(-1)`), "a", "range text correct");
+
+    const uiaRect = await runPython(`range.GetBoundingRectangles()`);
+    is(uiaRect.length, 4, "GetBoundingRectangles returned one rectangle");
+    is(uiaRect[0], charX.value, "UIA char rect X matches core char rect X");
+    is(uiaRect[1], charY.value, "UIA char rect Y matches core char rect Y");
+    is(uiaRect[2], charW.value, "UIA char rect W matches core char rect W");
+    is(uiaRect[3], charH.value, "UIA char rect H matches core char rect H");
+  },
+  { uiaEnabled: true, uiaDisabled: true, chrome: true }
+);
+
+/**
+ * Test special case line bounds with the TextRange pattern's
+ * GetBoundingRectangles method.
+ */
+addUiaTask(
+  `
+<div><span id="line-break" tabindex="-1">ABC<br/></span>DEF</div>
+<p style="width: 1px;"><span id="wrapping" tabindex="-1">ABC</span> DEF</p>
+  `,
+  async function testTextRangeGetBoundingRectanglesLine(browser, docAcc) {
+    const lineBreakAcc = findAccessibleChildByID(docAcc, "line-break", [
+      nsIAccessibleText,
+    ]);
+    const wrappingAcc = findAccessibleChildByID(docAcc, "wrapping", [
+      nsIAccessibleText,
+    ]);
+
+    let lineRects = await runPython(`
+      global doc, docText, testAcc
+      doc = getDocUia()
+      docText = getUiaPattern(doc, "Text")
+      testAcc = findUiaByDomId(doc, "line-break")
+      range = docText.RangeFromChild(testAcc)
+      return range.GetBoundingRectangles()
+    `);
+
+    is(lineRects.length, 4, "GetBoundingRectangles returned one rectangle");
+    const lineBreakLineRect = [
+      lineRects[0],
+      lineRects[1],
+      lineRects[2],
+      lineRects[3],
+    ];
+    testTextBounds(
+      lineBreakAcc,
+      0,
+      -1,
+      lineBreakLineRect,
+      COORDTYPE_SCREEN_RELATIVE
+    );
+
+    lineRects = await runPython(`
+      global doc, docText, testAcc
+      testAcc = findUiaByDomId(doc, "wrapping")
+      range = docText.RangeFromChild(testAcc)
+      return range.GetBoundingRectangles()
+    `);
+    is(lineRects.length, 4, "GetBoundingRectangles returned one rectangle");
+    const wrappingLineRect = [
+      lineRects[0],
+      lineRects[1],
+      lineRects[2],
+      lineRects[3],
+    ];
+    testTextBounds(
+      wrappingAcc,
+      0,
+      -1,
+      wrappingLineRect,
+      COORDTYPE_SCREEN_RELATIVE
+    );
+  },
+  { uiaEnabled: true, uiaDisabled: true, chrome: true }
+);
+
+/**
+ * Test the Text pattern's GetBoundingRectangles method with the caret.
+ */
+addUiaTask(
+  `
+<div id="editable" contenteditable role="textbox">
+  <div id="ce0">a</div>
+  <div id="ce1"><br></div>
+  <div id="ce2">b</div>
+</div>
+  `,
+  async function testTextRangeGetBoundingRectanglesCaret(browser, docAcc) {
+    info("Focusing editable");
+    const editable = findAccessibleChildByID(docAcc, "editable");
+    const ce0 = findAccessibleChildByID(docAcc, "ce0");
+    let moved = waitForEvent(EVENT_TEXT_CARET_MOVED, ce0);
+    editable.takeFocus();
+    await moved;
+    await runPython(`
+      global text
+      doc = getDocUia()
+      editable = findUiaByDomId(doc, "editable")
+      text = getUiaPattern(editable, "Text")
+    `);
+    let uiaRects = await runPython(
+      `text.GetSelection().GetElement(0).GetBoundingRectangles()`
+    );
+    testTextPos(ce0, 0, [uiaRects[0], uiaRects[1]], COORDTYPE_SCREEN_RELATIVE);
+
+    info("ArrowRight to end of line");
+    moved = waitForEvent(EVENT_TEXT_CARET_MOVED, ce0);
+    EventUtils.synthesizeKey("KEY_ArrowRight");
+    await moved;
+    uiaRects = await runPython(
+      `text.GetSelection().GetElement(0).GetBoundingRectangles()`
+    );
+    // Bug 1966812: We would ideally return a rect here.
+    is(uiaRects.length, 0, "GetBoundingRectangles returned nothing");
+
+    info("ArrowRight to line feed on blank line");
+    const ce1 = findAccessibleChildByID(docAcc, "ce1");
+    moved = waitForEvent(EVENT_TEXT_CARET_MOVED, ce1);
+    EventUtils.synthesizeKey("KEY_ArrowRight");
+    await moved;
+    uiaRects = await runPython(
+      `text.GetSelection().GetElement(0).GetBoundingRectangles()`
+    );
+    testTextPos(ce1, 0, [uiaRects[0], uiaRects[1]], COORDTYPE_SCREEN_RELATIVE);
+
+    info("ArrowRight to b");
+    const ce2 = findAccessibleChildByID(docAcc, "ce2");
+    moved = waitForEvent(EVENT_TEXT_CARET_MOVED, ce2);
+    EventUtils.synthesizeKey("KEY_ArrowRight");
+    await moved;
+    uiaRects = await runPython(
+      `text.GetSelection().GetElement(0).GetBoundingRectangles()`
+    );
+    testTextPos(ce2, 0, [uiaRects[0], uiaRects[1]], COORDTYPE_SCREEN_RELATIVE);
+  },
+  // The IA2 -> UIA proxy doesn't support this.
+  { uiaEnabled: true, uiaDisabled: false }
+);
+
+/**
  * Test the TextRange pattern's ScrollIntoView method.
  */
 addUiaTask(
@@ -1940,15 +2283,36 @@ addUiaTask(
  */
 addUiaTask(
   `
+<p id="p">ab</p>
 <input id="input" type="text" value="ab">
 <div id="contenteditable" contenteditable role="textbox">ab</div>
   `,
   async function testTextRangeSelect(browser, docAcc) {
+    info("Moving caret to b in p");
+    const p = findAccessibleChildByID(docAcc, "p", [nsIAccessibleText]);
+    let moved = waitForEvent(EVENT_TEXT_CARET_MOVED, p);
+    await runPython(`
+      global doc
+      doc = getDocUia()
+      p = findUiaByDomId(doc, "p")
+      textChild = getUiaPattern(p, "TextChild")
+      global range
+      range = textChild.TextRange
+      # Encompass "b".
+      range.Move(TextUnit_Character, 1)
+      # Collapse.
+      range.MoveEndpointByRange(TextPatternRangeEndpoint_End, range, TextPatternRangeEndpoint_Start)
+      range.Select()
+    `);
+    await moved;
+    testTextSelectionCount(p, 0);
+    is(p.caretOffset, 1, "caret at 1");
+
     // <input> and contentEditable should behave the same.
     for (const id of ["input", "contenteditable"]) {
       info(`Focusing ${id}`);
       const acc = findAccessibleChildByID(docAcc, id, [nsIAccessibleText]);
-      let moved = waitForEvents([
+      moved = waitForEvents([
         [EVENT_FOCUS, acc],
         [EVENT_TEXT_CARET_MOVED, acc],
       ]);
@@ -1961,7 +2325,6 @@ addUiaTask(
         [EVENT_TEXT_CARET_MOVED, acc],
       ]);
       await runPython(`
-        doc = getDocUia()
         acc = findUiaByDomId(doc, "${id}")
         text = getUiaPattern(acc, "Text")
         global range
@@ -2245,7 +2608,7 @@ addUiaTask(
   `
 <div id="div">
   <p>line1</p>
-  <p>line2</p>
+  <p><strong id="strong">line</strong>2</p>
   <p style="position: absolute; left: -10000px; width: 1px;">line3</p>
   <p>line4</p>
 </div>
@@ -2312,6 +2675,24 @@ line7</textarea>
       "range 0 text correct"
     );
     // line6 and line7 are scrolled off screen by the textarea.
+
+    await runPython(`
+      strong = findUiaByDomId(doc, "strong")
+      strongLeaf = uiaClient.RawViewWalker.GetFirstChildElement(strong)
+      strongText = getUiaPattern(strongLeaf, "Text")
+      global ranges
+      ranges = strongText.GetVisibleRanges()
+    `);
+    is(
+      await runPython(`ranges.Length`),
+      1,
+      "strong leaf has correct number of visible ranges"
+    );
+    is(
+      await runPython(`ranges.GetElement(0).GetText(-1)`),
+      "line",
+      "range 0 text correct"
+    );
   },
   // The IA2 -> UIA proxy doesn't support GetVisibleRanges.
   { uiaEnabled: true, uiaDisabled: false }

@@ -8,7 +8,6 @@ import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.DialogInterface
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -19,6 +18,8 @@ import android.widget.Toast
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.edit
+import androidx.core.net.toUri
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Observer
 import androidx.lifecycle.lifecycleScope
@@ -114,7 +115,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
             scope = lifecycleScope,
             accountManager = requireComponents.backgroundServices.accountManager,
             httpClient = requireComponents.core.client,
-            updateFxAAllowDomesticChinaServerMenu = ::updateFxAAllowDomesticChinaServerMenu,
         )
 
         addonFilePicker = AddonFilePicker(requireContext(), requireComponents.addonManager)
@@ -150,6 +150,8 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 getString(R.string.pref_key_show_voice_search),
                 getString(R.string.pref_key_show_search_suggestions_in_private),
                 getString(R.string.pref_key_show_trending_search_suggestions),
+                getString(R.string.pref_key_show_recent_search_suggestions),
+                getString(R.string.pref_key_show_shortcuts_suggestions),
             )
         }
 
@@ -191,6 +193,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 appStore = requireContext().components.appStore,
                 snackbarDelegate = FenixSnackbarDelegate(view),
                 navController = findNavController(),
+                tabsUseCases = requireContext().components.useCases.tabsUseCases,
                 sendTabUseCases = null,
                 customTabSessionId = null,
             ),
@@ -315,7 +318,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 )
             }
 
-            /* General preferences */
+            // General preferences
             resources.getString(R.string.pref_key_search_settings) -> {
                 SettingsFragmentDirections.actionSettingsFragmentToSearchEngineFragment()
             }
@@ -355,7 +358,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 SettingsFragmentDirections.actionSettingsFragmentToTranslationsSettingsFragment()
             }
 
-            /* Privacy and security preferences */
+            // Privacy and security preferences
             resources.getString(R.string.pref_key_private_browsing) -> {
                 SettingsFragmentDirections.actionSettingsFragmentToPrivateBrowsingFragment()
             }
@@ -394,7 +397,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 SettingsFragmentDirections.actionSettingsFragmentToDataChoicesFragment()
             }
 
-            /* Advanced preferences */
+            // Advanced preferences
             resources.getString(R.string.pref_key_addons) -> {
                 Addons.openAddonsInSettings.record(NoExtras())
                 SettingsFragmentDirections.actionSettingsFragmentToAddonsFragment()
@@ -461,10 +464,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 SettingsFragmentDirections.actionSettingsFragmentToSyncDebugFragment()
             }
 
-            /* About preferences */
+            // About preferences
             resources.getString(R.string.pref_key_rate) -> {
                 try {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(SupportUtils.RATE_APP_URL)))
+                    startActivity(Intent(Intent.ACTION_VIEW, SupportUtils.RATE_APP_URL.toUri()))
                 } catch (e: ActivityNotFoundException) {
                     // Device without the play store installed.
                     // Opening the play store website.
@@ -529,8 +532,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
 
         preferenceRemoteDebugging?.isVisible = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
         preferenceRemoteDebugging?.setOnPreferenceChangeListener<Boolean> { preference, newValue ->
-            preference.context.settings().preferences.edit()
-                .putBoolean(preference.key, newValue).apply()
+            preference.context.settings().preferences.edit { putBoolean(preference.key, newValue) }
             requireComponents.core.engine.settings.remoteDebuggingEnabled = newValue
             true
         }
@@ -565,7 +567,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
         setLinkSharingPreference()
         setupAmoCollectionOverridePreference(requireContext().settings())
         setupGeckoLogsPreference(requireContext().settings())
-        setupAllowDomesticChinaFxaServerPreference()
         setupHttpsOnlyPreferences()
         setupNotificationPreference()
         setupSearchPreference()
@@ -603,22 +604,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
             scrollBarSize = 0
             delay(SCROLL_INDICATOR_DELAY)
             scrollBarSize = originalSize
-        }
-    }
-
-    private fun updateFxAAllowDomesticChinaServerMenu() {
-        val settings = requireContext().settings()
-        val preferenceAllowDomesticChinaServer =
-            findPreference<SwitchPreference>(getPreferenceKey(R.string.pref_key_allow_domestic_china_fxa_server))
-        // Only enable changes to these prefs when the user isn't connected to an account.
-        val enabled =
-            requireComponents.backgroundServices.accountManager.authenticatedAccount() == null
-        val checked = settings.allowDomesticChinaFxaServer
-        val visible = Config.channel.isMozillaOnline
-        preferenceAllowDomesticChinaServer?.apply {
-            isEnabled = enabled
-            isChecked = checked
-            isVisible = visible
         }
     }
 
@@ -662,36 +647,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 )
                 true
             }
-    }
-
-    private fun setupAllowDomesticChinaFxaServerPreference() {
-        val allowDomesticChinaFxAServer = getPreferenceKey(R.string.pref_key_allow_domestic_china_fxa_server)
-        val preferenceAllowDomesticChinaFxAServer = findPreference<SwitchPreference>(allowDomesticChinaFxAServer)
-        val visible = Config.channel.isMozillaOnline
-
-        preferenceAllowDomesticChinaFxAServer?.apply {
-            isVisible = visible
-        }
-
-        if (visible) {
-            preferenceAllowDomesticChinaFxAServer?.onPreferenceChangeListener =
-                Preference.OnPreferenceChangeListener { preference, newValue ->
-                    preference.context.settings().preferences.edit()
-                        .putBoolean(preference.key, newValue as Boolean).apply()
-                    updateFxAAllowDomesticChinaServerMenu()
-                    Toast.makeText(
-                        context,
-                        getString(R.string.toast_override_account_sync_server_done),
-                        Toast.LENGTH_LONG,
-                    ).show()
-                    Handler(Looper.getMainLooper()).postDelayed(
-                        {
-                            exitProcess(0)
-                        },
-                        FXA_SYNC_OVERRIDE_EXIT_DELAY,
-                    )
-                }
-        }
     }
 
     @VisibleForTesting
@@ -747,7 +702,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private fun setupDnsOverHttpsPreference(settings: Settings) {
         with(requirePreference<Preference>(R.string.pref_key_doh_settings)) {
             isVisible = settings.showDohEntryPoint
-            summary = when (context.components.core.engine.settings.dohSettingsMode) {
+            summary = when (context.settings().getDohSettingsMode()) {
                 Engine.DohSettingsMode.DEFAULT -> getString(R.string.preference_doh_default_protection)
                 Engine.DohSettingsMode.OFF -> getString(R.string.preference_doh_off)
                 Engine.DohSettingsMode.INCREASED -> getString(R.string.preference_doh_increased_protection)

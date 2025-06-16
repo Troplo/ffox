@@ -82,7 +82,7 @@ nsresult UnwrapArgImpl(JSContext* cx, JS::Handle<JSObject*> src,
 template <class Interface>
 inline nsresult UnwrapArg(JSContext* cx, JS::Handle<JSObject*> src,
                           Interface** ppArg) {
-  return UnwrapArgImpl(cx, src, NS_GET_TEMPLATE_IID(Interface),
+  return UnwrapArgImpl(cx, src, NS_GET_IID(Interface),
                        reinterpret_cast<void**>(ppArg));
 }
 
@@ -3041,13 +3041,8 @@ struct DeferredFinalizerImpl {
   static bool DeferredFinalize(uint32_t aSlice, void* aData) {
     MOZ_ASSERT(aSlice > 0, "nonsensical/useless call with aSlice == 0");
     SmartPtrArray* pointers = static_cast<SmartPtrArray*>(aData);
-    uint32_t oldLen = pointers->Length();
-    if (oldLen < aSlice) {
-      aSlice = oldLen;
-    }
-    uint32_t newLen = oldLen - aSlice;
     pointers->PopLastN(aSlice);
-    if (newLen == 0) {
+    if (pointers->IsEmpty()) {
       delete pointers;
       return true;
     }

@@ -172,6 +172,8 @@ def mozharness_test_on_docker(config, job, taskdesc):
     # Set MOZ_ENABLE_WAYLAND env variables to enable Wayland backend.
     if "wayland" in job["label"]:
         env["MOZ_ENABLE_WAYLAND"] = "1"
+    else:
+        assert "MOZ_ENABLE_WAYLAND" not in env
 
     if mozharness.get("mochitest-flavor"):
         env["MOCHITEST_FLAVOR"] = mozharness["mochitest-flavor"]
@@ -235,7 +237,7 @@ def mozharness_test_on_docker(config, job, taskdesc):
     test_tags = get_test_tags(config, env)
     if test_tags:
         env["MOZHARNESS_TEST_TAG"] = json.dumps(test_tags)
-        command.extend(["--tag={}".format(x) for x in test_tags])
+        command.extend([f"--tag={x}" for x in test_tags])
 
     # TODO: remove the need for run['chunked']
     elif mozharness.get("chunked") or test["chunks"] > 1:
@@ -457,7 +459,7 @@ def mozharness_test_on_generic_worker(config, job, taskdesc):
         # do not add --tag for perf tests
         if test["suite"] not in ["talos", "raptor"]:
             env["MOZHARNESS_TEST_TAG"] = json.dumps(test_tags)
-            mh_command.extend(["--tag={}".format(x) for x in test_tags])
+            mh_command.extend([f"--tag={x}" for x in test_tags])
 
     # TODO: remove the need for run['chunked']
     elif mozharness.get("chunked") or test["chunks"] > 1:

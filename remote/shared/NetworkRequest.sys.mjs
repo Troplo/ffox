@@ -10,6 +10,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
     "resource://devtools/shared/network-observer/NetworkUtils.sys.mjs",
 
   Log: "chrome://remote/content/shared/Log.sys.mjs",
+  NavigationState: "chrome://remote/content/shared/NavigationManager.sys.mjs",
   notifyNavigationStarted:
     "chrome://remote/content/shared/NavigationManager.sys.mjs",
   TabManager: "chrome://remote/content/shared/TabManager.sys.mjs",
@@ -30,6 +31,7 @@ export class NetworkRequest {
   #isDataURL;
   #navigationId;
   #navigationManager;
+  #postDataSize;
   #rawHeaders;
   #redirectCount;
   #requestId;
@@ -87,6 +89,10 @@ export class NetworkRequest {
 
     this.#contextId = this.#getContextId();
     this.#navigationId = this.#getNavigationId();
+
+    // The postDataSize will no longer be available after the channel is closed.
+    // Compute and cache the value, to be updated when `setRequestBody` is used.
+    this.#postDataSize = this.#computePostDataSize();
   }
 
   get alreadyCompleted() {
@@ -151,12 +157,7 @@ export class NetworkRequest {
   }
 
   get postDataSize() {
-    const charset = lazy.NetworkUtils.getCharset(this.#channel);
-    const sentBody = lazy.NetworkHelper.readPostTextFromRequest(
-      this.#channel,
-      charset
-    );
-    return sentBody ? sentBody.length : 0;
+    return this.#postDataSize;
   }
 
   get redirectCount() {
@@ -249,6 +250,7 @@ export class NetworkRequest {
     } finally {
       // Make sure to reset the flag once the modification was attempted.
       this.#channel.requestObserversCalled = true;
+      this.#postDataSize = this.#computePostDataSize();
     }
   }
 
@@ -341,6 +343,15 @@ export class NetworkRequest {
       supportsInterception: false,
       timings: this.timings,
     };
+  }
+
+  #computePostDataSize() {
+    const charset = lazy.NetworkUtils.getCharset(this.#channel);
+    const sentBody = lazy.NetworkHelper.readPostTextFromRequest(
+      this.#channel,
+      charset
+    );
+    return sentBody ? sentBody.length : 0;
   }
 
   /**
@@ -500,7 +511,7 @@ export class NetworkRequest {
     // `onBeforeRequestSent` might be too early for the NavigationManager.
     // If there is no ongoing navigation, create one ourselves.
     // TODO: Bug 1835704 to detect navigations earlier and avoid this.
-    if (!navigation || navigation.state !== "started") {
+    if (!navigation || navigation.state !== lazy.NavigationState.Started) {
       navigation = lazy.notifyNavigationStarted({
         contextDetails: { context: browsingContext },
         url: this.serializedURL,

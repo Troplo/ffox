@@ -1,5 +1,4 @@
 [DEFAULT]
-skip-if = ["os == 'android'"] # bug 1730213
 head = "head.js"
 firefox-appdir = "browser"
 support-files = ["data/engine.xml"]
@@ -13,6 +12,8 @@ support-files = ["data/engine.xml"]
 ["test_UrlbarController_unit.js"]
 
 ["test_UrlbarPrefs.js"]
+
+["test_UrlbarProviderSemanticHistorySearch.js"]
 
 ["test_UrlbarQueryContext.js"]
 
@@ -97,7 +98,6 @@ prefs = [
 ["test_history_bookmark_results_on_search_service_failure.js"]
 
 ["test_keywords.js"]
-skip-if = ["os == 'linux'"] # bug 1474616
 
 ["test_l10nCache.js"]
 

@@ -1,14 +1,12 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* eslint-disable mozilla/valid-lazy */
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { IndexedDB } from "resource://gre/modules/IndexedDB.sys.mjs";
 
-/** @type {Lazy} */
-const lazy = {};
-
-ChromeUtils.defineESModuleGetters(lazy, {
+const lazy = XPCOMUtils.declareLazy({
   ExtensionStorage: "resource://gre/modules/ExtensionStorage.sys.mjs",
   ExtensionUtils: "resource://gre/modules/ExtensionUtils.sys.mjs",
   getTrimmedString: "resource://gre/modules/ExtensionTelemetry.sys.mjs",
@@ -45,10 +43,6 @@ var ErrorsTelemetry = {
       return;
     }
     this.initialized = true;
-
-    this.resultHistogram = Services.telemetry.getHistogramById(
-      IDB_MIGRATE_RESULT_HISTOGRAM
-    );
   },
 
   /**
@@ -113,7 +107,7 @@ var ErrorsTelemetry = {
       } = telemetryData;
 
       this.lazyInit();
-      this.resultHistogram.add(histogramCategory);
+      Glean.extensionsData.migrateResultCount[histogramCategory].add(1);
 
       const extra = { addon_id: lazy.getTrimmedString(extensionId), backend };
 
@@ -174,7 +168,11 @@ class ExtensionStorageLocalIDB extends IndexedDB {
 
   static openForPrincipal(storagePrincipal) {
     // The db is opened using an extension principal isolated in a reserved user context id.
-    return super.openForPrincipal(storagePrincipal, IDB_NAME, IDB_VERSION);
+    return /** @type {Promise<ExtensionStorageLocalIDB>} */ (
+      super.openForPrincipal(storagePrincipal, IDB_NAME, {
+        version: IDB_VERSION,
+      })
+    );
   }
 
   async isEmpty() {

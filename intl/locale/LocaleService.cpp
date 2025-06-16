@@ -14,10 +14,12 @@
 #include "mozilla/intl/AppDateTimeFormat.h"
 #include "mozilla/intl/Locale.h"
 #include "mozilla/intl/OSPreferences.h"
+#include "nsContentUtils.h"
 #include "nsDirectoryService.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsIObserverService.h"
 #include "nsStringEnumerator.h"
+#include "nsRFPService.h"
 #include "nsXULAppAPI.h"
 #include "nsZipArchive.h"
 #ifdef XP_WIN
@@ -528,8 +530,9 @@ LocaleService::GetRegionalPrefsLocales(nsTArray<nsCString>& aRetVal) {
 
 NS_IMETHODIMP
 LocaleService::GetWebExposedLocales(nsTArray<nsCString>& aRetVal) {
-  if (StaticPrefs::privacy_spoof_english() == 2) {
-    aRetVal = nsTArray<nsCString>({"en-US"_ns});
+  if (nsContentUtils::ShouldResistFingerprinting("No context",
+                                                 RFPTarget::JSLocale)) {
+    aRetVal = nsTArray<nsCString>({nsRFPService::GetSpoofedJSLocale()});
     return NS_OK;
   }
 

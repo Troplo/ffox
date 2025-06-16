@@ -4,6 +4,7 @@ createBindGroupLayout validation tests.
 TODO: make sure tests are complete.
 `;
 
+import { AllFeaturesMaxLimitsGPUTest } from '../.././gpu_test.js';
 import { kUnitCaseParamsBuilder } from '../../../common/framework/params_builder.js';
 import { makeTestGroup } from '../../../common/framework/test_group.js';
 import {
@@ -19,10 +20,11 @@ import {
   BGLEntry,
   getBindingLimitForBindingType,
 } from '../../capability_info.js';
-import { kAllTextureFormats, kTextureFormatInfo } from '../../format_info.js';
-import { MaxLimitsTestMixin } from '../../gpu_test.js';
-
-import { ValidationTest } from './validation_test.js';
+import {
+  isTextureFormatUsableAsReadWriteStorageTexture,
+  isTextureFormatUsableAsStorageFormat,
+  kAllTextureFormats,
+} from '../../format_info.js';
 
 function clone<T extends GPUBindGroupLayoutDescriptor>(descriptor: T): T {
   return JSON.parse(JSON.stringify(descriptor));
@@ -74,7 +76,7 @@ function isValidBGLEntryForStages(device: GPUDevice, visibility: number, entry: 
     : true;
 }
 
-export const g = makeTestGroup(MaxLimitsTestMixin(ValidationTest));
+export const g = makeTestGroup(AllFeaturesMaxLimitsGPUTest);
 
 g.test('duplicate_bindings')
   .desc('Test that uniqueness of binding numbers across entries is enforced.')
@@ -505,16 +507,15 @@ g.test('storage_texture,formats')
       .combine('format', kAllTextureFormats) //
       .combine('access', kStorageTextureAccessValues)
   )
-  .beforeAllSubcases(t => {
-    t.selectDeviceForTextureFormatOrSkipTestCase(t.params.format);
-    t.skipIfTextureFormatNotUsableAsStorageTexture(t.params.format);
-  })
   .fn(t => {
     const { format, access } = t.params;
-    const info = kTextureFormatInfo[format];
+    t.skipIfTextureFormatNotSupported(format);
 
     const success =
-      info.color?.storage && !(access === 'read-write' && !info.color?.readWriteStorage);
+      isTextureFormatUsableAsStorageFormat(t.device, format) &&
+      !(
+        access === 'read-write' && !isTextureFormatUsableAsReadWriteStorageTexture(t.device, format)
+      );
 
     t.expectValidationError(() => {
       t.device.createBindGroupLayout({

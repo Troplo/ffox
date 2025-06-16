@@ -1,9 +1,9 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 package org.mozilla.fenix.settings.doh
 
-import DohSettingsMiddleware
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -13,14 +13,16 @@ import androidx.fragment.app.Fragment
 import androidx.navigation.NavHostController
 import androidx.navigation.fragment.findNavController
 import org.mozilla.fenix.HomeActivity
+import org.mozilla.fenix.R
 import org.mozilla.fenix.components.StoreProvider
 import org.mozilla.fenix.databinding.FragmentDohSettingsBinding
 import org.mozilla.fenix.ext.components
-import org.mozilla.fenix.ext.hideToolbar
+import org.mozilla.fenix.ext.settings
+import org.mozilla.fenix.ext.showToolbar
 import org.mozilla.fenix.theme.FirefoxTheme
 
 /**
- * Settings for DNS Over HTTPS (DoH)
+ * Settings for DNS over HTTPS (DoH)
  */
 internal class DohSettingsFragment : Fragment() {
 
@@ -48,7 +50,8 @@ internal class DohSettingsFragment : Fragment() {
                         navController = this@DohSettingsFragment.findNavController(),
                         composeNavController = navController,
                         settingsProvider = DefaultDohSettingsProvider(
-                            requireContext().components.core.engine,
+                            engine = requireContext().components.core.engine,
+                            settings = requireContext().settings(),
                         ),
                         homeActivity = (requireActivity() as HomeActivity),
                     )
@@ -69,7 +72,8 @@ internal class DohSettingsFragment : Fragment() {
                     this.navController = this@DohSettingsFragment.findNavController()
                     this.composeNavController = navController
                     this.settingsProvider = DefaultDohSettingsProvider(
-                        requireContext().components.core.engine,
+                        engine = requireContext().components.core.engine,
+                        settings = requireContext().settings(),
                     )
                     this.homeActivity = (requireActivity() as HomeActivity)
                 }
@@ -80,15 +84,25 @@ internal class DohSettingsFragment : Fragment() {
                 FirefoxTheme {
                     DohSettingsNavHost(
                         buildStore = buildStore,
+                        onUpdateToolbar = { titleResId ->
+                            safeShowToolbar(titleResId)
+                        },
                     )
                 }
             }
         }
     }
 
+    private fun safeShowToolbar(titleResId: Int) {
+        // Only update the toolbar if the Fragment is still visible
+        if (isResumed && isVisible) {
+            showToolbar(getString(titleResId))
+        }
+    }
+
     override fun onResume() {
         super.onResume()
-        hideToolbar()
+        showToolbar(getString(R.string.preference_doh_title))
     }
 
     override fun onDestroyView() {

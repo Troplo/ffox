@@ -58,6 +58,13 @@ moz-card {
   border-top-left-radius: var(--preview-image-border-radius);
   border-top-right-radius: var(--preview-image-border-radius);
 
+  /*
+   * We set the background color here in case the
+   * ProfilesThemeCard.theme.contentColor doesn't exist. For example, when the
+   * theme card is a theme from AMO and not one of the default themes.
+   */
+  background-color: var(--newtab-background-color, var(--in-content-page-background));
+
   > img {
     -moz-context-properties: fill, stroke, fill-opacity;
     width: 100%;
@@ -68,16 +75,17 @@ moz-card {
 }
 
 .theme-name {
-  display: flex;
-  align-items: center;
-  padding-inline-start: var(--space-medium);
-  padding-block: var(--space-small);
+  display: block;
+  padding: var(--space-small) var(--space-medium);
 
   border-inline-width: var(--theme-card-border-width);
   border-block-end-width: var(--theme-card-border-width);
   border-block-start: var(--card-border);
 
   font-size: var(--font-size-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 
   @media (forced-colors) {
     color: ButtonText;

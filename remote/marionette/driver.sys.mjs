@@ -62,9 +62,15 @@ ChromeUtils.defineLazyGetter(lazy, "logger", () =>
   lazy.Log.get(lazy.Log.TYPES.MARIONETTE)
 );
 
-ChromeUtils.defineLazyGetter(lazy, "prefAsyncEventsEnabled", () =>
-  Services.prefs.getBoolPref("remote.events.async.enabled", false)
-);
+ChromeUtils.defineLazyGetter(lazy, "hasSystemAccess", () => {
+  // Bug 1955007: Remove temporary preference in Firefox 141
+  const skipCheck = !Services.prefs.getBoolPref(
+    "remote.system-access-check.enabled",
+    true
+  );
+
+  return skipCheck || lazy.RemoteAgent.allowSystemAccess;
+});
 
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
@@ -115,6 +121,7 @@ class ActionsHelper {
       dispatchEvent: this.dispatchEvent.bind(this),
       getClientRects: this.getClientRects.bind(this),
       getInViewCentrePoint: this.getInViewCentrePoint.bind(this),
+      toBrowserWindowCoordinates: this.toBrowserWindowCoordinates.bind(this),
     };
   }
 
@@ -159,6 +166,14 @@ class ActionsHelper {
    *     Promise that resolves once the event is dispatched.
    */
   dispatchEvent(eventName, browsingContext, details) {
+    if (
+      eventName === "synthesizeWheelAtPoint" &&
+      lazy.actions.useAsyncWheelEvents
+    ) {
+      browsingContext = browsingContext.topChromeWindow.browsingContext;
+      details.eventData.asyncEnabled = true;
+    }
+
     return this.#getActor(browsingContext).dispatchEvent(eventName, details);
   }
 
@@ -267,6 +282,19 @@ class ActionsHelper {
       this.#driver._inputStates.delete(browsingContext);
     }
   }
+
+  /**
+   * Convert a position or rect in browser coordinates of CSS units.
+   *
+   * @param {object} position - Object with the coordinates to convert.
+   * @param {number} position.x - X coordinate.
+   * @param {number} position.y - Y coordinate.
+   * @param {BrowsingContext} browsingContext - The Browsing Context to convert the
+   *     coordinates for.
+   */
+  toBrowserWindowCoordinates(position, browsingContext) {
+    return this.#getActor(browsingContext).toBrowserWindowCoordinates(position);
+  }
 }
 
 /**
@@ -325,6 +353,13 @@ Object.defineProperty(GeckoDriver.prototype, "context", {
   },
 
   set(context) {
+    if (context === lazy.Context.Chrome && !lazy.hasSystemAccess) {
+      throw new lazy.error.UnsupportedOperationError(
+        `System access is required to switch to ${lazy.Context.Chrome} scope. ` +
+          `Start ${lazy.AppInfo.name} with "-remote-allow-system-access" to enable it.`
+      );
+    }
+
     this._context = lazy.Context.fromString(context);
   },
 });
@@ -1620,12 +1655,6 @@ GeckoDriver.prototype.performActions = async function (cmd) {
   const browsingContext = lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
 
-  if (!lazy.prefAsyncEventsEnabled) {
-    // Bug 1920959: Remove if we no longer need to dispatch in content.
-    await this.getActor().performActions(actions);
-    return;
-  }
-
   // Bug 1821460: Fetch top-level browsing context.
   const inputState = this._actionsHelper.getInputState(browsingContext);
   const actionsOptions = {
@@ -1661,12 +1690,6 @@ GeckoDriver.prototype.performActions = async function (cmd) {
 GeckoDriver.prototype.releaseActions = async function () {
   const browsingContext = lazy.assert.open(this.getBrowsingContext());
   await this._handleUserPrompts();
-
-  if (!lazy.prefAsyncEventsEnabled) {
-    // Bug 1920959: Remove if we no longer need to dispatch in content.
-    await this.getActor().releaseActions();
-    return;
-  }
 
   // Bug 1821460: Fetch top-level browsing context.
   const inputState = this._actionsHelper.getInputState(browsingContext);
@@ -3561,9 +3584,9 @@ GeckoDriver.prototype.addVirtualAuthenticator = function (cmd) {
 GeckoDriver.prototype.removeVirtualAuthenticator = function (cmd) {
   const { authenticatorId } = cmd.parameters;
 
-  lazy.assert.positiveInteger(
+  lazy.assert.string(
     authenticatorId,
-    lazy.pprint`Expected "authenticatorId" to be a positiveInteger, got ${authenticatorId}`
+    lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
   );
 
   lazy.webauthn.removeVirtualAuthenticator(authenticatorId);
@@ -3580,9 +3603,9 @@ GeckoDriver.prototype.addCredential = function (cmd) {
     signCount,
   } = cmd.parameters;
 
-  lazy.assert.positiveInteger(
+  lazy.assert.string(
     authenticatorId,
-    lazy.pprint`Expected "authenticatorId" to be a positiveInteger, got ${authenticatorId}`
+    lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
   );
   lazy.assert.string(
     credentialId,
@@ -3625,9 +3648,9 @@ GeckoDriver.prototype.addCredential = function (cmd) {
 GeckoDriver.prototype.getCredentials = function (cmd) {
   const { authenticatorId } = cmd.parameters;
 
-  lazy.assert.positiveInteger(
+  lazy.assert.string(
     authenticatorId,
-    lazy.pprint`Expected "authenticatorId" to be a positiveInteger, got ${authenticatorId}`
+    lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
   );
 
   return lazy.webauthn.getCredentials(authenticatorId);
@@ -3636,9 +3659,9 @@ GeckoDriver.prototype.getCredentials = function (cmd) {
 GeckoDriver.prototype.removeCredential = function (cmd) {
   const { authenticatorId, credentialId } = cmd.parameters;
 
-  lazy.assert.positiveInteger(
+  lazy.assert.string(
     authenticatorId,
-    lazy.pprint`Expected "authenticatorId" to be a positiveInteger, got ${authenticatorId}`
+    lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
   );
   lazy.assert.string(
     credentialId,
@@ -3651,9 +3674,9 @@ GeckoDriver.prototype.removeCredential = function (cmd) {
 GeckoDriver.prototype.removeAllCredentials = function (cmd) {
   const { authenticatorId } = cmd.parameters;
 
-  lazy.assert.positiveInteger(
+  lazy.assert.string(
     authenticatorId,
-    lazy.pprint`Expected "authenticatorId" to be a positiveInteger, got ${authenticatorId}`
+    lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
   );
 
   lazy.webauthn.removeAllCredentials(authenticatorId);
@@ -3662,9 +3685,9 @@ GeckoDriver.prototype.removeAllCredentials = function (cmd) {
 GeckoDriver.prototype.setUserVerified = function (cmd) {
   const { authenticatorId, isUserVerified } = cmd.parameters;
 
-  lazy.assert.positiveInteger(
+  lazy.assert.string(
     authenticatorId,
-    lazy.pprint`Expected "authenticatorId" to be a positiveInteger, got ${authenticatorId}`
+    lazy.pprint`Expected "authenticatorId" to be a string, got ${authenticatorId}`
   );
   lazy.assert.boolean(
     isUserVerified,

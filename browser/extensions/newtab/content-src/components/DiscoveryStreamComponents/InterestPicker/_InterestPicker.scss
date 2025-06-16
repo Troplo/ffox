@@ -26,7 +26,7 @@
     row-gap: calc(1.25 * var(--space-small));
     column-gap: var(--space-small);
     justify-content: flex-start;
-    margin: var(--space-small) auto;
+    margin: var(--space-small) 0;
     padding-inline-start: 0;
     width: fit-content;
 
@@ -44,7 +44,7 @@
     li>label {
       background-color: var(--background-color-canvas);
       border: var(--border-width) solid var(--border-color-interactive);
-      border-radius: 40px;
+      border-radius: var(--border-radius-circle);
       color: var(--newtab-contextual-text-primary-color);
       padding: var(--space-small) calc(1.25 * var(--space-small)) var(--space-small) var(--space-xsmall);
 

@@ -62,8 +62,7 @@ class NetworkBench(BasePythonSupport):
         try:
             result = subprocess.run(
                 ["caddy", "version"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 text=True,
             )
             if result.returncode == 0:
@@ -185,6 +184,7 @@ class NetworkBench(BasePythonSupport):
                     ],
                 },
             ]
+        protocols = ["h3"] if self.http_version == "h3" else ["h1", "h2"]
         caddyfile_content = {
             "admin": {"disabled": True},
             "apps": {
@@ -192,7 +192,7 @@ class NetworkBench(BasePythonSupport):
                     "servers": {
                         "server1": {
                             "listen": [port_str],
-                            "protocols": ["h3"],
+                            "protocols": protocols,
                             "routes": routes,
                             "tls_connection_policies": [
                                 {"certificate_selection": {"any_tag": ["cert1"]}}
@@ -202,6 +202,10 @@ class NetworkBench(BasePythonSupport):
                     },
                 },
                 "tls": {
+                    # Disable 0RTT for now. Can be reverted once
+                    # https://github.com/quic-go/quic-go/issues/5001 and
+                    # https://github.com/mozilla/neqo/issues/2476 are fixed.
+                    "session_tickets": {"disabled": True},
                     "certificates": {
                         "load_files": [
                             {
@@ -210,7 +214,7 @@ class NetworkBench(BasePythonSupport):
                                 "tags": ["cert1"],
                             }
                         ]
-                    }
+                    },
                 },
             },
         }
@@ -252,8 +256,7 @@ class NetworkBench(BasePythonSupport):
         try:
             result = subprocess.run(
                 ["sudo", "tc", "-help"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
                 text=True,
             )
             if result.returncode == 0:
@@ -271,8 +274,7 @@ class NetworkBench(BasePythonSupport):
                 command,
                 shell=True,
                 check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                capture_output=True,
             )
             LOG.info(command)
             LOG.info(f"Output: {result.stdout.decode().strip()}")
@@ -436,7 +438,7 @@ class NetworkBench(BasePythonSupport):
         return temp_file_path, file_size
 
     def generate_download_test_html(self, temp_path, test_file_name):
-        html_content = """
+        html_content = f"""
 <!DOCTYPE html>
 <html>
   <head>
@@ -481,9 +483,7 @@ class NetworkBench(BasePythonSupport):
     </script>
   </body>
 </html>
-    """.format(
-            test_file_name=test_file_name
-        )
+    """
         # Write the HTML content to the file
         prefix = "download_test_"
         suffix = ".html"
@@ -602,8 +602,15 @@ class NetworkBench(BasePythonSupport):
                     f"--chrome.args=--origin-to-force-quic-on=localhost:{self.caddy_port}",
                     f"--chrome.args=--ignore-certificate-errors-spki-list={spki}",
                 ]
-        else:
+        elif self.http_version == "h2":
             self.caddy_port = self.find_free_port(socket.SOCK_STREAM)
+            if self._is_chrome:
+                spki = "VCIlmPM9NkgFQtrs4Oa5TeFcDu6MWRTKSNdePEhOgD8="
+                cmd += [
+                    f"--chrome.args=--ignore-certificate-errors-spki-list={spki}",
+                ]
+        else:
+            raise Exception("Unsupported HTTP version")
 
         self.get_network_conditions(cmd)
         temp_file_path = None

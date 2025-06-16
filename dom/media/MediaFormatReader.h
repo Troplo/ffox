@@ -250,13 +250,12 @@ class MediaFormatReader final
 
   MediaEventSource<MediaResult>& OnDecodeWarning() { return mOnDecodeWarning; }
 
-  MediaEventSource<VideoInfo>& OnStoreDecoderBenchmark() {
-    return mOnStoreDecoderBenchmark;
-  }
-
   MediaEventProducer<VideoInfo, AudioInfo>& OnTrackInfoUpdatedEvent() {
     return mTrackInfoUpdatedEvent;
   }
+
+  template <typename T>
+  friend struct DDLoggedTypeTraits;  // For DecoderData
 
  private:
   bool HasVideo() const { return mVideo.mTrackDemuxer; }
@@ -345,11 +344,6 @@ class MediaFormatReader final
   void SetVideoDecodeThreshold();
 
   size_t SizeOfQueue(TrackType aTrack);
-
-  // Fire a new OnStoreDecoderBenchmark event that will create new
-  // storage of the decoder benchmark.
-  // This is called only on TaskQueue.
-  void NotifyDecoderBenchmarkStore();
 
   void NotifyTrackInfoUpdated();
 
@@ -478,10 +472,7 @@ class MediaFormatReader final
       return mDrainState == DrainState::DrainCompleted ||
              mDrainState == DrainState::DrainAborted;
     }
-    void RequestDrain() {
-      MOZ_RELEASE_ASSERT(mDrainState == DrainState::None);
-      mDrainState = DrainState::DrainRequested;
-    }
+    void RequestDrain();
 
     void StartRecordDecodingPerf(const TrackType aTrack,
                                  const MediaRawData* aSample);
@@ -879,8 +870,6 @@ class MediaFormatReader final
 
   MediaEventProducer<MediaResult> mOnDecodeWarning;
 
-  MediaEventProducer<VideoInfo> mOnStoreDecoderBenchmark;
-
   MediaEventProducer<VideoInfo, AudioInfo> mTrackInfoUpdatedEvent;
 
   RefPtr<FrameStatistics> mFrameStats;
@@ -917,6 +906,8 @@ class MediaFormatReader final
   // encrypted stream later.
   Atomic<bool> mEncryptedCustomIdent;
 };
+
+DDLoggedTypeCustomName(MediaFormatReader::DecoderData, DecoderData);
 
 }  // namespace mozilla
 

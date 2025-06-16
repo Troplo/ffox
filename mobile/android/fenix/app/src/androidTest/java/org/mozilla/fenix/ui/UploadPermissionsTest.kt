@@ -1,27 +1,31 @@
 package org.mozilla.fenix.ui
 
 import android.os.Build
+import androidx.test.filters.SdkSuppress
 import mozilla.components.support.ktx.util.PromptAbuserDetector
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.AppAndSystemHelper.assertExternalAppOpens
+import org.mozilla.fenix.helpers.AppAndSystemHelper.closeSystemPhotoAndVideoPicker
 import org.mozilla.fenix.helpers.AppAndSystemHelper.denyPermission
 import org.mozilla.fenix.helpers.AppAndSystemHelper.grantSystemPermission
+import org.mozilla.fenix.helpers.AppAndSystemHelper.verifySystemPhotoAndVideoPickerExists
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.MatcherHelper.itemWithResId
 import org.mozilla.fenix.helpers.TestAssetHelper
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.clickPageObject
 import org.mozilla.fenix.ui.robots.navigationToolbar
 
 class UploadPermissionsTest : TestSetup() {
 
     @get:Rule
-    val activityTestRule = HomeActivityIntentTestRule(
-        isNavigationBarCFREnabled = false,
-        isPWAsPromptEnabled = false,
-    )
+    val activityTestRule = HomeActivityIntentTestRule()
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     override fun setUp() {
         super.setUp()
@@ -81,6 +85,23 @@ class UploadPermissionsTest : TestSetup() {
             // Grant app access to audio files storage
             grantSystemPermission()
             assertExternalAppOpens("com.google.android.documentsui")
+        }
+    }
+
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2751915
+    // The photo picker is only available on devices with API level 33 (TIRAMISU) or higher
+    @SdkSuppress(minSdkVersion = 33)
+    @Test
+    fun uploadSelectedVideoOrImageFilesWhenStoragePermissionGrantedTest() {
+        val testPage = TestAssetHelper.getHTMLControlsFormAsset(mockWebServer)
+
+        navigationToolbar {
+        }.enterURLAndEnterToBrowser(testPage.url) {
+            clickPageObject(itemWithResId("photosUpload"))
+            // Deny app access to pictures and video recordings
+            denyPermission()
+            verifySystemPhotoAndVideoPickerExists()
+            closeSystemPhotoAndVideoPicker()
         }
     }
 }

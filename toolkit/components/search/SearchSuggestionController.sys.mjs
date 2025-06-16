@@ -8,7 +8,14 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   FormHistory: "resource://gre/modules/FormHistory.sys.mjs",
-  SearchUtils: "resource://gre/modules/SearchUtils.sys.mjs",
+  SearchUtils: "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
+});
+
+ChromeUtils.defineLazyGetter(lazy, "logConsole", () => {
+  return console.createInstance({
+    prefix: "SearchSuggestionController",
+    maxLogLevel: lazy.SearchUtils.loggingEnabled ? "Debug" : "Warn",
+  });
 });
 
 const DEFAULT_FORM_HISTORY_PARAM = "searchbar-history";
@@ -18,8 +25,6 @@ const BROWSER_SUGGEST_PRIVATE_PREF = "browser.search.suggest.enabled.private";
 const BROWSER_RICH_SUGGEST_PREF = "browser.urlbar.richSuggestions.featureGate";
 const REMOTE_TIMEOUT_PREF = "browser.search.suggest.timeout";
 const REMOTE_TIMEOUT_DEFAULT = 500; // maximum time (ms) to wait before giving up on a remote suggestions
-
-const SEARCH_TELEMETRY_LATENCY = "SEARCH_SUGGESTIONS_LATENCY_MS";
 
 /**
  * Generates an UUID.
@@ -275,6 +280,10 @@ export class SearchSuggestionController {
     // server is different for every typed value - e.g. "ocean breathes" does
     // not return a subset of the results returned for "ocean".
 
+    lazy.logConsole.debug(
+      `SearchSuggestionController.fetch() called with searchTerm: ${searchTerm}`
+    );
+
     this.stop();
 
     if (!Services.search.isInitialized) {
@@ -308,6 +317,7 @@ export class SearchSuggestionController {
       restrictToEngine,
       searchString: searchTerm,
       telemetryHandled: false,
+      gleanTimerId: 0,
       timer: Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer),
       userContextId,
     });
@@ -329,7 +339,8 @@ export class SearchSuggestionController {
     }
 
     function handleRejection(reason) {
-      if (reason == "HTTP request aborted") {
+      if (reason.startsWith("HTTP request aborted")) {
+        lazy.logConsole.debug(reason);
         // Do nothing since this is normal.
         return null;
       }
@@ -387,22 +398,28 @@ export class SearchSuggestionController {
    *   The search context.
    */
   #reportTelemetryForEngine(context) {
-    // Stop the latency stopwatch.
     if (!context.telemetryHandled) {
+      // Stop the latency stopwatch.
       if (context.abort) {
-        TelemetryStopwatch.cancelKeyed(
-          SEARCH_TELEMETRY_LATENCY,
-          context.engineId,
-          context
+        Glean.search.suggestionsLatency[context.engineId].cancel(
+          context.gleanTimerId
         );
       } else {
-        TelemetryStopwatch.finishKeyed(
-          SEARCH_TELEMETRY_LATENCY,
-          context.engineId,
-          context
+        Glean.search.suggestionsLatency[context.engineId].stopAndAccumulate(
+          context.gleanTimerId
         );
       }
+      context.gleanTimerId = 0;
       context.telemetryHandled = true;
+      if (context.engine.isAppProvided) {
+        if (context.abort) {
+          Glean.searchSuggestions.abortedRequests[context.engine.id].add();
+        } else if (context.error) {
+          Glean.searchSuggestions.failedRequests[context.engine.id].add();
+        } else {
+          Glean.searchSuggestions.successfulRequests[context.engine.id].add();
+        }
+      }
     }
   }
 
@@ -447,6 +464,11 @@ export class SearchSuggestionController {
         `${context.engine.identifier || uuid()}.search.suggestions.mozilla`
       );
     }
+
+    lazy.logConsole.debug(
+      `HTTP request started for ${submission.uri.spec} by method ${method}`
+    );
+
     let firstPartyDomain = gFirstPartyDomains.get(context.engine.name);
 
     request.setOriginAttributes({
@@ -484,6 +506,7 @@ export class SearchSuggestionController {
     });
 
     request.addEventListener("error", () => {
+      this.#context.error = true;
       this.#reportTelemetryForEngine(context);
       deferredResponse.resolve("HTTP error");
     });
@@ -493,7 +516,9 @@ export class SearchSuggestionController {
     request.addEventListener("abort", () => {
       context.timer.cancel();
       this.#reportTelemetryForEngine(context);
-      deferredResponse.reject("HTTP request aborted");
+      deferredResponse.reject(
+        `HTTP request aborted for ${submission.uri.spec}}`
+      );
     });
 
     if (submission.postData) {
@@ -502,11 +527,8 @@ export class SearchSuggestionController {
       request.send();
     }
 
-    TelemetryStopwatch.startKeyed(
-      SEARCH_TELEMETRY_LATENCY,
-      context.engineId,
-      context
-    );
+    context.gleanTimerId =
+      Glean.search.suggestionsLatency[context.engineId].start();
 
     return deferredResponse.promise;
   }
@@ -538,6 +560,8 @@ export class SearchSuggestionController {
     }
 
     let serverResults = context.request.response;
+
+    lazy.logConsole.debug("Remote results:", serverResults);
 
     try {
       if (
@@ -652,6 +676,10 @@ export class SearchSuggestionController {
       maxRemoteCount -= results.local.length;
     }
     results.remote = results.remote.slice(0, maxRemoteCount);
+
+    lazy.logConsole.debug(
+      `Deduplication completed. Final results count: local=${results.local.length}, remote=${results.remote.length}`
+    );
 
     return results;
   }

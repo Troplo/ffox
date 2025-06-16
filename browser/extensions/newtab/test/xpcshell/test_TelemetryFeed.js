@@ -3,20 +3,14 @@
 
 "use strict";
 
-const { actionCreators: ac, actionTypes: at } = ChromeUtils.importESModule(
-  "resource://newtab/common/Actions.mjs"
-);
-
 const { updateAppInfo } = ChromeUtils.importESModule(
   "resource://testing-common/AppInfo.sys.mjs"
 );
 
-const { TelemetryFeed, USER_PREFS_ENCODING } = ChromeUtils.importESModule(
-  "resource://newtab/lib/TelemetryFeed.sys.mjs"
-);
-
 ChromeUtils.defineESModuleGetters(this, {
   AboutNewTab: "resource:///modules/AboutNewTab.sys.mjs",
+  actionCreators: "resource://newtab/common/Actions.mjs",
+  actionTypes: "resource://newtab/common/Actions.mjs",
   ExtensionSettingsStore:
     "resource://gre/modules/ExtensionSettingsStore.sys.mjs",
   HomePage: "resource:///modules/HomePage.sys.mjs",
@@ -24,13 +18,19 @@ ChromeUtils.defineESModuleGetters(this, {
     "resource://gre/modules/components-utils/JsonSchemaValidator.sys.mjs",
   sinon: "resource://testing-common/Sinon.sys.mjs",
   TelemetryController: "resource://gre/modules/TelemetryController.sys.mjs",
+  TelemetryFeed: "resource://newtab/lib/TelemetryFeed.sys.mjs",
   TelemetryTestUtils: "resource://testing-common/TelemetryTestUtils.sys.mjs",
+  USER_PREFS_ENCODING: "resource://newtab/lib/TelemetryFeed.sys.mjs",
   UTEventReporting: "resource://newtab/lib/UTEventReporting.sys.mjs",
 });
 
 const FAKE_UUID = "{foo-123-foo}";
 const PREF_IMPRESSION_ID = "browser.newtabpage.activity-stream.impressionId";
 const PREF_TELEMETRY = "browser.newtabpage.activity-stream.telemetry";
+const PREF_PRIVATE_PING_ENABLED =
+  "browser.newtabpage.activity-stream.telemetry.privatePing.enabled";
+const PREF_REDACT_NEWTAB_PING_ENABLED =
+  "browser.newtabpage.activity-stream.telemetry.privatePing.redactNewtabPing.enabled";
 const PREF_EVENT_TELEMETRY =
   "browser.newtabpage.activity-stream.telemetry.ut.events";
 
@@ -705,7 +705,10 @@ add_task(async function test_createUserEvent_is_valid() {
 
   let instance = new TelemetryFeed();
   let data = { source: "TOP_SITES", event: "CLICK" };
-  let action = ac.AlsoToMain(ac.UserEvent(data), PORT_ID);
+  let action = actionCreators.AlsoToMain(
+    actionCreators.UserEvent(data),
+    PORT_ID
+  );
   let session = instance.addSession(PORT_ID);
 
   let ping = await instance.createUserEvent(action);
@@ -1028,7 +1031,7 @@ add_task(async function test_onAction_basic_actions() {
       sandbox.stub(instance, "init");
       sandbox.stub(instance, "sendPageTakeoverData");
     },
-    { type: at.INIT },
+    { type: actionTypes.INIT },
     instance => {
       Assert.ok(instance.init.calledOnce, "TelemetryFeed.init called once");
       Assert.ok(
@@ -1043,7 +1046,7 @@ add_task(async function test_onAction_basic_actions() {
     (sandbox, instance) => {
       sandbox.stub(instance, "uninit");
     },
-    { type: at.UNINIT },
+    { type: actionTypes.UNINIT },
     instance => {
       Assert.ok(instance.uninit.calledOnce, "TelemetryFeed.uninit called once");
     }
@@ -1057,8 +1060,8 @@ add_task(async function test_onAction_basic_actions() {
     (sandbox, instance) => {
       sandbox.stub(instance, "handleNewTabInit");
     },
-    ac.AlsoToMain({
-      type: at.NEW_TAB_INIT,
+    actionCreators.AlsoToMain({
+      type: actionTypes.NEW_TAB_INIT,
       data: { url: "about:newtab", browser },
     }),
     instance => {
@@ -1078,9 +1081,9 @@ add_task(async function test_onAction_basic_actions() {
       sandbox.stub(instance, "addSession").returns({ perf: {} });
       sandbox.stub(instance, "setLoadTriggerInfo");
     },
-    ac.AlsoToMain(
+    actionCreators.AlsoToMain(
       {
-        type: at.NEW_TAB_INIT,
+        type: actionTypes.NEW_TAB_INIT,
         data: { url: "about:monkeys", browser },
       },
       "port123"
@@ -1102,7 +1105,7 @@ add_task(async function test_onAction_basic_actions() {
     (sandbox, instance) => {
       sandbox.stub(instance, "endSession");
     },
-    ac.AlsoToMain({ type: at.NEW_TAB_UNLOAD }, "port123"),
+    actionCreators.AlsoToMain({ type: actionTypes.NEW_TAB_UNLOAD }, "port123"),
     instance => {
       Assert.ok(
         instance.endSession.calledOnce,
@@ -1120,8 +1123,8 @@ add_task(async function test_onAction_basic_actions() {
     (sandbox, instance) => {
       sandbox.stub(instance, "saveSessionPerfData");
     },
-    ac.AlsoToMain(
-      { type: at.SAVE_SESSION_PERF_DATA, data: { some_ts: 10 } },
+    actionCreators.AlsoToMain(
+      { type: actionTypes.SAVE_SESSION_PERF_DATA, data: { some_ts: 10 } },
       "port123"
     ),
     instance => {
@@ -1146,14 +1149,16 @@ add_task(async function test_onAction_basic_actions() {
       sandbox.stub(instance, "createUserEvent");
       sandbox.stub(instance.utEvents, "sendUserEvent");
     },
-    { type: at.TELEMETRY_USER_EVENT },
+    { type: actionTypes.TELEMETRY_USER_EVENT },
     instance => {
       Assert.ok(
         instance.createUserEvent.calledOnce,
         "TelemetryFeed.createUserEvent called once"
       );
       Assert.ok(
-        instance.createUserEvent.calledWith({ type: at.TELEMETRY_USER_EVENT })
+        instance.createUserEvent.calledWith({
+          type: actionTypes.TELEMETRY_USER_EVENT,
+        })
       );
       Assert.ok(
         instance.utEvents.sendUserEvent.calledOnce,
@@ -1180,7 +1185,7 @@ add_task(async function test_onAction_basic_actions() {
       sandbox.stub(instance, "createUserEvent");
       sandbox.stub(instance.utEvents, "sendUserEvent");
     },
-    { type: at.DISCOVERY_STREAM_USER_EVENT },
+    { type: actionTypes.DISCOVERY_STREAM_USER_EVENT },
     instance => {
       Assert.ok(
         instance.createUserEvent.calledOnce,
@@ -1188,7 +1193,7 @@ add_task(async function test_onAction_basic_actions() {
       );
       Assert.ok(
         instance.createUserEvent.calledWith({
-          type: at.DISCOVERY_STREAM_USER_EVENT,
+          type: actionTypes.DISCOVERY_STREAM_USER_EVENT,
           data: {
             value: {
               pocket_logged_in_status: Glean.pocket.isSignedIn.testGetValue(),
@@ -1224,10 +1229,10 @@ add_task(
     let session = {};
     sandbox.stub(instance.sessions, "get").returns(session);
     let data = { source: "foo", tiles: [{ id: 1 }] };
-    let action = { type: at.DISCOVERY_STREAM_IMPRESSION_STATS, data };
+    let action = { type: actionTypes.DISCOVERY_STREAM_IMPRESSION_STATS, data };
     sandbox.spy(instance, "handleDiscoveryStreamImpressionStats");
 
-    instance.onAction(ac.AlsoToMain(action, "port123"));
+    instance.onAction(actionCreators.AlsoToMain(action, "port123"));
 
     Assert.ok(
       instance.handleDiscoveryStreamImpressionStats.calledWith("port123", data)
@@ -1250,10 +1255,13 @@ add_task(
     let session = {};
     sandbox.stub(instance.sessions, "get").returns(session);
     let data = { type: "impression", tile_id: 42, position: 1 };
-    let action = { type: at.TOP_SITES_SPONSORED_IMPRESSION_STATS, data };
+    let action = {
+      type: actionTypes.TOP_SITES_SPONSORED_IMPRESSION_STATS,
+      data,
+    };
     sandbox.spy(instance, "handleTopSitesSponsoredImpressionStats");
 
-    instance.onAction(ac.AlsoToMain(action));
+    instance.onAction(actionCreators.AlsoToMain(action));
 
     Assert.ok(
       instance.handleTopSitesSponsoredImpressionStats.calledOnce,
@@ -1278,10 +1286,10 @@ add_task(async function test_onAction_calls_handleAboutSponsoredTopSites() {
   let instance = new TelemetryFeed();
 
   let data = { position: 0, advertiser_name: "moo", tile_id: 42 };
-  let action = { type: at.ABOUT_SPONSORED_TOP_SITES, data };
+  let action = { type: actionTypes.ABOUT_SPONSORED_TOP_SITES, data };
   sandbox.spy(instance, "handleAboutSponsoredTopSites");
 
-  instance.onAction(ac.AlsoToMain(action));
+  instance.onAction(actionCreators.AlsoToMain(action));
 
   Assert.ok(
     instance.handleAboutSponsoredTopSites.calledOnce,
@@ -1299,10 +1307,10 @@ add_task(async function test_onAction_calls_handleBlockUrl() {
   let instance = new TelemetryFeed();
 
   let data = { position: 0, advertiser_name: "moo", tile_id: 42 };
-  let action = { type: at.BLOCK_URL, data };
+  let action = { type: actionTypes.BLOCK_URL, data };
   sandbox.spy(instance, "handleBlockUrl");
 
-  instance.onAction(ac.AlsoToMain(action));
+  instance.onAction(actionCreators.AlsoToMain(action));
 
   Assert.ok(
     instance.handleBlockUrl.calledOnce,
@@ -1325,10 +1333,10 @@ add_task(
     sandbox.stub(instance.sessions, "get").returns(session);
 
     let data = { type: "impression", position: 1 };
-    let action = { type: at.TOP_SITES_ORGANIC_IMPRESSION_STATS, data };
+    let action = { type: actionTypes.TOP_SITES_ORGANIC_IMPRESSION_STATS, data };
     sandbox.spy(instance, "handleTopSitesOrganicImpressionStats");
 
-    instance.onAction(ac.AlsoToMain(action));
+    instance.onAction(actionCreators.AlsoToMain(action));
 
     Assert.ok(
       instance.handleTopSitesOrganicImpressionStats.calledOnce,
@@ -1360,8 +1368,8 @@ add_task(async function test_handleNewTabInit_sets_preloaded_session() {
   sandbox.stub(instance, "addSession").returns(session);
 
   instance.onAction(
-    ac.AlsoToMain({
-      type: at.NEW_TAB_INIT,
+    actionCreators.AlsoToMain({
+      type: actionTypes.NEW_TAB_INIT,
       data: { url: "about:newtab", browser: preloadedBrowser },
     })
   );
@@ -1388,8 +1396,8 @@ add_task(async function test_handleNewTabInit_sets_nonpreloaded_session() {
   sandbox.stub(instance, "addSession").returns(session);
 
   instance.onAction(
-    ac.AlsoToMain({
-      type: at.NEW_TAB_INIT,
+    actionCreators.AlsoToMain({
+      type: actionTypes.NEW_TAB_INIT,
       data: { url: "about:newtab", browser: preloadedBrowser },
     })
   );
@@ -1584,7 +1592,6 @@ add_task(
     let pingSubmitted = new Promise(resolve => {
       GleanPings.spoc.testBeforeNextSubmit(reason => {
         Assert.equal(reason, "impression");
-
         let pocketImpressions = Glean.pocket.impression.testGetValue();
         Assert.equal(pocketImpressions.length, 2);
         Assert.deepEqual(pocketImpressions[0].extra, {
@@ -1924,7 +1931,7 @@ add_task(
     let instance = new TelemetryFeed();
     Services.fog.testResetFOG();
 
-    let action = ac.DiscoveryStreamUserEvent();
+    let action = actionCreators.DiscoveryStreamUserEvent();
     const SESSION_ID = "decafc0ffee";
     sandbox.stub(instance.sessions, "get").returns({ session_id: SESSION_ID });
 
@@ -1957,7 +1964,7 @@ add_task(
     let instance = new TelemetryFeed();
     Services.fog.testResetFOG();
 
-    let action = ac.DiscoveryStreamUserEvent({
+    let action = actionCreators.DiscoveryStreamUserEvent({
       event: "CLICK",
       source: "POPULAR_TOPICS",
     });
@@ -1986,7 +1993,7 @@ add_task(
     let instance = new TelemetryFeed();
     Services.fog.testResetFOG();
 
-    let action = ac.DiscoveryStreamUserEvent({
+    let action = actionCreators.DiscoveryStreamUserEvent({
       event: "CLICK",
       source: "not-POPULAR_TOPICS",
     });
@@ -2022,7 +2029,7 @@ add_task(
     let instance = new TelemetryFeed();
     Services.fog.testResetFOG();
     const TOPIC = "atopic";
-    let action = ac.DiscoveryStreamUserEvent({
+    let action = actionCreators.DiscoveryStreamUserEvent({
       event: "CLICK",
       source: "not-POPULAR_TOPICS",
       value: {
@@ -2056,7 +2063,7 @@ add_task(
     let sandbox = sinon.createSandbox();
     let instance = new TelemetryFeed();
     Services.fog.testResetFOG();
-    let action = ac.DiscoveryStreamUserEvent({
+    let action = actionCreators.DiscoveryStreamUserEvent({
       event: "CLICK",
       source: "not-POPULAR_TOPICS",
       value: {
@@ -2096,7 +2103,7 @@ add_task(async function test_handleDiscoveryStreamUserEvent_popular_click() {
   let instance = new TelemetryFeed();
   Services.fog.testResetFOG();
   const TOPIC = "entertainment";
-  let action = ac.DiscoveryStreamUserEvent({
+  let action = actionCreators.DiscoveryStreamUserEvent({
     event: "CLICK",
     source: "POPULAR_TOPICS",
     value: {
@@ -2129,7 +2136,7 @@ add_task(async function test_handleDiscoveryStreamUserEvent_tooltip_click() {
   let instance = new TelemetryFeed();
   Services.fog.testResetFOG();
   const feature = "SPONSORED_CONTENT_INFO";
-  let action = ac.DiscoveryStreamUserEvent({
+  let action = actionCreators.DiscoveryStreamUserEvent({
     event: "CLICK",
     source: "FEATURE_HIGHLIGHT",
     value: {
@@ -2157,17 +2164,20 @@ add_task(
       "TelemetryFeed.handleDiscoveryStreamUserEvent instruments an organic " +
         "top stories click"
     );
+    Services.prefs.setBoolPref(PREF_PRIVATE_PING_ENABLED, false);
+    Services.prefs.setBoolPref(PREF_REDACT_NEWTAB_PING_ENABLED, false);
 
     let sandbox = sinon.createSandbox();
     let instance = new TelemetryFeed();
     Services.fog.testResetFOG();
     const ACTION_POSITION = 42;
-    let action = ac.DiscoveryStreamUserEvent({
+    let action = actionCreators.DiscoveryStreamUserEvent({
       event: "CLICK",
       action_position: ACTION_POSITION,
       value: {
         card_type: "organic",
-        recommendation_id: "decaf-c0ff33",
+        corpus_item_id: "decaf-beef",
+        scheduled_corpus_item_id: "dead-beef",
         tile_id: 314623757745896,
       },
     });
@@ -2182,8 +2192,9 @@ add_task(
     Assert.deepEqual(clicks[0].extra, {
       newtab_visit_id: SESSION_ID,
       is_sponsored: String(false),
-      position: ACTION_POSITION,
-      recommendation_id: "decaf-c0ff33",
+      position: String(ACTION_POSITION),
+      corpus_item_id: "decaf-beef",
+      scheduled_corpus_item_id: "dead-beef",
       tile_id: String(314623757745896),
     });
 
@@ -2193,6 +2204,142 @@ add_task(
     );
 
     sandbox.restore();
+    Services.prefs.clearUserPref(PREF_PRIVATE_PING_ENABLED);
+    Services.prefs.clearUserPref(PREF_REDACT_NEWTAB_PING_ENABLED);
+  }
+);
+
+add_task(
+  async function test_handleDiscoveryStreamUserEvent_private_ping_without_redactions_organic_top_stories_click() {
+    info(
+      "TelemetryFeed.handleDiscoveryStreamUserEvent instruments an organic " +
+        "top stories click with private ping fully enabled"
+    );
+
+    Services.prefs.setBoolPref(PREF_PRIVATE_PING_ENABLED, true);
+    Services.prefs.setBoolPref(PREF_REDACT_NEWTAB_PING_ENABLED, false);
+
+    let sandbox = sinon.createSandbox();
+    let instance = new TelemetryFeed();
+    Services.fog.testResetFOG();
+    const ACTION_POSITION = 42;
+    let action = actionCreators.DiscoveryStreamUserEvent({
+      event: "CLICK",
+      action_position: ACTION_POSITION,
+      value: {
+        card_type: "organic",
+        corpus_item_id: "decaf-beef",
+        scheduled_corpus_item_id: "dead-beef",
+        tile_id: 314623757745896,
+      },
+    });
+
+    const SESSION_ID = "decafc0ffee";
+    sandbox.stub(instance.sessions, "get").returns({ session_id: SESSION_ID });
+    sandbox.spy(instance.newtabContentPing, "recordEvent");
+
+    instance.handleDiscoveryStreamUserEvent(action);
+
+    let clicks = Glean.pocket.click.testGetValue();
+
+    Assert.equal(clicks.length, 1, "Recorded 1 content click");
+    Assert.equal(clicks.length, 1, "Recorded 1 private click");
+    Assert.deepEqual(clicks[0].extra, {
+      newtab_visit_id: SESSION_ID,
+      is_sponsored: String(false),
+      corpus_item_id: "decaf-beef",
+      scheduled_corpus_item_id: "dead-beef",
+      position: String(ACTION_POSITION),
+      tile_id: 314623757745896,
+    });
+
+    Assert.ok(
+      instance.newtabContentPing.recordEvent.calledWith(
+        "click",
+        sinon.match({
+          newtab_visit_id: SESSION_ID,
+          is_sponsored: false,
+          position: ACTION_POSITION,
+          tile_id: 314623757745896,
+          corpus_item_id: "decaf-beef",
+          scheduled_corpus_item_id: "dead-beef",
+        })
+      ),
+      "NewTabContentPing passed the expected arguments."
+    );
+
+    Assert.ok(
+      !Glean.pocket.shim.testGetValue(),
+      "Pocket shim was not recorded"
+    );
+
+    sandbox.restore();
+    Services.prefs.clearUserPref(PREF_PRIVATE_PING_ENABLED);
+    Services.prefs.clearUserPref(PREF_REDACT_NEWTAB_PING_ENABLED);
+  }
+);
+
+add_task(
+  async function test_handleDiscoveryStreamUserEvent_private_ping_with_redactions_organic_top_stories_click() {
+    info(
+      "TelemetryFeed.handleDiscoveryStreamUserEvent instruments an organic " +
+        "top stories click with private ping fully enabled"
+    );
+
+    Services.prefs.setBoolPref(PREF_PRIVATE_PING_ENABLED, true);
+    Services.prefs.setBoolPref(PREF_REDACT_NEWTAB_PING_ENABLED, true);
+
+    let sandbox = sinon.createSandbox();
+    let instance = new TelemetryFeed();
+    Services.fog.testResetFOG();
+    const ACTION_POSITION = 42;
+    let action = actionCreators.DiscoveryStreamUserEvent({
+      event: "CLICK",
+      action_position: ACTION_POSITION,
+      value: {
+        card_type: "organic",
+        corpus_item_id: "decaf-beef",
+        scheduled_corpus_item_id: "dead-beef",
+        tile_id: 314623757745896,
+      },
+    });
+
+    const SESSION_ID = "decafc0ffee";
+    sandbox.stub(instance.sessions, "get").returns({ session_id: SESSION_ID });
+    sandbox.spy(instance.newtabContentPing, "recordEvent");
+
+    instance.handleDiscoveryStreamUserEvent(action);
+
+    let clicks = Glean.pocket.click.testGetValue();
+
+    Assert.equal(clicks.length, 1, "Recorded 1 content click");
+    Assert.equal(clicks.length, 1, "Recorded 1 private click");
+    Assert.deepEqual(clicks[0].extra, {
+      newtab_visit_id: SESSION_ID,
+      is_sponsored: String(false),
+      position: String(ACTION_POSITION),
+    });
+
+    Assert.ok(
+      instance.newtabContentPing.recordEvent.calledWith(
+        "click",
+        sinon.match({
+          newtab_visit_id: SESSION_ID,
+          is_sponsored: false,
+          position: ACTION_POSITION,
+        })
+      ),
+      "NewTabContentPing passed the expected arguments."
+    );
+
+    Assert.ok(
+      !Glean.pocket.shim.testGetValue(),
+      "Pocket shim was not recorded"
+    );
+
+    sandbox.restore();
+    Services.prefs.clearUserPref(PREF_PRIVATE_PING_ENABLED);
+    Services.prefs.clearUserPref(PREF_REDACT_NEWTAB_PING_ENABLED);
   }
 );
 
@@ -2210,7 +2357,7 @@ add_task(
     const SHIM = "Y29uc2lkZXIgeW91ciBjdXJpb3NpdHkgcmV3YXJkZWQ=";
     const FETCH_TIMESTAMP = new Date("March 22, 2024 10:15:20");
     const NEWTAB_CREATION_TIMESTAMP = new Date("March 23, 2024 11:10:30");
-    let action = ac.DiscoveryStreamUserEvent({
+    let action = actionCreators.DiscoveryStreamUserEvent({
       event: "CLICK",
       action_position: ACTION_POSITION,
       value: {
@@ -2269,7 +2416,7 @@ add_task(
     let instance = new TelemetryFeed();
     Services.fog.testResetFOG();
     const ACTION_POSITION = 42;
-    let action = ac.DiscoveryStreamUserEvent({
+    let action = actionCreators.DiscoveryStreamUserEvent({
       event: "SAVE_TO_POCKET",
       action_position: ACTION_POSITION,
       value: {
@@ -2316,7 +2463,7 @@ add_task(
     const SHIM = "Y29uc2lkZXIgeW91ciBjdXJpb3NpdHkgcmV3YXJkZWQ=";
     const FETCH_TIMESTAMP = new Date("March 22, 2024 10:15:20");
     const NEWTAB_CREATION_TIMESTAMP = new Date("March 23, 2024 11:10:30");
-    let action = ac.DiscoveryStreamUserEvent({
+    let action = actionCreators.DiscoveryStreamUserEvent({
       event: "SAVE_TO_POCKET",
       action_position: ACTION_POSITION,
       value: {
@@ -2380,7 +2527,7 @@ add_task(
     let instance = new TelemetryFeed();
     Services.fog.testResetFOG();
     const ACTION_POSITION = 42;
-    let action = ac.DiscoveryStreamUserEvent({
+    let action = actionCreators.DiscoveryStreamUserEvent({
       event: "SAVE_TO_POCKET",
       action_position: ACTION_POSITION,
     });
@@ -2417,7 +2564,7 @@ add_task(
     let instance = new TelemetryFeed();
     Services.fog.testResetFOG();
     const ACTION_POSITION = 42;
-    let action = ac.DiscoveryStreamUserEvent({
+    let action = actionCreators.DiscoveryStreamUserEvent({
       event: "POCKET_THUMBS_DOWN",
       action_position: ACTION_POSITION,
       value: {
@@ -2458,7 +2605,7 @@ add_task(async function test_handleDiscoveryStreamUserEvent_thumbs_up_event() {
   let instance = new TelemetryFeed();
   Services.fog.testResetFOG();
   const ACTION_POSITION = 42;
-  let action = ac.DiscoveryStreamUserEvent({
+  let action = actionCreators.DiscoveryStreamUserEvent({
     event: "POCKET_THUMBS_DOWN",
     action_position: ACTION_POSITION,
     value: {
@@ -2606,7 +2753,7 @@ add_task(async function test_handleBlockUrl_record_dismiss_on_action() {
     },
   ];
 
-  await instance.handleBlockUrl({ data });
+  await instance.handleBlockUrl({ data, source: "TOP_SITES" });
 
   let dismisses = Glean.topsites.dismiss.testGetValue();
   Assert.equal(dismisses.length, 1, "Should have recorded 1 dismiss");
@@ -2643,7 +2790,7 @@ add_task(
       },
     ];
 
-    await instance.handleBlockUrl({ data });
+    await instance.handleBlockUrl({ data, source: "TOP_SITES" });
 
     let dismisses = Glean.topsites.dismiss.testGetValue();
     Assert.equal(dismisses.length, 1, "Should have recorded 1 dismiss");

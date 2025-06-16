@@ -65,10 +65,6 @@ const DEBUGGER_L10N = new LocalizationHelper(
   "devtools/client/locales/debugger.properties"
 );
 
-const isCm6Enabled = Services.prefs.getBoolPref(
-  "devtools.debugger.features.codemirror-next"
-);
-
 /**
  * Waits for `predicate()` to be true. `state` is the redux app state.
  *
@@ -154,6 +150,7 @@ function waitForSource(dbg, url) {
 }
 
 async function waitForElement(dbg, name, ...args) {
+  info(`Waiting for debugger element by name: ${name}`);
   await waitUntil(() => findElement(dbg, name, ...args));
   return findElement(dbg, name, ...args);
 }
@@ -175,6 +172,7 @@ async function waitForAllElements(
   count = 1,
   countStrictlyEqual = false
 ) {
+  info(`Waiting for N=${count} debugger elements by name: ${name}`);
   await waitUntil(() => {
     const elsCount = findAllElements(dbg, name).length;
     return countStrictlyEqual ? elsCount === count : elsCount >= count;
@@ -183,6 +181,7 @@ async function waitForAllElements(
 }
 
 async function waitForElementWithSelector(dbg, selector) {
+  info(`Waiting for debugger element by selector: ${selector}`);
   await waitUntil(() => findElementWithSelector(dbg, selector));
   return findElementWithSelector(dbg, selector);
 }
@@ -204,8 +203,10 @@ function waitForSelectedLocation(dbg, line, column) {
     const location = dbg.selectors.getSelectedLocation();
     return (
       location &&
-      (line ? location.line == line : true) &&
-      (column ? location.column == column : true)
+      location.line == line &&
+      // location's column is 0-based, while all line and columns mentioned in tests
+      // are 1-based.
+      (typeof column == "number" ? location.column + 1 == column : true)
     );
   });
 }
@@ -222,7 +223,6 @@ function waitForSelectedLocation(dbg, line, column) {
 function waitForSelectedSource(dbg, sourceOrUrl) {
   const {
     getSelectedSourceTextContent,
-    getSymbols,
     getBreakableLines,
     getSourceActorsForSource,
     getSourceActorBreakableLines,
@@ -251,28 +251,6 @@ function waitForSelectedSource(dbg, sourceOrUrl) {
         } else if (location.source.id != sourceOrUrl.id) {
           return false;
         }
-      }
-
-      const selectedFrame = getSelectedFrame(getCurrentThread());
-      // Only when we are paused on that specific source
-      const isPausedInSource =
-        selectedFrame?.location.source.id == location.source.id;
-      // Wait for symbols/AST to be parsed only when CM5 is enabled or
-      // when paused in original sources, as parserWorker.getClosestFunctionName
-      // is called when mapping original frames (TODO: Remove when Bug 1943945 is fixed)
-      const hasSymbols =
-        !isCm6Enabled || selectedFrame?.location.source.isOriginal
-          ? getSymbols(location)
-          : true;
-      // And this isn't a WASM source (which has no AST)
-      if (
-        // Only when we are paused on that specific source
-        selectedFrame?.location.source.id == location.source.id &&
-        !hasSymbols &&
-        // And this isn't a WASM source (which has no AST)
-        !isWasmBinarySource(location.source)
-      ) {
-        return false;
       }
 
       // Finaly wait for breakable lines to be set
@@ -371,7 +349,7 @@ function assertHighlightLocation(dbg, source, line) {
 
   ok(isVisibleInEditor(dbg, lineEl), "Highlighted line is visible");
 
-  const lineInfo = getCMEditor(dbg).lineInfo(isCm6Enabled ? line : line - 1);
+  const lineInfo = getCMEditor(dbg).lineInfo(line);
   ok(lineInfo.wrapClass.includes("highlight-line"), "Line is highlighted");
 }
 
@@ -384,13 +362,13 @@ async function _assertDebugLine(dbg, line, column) {
   const source = dbg.selectors.getSelectedSource();
   // WASM lines are hex addresses which have to be mapped to decimal line number
   if (isWasmBinarySource(source)) {
-    line = wasmOffsetToLine(dbg, source.id, line);
+    line = wasmOffsetToLine(dbg, line);
   }
 
   // Check the debug line
   // cm6 lines are 1-based, while cm5 are 0-based, to keep compatibility with
   // .lineInfo usage in other locations.
-  const lineInfo = getCMEditor(dbg).lineInfo(isCm6Enabled ? line : line - 1);
+  const lineInfo = getCMEditor(dbg).lineInfo(line);
   const sourceTextContent = dbg.selectors.getSelectedSourceTextContent();
   if (source && !sourceTextContent) {
     const url = source.url;
@@ -411,38 +389,37 @@ async function _assertDebugLine(dbg, line, column) {
     return;
   }
 
+  // Consider pausing on error also as being paused
   ok(
-    lineInfo?.wrapClass.includes("new-debug-line"),
+    lineInfo?.wrapClass.includes("paused-line") ||
+      lineInfo?.wrapClass.includes("new-debug-line-error"),
     `Line ${line} is not highlighted as paused`
   );
 
-  const debugLine =
-    findElement(dbg, "debugLine") || findElement(dbg, "debugErrorLine");
+  const pausedLine =
+    findElement(dbg, "pausedLine") || findElement(dbg, "debugErrorLine");
 
   is(
-    findAllElements(dbg, "debugLine").length +
+    findAllElements(dbg, "pausedLine").length +
       findAllElements(dbg, "debugErrorLine").length,
     1,
     "There is only one line"
   );
 
-  ok(isVisibleInEditor(dbg, debugLine), "debug line is visible");
+  ok(isVisibleInEditor(dbg, pausedLine), "debug line is visible");
 
-  const markedSpans = lineInfo.handle.markedSpans;
-  if (markedSpans && markedSpans.length && !isWasmBinarySource(source)) {
-    const hasExpectedDebugLine = markedSpans.some(
-      span =>
-        span.marker.className?.includes("debug-expression") &&
-        // When a precise column is expected, ensure that we have at least
-        // one "debug line" for the column we expect.
-        // (See the React Component: DebugLine.setDebugLine)
-        (!column || span.from == column)
-    );
-    ok(
-      hasExpectedDebugLine,
-      "Got the expected DebugLine. i.e. got the right marker in codemirror visualizing the breakpoint"
-    );
-  }
+  const editorLineEl = getCMEditor(dbg).getElementAtLine(line);
+  const pauseLocationMarker = editorLineEl.querySelector(".paused-location");
+  is(
+    pauseLocationMarker.cmView.widget.line,
+    line,
+    "The paused caret is at the right line"
+  );
+  is(
+    pauseLocationMarker.cmView.widget.column,
+    column,
+    "The paused caret is at the right column"
+  );
   info(`Paused on line ${line}`);
 }
 
@@ -473,7 +450,12 @@ async function assertPausedAtSourceAndLine(
     expectedLine,
     "Redux state for currently selected frame's line is correct"
   );
-  const pauseColumn = getVisibleSelectedFrameColumn(dbg);
+
+  const selectedSource = dbg.selectors.getSelectedSource();
+  // WASM binary source is pausing at 0 column, whereas visible selected frame returns 1
+  const pauseColumn = isWasmBinarySource(selectedSource)
+    ? 0
+    : getVisibleSelectedFrameColumn(dbg);
   if (expectedColumn) {
     // `pauseColumn` is 0-based, coming from internal state,
     // while `expectedColumn` is manually passed from test scripts and so is 1-based.
@@ -488,7 +470,6 @@ async function assertPausedAtSourceAndLine(
   ok(isVisibleInEditor(dbg, findElement(dbg, "gutters")), "gutter is visible");
 
   const frames = dbg.selectors.getCurrentThreadFrames();
-  const selectedSource = dbg.selectors.getSelectedSource();
 
   // WASM support is limited when we are on the generated binary source
   if (isWasmBinarySource(selectedSource)) {
@@ -532,6 +513,7 @@ async function waitForLoadedScopes(dbg) {
   const scopes = await waitForElement(dbg, "scopes");
   // Since scopes auto-expand, we can assume they are loaded when there is a tree node
   // with the aria-level attribute equal to "2".
+  info("Wait for loaded scopes - ie when a tree node has aria-level=2");
   await waitUntil(() => scopes.querySelector('.tree-node[aria-level="2"]'));
 }
 
@@ -590,7 +572,10 @@ function assertPaused(dbg, msg = "client is paused") {
 async function waitForPaused(
   dbg,
   url,
-  options = { shouldWaitForLoadedScopes: true }
+  options = {
+    shouldWaitForLoadedScopes: true,
+    shouldWaitForInlinePreviews: true,
+  }
 ) {
   info("Waiting for the debugger to pause");
   const { getSelectedScope, getCurrentThread, getCurrentThreadFrames } =
@@ -598,7 +583,7 @@ async function waitForPaused(
 
   await waitForState(
     dbg,
-    () => isPaused(dbg) && !!getSelectedScope(getCurrentThread()),
+    () => isPaused(dbg) && !!getSelectedScope(),
     "paused"
   );
 
@@ -608,9 +593,11 @@ async function waitForPaused(
     await waitForLoadedScopes(dbg);
   }
 
-  // Note that this will wait for symbols (when CM5 is enabled),
-  // which are fetched on pause
   await waitForSelectedSource(dbg, url);
+
+  if (options.shouldWaitForInlinePreviews) {
+    await waitForInlinePreviews(dbg);
+  }
 }
 
 /**
@@ -855,10 +842,25 @@ function waitForLoadedSource(dbg, url) {
  *
  * @param {Object} dbg
  * @param {String} filename - The filename for the specific source
- * @param {Number} sourcePosition - The source node postion in the tree
- * @param {String} message - The info message to display
  */
-async function selectSourceFromSourceTree(
+async function selectSourceFromSourceTree(dbg, fileName) {
+  info(`Selecting '${fileName}' source from source tree`);
+  // Ensure that the source is visible in the tree before trying to click on it
+  const elt = await waitForSourceInSourceTree(dbg, fileName);
+  elt.scrollIntoView();
+  clickDOMElement(dbg, elt);
+  await waitForSelectedSource(dbg, fileName);
+  await waitFor(
+    () => getEditorContent(dbg) !== `Loading…`,
+    "Wait for source to completely load"
+  );
+}
+
+/**
+ * Similar to selectSourceFromSourceTree, but with a precise location
+ * in the source tree.
+ */
+async function selectSourceFromSourceTreeWithIndex(
   dbg,
   fileName,
   sourcePosition,
@@ -1567,21 +1569,6 @@ function isVisible(outerEl, innerEl) {
   return visible;
 }
 
-/**
- * Get the element in the editor gutter at the specified line
- * @param {Object} dbg
- * @param {Number} line
- * @returns
- */
-async function getEditorLineGutter(dbg, line) {
-  let el = await codeMirrorGutterElement(dbg, line);
-  while (el && !el.matches(".CodeMirror-code > div")) {
-    el = el.parentElement;
-  }
-
-  return el;
-}
-
 // Handles virtualization scenarios
 async function scrollAndGetEditorLineGutterElement(dbg, line) {
   const editor = getCMEditor(dbg);
@@ -1595,9 +1582,7 @@ async function scrollAndGetEditorLineGutterElement(dbg, line) {
 
   const els = findAllElementsWithSelector(
     dbg,
-    isCm6Enabled
-      ? ".cm-gutter.cm-lineNumbers .cm-gutterElement"
-      : ".CodeMirror-code .CodeMirror-linenumber"
+    ".cm-gutter.cm-lineNumbers .cm-gutterElement"
   );
   return [...els].find(el => el.innerText == line);
 }
@@ -1609,13 +1594,8 @@ async function scrollAndGetEditorLineGutterElement(dbg, line) {
  * @returns {Element} DOM Element
  */
 async function getNodeAtEditorLine(dbg, line) {
-  if (isCm6Enabled) {
-    // To handle virtualized lines accurately, lets use the
-    // cm6 utility here.
-    await scrollEditorIntoView(dbg, line, 0);
-    return getCMEditor(dbg).getElementAtLine(line);
-  }
-  return getEditorLineGutter(dbg, line);
+  await scrollEditorIntoView(dbg, line, 0);
+  return getCMEditor(dbg).getElementAtLine(line);
 }
 
 /**
@@ -1625,34 +1605,21 @@ async function getNodeAtEditorLine(dbg, line) {
  * @returns {Element} DOM Element
  */
 async function getNodeAtEditorGutterLine(dbg, line) {
-  if (isCm6Enabled) {
-    return scrollAndGetEditorLineGutterElement(dbg, line);
-  }
-  // Note: In CM5 both the line gutter elements and the
-  // line content elements are within the editor line.
-  return getEditorLineGutter(dbg, line);
+  return scrollAndGetEditorLineGutterElement(dbg, line);
 }
 
 async function getConditionalPanelAtLine(dbg, line) {
   info(`Get conditional panel at line ${line}`);
-  let el = await getNodeAtEditorLine(dbg, line);
-  if (isCm6Enabled) {
-    // In CM6 the conditional panel for a specific line
-    // is injected in a sibling node just after.
-    el = el.nextSibling;
-  }
-  return el.querySelector(".conditional-breakpoint-panel");
+  const el = await getNodeAtEditorLine(dbg, line);
+  return el.nextSibling.querySelector(".conditional-breakpoint-panel");
 }
 
 async function waitForConditionalPanelFocus(dbg) {
-  if (isCm6Enabled) {
-    return waitFor(
-      () =>
-        dbg.win.document.activeElement.classList.contains("cm-content") &&
-        dbg.win.document.activeElement.closest(".conditional-breakpoint-panel")
-    );
-  }
-  return waitFor(() => dbg.win.document.activeElement.tagName === "TEXTAREA");
+  return waitFor(
+    () =>
+      dbg.win.document.activeElement.classList.contains("cm-content") &&
+      dbg.win.document.activeElement.closest(".conditional-breakpoint-panel")
+  );
 }
 
 /**
@@ -1737,7 +1704,7 @@ async function assertIgnoredStyleInSourceLines(
  * @param {String} expectedTextContent
  */
 function assertTextContentOnLine(dbg, line, expectedTextContent) {
-  const lineInfo = getCMEditor(dbg).lineInfo(isCm6Enabled ? line : line - 1);
+  const lineInfo = getCMEditor(dbg).lineInfo(line);
   const textContent = lineInfo.text.trim();
   is(textContent, expectedTextContent, `Expected text content on line ${line}`);
 }
@@ -1754,9 +1721,7 @@ function assertTextContentOnLine(dbg, line, expectedTextContent) {
 async function assertNoBreakpoint(dbg, line) {
   const el = await getNodeAtEditorGutterLine(dbg, line);
 
-  const exists = el.classList.contains(
-    isCm6Enabled ? "cm6-gutter-breakpoint" : "new-breakpioint"
-  );
+  const exists = el.classList.contains("cm6-gutter-breakpoint");
   ok(!exists, `Breakpoint doesn't exists on line ${line}`);
 }
 
@@ -1770,21 +1735,19 @@ async function assertNoBreakpoint(dbg, line) {
  * @static
  */
 async function assertBreakpoint(dbg, line) {
-  let el = await getNodeAtEditorGutterLine(dbg, line);
-  el = isCm6Enabled ? el.firstChild : el;
-
+  const el = await getNodeAtEditorGutterLine(dbg, line);
   ok(
-    el.classList.contains(selectors.gutterBreakpoint),
+    el.firstChild.classList.contains(selectors.gutterBreakpoint),
     `Breakpoint exists on line ${line}`
   );
 
-  const hasConditionClass = el.classList.contains("has-condition");
+  const hasConditionClass = el.firstChild.classList.contains("has-condition");
   ok(
     !hasConditionClass,
     `Regular breakpoint doesn't have condition on line ${line}`
   );
 
-  const hasLogClass = el.classList.contains("has-log");
+  const hasLogClass = el.firstChild.classList.contains("has-log");
   ok(!hasLogClass, `Regular breakpoint doesn't have log on line ${line}`);
 }
 
@@ -1797,18 +1760,17 @@ async function assertBreakpoint(dbg, line) {
  * @static
  */
 async function assertConditionBreakpoint(dbg, line) {
-  let el = await getNodeAtEditorGutterLine(dbg, line);
-  el = isCm6Enabled ? el.firstChild : el;
+  const el = await getNodeAtEditorGutterLine(dbg, line);
 
   ok(
-    el.classList.contains(selectors.gutterBreakpoint),
+    el.firstChild.classList.contains(selectors.gutterBreakpoint),
     `Breakpoint exists on line ${line}`
   );
 
-  const hasConditionClass = el.classList.contains("has-condition");
+  const hasConditionClass = el.firstChild.classList.contains("has-condition");
   ok(hasConditionClass, `Conditional breakpoint on line ${line}`);
 
-  const hasLogClass = el.classList.contains("has-log");
+  const hasLogClass = el.firstChild.classList.contains("has-log");
   ok(
     !hasLogClass,
     `Conditional breakpoint doesn't have log breakpoint on line ${line}`
@@ -1824,21 +1786,19 @@ async function assertConditionBreakpoint(dbg, line) {
  * @static
  */
 async function assertLogBreakpoint(dbg, line) {
-  let el = await getNodeAtEditorGutterLine(dbg, line);
-  el = isCm6Enabled ? el.firstChild : el;
-
+  const el = await getNodeAtEditorGutterLine(dbg, line);
   ok(
-    el.classList.contains(selectors.gutterBreakpoint),
+    el.firstChild.classList.contains(selectors.gutterBreakpoint),
     `Breakpoint exists on line ${line}`
   );
 
-  const hasConditionClass = el.classList.contains("has-condition");
+  const hasConditionClass = el.firstChild.classList.contains("has-condition");
   ok(
     !hasConditionClass,
     `Log breakpoint doesn't have condition on line ${line}`
   );
 
-  const hasLogClass = el.classList.contains("has-log");
+  const hasLogClass = el.firstChild.classList.contains("has-log");
   ok(hasLogClass, `Log breakpoint on line ${line}`);
 }
 
@@ -1877,12 +1837,8 @@ const selectors = {
     removeOthers: "#node-menu-delete-other",
     removeCondition: "#node-menu-remove-condition",
   },
-  blackboxedLines: isCm6Enabled
-    ? ".cm-content > .blackboxed-line"
-    : ".CodeMirror-code .blackboxed-line",
-  codeLines: isCm6Enabled
-    ? ".cm-content > .cm-line"
-    : ".CodeMirror-code .CodeMirror-line",
+  blackboxedLines: ".cm-content > .blackboxed-line",
+  codeLines: ".cm-content > .cm-line",
   editorContextMenu: {
     continueToHere: "#node-menu-continue-to-here",
   },
@@ -1897,17 +1853,12 @@ const selectors = {
     `.frames div[role=listbox] .location-async-cause:nth-child(${i})`,
   frame: i => `.frames div[role=listbox] .frame:nth-child(${i})`,
   frames: ".frames [role='listbox'] .frame",
-  gutterBreakpoint: isCm6Enabled ? "breakpoint-marker" : "new-breakpoint",
+  gutterBreakpoint: "breakpoint-marker",
   // This is used to trigger events (click etc) on the gutter
   gutterElement: i =>
-    isCm6Enabled
-      ? `.cm-gutter.cm-lineNumbers .cm-gutterElement:nth-child(${i + 1})`
-      : `.CodeMirror-code *:nth-child(${i}) .CodeMirror-linenumber`,
-  gutters: isCm6Enabled ? `.cm-gutters` : `.CodeMirror-gutters`,
-  line: i =>
-    isCm6Enabled
-      ? `.cm-content > div.cm-line:nth-child(${i})`
-      : `.CodeMirror-code div:nth-child(${i}) .CodeMirror-line`,
+    `.cm-gutter.cm-lineNumbers .cm-gutterElement:nth-child(${i + 1})`,
+  gutters: `.cm-gutters`,
+  line: i => `.cm-content > div.cm-line:nth-child(${i})`,
   addConditionItem:
     "#node-menu-add-condition, #node-menu-add-conditional-breakpoint",
   editConditionItem:
@@ -1915,15 +1866,12 @@ const selectors = {
   addLogItem: "#node-menu-add-log-point",
   editLogItem: "#node-menu-edit-log-point",
   disableItem: "#node-menu-disable-breakpoint",
-  breakpoint: isCm6Enabled
-    ? ".cm-gutter > .cm6-gutter-breakpoint"
-    : ".CodeMirror-code > .new-breakpoint",
-  highlightLine: isCm6Enabled
-    ? ".cm-content > .highlight-line"
-    : ".CodeMirror-code > .highlight-line",
-  debugLine: ".new-debug-line",
+  breakpoint: ".cm-gutter > .cm6-gutter-breakpoint",
+  highlightLine: ".cm-content > .highlight-line",
+  pausedLine: ".paused-line",
+  tracedLine: ".traced-line",
   debugErrorLine: ".new-debug-line-error",
-  codeMirror: isCm6Enabled ? ".cm-editor" : ".CodeMirror",
+  codeMirror: ".cm-editor",
   resume: ".resume.active",
   pause: ".pause.active",
   sourceTabs: ".source-tabs",
@@ -1952,12 +1900,8 @@ const selectors = {
     `.outline-list__element:nth-child(${i}) .function-signature`,
   outlineItems: ".outline-list__element",
   conditionalPanel: ".conditional-breakpoint-panel",
-  conditionalPanelInput: `.conditional-breakpoint-panel  ${
-    isCm6Enabled ? ".cm-content" : "textarea"
-  }`,
-  logPanelInput: `.conditional-breakpoint-panel.log-point ${
-    isCm6Enabled ? ".cm-content" : "textarea"
-  }`,
+  conditionalPanelInput: `.conditional-breakpoint-panel .cm-content`,
+  logPanelInput: `.conditional-breakpoint-panel.log-point .cm-content`,
   conditionalBreakpointInSecPane: ".breakpoint.is-conditional",
   logPointPanel: ".conditional-breakpoint-panel.log-point",
   logPointInSecPane: ".breakpoint.is-log",
@@ -1977,11 +1921,9 @@ const selectors = {
   threadsPaneItems: ".threads-pane .thread",
   threadsPaneItem: i => `.threads-pane .thread:nth-child(${i})`,
   threadsPaneItemPause: i => `${selectors.threadsPaneItem(i)}.paused`,
-  CodeMirrorLines: isCm6Enabled ? ".cm-content" : ".CodeMirror-lines",
-  CodeMirrorCode: isCm6Enabled ? ".cm-content" : ".CodeMirror-code",
-  inlinePreview: isCm6Enabled
-    ? ".cm-content .inline-preview"
-    : ".CodeMirror-code .CodeMirror-widget",
+  CodeMirrorLines: ".cm-content",
+  CodeMirrorCode: ".cm-content",
+  inlinePreview: ".cm-content .inline-preview",
   inlinePreviewLabels: ".inline-preview .inline-preview-label",
   inlinePreviewValues: ".inline-preview .inline-preview-value",
   inlinePreviewOpenInspector: ".inline-preview-value button.open-inspector",
@@ -2116,16 +2058,12 @@ async function clearElement(dbg, elementName) {
 }
 
 async function clickGutter(dbg, line) {
-  const el = await (isCm6Enabled
-    ? scrollAndGetEditorLineGutterElement(dbg, line)
-    : codeMirrorGutterElement(dbg, line));
+  const el = await scrollAndGetEditorLineGutterElement(dbg, line);
   clickDOMElement(dbg, el);
 }
 
 async function cmdClickGutter(dbg, line) {
-  const el = await (isCm6Enabled
-    ? scrollAndGetEditorLineGutterElement(dbg, line)
-    : codeMirrorGutterElement(dbg, line));
+  const el = await scrollAndGetEditorLineGutterElement(dbg, line);
   clickDOMElement(dbg, el, cmdOrCtrl);
 }
 
@@ -2223,11 +2161,8 @@ async function typeInPanel(dbg, text, inLogPanel = false) {
   pressKey(dbg, "End");
 
   type(dbg, text);
-  // Wait for any possible CM6 scroll actions in the conditional panel editor
-  // to complete
-  if (isCm6Enabled) {
-    await wait(1000);
-  }
+  // Wait for any possible scroll actions in the conditional panel editor to complete
+  await wait(1000);
   pressKey(dbg, "Enter");
 }
 
@@ -2282,8 +2217,10 @@ function toggleObjectInspectorNode(node) {
   const objectInspector = node.closest(".object-inspector");
   const properties = objectInspector.querySelectorAll(".node").length;
 
-  info(`Toggling node ${node.innerText}`);
+  info(`Toggle node ${node.innerText}`);
   node.click();
+
+  info(`Waiting for object inspector properties update`);
   return waitUntil(
     () => objectInspector.querySelectorAll(".node").length !== properties
   );
@@ -2296,6 +2233,7 @@ function rightClickObjectInspectorNode(dbg, node) {
   info(`Right clicking node ${node.innerText}`);
   rightClickEl(dbg, node);
 
+  info(`Waiting for object inspector properties update`);
   return waitUntil(
     () => objectInspector.querySelectorAll(".node").length !== properties
   );
@@ -2310,11 +2248,8 @@ function getCMEditor(dbg) {
   return dbg.win.codeMirrorSourceEditorTestInstance;
 }
 
-function wasmOffsetToLine(dbg, sourceId, offset) {
-  if (isCm6Enabled) {
-    return getCMEditor(dbg).wasmOffsetToLine(offset) + 1;
-  }
-  return dbg.wasmOffsetToLine(sourceId, offset) + 1;
+function wasmOffsetToLine(dbg, offset) {
+  return getCMEditor(dbg).wasmOffsetToLine(offset) + 1;
 }
 
 // Gets the number of lines in the editor
@@ -2334,9 +2269,7 @@ function waitForSearchState(dbg) {
  * to completely load (for CM6 only)
  */
 function waitForDocumentLoadComplete(dbg) {
-  return waitFor(() =>
-    isCm6Enabled ? getCMEditor(dbg).codeMirror.isDocumentLoadComplete : true
-  );
+  return waitFor(() => getCMEditor(dbg).codeMirror.isDocumentLoadComplete);
 }
 
 /**
@@ -2344,10 +2277,8 @@ function waitForDocumentLoadComplete(dbg) {
  * to completely load (for CM6 only)
  */
 function waitForInPanelDocumentLoadComplete(dbg, panelName) {
-  return waitFor(() =>
-    isCm6Enabled
-      ? getCodeMirrorInstance(dbg, panelName).isDocumentLoadComplete
-      : true
+  return waitFor(
+    () => getCodeMirrorInstance(dbg, panelName).isDocumentLoadComplete
   );
 }
 
@@ -2403,8 +2334,7 @@ function setEditorCursorAt(dbg, line, column) {
  */
 async function scrollEditorIntoView(dbg, line, column, yAlign) {
   const onScrolled = waitForScrolling(dbg);
-  line = isCm6Enabled ? line + 1 : line;
-  getCMEditor(dbg).scrollTo(line, column, yAlign);
+  getCMEditor(dbg).scrollTo(line + 1, column, yAlign);
   // Ensure the line is visible with margin because the bar at the bottom of
   // the editor overlaps into what the editor thinks is its own space, blocking
   // the click event below.
@@ -2415,12 +2345,12 @@ async function scrollEditorIntoView(dbg, line, column, yAlign) {
  * Wrapper around source editor api to check if a scrolled position is visible
  *
  * @param {*} dbg
- * @param {Number} line
+ * @param {Number} line 1-based
  * @param {Number} column
  * @returns
  */
 function isScrolledPositionVisible(dbg, line, column = 0) {
-  line = isCm6Enabled ? line + 1 : line;
+  // CodeMirror 6 uses 1-based lines.
   return getCMEditor(dbg).isPositionVisible(line, column);
 }
 
@@ -2450,22 +2380,8 @@ function getCoordsFromPosition(dbg, line, ch) {
 
 async function getTokenFromPosition(dbg, { line, column = 0 }) {
   info(`Get token at ${line}:${column}`);
-  line = isCm6Enabled ? line : line - 1;
-  column = isCm6Enabled ? column : column - 1;
   await scrollEditorIntoView(dbg, line, column);
-
-  if (isCm6Enabled) {
-    return getCMEditor(dbg).getElementAtPos(line, column);
-  }
-
-  const { left, top } = getCoordsFromPosition(dbg, line, column);
-
-  // Adds a vertical offset due to increased line height
-  // https://github.com/firefox-devtools/debugger/pull/7934
-  const lineHeightOffset = 3;
-
-  // Note that we might end up retrieving any popup if one is still shown over the expected token
-  return dbg.win.document.elementFromPoint(left, top + lineHeightOffset);
+  return getCMEditor(dbg).getElementAtPos(line, column);
 }
 /**
  * Waits for the currently triggered scroll to complete
@@ -2479,47 +2395,11 @@ async function getTokenFromPosition(dbg, { line, column = 0 }) {
 async function waitForScrolling(dbg, { useTimeoutFallback = true } = {}) {
   return new Promise(resolve => {
     const editor = getCMEditor(dbg);
-    if (isCm6Enabled) {
-      editor.once("cm-editor-scrolled", resolve);
-    } else {
-      function onScroll() {
-        editor.codeMirror.off("scroll", onScroll);
-        resolve();
-      }
-      editor.codeMirror.on("scroll", onScroll);
-    }
+    editor.once("cm-editor-scrolled", resolve);
     if (useTimeoutFallback) {
       setTimeout(resolve, 500);
     }
   });
-}
-
-async function codeMirrorGutterElement(dbg, line) {
-  info(`CodeMirror line ${line}`);
-
-  line = isCm6Enabled ? line : line - 1;
-  await scrollEditorIntoView(dbg, line, 0);
-
-  const coords = getCoordsFromPosition(dbg, line);
-
-  const { left, top } = coords;
-
-  // Adds a vertical offset due to increased line height
-  // https://github.com/firefox-devtools/debugger/pull/7934
-  const lineHeightOffset = 3;
-
-  // Click in the center of the line/breakpoint
-  const leftOffset = 10;
-
-  const tokenEl = dbg.win.document.elementFromPoint(
-    left - leftOffset,
-    top + lineHeightOffset
-  );
-
-  if (!tokenEl) {
-    throw new Error(`Failed to find element for line ${line}`);
-  }
-  return tokenEl;
 }
 
 async function clickAtPos(dbg, pos) {
@@ -2534,20 +2414,7 @@ async function clickAtPos(dbg, pos) {
     `Clicking on token ${tokenEl.innerText} in line ${tokenEl.parentNode.innerText}`
   );
   // TODO: Unify the usage for CM6 and CM5 Bug 1919694
-  if (isCm6Enabled) {
-    EventUtils.synthesizeMouseAtCenter(tokenEl, {}, dbg.win);
-  } else {
-    tokenEl.dispatchEvent(
-      new PointerEvent("click", {
-        bubbles: true,
-        cancelable: true,
-        view: dbg.win,
-        // Shift by one as we might be on the edge of the element and click on previous line/column
-        clientX: left + 1,
-        clientY: top + 1,
-      })
-    );
-  }
+  EventUtils.synthesizeMouseAtCenter(tokenEl, {}, dbg.win);
 }
 
 async function rightClickAtPos(dbg, pos) {
@@ -2556,10 +2423,8 @@ async function rightClickAtPos(dbg, pos) {
     return;
   }
   // In CM6 when clicking in the editor an extra click is needed
-  // TODO: Investiaget and remove Bug 1919693
-  if (isCm6Enabled) {
-    EventUtils.synthesizeMouseAtCenter(el, {}, dbg.win);
-  }
+  // TODO: Investiage and remove Bug 1919693
+  EventUtils.synthesizeMouseAtCenter(el, {}, dbg.win);
   rightClickEl(dbg, el);
 }
 
@@ -2673,6 +2538,7 @@ async function closePreviewForToken(
     element.ownerGlobal
   );
 
+  info(`Waiting for preview to be closed (preview type=${previewType})`);
   await waitUntil(() => findElement(dbg, previewType) == null);
   info("Preview closed");
 }
@@ -2756,27 +2622,10 @@ async function tryHoverToken(dbg, tokenEl, elementName) {
  */
 async function getTokenElAtLine(dbg, expression, line, column = 0) {
   info(`Search for <${expression}> token on ${line}:${column}`);
-  let editorLineEl;
-  if (isCm6Enabled) {
-    // Get the related editor line
-    editorLineEl = getCMEditor(dbg).getElementAtLine(line);
-  } else {
-    // Get the line gutter element matching the passed line
-    const lineGutterEl = [
-      ...dbg.win.document.querySelectorAll(".CodeMirror-linenumber"),
-    ].find(el => el.textContent === `${line}`);
-
-    // Get the related editor line
-    editorLineEl = lineGutterEl
-      .closest(".CodeMirror-gutter-wrapper")
-      .parentElement.querySelector(".CodeMirror-line");
-  }
+  // Get the related editor line
+  const tokenParent = getCMEditor(dbg).getElementAtLine(line);
 
   // Lookup for the token matching the passed expression
-  const tokenParent = isCm6Enabled
-    ? editorLineEl
-    : editorLineEl.querySelector(".CodeMirror-line > span");
-
   const tokenElements = [...tokenParent.childNodes];
   let currentColumn = 1;
   return tokenElements.find(el => {
@@ -2988,6 +2837,7 @@ async function assertInlineExceptionPreview(
  * @param {String} result
  */
 async function waitForPreviewWithResult(dbg, result) {
+  info(`Wait for preview popup with result ${result}`);
   await waitUntil(async () => {
     const previewEl = await waitForElement(dbg, "previewPopup");
     return previewEl.innerText.includes(result);
@@ -3033,24 +2883,56 @@ async function waitForBreakableLine(dbg, source, lineNumber) {
 }
 
 async function waitForSourceTreeThreadsCount(dbg, i) {
-  info(`waiting for ${i} threads in the source tree`);
+  info(`Waiting for ${i} threads in the source tree`);
   await waitUntil(() => {
     return findAllElements(dbg, "sourceTreeThreads").length === i;
   });
 }
 
+function getDisplayedSourceTree(dbg) {
+  return [...findAllElements(dbg, "sourceNodes")];
+}
+
+function getDisplayedSourceElements(dbg) {
+  return [...findAllElements(dbg, "sourceTreeFiles")];
+}
+
+function getDisplayedSources(dbg) {
+  return getDisplayedSourceElements(dbg).map(e => {
+    // Replace some non visible space characters that prevents Array.includes from working correctly
+    return e.textContent.trim().replace(/^[\s\u200b]*/g, "");
+  });
+}
+
+/**
+ * Wait for a single source to be visible in the Source Tree.
+ */
+async function waitForSourceInSourceTree(dbg, fileName) {
+  return waitFor(
+    async () => {
+      await expandSourceTree(dbg);
+
+      return getDisplayedSourceElements(dbg).find(e => {
+        // Replace some non visible space characters that prevents Array.includes from working correctly
+        return e.textContent.trim().replace(/^[\s\u200b]*/g, "") == fileName;
+      });
+    },
+    null,
+    100,
+    50
+  );
+}
+
+/**
+ * Wait for a precise list of sources to be shown in the Source Tree.
+ * No more, no less than the list.
+ */
 async function waitForSourcesInSourceTree(
   dbg,
   sources,
   { noExpand = false } = {}
 ) {
   info(`waiting for ${sources.length} files in the source tree`);
-  function getDisplayedSources() {
-    // Replace some non visible space characters that prevents Array.includes from working correctly
-    return [...findAllElements(dbg, "sourceTreeFiles")].map(e => {
-      return e.textContent.trim().replace(/^[\s\u200b]*/g, "");
-    });
-  }
   try {
     // Use custom timeout and retry count for waitFor as the test method is slow to resolve
     // and default value makes the timeout unecessarily long
@@ -3059,7 +2941,7 @@ async function waitForSourcesInSourceTree(
         if (!noExpand) {
           await expandSourceTree(dbg);
         }
-        const displayedSources = getDisplayedSources();
+        const displayedSources = getDisplayedSources(dbg);
         return (
           displayedSources.length == sources.length &&
           sources.every(source => displayedSources.includes(source))
@@ -3093,6 +2975,7 @@ async function waitForSourcesInSourceTree(
 }
 
 async function waitForNodeToGainFocus(dbg, index) {
+  info(`Waiting for source node #${index} to be focused`);
   await waitUntil(() => {
     const element = findElement(dbg, "sourceNode", index);
 
@@ -3101,7 +2984,7 @@ async function waitForNodeToGainFocus(dbg, index) {
     }
 
     return false;
-  }, `waiting for source node ${index} to be focused`);
+  });
 }
 
 async function assertNodeIsFocused(dbg, index) {
@@ -3227,15 +3110,6 @@ async function findConsoleMessage({ toolbox }, query) {
   return { value, link };
 }
 
-async function findConsoleMessages(toolbox, query) {
-  const webConsole = await toolbox.getPanel("webconsole");
-  const win = webConsole._frameWindow;
-  return Array.prototype.filter.call(
-    win.document.querySelectorAll(".message"),
-    e => e.innerText.includes(query)
-  );
-}
-
 async function hasConsoleMessage({ toolbox }, msg) {
   return waitFor(async () => {
     const messages = await findConsoleMessages(toolbox, msg);
@@ -3282,6 +3156,7 @@ function getEagerEvaluationElement(hud) {
 }
 
 async function waitForEagerEvaluationResult(hud, text) {
+  info(`Waiting for eager evaluation result: ${text}`);
   await waitUntil(() => {
     const elem = getEagerEvaluationElement(hud);
     if (elem) {
@@ -3442,7 +3317,7 @@ async function doProjectSearch(dbg, searchTerm, expectedResults) {
 }
 
 /**
- * Waits for the search resluts node to render
+ * Waits for the search results node to render
  *
  * @param {Object} dbg
  * @param {Number} expectedResults - The expected no of results to wait for
@@ -3451,7 +3326,7 @@ async function doProjectSearch(dbg, searchTerm, expectedResults) {
  */
 async function waitForSearchResults(dbg, expectedResults) {
   if (expectedResults) {
-    info(`Wait for ${expectedResults} project search results`);
+    info(`Waiting for ${expectedResults} project search results`);
     await waitUntil(
       () =>
         findAllElements(dbg, "projectSearchFileResults").length ==

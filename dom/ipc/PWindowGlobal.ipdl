@@ -36,9 +36,11 @@ using mozilla::UseCounters from "mozilla/UseCounter.h";
 using mozilla::dom::MaybeDiscardedWindowContext from "mozilla/dom/WindowContext.h";
 [RefCounted] using mozilla::dom::SessionStoreRestoreData from "mozilla/dom/SessionStoreRestoreData.h";
 using mozilla::dom::CredentialMediationRequirement from "mozilla/dom/CredentialManagementBinding.h";
+using mozilla::dom::IdentityCredentialDisconnectOptions from "mozilla/dom/IdentityCredentialBinding.h";
 using mozilla::dom::IdentityCredentialInit from "mozilla/dom/IdentityCredentialBinding.h";
 using mozilla::dom::IdentityCredentialRequestOptions from "mozilla/dom/IdentityCredentialBinding.h";
 using mozilla::dom::IdentityLoginTargetType from "mozilla/dom/IdentityCredentialBinding.h";
+using mozilla::dom::LoginStatus from "mozilla/dom/LoginStatusBinding.h";
 
 namespace mozilla {
 namespace dom {
@@ -210,11 +212,17 @@ parent:
   // credentialed requests that are specifically not partitioned are made and
   // the results must not enter the child process until the user consents via
   // purpose built UI.
-  async GetIdentityCredential(IdentityCredentialRequestOptions aOptions, CredentialMediationRequirement aMediationRequirement)
-      returns (IPCIdentityCredential? identityCredential, nsresult rv);
+  async GetIdentityCredential(IdentityCredentialRequestOptions aOptions,
+                              CredentialMediationRequirement aMediationRequirement,
+                              bool aHasUserActivation)
+    returns (IPCIdentityCredential? identityCredential, nsresult rv);
   async StoreIdentityCredential(IPCIdentityCredential aCredential)
       returns (nsresult rv);
+  async DisconnectIdentityCredential(IdentityCredentialDisconnectOptions aOptions) returns (nsresult rv);
   async PreventSilentAccess() returns (nsresult rv);
+
+  // Indicate that the page has reported itself as logged in
+  async SetLoginStatus(LoginStatus foo) returns (nsresult rv);
 
   async GetStorageAccessPermission(bool aIncludeIdentityCredential) returns(uint32_t permission_action);
 

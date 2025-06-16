@@ -7,6 +7,9 @@ package org.mozilla.fenix.compose.snackbar
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.compose.animation.core.DecayAnimationSpec
+import androidx.compose.animation.rememberSplineBasedDecay
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,21 +36,27 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.coordinatorlayout.widget.CoordinatorLayout
+import androidx.core.view.setPadding
 import com.google.android.material.snackbar.BaseTransientBottomBar
 import kotlinx.coroutines.launch
 import mozilla.components.compose.base.annotation.FlexibleWindowLightDarkPreview
+import mozilla.components.compose.base.button.PrimaryButton
 import mozilla.components.compose.base.button.TextButton
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.SnackbarBehavior
-import org.mozilla.fenix.compose.button.PrimaryButton
+import org.mozilla.fenix.compose.SwipeToDismissBox2
+import org.mozilla.fenix.compose.SwipeToDismissState2
 import org.mozilla.fenix.compose.core.Action
-import org.mozilla.fenix.compose.snackbar.Snackbar.Companion.SnackbarAnimationCallback
 import org.mozilla.fenix.compose.snackbar.SnackbarState.Type
 import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.theme.FirefoxTheme
@@ -78,8 +87,9 @@ class Snackbar private constructor(
 
     init {
         // Ensure the underlying background color does not show and delegate the UI
-        // to [content].
+        // to [content]. Also remove any unintended padding and delegate the padding to the Composable.
         view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        view.setPadding(0)
     }
 
     /**
@@ -95,6 +105,7 @@ class Snackbar private constructor(
          * @param snackBarParentView The [View] to embed the Snackbar in.
          * @param snackbarState [SnackbarState] containing the data parameters of the Snackbar.
          */
+        @OptIn(ExperimentalFoundationApi::class)
         fun make(
             snackBarParentView: View,
             snackbarState: SnackbarState,
@@ -132,9 +143,29 @@ class Snackbar private constructor(
 
                 contentView.setContent {
                     FirefoxTheme {
-                        Snackbar(
-                            snackbarState = snackbarState.copy(action = action),
-                        )
+                        val density = LocalDensity.current
+                        val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+                        val decayAnimationSpec: DecayAnimationSpec<Float> = rememberSplineBasedDecay()
+                        val swipeState = remember {
+                            SwipeToDismissState2(
+                                density = density,
+                                decayAnimationSpec = decayAnimationSpec,
+                                isRtl = isRtl,
+                            )
+                        }
+
+                        SwipeToDismissBox2(
+                            state = swipeState,
+                            modifier = Modifier.fillMaxWidth(),
+                            onItemDismiss = {
+                                snackbarState.onDismiss.invoke()
+                            },
+                            backgroundContent = {},
+                        ) {
+                            Snackbar(
+                                snackbarState = snackbarState.copy(action = action),
+                            )
+                        }
                     }
                 }
 
@@ -154,11 +185,21 @@ class Snackbar private constructor(
         /**
          * This is a re-implementation of [MaterialSnackbar.findSuitableParent].
          */
+        @Suppress("ReturnCount")
         private fun findSuitableParent(view: View?): ViewGroup? {
             var currentView = view
             var fallback: ViewGroup? = null
 
             do {
+                /**
+                 * A [ConstraintLayout] parent overcomes the issue with snackbars internally
+                 * positioning themselves above the OS navigation bar or IMEs when using edge-to-edge
+                 * https://github.com/material-components/material-components-android/issues/3446
+                 */
+                if (currentView is ConstraintLayout && currentView.id == R.id.dynamicSnackbarContainer) {
+                    return currentView
+                }
+
                 if (currentView is CoordinatorLayout) {
                     return currentView
                 }
@@ -230,15 +271,18 @@ internal fun Snackbar(
     }
 
     Column(
-        modifier = modifier
-            .padding(horizontal = snackbarHorizontalMargin)
-            .widthIn(max = FirefoxTheme.layout.size.maxWidth.small)
-            .semantics {
-                testTagsAsResourceId = true
-            }
-            .testTag(SNACKBAR_TEST_TAG),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = snackbarHorizontalMargin),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Card(
+            modifier = modifier
+                .widthIn(max = FirefoxTheme.layout.size.maxWidth.small)
+                .semantics {
+                    testTagsAsResourceId = true
+                }
+                .testTag(SNACKBAR_TEST_TAG),
             shape = RoundedCornerShape(size = 8.dp),
             backgroundColor = colors.backgroundColor,
             elevation = 4.dp,
@@ -314,6 +358,7 @@ private data class SnackbarColors(
 
 @FlexibleWindowLightDarkPreview
 @Composable
+@Suppress("LongMethod")
 private fun SnackbarHostPreview() {
     val snackbarHostState = remember { AcornSnackbarHostState() }
     var defaultSnackbarClicks by remember { mutableIntStateOf(0) }
@@ -328,7 +373,10 @@ private fun SnackbarHostPreview() {
                 .padding(all = 16.dp),
         ) {
             Column {
-                PrimaryButton(text = "Show snackbar") {
+                PrimaryButton(
+                    text = "Show snackbar",
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     scope.launch {
                         snackbarHostState.showSnackbar(
                             snackbarState = SnackbarState(
@@ -349,7 +397,10 @@ private fun SnackbarHostPreview() {
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                PrimaryButton(text = "Show warning snackbar") {
+                PrimaryButton(
+                    text = "Show warning snackbar",
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     scope.launch {
                         snackbarHostState.showSnackbar(
                             snackbarState = SnackbarState(

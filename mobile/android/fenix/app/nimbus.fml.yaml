@@ -50,6 +50,7 @@ features:
             "recent-explorations": true,
             "pocket": true,
             "pocket-sponsored-stories": true,
+            "synced-tabs": true,
           }
     defaults:
       - channel: nightly
@@ -60,6 +61,7 @@ features:
             "bookmarks": true,
             "recent-explorations": true,
             "pocket": true,
+            "synced-tabs": true,
           }
         }
   nimbus-validation:
@@ -179,9 +181,9 @@ features:
       - channel: nightly
         value: {
           "sections-enabled": {
-            "feature-ui": 1,
+            "feature-ui": 0,
             "feature-setting-value": 0,
-            "feature-setting-value-pbm": 1,
+            "feature-setting-value-pbm": 0,
             "feature-setting-detect-only": 0,
             "feature-setting-global-rules": 1,
             "feature-setting-global-rules-sub-frames": 1,
@@ -190,9 +192,9 @@ features:
       - channel: beta
         value: {
           "sections-enabled": {
-            "feature-ui": 1,
+            "feature-ui": 0,
             "feature-setting-value": 0,
-            "feature-setting-value-pbm": 1,
+            "feature-setting-value-pbm": 0,
             "feature-setting-detect-only": 0,
             "feature-setting-global-rules": 1,
             "feature-setting-global-rules-sub-frames": 1,
@@ -334,6 +336,18 @@ features:
           download-link: "[Download Link]"
           show-snackbar: true
 
+  setup-checklist:
+    description: A feature on the home page that allows the user to track onboarding setup progress.
+    variables:
+      enabled:
+        type: Boolean
+        description: If true, the setup checklist will be enabled.
+        default: false
+      setup-checklist-type:
+        type: SetupChecklistType
+        description: The collection used for the setup checklist.
+        default: collection-1
+
   search-extra-params:
     description: A feature that provides additional args for search.
     variables:
@@ -451,6 +465,15 @@ features:
         value:
           enabled: true
 
+  composable-toolbar:
+    description: Use a composable toolbar instead of the View based one.
+    variables:
+      enabled:
+        description: >
+          When the feature is enabled the user will see a new composable toolbar instead the previous View based one.
+        type: Boolean
+        default: false
+
   remote-tab-management:
     description: >
       Features that let users manage tabs on other devices that are
@@ -474,6 +497,13 @@ features:
           set to true.
         type: Boolean
         default: true
+    defaults:
+      - channel: nightly
+        value:
+          disabled: false
+      - channel: developer
+        value:
+          disabled: false
 
   fission:
     description: The feature that controls whether fission is enabled or not in Gecko.
@@ -492,7 +522,7 @@ features:
         description: >
           Suggest domains from the shipped domain list.
         type: Boolean
-        default: true
+        default: false
     defaults:
       - channel: nightly
         value:
@@ -591,6 +621,13 @@ features:
           Whether or not to turn on the compose homepage.
         type: Boolean
         default: false
+    defaults:
+      - channel: nightly
+        value:
+          enabled: true
+      - channel: developer
+        value:
+          enabled: true
 
   microsurveys:
     description: Feature for microsurveys.
@@ -599,7 +636,26 @@ features:
         description: >
           When the feature is enabled then microsurveys can be used.
         type: Boolean
-        default: true
+        default: false
+
+  tab-strip:
+    description: Enables tab strip.
+    variables:
+      enabled:
+        description: >
+          Whether or not to enable tab strip.
+        type: Boolean
+        default: false
+    defaults:
+      - channel: developer
+        value:
+          enabled: true
+      - channel: nightly
+        value:
+          enabled: true
+      - channel: beta
+        value:
+          enabled: true
 
   trending-searches:
     description: Enables trending searches.
@@ -609,6 +665,10 @@ features:
           Whether or not to enable trending searches.
         type: Boolean
         default: false
+      max-suggestions:
+        description: The number of maximum suggestions.
+        type: Int
+        default: 4
 
   recent-searches:
     description: Enables recent searches.
@@ -618,6 +678,23 @@ features:
           Whether or not to enable recent searches.
         type: Boolean
         default: false
+      max-suggestions:
+        description: The number of maximum suggestions.
+        type: Int
+        default: 4
+
+  top-sites-suggestions:
+    description: Enables top sites suggestions.
+    variables:
+      enabled:
+        description: >
+          Whether or not to enable top sites suggestions.
+        type: Boolean
+        default: false
+      max-suggestions:
+        description: The number of maximum suggestions.
+        type: Int
+        default: 4
 
   search-suggestions-on-homepage:
     description: Enables search suggestions on homepage.
@@ -628,32 +705,32 @@ features:
         type: Boolean
         default: false
 
-  set-as-default-prompt:
-    description: >
-      Displays native default browser prompt to existing users.
+  homepage-as-new-tab:
+    description: Enables homepage as a a new tab.
     variables:
       enabled:
         description: >
-          When the feature is enabled then the Set as default prompt can be triggered for
-          existing users.
+          Whether or not to enable homepage as a new tab
         type: Boolean
-        default: true
-      app-cold-starts-between-prompts:
+        default: false
+
+  homepage-search-bar:
+    description: Enables the homepage search bar.
+    variables:
+      enabled:
         description: >
-          Minimum number of app cold starts before the next prompt should be displayed to
-          the user.
-        type: Int
-        default: 4
-      days-between-prompts:
+          Whether or not to enable the homepage search bar.
+        type: Boolean
+        default: false
+
+  homepage-hide-frecent-top-sites:
+    description: Hides frecent top sites on the homepage.
+    variables:
+      enabled:
         description: >
-          Minimum number of days between displays of Set as default prompt.
-        type: Int
-        default: 14
-      max-number-of-times-to-display:
-        description: >
-          Maximum number of time the prompt should be displayed.
-        type: Int
-        default: 3
+          Whether or not to hide frecent top sites on the homepage.
+        type: Boolean
+        default: false
 
   user-characteristics:
     description: A feature for control user characteristic data collection
@@ -680,6 +757,14 @@ features:
         type: Boolean
         default: true
 
+  networkingBannedPorts:
+    description: "Networking (Necko) Banned Ports"
+    variables:
+      bannedPortList:
+        description: A comma-separated list of ports that Firefox will refuse to connect to. These ports will be appended to nsIOService gBadPortList
+        type: String
+        default: ""
+
   pki:
     description: Certificate verification configuration
     variables:
@@ -688,6 +773,16 @@ features:
           What mode Certificate Transparency is in (0=disable, 1=telemetry only, 2=enforce).
         type: Int
         default: 0
+    defaults:
+      - channel: nightly
+        value:
+          certificateTransparencyMode: 2
+      - channel: developer
+        value:
+          certificateTransparencyMode: 2
+      - channel: beta
+        value:
+          certificateTransparencyMode: 2
 
   pqcrypto:
     description: Control the use of post-quantum key exchange mechanisms in TLS and HTTP/3.
@@ -695,8 +790,8 @@ features:
       postQuantumKeyExchangeEnabled:
         description: >
           Toggles the security.tls.enable_kyber and network.http.http3.enable_kyber preferences.
-        type: Boolean
-        default: false
+        type: Option<Boolean>
+        default: null
 
   javascript:
     description: Enables Javascript Engine (Spidermonkey) features
@@ -718,6 +813,68 @@ features:
         description: The text to show in the CFR
         type: Text
         default: ""
+  remote-search-configuration:
+    description: Feature to use search configurations from remote servers.
+    variables:
+      enabled:
+        description: >
+          Uses search configuration from remote servers .
+        type: Boolean
+        default: true
+  same-document-navigation-overrides-load-type:
+    description: Control whether the same document navigation overrides the load type.
+    variables:
+      enabled:
+        description: >
+          Overrides the loadType when it is a same document navigation
+        type: Boolean
+        default: true
+      force-disable-uri:
+        description: >
+          Disable overriding the loadType during same document navigation on the domain specified by this URI.
+        type: String
+        default: ""
+    defaults:
+      - channel: nightly
+        value:
+          enabled: false
+          force-disable-uri: ""
+      - channel: developer
+        value:
+          enabled: false
+          force-disable-uri: ""
+  doh:
+    description: Feature controlling DNS over HTTPS (DoH).
+    variables:
+      show-ui:
+        description: >
+          When `true`, include DoH settings in the settings UI.
+        type: Boolean
+        default: false
+      autoselect-enabled:
+        description: >
+          Controls the network.android_doh.autoselect_enabled pref and automatically chooses a DoH provider when Default Protection mode is selected.
+        type: Boolean
+        default: false
+
+  private-browsing-lock:
+    description: Allows enabling and disabling the private browsing mode lock via an authentication screen.
+    variables:
+      enabled:
+        description: >
+          Whether or not to enable private browsing mode lock.
+        type: Boolean
+        default: false
+    defaults:
+      - channel: nightly
+        value:
+          enabled: true
+      - channel: beta
+        value:
+          enabled: true
+      - channel: developer
+        value:
+          enabled: true
 
 types:
   objects: {}
@@ -738,6 +895,8 @@ types:
           description: The pocket section. This should only be available in the US.
         pocket-sponsored-stories:
           description: Subsection of the Pocket homescreen section which shows sponsored stories.
+        synced-tabs:
+          description: The synced tabs section of the homepage.
 
     MR2022Section:
       description: The identifiers for the sections of the MR 2022.
@@ -809,3 +968,11 @@ types:
           description: The onboarding panel where users can choose their total cookie protection settings
         privacy-notice:
           description: The onboarding panel where users can tap to view our privacy notice.
+
+    SetupChecklistType:
+      description: An enum to represent the different experiment branches for the setup checklist.
+      variants:
+        collection-1:
+          description: The collection for the setup checklist that has 3 items.
+        collection-2:
+          description: The collection for the setup checklist that has 6 items.

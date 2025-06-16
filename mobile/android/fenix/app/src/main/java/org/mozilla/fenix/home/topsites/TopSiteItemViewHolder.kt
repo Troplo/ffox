@@ -8,7 +8,6 @@ import android.annotation.SuppressLint
 import android.content.res.ColorStateList
 import android.view.MotionEvent
 import android.view.View
-import android.widget.PopupWindow
 import androidx.appcompat.content.res.AppCompatResources.getDrawable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -23,6 +22,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import mozilla.components.browser.menu.BrowserMenu
 import mozilla.components.feature.top.sites.TopSite
 import mozilla.components.lib.state.ext.flowScoped
 import mozilla.components.support.ktx.android.content.getColorFromAttr
@@ -46,36 +46,47 @@ class TopSiteItemViewHolder(
 ) : ViewHolder(view) {
     private lateinit var topSite: TopSite
     private val binding = TopSiteItemBinding.bind(view)
+    private val menu: BrowserMenu by lazy {
+        val topSiteMenu = TopSiteItemMenu(
+            context = view.context,
+            topSite = topSite,
+        ) { item ->
+            when (item) {
+                is TopSiteItemMenu.Item.OpenInPrivateTab -> interactor.onOpenInPrivateTabClicked(
+                    topSite,
+                )
+                is TopSiteItemMenu.Item.EditTopSite -> interactor.onEditTopSiteClicked(
+                    topSite,
+                )
+                is TopSiteItemMenu.Item.RemoveTopSite -> {
+                    interactor.onRemoveTopSiteClicked(topSite)
+                }
+                is TopSiteItemMenu.Item.Settings -> interactor.onSettingsClicked()
+                is TopSiteItemMenu.Item.SponsorPrivacy -> interactor.onSponsorPrivacyClicked()
+            }
+        }
+
+        topSiteMenu.menuBuilder.build(view.context)
+    }
 
     init {
         itemView.setOnLongClickListener {
             interactor.onTopSiteLongClicked(topSite)
-
-            val topSiteMenu = TopSiteItemMenu(
-                context = view.context,
-                topSite = topSite,
-            ) { item ->
-                when (item) {
-                    is TopSiteItemMenu.Item.OpenInPrivateTab -> interactor.onOpenInPrivateTabClicked(
-                        topSite,
-                    )
-                    is TopSiteItemMenu.Item.EditTopSite -> interactor.onEditTopSiteClicked(
-                        topSite,
-                    )
-                    is TopSiteItemMenu.Item.RemoveTopSite -> {
-                        interactor.onRemoveTopSiteClicked(topSite)
-                    }
-                    is TopSiteItemMenu.Item.Settings -> interactor.onSettingsClicked()
-                    is TopSiteItemMenu.Item.SponsorPrivacy -> interactor.onSponsorPrivacyClicked()
-                }
-            }
-            val menu = topSiteMenu.menuBuilder.build(view.context).show(anchor = it)
-
-            it.setOnTouchListener { v, event ->
-                onTouchEvent(v, event, menu)
-            }
-
+            menu.show(anchor = it)
             true
+        }
+
+        // Handle a mouse right click as a long press
+        itemView.setOnTouchListener { v, event ->
+            if (event.action == MotionEvent.ACTION_DOWN && event.buttonState == MotionEvent.BUTTON_SECONDARY) {
+                v.performLongClick()
+                return@setOnTouchListener true
+            } else if (event.action == MotionEvent.ACTION_CANCEL) {
+                menu.dismiss()
+                return@setOnTouchListener v.onTouchEvent(event)
+            }
+
+            return@setOnTouchListener v.onTouchEvent(event)
         }
 
         appStore.flowScoped(viewLifecycleOwner) { flow ->
@@ -143,21 +154,6 @@ class TopSiteItemViewHolder(
                 SupportUtils.POCKET_TRENDING_URL -> {
                     binding.faviconImage.setImageDrawable(getDrawable(itemView.context, R.drawable.ic_pocket))
                 }
-                SupportUtils.BAIDU_URL -> {
-                    binding.faviconImage.setImageDrawable(getDrawable(itemView.context, R.drawable.ic_baidu))
-                }
-                SupportUtils.JD_URL -> {
-                    binding.faviconImage.setImageDrawable(getDrawable(itemView.context, R.drawable.ic_jd))
-                }
-                SupportUtils.PDD_URL -> {
-                    binding.faviconImage.setImageDrawable(getDrawable(itemView.context, R.drawable.ic_pdd))
-                }
-                SupportUtils.TC_URL -> {
-                    binding.faviconImage.setImageDrawable(getDrawable(itemView.context, R.drawable.ic_tc))
-                }
-                SupportUtils.MEITUAN_URL -> {
-                    binding.faviconImage.setImageDrawable(getDrawable(itemView.context, R.drawable.ic_meituan))
-                }
                 else -> {
                     itemView.context.components.core.icons.loadIntoView(binding.faviconImage, topSite.url)
                 }
@@ -165,18 +161,6 @@ class TopSiteItemViewHolder(
         }
 
         this.topSite = topSite
-    }
-
-    @SuppressLint("ClickableViewAccessibility")
-    private fun onTouchEvent(
-        v: View,
-        event: MotionEvent,
-        menu: PopupWindow,
-    ): Boolean {
-        if (event.action == MotionEvent.ACTION_CANCEL) {
-            menu.dismiss()
-        }
-        return v.onTouchEvent(event)
     }
 
     companion object {

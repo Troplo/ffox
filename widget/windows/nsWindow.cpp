@@ -223,7 +223,6 @@
 #include "InputData.h"
 
 #include "mozilla/TaskController.h"
-#include "mozilla/Telemetry.h"
 #include "mozilla/webrender/WebRenderAPI.h"
 #include "mozilla/layers/IAPZCTreeManager.h"
 
@@ -452,8 +451,8 @@ namespace mozilla {
  * Windows touchscreen code works by setting a global WH_GETMESSAGE hook and
  * injecting tiptsf.dll. The touchscreen process then posts registered messages
  * to our main thread. The tiptsf hook picks up those registered messages and
- * uses them as commands, some of which call into UIA, which then calls into
- * MSAA, which then sends WM_GETOBJECT to us.
+ * uses them as commands, some of which call into UIA, which then sends
+ * WM_GETOBJECT to us.
  *
  * We can get ahead of this by installing our own thread-local WH_GETMESSAGE
  * hook. Since thread-local hooks are called ahead of global hooks, we will
@@ -561,8 +560,10 @@ class TIPMessageHandler {
     // want to block, and the aHwnd is a nsWindow that belongs to the current
     // (i.e., main) thread.
     if (!aMsgResult || aMsgCode != WM_GETOBJECT ||
-        static_cast<LONG>(aLParam) != OBJID_CLIENT || !::NS_IsMainThread() ||
-        !WinUtils::GetNSWindowPtr(aHwnd) || !IsA11yBlocked()) {
+        (static_cast<LONG>(aLParam) != OBJID_CLIENT &&
+         static_cast<LONG>(aLParam) != UiaRootObjectId) ||
+        !::NS_IsMainThread() || !WinUtils::GetNSWindowPtr(aHwnd) ||
+        !IsA11yBlocked()) {
       return sSendMessageTimeoutWStub(aHwnd, aMsgCode, aWParam, aLParam, aFlags,
                                       aTimeout, aMsgResult);
     }
@@ -663,18 +664,15 @@ static bool IsCloaked(HWND hwnd) {
  *
  **************************************************************/
 
-nsWindow::nsWindow(bool aIsChildWindow)
+nsWindow::nsWindow()
     : nsBaseWidget(BorderStyle::Default),
       mFrameState(std::in_place, this),
-      mIsChildWindow(aIsChildWindow),
       mPIPWindow(false),
       mMicaBackdrop(false),
       mLastPaintEndTime(TimeStamp::Now()),
       mCachedHitTestTime(TimeStamp::Now()),
       mSizeConstraintsScale(GetDefaultScale().scale),
       mDesktopId("DesktopIdMutex") {
-  MOZ_ASSERT(mWindowType == WindowType::Child);
-
   if (!gInitializedVirtualDesktopManager) {
     TaskController::Get()->AddTask(
         MakeAndAddRef<InitializeVirtualDesktopManagerTask>());
@@ -701,8 +699,6 @@ nsWindow::nsWindow(bool aIsChildWindow)
     }
     NS_ASSERTION(sIsOleInitialized, "***** OLE is not initialized!\n");
     MouseScrollHandler::Initialize();
-    // Init theme data
-    nsUXThemeData::UpdateNativeThemeInfo();
     RedirectedKeyDownMessageManager::Forget();
   }  // !sInstanceCount
 
@@ -728,9 +724,15 @@ nsWindow::~nsWindow() {
 
   // Global shutdown
   if (sInstanceCount == 0) {
-    IMEHandler::Terminate();
     sCurrentCursor = {};
     if (sIsOleInitialized) {
+      // When we reach here, IMEHandler::Terminate() should've already been
+      // called because it causes releasing the last nsWindow instance.
+      // However, it **could** occur that we are shutting down without giving
+      // IME focus, but we need to release TSF objects before the following
+      // ::OleUninitialize() call.  Fortunately, it's fine to call the method
+      // twice so that we can always call it here.
+      IMEHandler::Terminate();
       ::OleFlushClipboard();
       ::OleUninitialize();
       sIsOleInitialized = false;
@@ -941,9 +943,6 @@ nsresult nsWindow::Create(nsIWidget* aParent, const LayoutDeviceIntRect& aRect,
 
       // Skeleton ui is disabled when custom titlebar is off, see bug 1673092.
       SetCustomTitlebar(true);
-      // The skeleton UI already painted over the NC area, so there's no need
-      // to do that again; the effective non-client margins haven't changed.
-      mNeedsNCAreaClear = false;
 
       // Reset the WNDPROC for this window and its whole class, as we had
       // to use our own WNDPROC when creating the the skeleton UI window.
@@ -1310,10 +1309,6 @@ static DWORD WindowStylesRemovedForBorderStyle(BorderStyle aStyle) {
 DWORD nsWindow::WindowStyle() {
   DWORD style;
   switch (mWindowType) {
-    case WindowType::Child:
-      style = WS_OVERLAPPED;
-      break;
-
     case WindowType::Dialog:
       style = WS_OVERLAPPED | WS_BORDER | WS_DLGFRAME | WS_SYSMENU |
               DS_MODALFRAME | WS_CLIPCHILDREN;
@@ -1323,7 +1318,7 @@ DWORD nsWindow::WindowStyle() {
       break;
 
     case WindowType::Popup:
-      style = WS_OVERLAPPED | WS_POPUP;
+      style = WS_OVERLAPPED | WS_POPUP | WS_CLIPCHILDREN;
       break;
 
     default:
@@ -1338,13 +1333,6 @@ DWORD nsWindow::WindowStyle() {
 
   style &= ~WindowStylesRemovedForBorderStyle(mBorderStyle);
 
-  if (mIsChildWindow) {
-    style |= WS_CLIPCHILDREN;
-    if (!(style & WS_POPUP)) {
-      style |= WS_CHILD;  // WS_POPUP and WS_CHILD are mutually exclusive.
-    }
-  }
-
   VERIFY_WINDOW_STYLE(style);
   return style;
 }
@@ -1352,8 +1340,6 @@ DWORD nsWindow::WindowStyle() {
 // Return nsWindow extended styles
 DWORD nsWindow::WindowExStyle() {
   switch (mWindowType) {
-    case WindowType::Child:
-      return 0;
     case WindowType::Popup: {
       DWORD extendedStyle = WS_EX_TOOLWINDOW;
       if (mPopupLevel == PopupLevel::Top) {
@@ -1450,14 +1436,7 @@ static int32_t RoundDown(double aDouble) {
                      : static_cast<int32_t>(ceil(aDouble));
 }
 
-float nsWindow::GetDPI() {
-  float dpi = 96.0f;
-  nsCOMPtr<nsIScreen> screen = GetWidgetScreen();
-  if (screen) {
-    screen->GetDpi(&dpi);
-  }
-  return dpi;
-}
+float nsWindow::GetDPI() { return GetDefaultScaleInternal() * 96.0f; }
 
 double nsWindow::GetDefaultScaleInternal() {
   if (mDefaultScale <= 0.0) {
@@ -2146,9 +2125,14 @@ void nsWindow::AsyncUpdateWorkspaceID(Desktop& aDesktop) {
           mSelf(aSelf) {}
 
     TaskResult Run() override {
-      auto desktop = mSelf->mDesktopId.Lock();
+      RefPtr<nsWindow> self(mSelf);
+      // If the window is not alive anymore, no need to do anything
+      if (!self) {
+        return TaskResult::Complete;
+      }
+      auto desktop = self->mDesktopId.Lock();
       if (desktop->mUpdateIsQueued) {
-        DoGetWorkspaceID(mSelf->mWnd, &desktop->mID);
+        DoGetWorkspaceID(self->mWnd, &desktop->mID);
         desktop->mUpdateIsQueued = false;
       }
       return TaskResult::Complete;
@@ -2161,7 +2145,9 @@ void nsWindow::AsyncUpdateWorkspaceID(Desktop& aDesktop) {
     }
 #endif
 
-    RefPtr<nsWindow> mSelf;
+    // Only hold a weak pointer so this structure can't keep the window alive
+    // and possibly Release() it on the wrong thread (bug 1824697)
+    ThreadSafeWeakPtr<nsWindow> mSelf;
   };
 
   if (aDesktop.mUpdateIsQueued) {
@@ -2546,7 +2532,18 @@ void nsWindow::UpdateMicaBackdrop(bool aForce) {
     if (!useBackdrop) {
       return DWMSBT_AUTO;
     }
-    return IsPopup() ? DWMSBT_TRANSIENTWINDOW : DWMSBT_TABBEDWINDOW;
+    if (IsPopup()) {
+      return DWMSBT_TRANSIENTWINDOW;
+    }
+    switch (StaticPrefs::widget_windows_mica_toplevel_backdrop()) {
+      case 1:
+        return DWMSBT_MAINWINDOW;
+      case 2:
+        return DWMSBT_TRANSIENTWINDOW;
+      case 3:
+      default:
+        return DWMSBT_TABBEDWINDOW;
+    }
   }();
   ::DwmSetWindowAttribute(mWnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop,
                           sizeof backdrop);
@@ -2601,6 +2598,9 @@ bool nsWindow::UpdateNonClientMargins(bool aReflowWindow) {
   }
 
   const nsSizeMode sizeMode = mFrameState->GetSizeMode();
+  if (sizeMode == nsSizeMode_Minimized) {
+    return false;
+  }
 
   const bool hasCaption =
       bool(mBorderStyle & (BorderStyle::All | BorderStyle::Title |
@@ -2644,9 +2644,7 @@ bool nsWindow::UpdateNonClientMargins(bool aReflowWindow) {
       hasCaption ? WinUtils::GetSystemMetricsForDpi(SM_CYCAPTION, dpi) : 0;
 
   metrics.mOffset = {};
-  if (sizeMode == nsSizeMode_Minimized) {
-    // Use default frame size for minimized windows (so, do nothing).
-  } else if (sizeMode == nsSizeMode_Fullscreen) {
+  if (sizeMode == nsSizeMode_Fullscreen) {
     // Remove the default frame from the top of our fullscreen window.  This
     // makes the whole caption part of our client area, allowing us to draw
     // in the whole caption area.  Additionally remove the default frame from
@@ -2663,19 +2661,6 @@ bool nsWindow::UpdateNonClientMargins(bool aReflowWindow) {
     // frame sizes for left, right and bottom since Windows will automagically
     // position the edges "offscreen" for maximized windows.
     metrics.mOffset.top = metrics.mCaptionHeight;
-
-    if (StaticPrefs::widget_windows_hidden_taskbar_hack_size()) {
-      if (mozilla::Maybe<UINT> maybeEdge = GetHiddenTaskbarEdge()) {
-        auto edge = maybeEdge.value();
-        if (ABE_LEFT == edge) {
-          metrics.mOffset.left -= kHiddenTaskbarSize;
-        } else if (ABE_RIGHT == edge) {
-          metrics.mOffset.right -= kHiddenTaskbarSize;
-        } else if (ABE_BOTTOM == edge || ABE_TOP == edge) {
-          metrics.mOffset.bottom -= kHiddenTaskbarSize;
-        }
-      }
-    }
   } else if (mPIPWindow &&
              !StaticPrefs::widget_windows_pip_decorations_enabled()) {
     metrics.mOffset = metrics.DefaultMargins();
@@ -2684,12 +2669,6 @@ bool nsWindow::UpdateNonClientMargins(bool aReflowWindow) {
   }
 
   UpdateOpaqueRegionInternal();
-  if (StaticPrefs::widget_windows_hidden_taskbar_hack_paint()) {
-    // We probably shouldn't need to clear the NC-area, but we need to in
-    // order to work around bug 642851.
-    mNeedsNCAreaClear = true;
-  }
-
   if (aReflowWindow) {
     // Force a reflow of content based on the new client
     // dimensions.
@@ -2757,26 +2736,6 @@ void nsWindow::SetCustomTitlebar(bool aCustomTitlebar) {
 
 void nsWindow::SetResizeMargin(mozilla::LayoutDeviceIntCoord aResizeMargin) {
   mCustomResizeMargin = aResizeMargin;
-}
-
-LayoutDeviceIntRegion nsWindow::ComputeNonClientRegion() {
-  // +-+-----------------------+-+
-  // | | app non-client chrome | |
-  // | +-----------------------+ |
-  // | |   app client chrome   | | }
-  // | +-----------------------+ | }
-  // | |      app content      | | } area we don't want to invalidate
-  // | +-----------------------+ | }
-  // | |   app client chrome   | | }
-  // | +-----------------------+ |
-  // +---------------------------+ <
-  //  ^                         ^    windows non-client chrome
-  // client area = app *
-  auto winRect = LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetSize());
-  LayoutDeviceIntRegion region{winRect};
-  winRect.Deflate(mCustomNonClientMetrics.DefaultMargins());
-  region.SubOut(winRect);
-  return region;
 }
 
 /**************************************************************
@@ -3443,13 +3402,8 @@ void* nsWindow::GetNativeData(uint32_t aDataType) {
       if (pseudoIMEContext) {
         return pseudoIMEContext;
       }
-      [[fallthrough]];
-    }
-    case NS_NATIVE_TSF_THREAD_MGR:
-    case NS_NATIVE_TSF_CATEGORY_MGR:
-    case NS_NATIVE_TSF_DISPLAY_ATTR_MGR:
       return IMEHandler::GetNativeData(this, aDataType);
-
+    }
     default:
       break;
   }
@@ -4840,10 +4794,7 @@ bool nsWindow::ProcessMessageInternal(UINT msg, WPARAM& wParam, LPARAM& lParam,
     case WM_THEMECHANGED: {
       // Update non-client margin offsets
       UpdateNonClientMargins();
-      nsUXThemeData::UpdateNativeThemeInfo();
-
-      // Invalidate the window so that the repaint will
-      // pick up the new theme.
+      // Invalidate the window so that the repaint will pick up the new theme.
       Invalidate(true, true, true);
     } break;
 
@@ -5061,7 +5012,7 @@ bool nsWindow::ProcessMessageInternal(UINT msg, WPARAM& wParam, LPARAM& lParam,
       break;
 
     case WM_PAINT:
-      *aRetValue = (int)OnPaint(0);
+      *aRetValue = (int)OnPaint();
       result = true;
       break;
 
@@ -6951,14 +6902,6 @@ bool nsWindow::ShouldUseOffMainThreadCompositing() {
   if (mWindowType == WindowType::Popup && mPopupType == PopupType::Tooltip) {
     return false;
   }
-
-  // Content rendering of popup is always done by child window.
-  // See nsDocumentViewer::ShouldAttachToTopLevel().
-  if (mWindowType == WindowType::Popup && !mIsChildWindow) {
-    MOZ_ASSERT(!mParent);
-    return false;
-  }
-
   return nsBaseWidget::ShouldUseOffMainThreadCompositing();
 }
 
@@ -6987,10 +6930,14 @@ void nsWindow::OnDPIChanged(int32_t x, int32_t y, int32_t width,
 
   if (mResizeState != RESIZING &&
       mFrameState->GetSizeMode() == nsSizeMode_Normal) {
-    // Limit the position (if not in the middle of a drag-move) & size,
-    // if it would overflow the destination screen
-    nsCOMPtr<nsIScreenManager> sm = do_GetService(sScreenManagerContractID);
-    if (sm) {
+    if (nsCOMPtr<nsIScreenManager> sm =
+            do_GetService(sScreenManagerContractID)) {
+      // Before getting the screen which will contain this window, we need to
+      // refresh the screens because WM_DPICHANGED is sent before
+      // WM_DISPLAYCHANGE.
+      ScreenHelperWin::RefreshScreens();
+      // Limit the position (if not in the middle of a drag-move) & size,
+      // if it would overflow the destination screen
       nsCOMPtr<nsIScreen> screen;
       sm->ScreenForRect(x, y, width, height, getter_AddRefs(screen));
       if (screen) {
@@ -7195,9 +7142,10 @@ LayoutDeviceIntRegion nsWindow::GetTranslucentRegion() {
   if (mTransparencyMode != TransparencyMode::Transparent) {
     return {};
   }
-  const auto winRect = LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetSize());
-  LayoutDeviceIntRegion translucentRegion{winRect};
-  translucentRegion.SubOut(mOpaqueRegion.MovedBy(GetClientOffset()));
+  const auto clientRect =
+      LayoutDeviceIntRect(LayoutDeviceIntPoint(), GetClientSize());
+  LayoutDeviceIntRegion translucentRegion{clientRect};
+  translucentRegion.SubOut(mOpaqueRegion);
   return translucentRegion;
 }
 
@@ -8271,7 +8219,7 @@ already_AddRefed<nsIWidget> nsIWidget::CreateTopLevelWindow() {
 }
 
 already_AddRefed<nsIWidget> nsIWidget::CreateChildWindow() {
-  nsCOMPtr<nsIWidget> window = new nsWindow(true);
+  nsCOMPtr<nsIWidget> window = new nsWindow();
   return window.forget();
 }
 

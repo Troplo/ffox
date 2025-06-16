@@ -4,12 +4,13 @@
 
 use crate::{
     client::CollectionMetadata, client::CollectionSignature,
-    schema::RemoteSettingsConnectionInitializer, Attachment, RemoteSettingsRecord, Result,
+    schema::RemoteSettingsConnectionInitializer, Attachment, Error, RemoteSettingsRecord, Result,
 };
 use camino::Utf8PathBuf;
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Transaction};
 use serde_json;
 use sha2::{Digest, Sha256};
+use std::io;
 
 use sql_support::{open_database::open_database_with_flags, ConnExt};
 
@@ -27,27 +28,67 @@ use sql_support::{open_database::open_database_with_flags, ConnExt};
 /// passes a new server or bucket to `update_config`, we don't want to be using cached data from
 /// the previous config.
 pub struct Storage {
-    conn: Connection,
+    path: Utf8PathBuf,
+    conn: ConnectionCell,
 }
 
 impl Storage {
-    pub fn new(path: Utf8PathBuf) -> Result<Self> {
-        let conn = open_database_with_flags(
+    pub fn new(path: Utf8PathBuf) -> Self {
+        Self {
             path,
-            OpenFlags::default(),
-            &RemoteSettingsConnectionInitializer,
-        )?;
-        Ok(Self { conn })
+            conn: ConnectionCell::Uninitialized,
+        }
+    }
+
+    fn transaction(&mut self) -> Result<Transaction<'_>> {
+        match &self.conn {
+            ConnectionCell::Uninitialized => {
+                self.ensure_dir()?;
+                self.conn = ConnectionCell::Initialized(open_database_with_flags(
+                    &self.path,
+                    OpenFlags::default(),
+                    &RemoteSettingsConnectionInitializer,
+                )?);
+            }
+            ConnectionCell::Initialized(_) => (),
+            ConnectionCell::Closed => return Err(Error::DatabaseClosed),
+        }
+        match &mut self.conn {
+            ConnectionCell::Initialized(conn) => Ok(conn.transaction()?),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn ensure_dir(&self) -> Result<()> {
+        if self.path == ":memory:" {
+            return Ok(());
+        }
+        let Some(dir) = self.path.parent() else {
+            return Ok(());
+        };
+        if !std::fs::exists(dir).map_err(Error::CreateDirError)? {
+            match std::fs::create_dir(dir) {
+                Ok(()) => (),
+                // Another thread created the directory, just ignore the error.
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => (),
+                Err(e) => return Err(Error::CreateDirError(e)),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn close(&mut self) {
+        self.conn = ConnectionCell::Closed;
     }
 
     /// Get the last modified timestamp for the stored records
     ///
     /// Returns None if no records are stored or if `collection_url` does not match the
     /// last `collection_url` passed to `insert_collection_content`
-    pub fn get_last_modified_timestamp(&self, collection_url: &str) -> Result<Option<u64>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT last_modified FROM collection_metadata WHERE collection_url = ?")?;
+    pub fn get_last_modified_timestamp(&mut self, collection_url: &str) -> Result<Option<u64>> {
+        let tx = self.transaction()?;
+        let mut stmt =
+            tx.prepare("SELECT last_modified FROM collection_metadata WHERE collection_url = ?")?;
         let result: Option<u64> = stmt
             .query_row((collection_url,), |row| row.get(0))
             .optional()?;
@@ -62,7 +103,7 @@ impl Storage {
         &mut self,
         collection_url: &str,
     ) -> Result<Option<Vec<RemoteSettingsRecord>>> {
-        let tx = self.conn.transaction()?;
+        let tx = self.transaction()?;
 
         let fetched = tx.exists(
             "SELECT 1 FROM collection_metadata WHERE collection_url = ?",
@@ -90,10 +131,11 @@ impl Storage {
     /// Returns None if no data is stored or if `collection_url` does not match the `collection_url` passed
     /// to `insert_collection_content`.
     pub fn get_collection_metadata(
-        &self,
+        &mut self,
         collection_url: &str,
     ) -> Result<Option<CollectionMetadata>> {
-        let mut stmt_metadata = self.conn.prepare(
+        let tx = self.transaction()?;
+        let mut stmt_metadata = tx.prepare(
             "SELECT bucket, signature, x5u FROM collection_metadata WHERE collection_url = ?",
         )?;
 
@@ -122,13 +164,13 @@ impl Storage {
     /// Returns None if no attachment data is stored or if `collection_url` does not match the `collection_url`
     /// passed to `set_attachment`.
     pub fn get_attachment(
-        &self,
+        &mut self,
         collection_url: &str,
         metadata: Attachment,
     ) -> Result<Option<Vec<u8>>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT data FROM attachments WHERE id = ? AND collection_url = ?")?;
+        let tx = self.transaction()?;
+        let mut stmt =
+            tx.prepare("SELECT data FROM attachments WHERE id = ? AND collection_url = ?")?;
 
         if let Some(data) = stmt
             .query_row((metadata.location, collection_url), |row| {
@@ -158,7 +200,7 @@ impl Storage {
         last_modified: u64,
         metadata: CollectionMetadata,
     ) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self.transaction()?;
 
         // Delete ALL existing records and metadata for with different collection_urls.
         //
@@ -237,7 +279,7 @@ impl Storage {
         location: &str,
         attachment: &[u8],
     ) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self.transaction()?;
 
         // Delete ALL existing attachments for every collection_url
         tx.execute(
@@ -261,13 +303,20 @@ impl Storage {
     /// RemoteSettingsService::update_config() is called, since that could change the remote
     /// settings server which would invalidate all cached data.
     pub fn empty(&mut self) -> Result<()> {
-        let tx = self.conn.transaction()?;
+        let tx = self.transaction()?;
         tx.execute("DELETE FROM records", [])?;
         tx.execute("DELETE FROM attachments", [])?;
         tx.execute("DELETE FROM collection_metadata", [])?;
         tx.commit()?;
         Ok(())
     }
+}
+
+/// Stores the SQLite connection, which is lazily constructed and can be closed/shutdown.
+enum ConnectionCell {
+    Uninitialized,
+    Initialized(Connection),
+    Closed,
 }
 
 #[cfg(test)]
@@ -281,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_storage_set_and_get_records() -> Result<()> {
-        let mut storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let collection_url = "https://example.com/api";
         let records = vec![
@@ -333,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_storage_get_records_none() -> Result<()> {
-        let mut storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let collection_url = "https://example.com/api";
 
@@ -350,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_storage_get_records_empty() -> Result<()> {
-        let mut storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let collection_url = "https://example.com/api";
 
@@ -375,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_storage_set_and_get_attachment() -> Result<()> {
-        let mut storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let attachment = &[0x18, 0x64];
         let collection_url = "https://example.com/api";
@@ -401,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_storage_set_and_replace_attachment() -> Result<()> {
-        let mut storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let collection_url = "https://example.com/api";
 
@@ -449,7 +498,7 @@ mod tests {
 
     #[test]
     fn test_storage_set_attachment_delete_others() -> Result<()> {
-        let mut storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let collection_url_1 = "https://example.com/api1";
         let collection_url_2 = "https://example.com/api2";
@@ -501,7 +550,7 @@ mod tests {
 
     #[test]
     fn test_storage_get_attachment_not_found() -> Result<()> {
-        let storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let collection_url = "https://example.com/api";
         let metadata = Attachment::default();
@@ -515,7 +564,7 @@ mod tests {
 
     #[test]
     fn test_storage_empty() -> Result<()> {
-        let mut storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let collection_url = "https://example.com/api";
         let attachment = &[0x18, 0x64];
@@ -583,7 +632,7 @@ mod tests {
 
     #[test]
     fn test_storage_collection_url_isolation() -> Result<()> {
-        let mut storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let collection_url1 = "https://example.com/api1";
         let collection_url2 = "https://example.com/api2";
@@ -652,7 +701,7 @@ mod tests {
 
     #[test]
     fn test_storage_insert_collection_content() -> Result<()> {
-        let mut storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let collection_url = "https://example.com/api";
         let initial_records = vec![RemoteSettingsRecord {
@@ -718,7 +767,7 @@ mod tests {
 
     #[test]
     fn test_storage_merge_records() -> Result<()> {
-        let mut storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let collection_url = "https://example.com/api";
 
@@ -829,7 +878,7 @@ mod tests {
     }
     #[test]
     fn test_storage_get_collection_metadata() -> Result<()> {
-        let mut storage = Storage::new(":memory:".into())?;
+        let mut storage = Storage::new(":memory:".into());
 
         let collection_url = "https://example.com/api";
         let initial_records = vec![RemoteSettingsRecord {

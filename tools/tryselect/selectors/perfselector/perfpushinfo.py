@@ -6,9 +6,18 @@
 class PerfPushInfo:
     """Used to store, and pass information about the perf try pushes."""
 
-    def __init__(self, base_revision=None, new_revision=None, framework=None):
+    def __init__(
+        self,
+        base_revision=None,
+        new_revision=None,
+        base_lando_commit_id=None,
+        new_lando_commit_id=None,
+        framework=None,
+    ):
         self.base_revision = base_revision
         self.new_revision = new_revision
+        self.base_lando_commit_id = base_lando_commit_id
+        self.new_lando_commit_id = new_lando_commit_id
         self.framework = framework
         self.finished_run = False
 
@@ -29,10 +38,35 @@ class PerfPushInfo:
         self._new_revision = new_revision
         self.finished_run = True
 
+    @property
+    def base_lando_commit_id(self):
+        return self._base_lando_commit_id
+
+    @base_lando_commit_id.setter
+    def base_lando_commit_id(self, base_lando_commit_id):
+        self._base_lando_commit_id = base_lando_commit_id
+
+    @property
+    def new_lando_commit_id(self):
+        return self._new_lando_commit_id
+
+    @new_lando_commit_id.setter
+    def new_lando_commit_id(self, new_lando_commit_id):
+        self._new_lando_commit_id = new_lando_commit_id
+        self.finished_run = True
+
     def get_perfcompare_settings(self):
         """Returns all the settings required to setup a perfcompare URL."""
         return (
             self.base_revision,
             self.new_revision,
+            self.framework,
+        )
+
+    def get_perfcompare_settings_lando(self):
+        """Returns all the settings required to setup a perfcompare URL using lando pushes."""
+        return (
+            self.base_lando_commit_id,
+            self.new_lando_commit_id,
             self.framework,
         )

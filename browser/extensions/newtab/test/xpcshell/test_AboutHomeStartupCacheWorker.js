@@ -9,9 +9,6 @@ http://creativecommons.org/publicdomain/zero/1.0/ */
  * Stream Redux store into an HTML document and script.
  */
 
-const { AddonTestUtils } = ChromeUtils.importESModule(
-  "resource://testing-common/AddonTestUtils.sys.mjs"
-);
 const { SearchTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/SearchTestUtils.sys.mjs"
 );
@@ -21,21 +18,17 @@ const { TestUtils } = ChromeUtils.importESModule(
 const { sinon } = ChromeUtils.importESModule(
   "resource://testing-common/Sinon.sys.mjs"
 );
-const { DiscoveryStreamFeed } = ChromeUtils.importESModule(
-  "resource://newtab/lib/DiscoveryStreamFeed.sys.mjs"
-);
 
 SearchTestUtils.init(this);
 
 const { AboutNewTab } = ChromeUtils.importESModule(
   "resource:///modules/AboutNewTab.sys.mjs"
 );
-const { PREFS_CONFIG } = ChromeUtils.importESModule(
-  "resource://newtab/lib/ActivityStream.sys.mjs"
-);
 
 ChromeUtils.defineESModuleGetters(this, {
   BasePromiseWorker: "resource://gre/modules/PromiseWorker.sys.mjs",
+  DiscoveryStreamFeed: "resource://newtab/lib/DiscoveryStreamFeed.sys.mjs",
+  PREFS_CONFIG: "resource://newtab/lib/ActivityStream.sys.mjs",
 });
 
 const CACHE_WORKER_URL = "resource://newtab/lib/cache.worker.js";
@@ -77,10 +70,6 @@ add_setup(async function () {
     "browser.newtabpage.activity-stream.newtabWallpapers.enabled",
     false
   );
-  Services.prefs.setBoolPref(
-    "browser.newtabpage.activity-stream.newtabWallpapers.v2.enabled",
-    false
-  );
   // While this is on in nightly only, we still want to be testing what's going to release.
   // Once this is on in release, we should update this test to also test against the new data,
   // including updating the static data in topstories.json to match what Merino returns.
@@ -95,7 +84,6 @@ add_setup(async function () {
       locale: "en-US",
     })
   );
-
   const sandbox = sinon.createSandbox();
   sandbox
     .stub(DiscoveryStreamFeed.prototype, "generateFeedUrl")
@@ -218,7 +206,10 @@ add_task(async function test_cache_worker() {
   // it through ReactDOMServer by setting App.isForStartupCache to true.
   // This allows React components to change their behaviour if the cache
   // is being generated.
-  state.App.isForStartupCache = true;
+  state.App.isForStartupCache = {
+    App: true,
+    Wallpaper: true,
+  };
 
   // Some of the properties on the state might have values set to undefined.
   // There is no way to express a named undefined property on an object in

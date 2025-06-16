@@ -643,6 +643,7 @@ namespace jit {
 
 // The base class of all Assemblers for all archs.
 class AssemblerShared {
+  wasm::InliningContext inliningContext_;
   wasm::CallSites callSites_;
   wasm::CallSiteTargetVector callSiteTargets_;
   wasm::TrapSites trapSites_;
@@ -650,6 +651,7 @@ class AssemblerShared {
   wasm::TryNoteVector tryNotes_;
   wasm::CodeRangeUnwindInfoVector codeRangesUnwind_;
   wasm::CallRefMetricsPatchVector callRefMetricsPatches_;
+  wasm::AllocSitePatchVector allocSitesPatches_;
 
 #ifdef DEBUG
   // To facilitate figuring out which part of SM created each instruction as
@@ -701,17 +703,16 @@ class AssemblerShared {
   template <typename... Args>
   void append(const wasm::CallSiteDesc& desc, CodeOffset retAddr,
               Args&&... args) {
-    enoughMemory_ &= callSites_.append(wasm::CallSite(desc, retAddr.offset()));
+    enoughMemory_ &= callSites_.append(desc, retAddr.offset());
     enoughMemory_ &= callSiteTargets_.emplaceBack(std::forward<Args>(args)...);
   }
-  void append(wasm::Trap trap, wasm::TrapSite site) {
-    enoughMemory_ &= trapSites_.append(trap, site);
+  void append(wasm::Trap trap, wasm::TrapMachineInsn insn, uint32_t pcOffset,
+              const wasm::TrapSiteDesc& desc) {
+    enoughMemory_ &= trapSites_.append(trap, insn, pcOffset, desc);
   }
   void append(const wasm::MemoryAccessDesc& access, wasm::TrapMachineInsn insn,
-              FaultingCodeOffset assemblerOffsetOfFaultingMachineInsn) {
-    append(wasm::Trap::OutOfBounds,
-           wasm::TrapSite(insn, assemblerOffsetOfFaultingMachineInsn,
-                          access.trapDesc()));
+              FaultingCodeOffset pcOffset) {
+    append(wasm::Trap::OutOfBounds, insn, pcOffset.get(), access.trapDesc());
   }
   void append(wasm::SymbolicAccess access) {
     enoughMemory_ &= symbolicAccesses_.append(access);
@@ -734,7 +735,11 @@ class AssemblerShared {
   void append(wasm::CallRefMetricsPatch patch) {
     enoughMemory_ &= callRefMetricsPatches_.append(patch);
   }
+  void append(wasm::AllocSitePatch patch) {
+    enoughMemory_ &= allocSitesPatches_.append(patch);
+  }
 
+  wasm::InliningContext& inliningContext() { return inliningContext_; }
   wasm::CallSites& callSites() { return callSites_; }
   wasm::CallSiteTargetVector& callSiteTargets() { return callSiteTargets_; }
   wasm::TrapSites& trapSites() { return trapSites_; }
@@ -746,6 +751,7 @@ class AssemblerShared {
   wasm::CallRefMetricsPatchVector& callRefMetricsPatches() {
     return callRefMetricsPatches_;
   }
+  wasm::AllocSitePatchVector& allocSitesPatches() { return allocSitesPatches_; }
 };
 
 // AutoCreatedBy pushes and later pops a who-created-these-insns? tag into the

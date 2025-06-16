@@ -4,11 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![expect(clippy::unwrap_used, reason = "This is example code.")]
+
 //! An [HTTP 0.9](https://www.w3.org/Protocols/HTTP/AsImplemented.html) client implementation.
 
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
+    fmt::Display,
     fs::File,
     io::{BufWriter, Write as _},
     net::SocketAddr,
@@ -159,7 +162,11 @@ pub fn create_client(
         client.set_ciphers(&ciphers)?;
     }
 
-    client.set_qlog(qlog_new(args, hostname, client.odcid().unwrap())?);
+    client.set_qlog(qlog_new(
+        args,
+        hostname,
+        client.odcid().ok_or(Error::InternalError)?,
+    )?);
 
     Ok(client)
 }
@@ -189,7 +196,7 @@ impl super::Client for Connection {
 
     fn process_multiple_input<'a>(
         &mut self,
-        dgrams: impl IntoIterator<Item = Datagram<&'a [u8]>>,
+        dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
         now: Instant,
     ) {
         self.process_multiple_input(dgrams, now);
@@ -197,7 +204,7 @@ impl super::Client for Connection {
 
     fn close<S>(&mut self, now: Instant, app_error: neqo_transport::AppError, msg: S)
     where
-        S: AsRef<str> + std::fmt::Display,
+        S: AsRef<str> + Display,
     {
         if !self.state().closed() {
             self.close(now, app_error, msg);
@@ -302,7 +309,7 @@ impl<'b> Handler<'b> {
             } else {
                 qdebug!(
                     "READ[{stream_id}]: {}",
-                    std::str::from_utf8(read_buffer).unwrap()
+                    std::str::from_utf8(read_buffer).map_err(|_| Error::InvalidInput)?
                 );
             }
             if fin {

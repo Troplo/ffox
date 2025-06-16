@@ -38,10 +38,13 @@ body {
 :root {
   user-select: none;
   color-scheme: light dark;
-  accent-color: var(--color-accent-primary);
   text-rendering: optimizeLegibility;
   min-height: 95px;
   min-width: 95px;
+
+  @media not (forced-colors) {
+    accent-color: var(--color-accent-primary);
+  }
 
   &:-moz-locale-dir(rtl) {
     direction: rtl;
@@ -55,8 +58,21 @@ body {
     @media -moz-pref("sidebar.verticalTabs") {
       min-width: 732px;
 
+      /* If the Content Analysis icon is showing, we don't
+         want to collapse it, so make a little more room. */
+      &[contentanalysisactive] {
+        min-width: 768px;
+      }
+
       @media (-moz-platform: macos) {
         min-width: 670px;
+
+        /* If the Content Analysis icon is showing, we don't
+          want to collapse it, so make a little more room. */
+        /* stylelint-disable max-nesting-depth */
+        &[contentanalysisactive] {
+          min-width: 706px;
+        }
       }
     }
   }
@@ -70,7 +86,7 @@ body {
   --browser-area-z-index-toolbox: 0;
   --browser-area-z-index-sidebar: 1;
   --browser-area-z-index-tabbox: 2;
-  --browser-area-z-index-sidebar-wrapper: 3;
+  --browser-area-z-index-sidebar-expand-on-hover: 4;
   --browser-area-z-index-sidebar-splitter: 3;
 
   /* on macOS the animation of the toolbox in fullscreen needs the toolbox to be higher */
@@ -421,9 +437,11 @@ body {
   }
 }
 
-/* stylelint-disable-next-line media-query-no-invalid */
-@media not -moz-pref("sidebar.verticalTabs") {
-  #vertical-spacer {
+#vertical-spacer {
+  min-width: 20px;
+
+  /* stylelint-disable-next-line media-query-no-invalid */
+  @media not -moz-pref("sidebar.verticalTabs") {
     display: none;
   }
 }
@@ -511,6 +529,18 @@ toolbarpaletteitem > #personal-bookmarks > #PlacesToolbar,
 #notifications-toolbar {
   min-height: 0;
   flex-direction: column;
+}
+
+.bookmark-item[cutting] {
+  > .toolbarbutton-icon,
+  > .menu-icon {
+    opacity: 0.5;
+  }
+
+  > .toolbarbutton-text,
+  > .menu-text {
+    opacity: 0.7;
+  }
 }
 
 /* Menupopup drop indicators */
@@ -1219,8 +1249,8 @@ popupnotificationcontent {
   }
 }
 
-#historySwipeAnimationPreviousArrow:-moz-locale-dir(rtl),
-#historySwipeAnimationNextArrow:-moz-locale-dir(ltr) {
+.swipe-nav-icon:-moz-locale-dir(rtl),
+#historySwipeAnimationNextArrow {
   transform: scaleX(-1);
 }
 
@@ -1321,14 +1351,4 @@ panel toolbarseparator {
 
 #PictureInPicturePanelFooter {
   margin: 8px 16px 16px;
-}
-
-/* Shopping sidebar */
-
-shopping-sidebar {
-  border-inline-start: 1px solid var(--chrome-content-separator-color);
-  min-width: 16.92em;
-  max-width: 32.31em;
-  width: 320px;
-  box-sizing: content-box;
 }

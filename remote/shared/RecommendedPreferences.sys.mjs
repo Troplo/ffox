@@ -43,6 +43,7 @@ if (Services.appinfo.processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
 // - remote/test/puppeteer/packages/browsers/src/browser-data/firefox.ts
 // - testing/geckodriver/src/prefs.rs
 // - testing/marionette/client/marionette_driver/geckoinstance.py
+// - testing/profiles/
 //
 // The preferences in `firefox.ts`, `prefs.rs` and `geckoinstance.py`
 // will be applied before the application starts, and should typically be used
@@ -61,6 +62,10 @@ if (Services.appinfo.processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
 // several lists of preferences, either common or specific to a given application
 // (Firefox Desktop, Fennec, Thunderbird).
 //
+// Some test types may disable recommended preferences. Search for
+// `"remote.prefs.recommended", false` in `/testing/profiles` to find
+// `user.js` files that do so.
+//
 // Depending on how users interact with the Remote Agent, they will use different
 // combinations of preferences. So it's important to update the preferences files
 // so that all users have the proper preferences.
@@ -73,6 +78,8 @@ if (Services.appinfo.processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT) {
 //   - Create a PR to upstream the change on `browser-data/firefox.ts` to puppeteer
 // - Otherwise, if the preference can be set after startup:
 //   - Add the preference to `RecommendedPreferences.sys.mjs`
+// - If a `user.js` file in `/testing/profiles` disables recommended preferences,
+//   identify affected test suites and set the new preference where needed.
 const COMMON_PREFERENCES = new Map([
   // Make sure Shield doesn't hit the network.
   ["app.normandy.api_url", ""],
@@ -98,6 +105,9 @@ const COMMON_PREFERENCES = new Map([
   // This can be removed once Firefox 69 and 68 ESR and are no longer supported.
   ["browser.contentblocking.introCount", 99],
 
+  // Set global `dump` function to log strings to `stdout` for release builds as well.
+  ["browser.dom.window.dump.enabled", true],
+
   // Indicate that the download panel has been shown once so that
   // whichever download test runs first doesn't show the popup
   // inconsistently.
@@ -114,7 +124,6 @@ const COMMON_PREFERENCES = new Map([
 
   // Make sure newtab wallpapers don't hit the network to retrieve wallpaper data.
   ["browser.newtabpage.activity-stream.newtabWallpapers.enabled", false],
-  ["browser.newtabpage.activity-stream.newtabWallpapers.v2.enabled", false],
 
   // Make sure Topsites doesn't hit the network to retrieve sponsored tiles.
   ["browser.newtabpage.activity-stream.showSponsoredTopSites", false],
@@ -220,6 +229,14 @@ const COMMON_PREFERENCES = new Map([
 
   // Disable the ProcessHangMonitor
   ["dom.ipc.reportProcessHangs", false],
+
+  // Disable the QoS manager on MacOS and the priority manager on all other
+  // platforms to not cause stalled processes in background tabs when the
+  // overall CPU load on the machine is high.
+  //
+  // TODO: Should be considered to get removed once bug 1960741 is fixed.
+  ["threads.lower_mainthread_priority_in_background.enabled", false],
+  ["dom.ipc.processPriorityManager.enabled", false],
 
   // Disable slow script dialogues
   ["dom.max_chrome_script_run_time", 0],

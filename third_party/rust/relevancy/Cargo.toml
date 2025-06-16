@@ -37,7 +37,6 @@ path = "src/bin/generate-test-data.rs"
 [dependencies]
 anyhow = "1.0"
 base64 = "0.21.2"
-log = "0.4"
 md-5 = "0.10"
 parking_lot = ">=0.11,<=0.12"
 rand = "0.8"
@@ -57,7 +56,7 @@ path = "../support/interrupt"
 path = "../remote_settings"
 
 [dependencies.rusqlite]
-version = "0.31.0"
+version = "0.33.0"
 features = ["bundled"]
 
 [dependencies.serde]
@@ -68,8 +67,8 @@ features = ["derive"]
 path = "../support/sql"
 
 [dependencies.uniffi]
-version = "0.28.2"
+version = "0.29.0"
 
 [build-dependencies.uniffi]
-version = "0.28.2"
+version = "0.29.0"
 features = ["build"]

@@ -6,20 +6,22 @@ https://creativecommons.org/publicdomain/zero/1.0/ */
 add_setup(async () => {
   startProfileService();
   const SelectableProfileService = getSelectableProfileService();
-
-  await SelectableProfileService.init();
+  const ProfilesDatastoreService = getProfilesDatastoreService();
 
   Services.prefs.setIntPref("testPrefInt0", 5);
   Services.prefs.setBoolPref("testBoolPref", true);
   Services.prefs.setCharPref("testCharPref", "hello");
 
-  SelectableProfileService.constructor.initialSharedPrefs.splice(
+  SelectableProfileService.constructor.permanentSharedPrefs.splice(
     0,
-    SelectableProfileService.constructor.initialSharedPrefs.length,
+    SelectableProfileService.constructor.permanentSharedPrefs.length,
     "testPrefInt0",
     "testBoolPref",
     "testCharPref"
   );
+
+  await ProfilesDatastoreService.init();
+  await SelectableProfileService.init();
 
   await SelectableProfileService.maybeSetupDataStore();
 });
@@ -31,7 +33,7 @@ add_task(async function test_SharedPrefsLifecycle() {
   Assert.equal(
     prefs.length,
     3,
-    "Shoulds have stored the default prefs into the database."
+    "Should have stored the default prefs into the database."
   );
 
   Assert.equal(
@@ -179,6 +181,4 @@ add_task(async function test_SharedPrefsLifecycle() {
     false,
     "Should have updated testPrefBoolTrue"
   );
-
-  await SelectableProfileService.deleteProfileGroup();
 });

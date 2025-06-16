@@ -1041,6 +1041,9 @@ typedef struct AV1EncoderConfig {
   // Indicates the speed preset to be used.
   int speed;
 
+  // Enable the low complexity decode mode.
+  unsigned int enable_low_complexity_decode;
+
   // Indicates the target sequence level index for each operating point(OP).
   AV1_LEVEL target_seq_level_idx[MAX_NUM_OPERATING_POINTS];
 
@@ -2672,7 +2675,11 @@ typedef struct AV1_PRIMARY {
   /*!
    * Sequence parameters have been transmitted already and locked
    * or not. Once locked av1_change_config cannot change the seq
-   * parameters.
+   * parameters. Note that for SVC encoding the sequence parameters
+   * (operating_points_cnt_minus_1, operating_point_idc[],
+   * has_nonzero_operating_point_idc) should be updated whenever the
+   * number of layers is changed. This is done in the
+   * ctrl_set_svc_params().
    */
   int seq_params_locked;
 
@@ -3902,6 +3909,8 @@ void av1_set_screen_content_options(struct AV1_COMP *cpi,
 
 void av1_update_frame_size(AV1_COMP *cpi);
 
+void av1_set_svc_seq_params(AV1_PRIMARY *const ppi);
+
 typedef struct {
   int pyr_level;
   int disp_order;
@@ -4404,6 +4413,8 @@ static inline void set_postproc_filter_default_params(AV1_COMMON *cm) {
 
   lf->filter_level[0] = 0;
   lf->filter_level[1] = 0;
+  lf->backup_filter_level[0] = 0;
+  lf->backup_filter_level[1] = 0;
   cdef_info->cdef_bits = 0;
   cdef_info->cdef_strengths[0] = 0;
   cdef_info->nb_cdef_strengths = 1;

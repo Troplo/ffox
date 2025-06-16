@@ -5,6 +5,7 @@ TODO:
     - x= {superset, subset}
 `;
 
+import { AllFeaturesMaxLimitsGPUTest } from '../.././gpu_test.js';
 import { makeTestGroup } from '../../../common/framework/test_group.js';
 import {
   kShaderStageCombinations,
@@ -12,9 +13,8 @@ import {
   ValidBindableResource,
 } from '../../capability_info.js';
 import { GPUConst } from '../../constants.js';
-import { MaxLimitsTestMixin } from '../../gpu_test.js';
 
-import { ValidationTest } from './validation_test.js';
+import * as vtu from './validation_test_utils.js';
 
 type BindableResourceType = ValidBindableResource | 'readonlyStorageBuf';
 const kBindableResources = [
@@ -93,7 +93,7 @@ const bindGroupLayoutEntryContents = {
   },
 } as const;
 
-class F extends ValidationTest {
+class F extends AllFeaturesMaxLimitsGPUTest {
   createPipelineLayout(
     bindingInPipelineLayout: BindableResourceType,
     visibility: number
@@ -157,7 +157,7 @@ const BindingResourceCompatibleWithShaderStages = function (
   return true;
 };
 
-export const g = makeTestGroup(MaxLimitsTestMixin(F));
+export const g = makeTestGroup(F);
 
 g.test('pipeline_layout_shader_exact_match')
   .desc(
@@ -268,7 +268,7 @@ g.test('pipeline_layout_shader_exact_match')
           ${staticallyUseBinding}
         }
         `;
-        t.doCreateComputePipelineTest(isAsync, success, {
+        vtu.doCreateComputePipelineTest(t, isAsync, success, {
           layout,
           compute: {
             module: t.device.createShaderModule({
@@ -287,7 +287,7 @@ g.test('pipeline_layout_shader_exact_match')
           return vec4f();
         }
         `;
-        t.doCreateRenderPipelineTest(isAsync, success, {
+        vtu.doCreateRenderPipelineTest(t, isAsync, success, {
           layout,
           vertex: {
             module: t.device.createShaderModule({
@@ -307,7 +307,7 @@ g.test('pipeline_layout_shader_exact_match')
           return vec4f();
         }
         `;
-        t.doCreateRenderPipelineTest(isAsync, success, {
+        vtu.doCreateRenderPipelineTest(t, isAsync, success, {
           layout,
           vertex: {
             module: t.device.createShaderModule({

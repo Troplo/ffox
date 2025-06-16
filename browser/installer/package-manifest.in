@@ -61,9 +61,6 @@
 #ifdef MOZ_UPDATER
 @RESPATH@/updater.ini
 #endif
-#if defined(MOZ_UPDATE_AGENT)
-@RESPATH@/locale.ini
-#endif
 
 [xpcom]
 @RESPATH@/dependentlibs.list
@@ -171,7 +168,7 @@
 #endif
 
 ; JavaScript components
-@RESPATH@/browser/components/BrowserComponents.manifest
+@RESPATH@/browser/components/*.manifest
 @RESPATH@/components/extensions.manifest
 #ifdef MOZ_UPDATER
 @RESPATH@/components/nsUpdateService.manifest
@@ -188,7 +185,6 @@
 @RESPATH@/components/antitracking.manifest
 
 @RESPATH@/components/l10n-registry.manifest
-@RESPATH@/browser/components/l10n-registry.manifest
 
 ; WebDriver (Marionette, Remote Agent) remote protocols
 #ifdef ENABLE_WEBDRIVER
@@ -198,11 +194,11 @@
 
 ; [Extensions]
 @RESPATH@/components/extensions-toolkit.manifest
-@RESPATH@/browser/components/extensions-browser.manifest
 
 ; Modules
 @RESPATH@/browser/modules/*
 @RESPATH@/modules/*
+@RESPATH@/moz-src/*
 @RESPATH@/browser/actors/*
 @RESPATH@/actors/*
 
@@ -230,7 +226,6 @@
 @RESPATH@/browser/chrome/icons/default/default64.png
 @RESPATH@/browser/chrome/icons/default/default128.png
 #endif
-@RESPATH@/browser/features/*
 
 ; [DevTools Startup Files]
 @RESPATH@/browser/chrome/devtools-startup@JAREXT@
@@ -393,6 +388,12 @@ bin/libfreebl_64int_3.so
 @BINPATH@/@DLL_PREFIX@mozwer@DLL_SUFFIX@
 #endif
 #endif
+#endif
+
+; [ crashhelper ]
+;
+#ifdef MOZ_CRASHREPORTER
+@BINPATH@/crashhelper@BIN_SUFFIX@
 #endif
 
 ; [ Ping Sender ]

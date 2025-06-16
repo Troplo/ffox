@@ -183,9 +183,8 @@ void wasm::EmitWasmPreBarrierGuard(MacroAssembler& masm, Register instance,
 
   // Emit metadata for a potential null access when reading the previous value.
   if (trapSiteDesc) {
-    masm.append(
-        wasm::Trap::NullPointerDereference,
-        wasm::TrapSite(TrapMachineInsnForLoadWord(), fco, *trapSiteDesc));
+    masm.append(wasm::Trap::NullPointerDereference,
+                TrapMachineInsnForLoadWord(), fco.get(), *trapSiteDesc);
   }
 }
 
@@ -272,6 +271,16 @@ void wasm::EmitWasmPostBarrierGuard(MacroAssembler& masm,
                                      skipBarrier);
 }
 
+void wasm::CheckWholeCellLastElementCache(MacroAssembler& masm,
+                                          Register instance, Register object,
+                                          Register temp, Label* skipBarrier) {
+  masm.loadPtr(
+      Address(instance,
+              wasm::Instance::offsetOfAddressOfLastBufferedWholeCell()),
+      temp);
+  masm.branchPtr(Assembler::Equal, Address(temp, 0), object, skipBarrier);
+}
+
 #ifdef DEBUG
 bool wasm::IsPlausibleStackMapKey(const uint8_t* nextPC) {
 #  if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_X86)
@@ -315,3 +324,14 @@ bool wasm::IsPlausibleStackMapKey(const uint8_t* nextPC) {
 #  endif
 }
 #endif
+
+void StackMaps::checkInvariants(const uint8_t* base) const {
+#ifdef DEBUG
+  // Chech that each entry points from the stackmap structure points
+  // to a plausible instruction.
+  for (auto iter = mapping_.iter(); !iter.done(); iter.next()) {
+    MOZ_ASSERT(IsPlausibleStackMapKey(base + iter.get().key()),
+               "wasm stackmap does not reference a valid insn");
+  }
+#endif
+}

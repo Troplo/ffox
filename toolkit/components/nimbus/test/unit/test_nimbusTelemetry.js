@@ -2,10 +2,6 @@
  * http://creativecommons.org/publicdomain/zero/1.0/
  */
 
-const { ExperimentAPI } = ChromeUtils.importESModule(
-  "resource://nimbus/ExperimentAPI.sys.mjs"
-);
-
 const { recordTargetingContext } = ChromeUtils.importESModule(
   "resource://nimbus/lib/TargetingContextRecorder.sys.mjs"
 );
@@ -15,7 +11,6 @@ const { JsonSchema } = ChromeUtils.importESModule(
 );
 
 add_setup(function setup() {
-  do_get_profile();
   Services.fog.initializeFOG();
 });
 
@@ -34,67 +29,41 @@ function nimbusTargetingContextTelemetryDisabled() {
   );
 }
 
+function setupTest({ ...args } = {}) {
+  return NimbusTestUtils.setupTest({ ...args, clearTelemetry: true });
+}
+
 add_task(
   { skip_if: nimbusTargetingContextTelemetryDisabled },
   async function test_enrollAndUnenroll_gleanMetricConfiguration() {
-    const experiment = ExperimentFakes.recipe("experiment", {
-      bucketConfig: {
-        ...ExperimentFakes.recipe.bucketConfig,
-        count: 1000,
-      },
-      branches: [
-        {
-          slug: "control",
-          ratio: 1,
-          features: [
-            {
-              featureId: "nimbusTelemetry",
-              value: {
-                gleanMetricConfiguration: {
-                  metrics_enabled: {
-                    "nimbus_targeting_environment.targeting_context_value": true,
-                  },
-                },
-              },
+    info(
+      "Testing the interaction of gleanMetricConfiguration with submission of enrollment status and targeting context telemetry"
+    );
+
+    const experiment = NimbusTestUtils.factories.recipe.withFeatureConfig(
+      "experiment",
+      {
+        featureId: "nimbusTelemetry",
+        value: {
+          gleanMetricConfiguration: {
+            metrics_enabled: {
+              "nimbus_targeting_environment.targeting_context_value": true,
             },
-          ],
+          },
         },
-      ],
-    });
+      }
+    );
 
-    const rollout = ExperimentFakes.recipe("rollout", {
-      bucketConfig: experiment.bucketConfig,
-      isRollout: true,
-      branches: [
-        {
-          slug: "control",
-          ratio: 1,
-          features: [
-            {
-              featureId: "nimbusTelemetry",
-              value: {
-                gleanMetricConfiguration: {
-                  metrics_enabled: {
-                    "nimbus_events.enrollment_status": true,
-                  },
-                },
-              },
-            },
-          ],
-        },
-      ],
-    });
+    const { manager, cleanup } = await setupTest();
 
-    const manager = ExperimentFakes.manager();
-
-    sinon.stub(ExperimentAPI, "_manager").get(() => manager);
-
-    await manager.onStartup();
-    await manager.store.ready();
-
+    // We don't call recordTargetingContext() here because we dont actually want
+    // to do all the work when we're just testing whether or not the metrics are
+    // being recorded.
     Glean.nimbusTargetingEnvironment.targetingContextValue.set(
       "nothing-active-0"
     );
+
+    // We're submitting a bogus event here -- we shouldn't see it recorded.
     Glean.nimbusEvents.enrollmentStatus.record({ reason: "nothing-active-0" });
 
     Assert.equal(
@@ -102,18 +71,10 @@ add_task(
       null,
       "targetingContextValue not recorded by default"
     );
-    Assert.equal(
-      Glean.nimbusEvents.enrollmentStatus.testGetValue("events"),
-      null,
-      "enrollmentStatus not recorded by default"
-    );
-
-    await manager.enroll(rollout, "rs-loader");
 
     Glean.nimbusTargetingEnvironment.targetingContextValue.set(
       "rollout-active-1"
     );
-    Glean.nimbusEvents.enrollmentStatus.record({ reason: "rollout-active-1" });
 
     Assert.equal(
       Glean.nimbusTargetingEnvironment.targetingContextValue.testGetValue(),
@@ -121,68 +82,40 @@ add_task(
       "targetingContextValue not recorded by default"
     );
 
-    {
-      const events = Glean.nimbusEvents.enrollmentStatus.testGetValue("events");
-      Assert.equal(events?.length ?? 0, 1, "enrollmentStatus recorded once");
-      Assert.equal(
-        events[0].extra.reason,
-        "rollout-active-1",
-        "enrollmentStatus recorded once"
-      );
-    }
-
     await manager.enroll(experiment, "rs-loader");
+    Assert.ok(
+      manager.store.get(experiment.slug)?.active,
+      "Experiment enrolled and active"
+    );
 
     Glean.nimbusTargetingEnvironment.targetingContextValue.set(
       "experiment-active-2"
     );
-    Glean.nimbusEvents.enrollmentStatus.record({
-      reason: "experiment-active-2",
-    });
 
     Assert.equal(
       Glean.nimbusTargetingEnvironment.targetingContextValue.testGetValue(),
-      "experiment-active-2"
+      "experiment-active-2",
+      "Targeting context metric was recorded"
     );
 
-    {
-      const events = Glean.nimbusEvents.enrollmentStatus.testGetValue("events");
-      Assert.equal(
-        events?.length ?? 0,
-        1,
-        "enrollmentStatus not recorded again"
-      );
-    }
-
-    await manager.unenroll("experiment");
+    // Now the listener triggers again and the metric re-enables. We should see
+    // telemetry for this unenrollment but not setting the targeting context
+    // value.
+    await manager.unenroll(experiment.slug, { reason: "recipe-not-seen" });
 
     Glean.nimbusTargetingEnvironment.targetingContextValue.set(
       "rollout-active-3"
     );
-    Glean.nimbusEvents.enrollmentStatus.record({ reason: "rollout-active-3" });
 
     Assert.equal(
       Glean.nimbusTargetingEnvironment.targetingContextValue.testGetValue(),
       "experiment-active-2",
       "targetingContextValue was not recorded again"
     );
-
-    {
-      const events = Glean.nimbusEvents.enrollmentStatus.testGetValue("events");
-      Assert.equal(events?.length ?? 0, 2, "enrollmentStatus recorded again");
-      Assert.equal(
-        events[1].extra.reason,
-        "rollout-active-3",
-        "enrollmentStatus recorded with correct value"
-      );
-    }
-
-    await manager.unenroll("rollout");
 
     Glean.nimbusTargetingEnvironment.targetingContextValue.set(
       "nothing-active-0"
     );
-    Glean.nimbusEvents.enrollmentStatus.record({ reason: "nothing-active-0" });
 
     Assert.equal(
       Glean.nimbusTargetingEnvironment.targetingContextValue.testGetValue(),
@@ -190,21 +123,9 @@ add_task(
       "targetingContextValue was not recorded again"
     );
 
-    {
-      const events = Glean.nimbusEvents.enrollmentStatus.testGetValue("events");
-      Assert.equal(
-        events?.length ?? 0,
-        2,
-        "enrollmentStatus not recorded again"
-      );
-    }
-
     Services.fog.testResetFOG();
 
-    manager.store._deleteForTests("experiment");
-    manager.store._deleteForTests("rollout");
-
-    await assertEmptyStore(manager.store);
+    await cleanup();
   }
 );
 
@@ -280,15 +201,9 @@ add_task(async function test_featureConfigSchema_nimbusTargetingEnvironment() {
 add_task(
   { skip_if: nimbusTargetingContextTelemetryDisabled },
   async function test_nimbusTargetingEnvironment_recordAttrs() {
-    const sandbox = sinon.createSandbox();
-    const manager = ExperimentFakes.manager();
+    const { manager, cleanup } = await setupTest();
 
-    sandbox.stub(ExperimentAPI, "_manager").get(() => manager);
-
-    await manager.onStartup();
-    await manager.store.ready();
-
-    const cleanup = await ExperimentFakes.enrollWithFeatureConfig(
+    const cleanupExperiment = await NimbusTestUtils.enrollWithFeatureConfig(
       {
         featureId: "nimbusTelemetry",
         value: {
@@ -319,7 +234,7 @@ add_task(
       "The targetingContextValue metric has not been recorded yet."
     );
 
-    GleanPings.nimbusTargetingContext.testBeforeNextSubmit(() => {
+    await GleanPings.nimbusTargetingContext.testSubmission(() => {
       Assert.deepEqual(
         JSON.parse(
           Glean.nimbusTargetingEnvironment.targetingContextValue.testGetValue()
@@ -335,13 +250,9 @@ add_task(
           ],
         }
       );
-    });
-    await recordTargetingContext();
+    }, recordTargetingContext);
 
+    await cleanupExperiment();
     await cleanup();
-    await assertEmptyStore(manager.store);
-    await sandbox.restore();
-
-    Services.fog.testResetFOG();
   }
 );

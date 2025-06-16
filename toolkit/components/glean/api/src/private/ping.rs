@@ -18,6 +18,15 @@ pub enum Ping {
     Child,
 }
 
+impl malloc_size_of::MallocSizeOf for Ping {
+    fn size_of(&self, ops: &mut malloc_size_of::MallocSizeOfOps) -> usize {
+        match self {
+            Ping::Child => 0,
+            Ping::Parent { inner, .. } => inner.size_of(ops),
+        }
+    }
+}
+
 impl Ping {
     /// Create a new ping type for the given name, whether to include the client ID and whether to
     /// send this ping empty.
@@ -38,6 +47,7 @@ impl Ping {
         schedules_pings: Vec<String>,
         reason_codes: Vec<String>,
         follows_collection_enabled: bool,
+        uploader_capabilities: Vec<String>,
     ) -> Self {
         if need_ipc() {
             Ping::Child
@@ -54,6 +64,7 @@ impl Ping {
                     schedules_pings,
                     reason_codes,
                     follows_collection_enabled,
+                    uploader_capabilities,
                 ),
                 name,
             }
@@ -151,6 +162,7 @@ mod test {
             vec![],
             vec![],
             true,
+            vec![],
         )
     });
 

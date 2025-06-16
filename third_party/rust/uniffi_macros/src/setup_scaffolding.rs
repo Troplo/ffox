@@ -11,16 +11,20 @@ use uniffi_meta::UNIFFI_CONTRACT_VERSION;
 
 pub fn setup_scaffolding(namespace: String) -> Result<TokenStream> {
     let module_path = mod_path()?;
-    let ffi_contract_version_ident = format_ident!("ffi_{module_path}_uniffi_contract_version");
+    let normalized_module_path = module_path.replace("::", "__");
+    let ffi_contract_version_ident =
+        format_ident!("ffi_{normalized_module_path}_uniffi_contract_version");
     let namespace_upper = namespace.to_ascii_uppercase();
     let namespace_const_ident = format_ident!("UNIFFI_META_CONST_NAMESPACE_{namespace_upper}");
     let namespace_static_ident = format_ident!("UNIFFI_META_NAMESPACE_{namespace_upper}");
-    let ffi_rustbuffer_alloc_ident = format_ident!("ffi_{module_path}_rustbuffer_alloc");
-    let ffi_rustbuffer_from_bytes_ident = format_ident!("ffi_{module_path}_rustbuffer_from_bytes");
-    let ffi_rustbuffer_free_ident = format_ident!("ffi_{module_path}_rustbuffer_free");
-    let ffi_rustbuffer_reserve_ident = format_ident!("ffi_{module_path}_rustbuffer_reserve");
-    let reexport_hack_ident = format_ident!("{module_path}_uniffi_reexport_hack");
-    let ffi_rust_future_scaffolding_fns = rust_future_scaffolding_fns(&module_path);
+    let ffi_rustbuffer_alloc_ident = format_ident!("ffi_{normalized_module_path}_rustbuffer_alloc");
+    let ffi_rustbuffer_from_bytes_ident =
+        format_ident!("ffi_{normalized_module_path}_rustbuffer_from_bytes");
+    let ffi_rustbuffer_free_ident = format_ident!("ffi_{normalized_module_path}_rustbuffer_free");
+    let ffi_rustbuffer_reserve_ident =
+        format_ident!("ffi_{normalized_module_path}_rustbuffer_reserve");
+    let reexport_hack_ident = format_ident!("{normalized_module_path}_uniffi_reexport_hack");
+    let ffi_rust_future_scaffolding_fns = rust_future_scaffolding_fns(&normalized_module_path);
 
     Ok(quote! {
         // Unit struct to parameterize the FfiConverter trait.
@@ -35,7 +39,7 @@ pub fn setup_scaffolding(namespace: String) -> Result<TokenStream> {
 
         #[allow(clippy::missing_safety_doc, missing_docs)]
         #[doc(hidden)]
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub extern "C" fn #ffi_contract_version_ident() -> ::std::primitive::u32 {
             #UNIFFI_CONTRACT_VERSION
         }
@@ -51,7 +55,7 @@ pub fn setup_scaffolding(namespace: String) -> Result<TokenStream> {
                 .concat_str(#namespace);
 
         #[doc(hidden)]
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub static #namespace_static_ident: [::std::primitive::u8; #namespace_const_ident.size] =
             #namespace_const_ident.into_array();
 
@@ -61,7 +65,7 @@ pub fn setup_scaffolding(namespace: String) -> Result<TokenStream> {
 
         #[allow(clippy::missing_safety_doc, missing_docs)]
         #[doc(hidden)]
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub extern "C" fn #ffi_rustbuffer_alloc_ident(
             size: ::std::primitive::u64,
             call_status: &mut ::uniffi::RustCallStatus,
@@ -71,7 +75,7 @@ pub fn setup_scaffolding(namespace: String) -> Result<TokenStream> {
 
         #[allow(clippy::missing_safety_doc, missing_docs)]
         #[doc(hidden)]
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub unsafe extern "C" fn #ffi_rustbuffer_from_bytes_ident(
             bytes: ::uniffi::ForeignBytes,
             call_status: &mut ::uniffi::RustCallStatus,
@@ -81,7 +85,7 @@ pub fn setup_scaffolding(namespace: String) -> Result<TokenStream> {
 
         #[allow(clippy::missing_safety_doc, missing_docs)]
         #[doc(hidden)]
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub unsafe extern "C" fn #ffi_rustbuffer_free_ident(
             buf: ::uniffi::RustBuffer,
             call_status: &mut ::uniffi::RustCallStatus,
@@ -91,7 +95,7 @@ pub fn setup_scaffolding(namespace: String) -> Result<TokenStream> {
 
         #[allow(clippy::missing_safety_doc, missing_docs)]
         #[doc(hidden)]
-        #[no_mangle]
+        #[unsafe(no_mangle)]
         pub unsafe extern "C" fn #ffi_rustbuffer_reserve_ident(
             buf: ::uniffi::RustBuffer,
             additional: ::std::primitive::u64,
@@ -124,22 +128,11 @@ pub fn setup_scaffolding(namespace: String) -> Result<TokenStream> {
         macro_rules! uniffi_reexport_scaffolding {
             () => {
                 #[doc(hidden)]
-                #[no_mangle]
+                #[unsafe(no_mangle)]
                 pub extern "C" fn #reexport_hack_ident() {
                     $crate::uniffi_reexport_hack()
                 }
             };
-        }
-
-        // A trait that's in our crate for our external wrapped types to implement.
-        #[allow(unused)]
-        #[doc(hidden)]
-        pub trait UniffiCustomTypeConverter {
-            type Builtin;
-            fn into_custom(val: Self::Builtin) -> ::uniffi::Result<Self>
-            where
-                Self: ::std::marker::Sized;
-            fn from_custom(obj: Self) -> Self::Builtin;
         }
     })
 }
@@ -182,21 +175,21 @@ fn rust_future_scaffolding_fns(module_path: &str) -> TokenStream {
         quote! {
             #[allow(clippy::missing_safety_doc, missing_docs)]
             #[doc(hidden)]
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn #ffi_rust_future_poll(handle: ::uniffi::Handle, callback: ::uniffi::RustFutureContinuationCallback, data: u64) {
                 ::uniffi::ffi::rust_future_poll::<#return_type, crate::UniFfiTag>(handle, callback, data);
             }
 
             #[allow(clippy::missing_safety_doc, missing_docs)]
             #[doc(hidden)]
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn #ffi_rust_future_cancel(handle: ::uniffi::Handle) {
                 ::uniffi::ffi::rust_future_cancel::<#return_type, crate::UniFfiTag>(handle)
             }
 
             #[allow(clippy::missing_safety_doc, missing_docs)]
             #[doc(hidden)]
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn #ffi_rust_future_complete(
                 handle: ::uniffi::Handle,
                 out_status: &mut ::uniffi::RustCallStatus
@@ -206,7 +199,7 @@ fn rust_future_scaffolding_fns(module_path: &str) -> TokenStream {
 
             #[allow(clippy::missing_safety_doc, missing_docs)]
             #[doc(hidden)]
-            #[no_mangle]
+            #[unsafe(no_mangle)]
             pub unsafe extern "C" fn #ffi_rust_future_free(handle: ::uniffi::Handle) {
                 ::uniffi::ffi::rust_future_free::<#return_type, crate::UniFfiTag>(handle)
             }

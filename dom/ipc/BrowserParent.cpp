@@ -843,20 +843,8 @@ void BrowserParent::ActorDestroy(ActorDestroyReason why) {
       nsCOMPtr<nsIPrincipal> principal = GetContentPrincipal();
 
       if (principal) {
-        nsAutoCString crash_reason;
-        CrashReporter::GetAnnotation(OtherPid(),
-                                     CrashReporter::Annotation::MozCrashReason,
-                                     crash_reason);
-        // FIXME(arenevier): Find a less fragile way to identify that a crash
-        // was caused by OOM
-        bool is_oom = false;
-        if (crash_reason == "OOM" || crash_reason == "OOM!" ||
-            StringBeginsWith(crash_reason, "[unhandlable oom]"_ns) ||
-            StringBeginsWith(crash_reason, "Unhandlable OOM"_ns)) {
-          is_oom = true;
-        }
-
-        CrashReport::Deliver(principal, is_oom);
+        // TODO: Flag out-of-memory crashes appropriately.
+        CrashReport::Deliver(principal, /* aIsOOM */ false);
       }
     }
   }
@@ -1124,20 +1112,6 @@ nsresult BrowserParent::UpdatePosition() {
   return NS_OK;
 }
 
-void BrowserParent::NotifyPositionUpdatedForContentsInPopup() {
-  if (CanonicalBrowsingContext* bc = GetBrowsingContext()) {
-    bc->PreOrderWalk([](BrowsingContext* aContext) {
-      if (WindowGlobalParent* windowGlobalParent =
-              aContext->Canonical()->GetCurrentWindowGlobal()) {
-        if (RefPtr<BrowserParent> browserParent =
-                windowGlobalParent->GetBrowserParent()) {
-          browserParent->UpdatePosition();
-        }
-      }
-    });
-  }
-}
-
 void BrowserParent::UpdateDimensions(const LayoutDeviceIntRect& rect,
                                      const LayoutDeviceIntSize& size) {
   if (mIsDestroyed) {
@@ -1189,7 +1163,7 @@ void BrowserParent::SizeModeChanged(const nsSizeMode& aSizeMode) {
   }
 }
 
-#if defined(MOZ_WIDGET_ANDROID)
+#ifdef MOZ_WIDGET_ANDROID
 void BrowserParent::DynamicToolbarMaxHeightChanged(ScreenIntCoord aHeight) {
   if (!mIsDestroyed) {
     Unused << SendDynamicToolbarMaxHeightChanged(aHeight);
@@ -1205,6 +1179,12 @@ void BrowserParent::DynamicToolbarOffsetChanged(ScreenIntCoord aOffset) {
 void BrowserParent::KeyboardHeightChanged(ScreenIntCoord aHeight) {
   if (!mIsDestroyed) {
     Unused << SendKeyboardHeightChanged(aHeight);
+  }
+}
+
+void BrowserParent::AndroidPipModeChanged(bool aPipMode) {
+  if (!mIsDestroyed) {
+    Unused << SendAndroidPipModeChanged(aPipMode);
   }
 }
 #endif
@@ -1404,7 +1384,7 @@ IPCResult BrowserParent::RecvNewWindowGlobal(
 
   // Ensure we never load a document with a content principal in
   // the wrong type of webIsolated process
-  EnumSet<ContentParent::ValidatePrincipalOptions> validationOptions = {};
+  EnumSet<ValidatePrincipalOptions> validationOptions = {};
   nsCOMPtr<nsIURI> docURI = aInit.documentURI();
   if (docURI->SchemeIs("blob") || docURI->SchemeIs("chrome")) {
     // XXXckerschb TODO - Do not use SystemPrincipal for:
@@ -1414,7 +1394,7 @@ IPCResult BrowserParent::RecvNewWindowGlobal(
     //   * chrome://reftest/content/writing-mode/ua-style-sheet-button-1a-ref.html
     //   * chrome://reftest/content/xul-document-load/test003.xhtml
     //   * chrome://reftest/content/forms/input/text/centering-1.xhtml
-    validationOptions = {ContentParent::ValidatePrincipalOptions::AllowSystem};
+    validationOptions = {ValidatePrincipalOptions::AllowSystem};
   }
 
   // Some reftests have frames inside their chrome URIs and those load
@@ -1426,8 +1406,7 @@ IPCResult BrowserParent::RecvNewWindowGlobal(
                       IPC_FAIL(this, "Should have spec for about: URI"));
     if (spec.Equals("about:blank") && wgp &&
         wgp->DocumentPrincipal()->IsSystemPrincipal()) {
-      validationOptions = {
-          ContentParent::ValidatePrincipalOptions::AllowSystem};
+      validationOptions = {ValidatePrincipalOptions::AllowSystem};
     }
   }
 
@@ -3746,8 +3725,7 @@ bool BrowserParent::CanCancelContentJS(
                     false);
 
   nsCOMPtr<nsIURI> currentURI = entry->GetURI();
-  if (!currentURI->SchemeIs("http") && !currentURI->SchemeIs("https") &&
-      !currentURI->SchemeIs("file")) {
+  if (!net::SchemeIsHttpOrHttps(currentURI) && !currentURI->SchemeIs("file")) {
     // Only cancel content JS for http(s) and file URIs. Other URIs are probably
     // internal and we should just let them run to completion.
     return false;

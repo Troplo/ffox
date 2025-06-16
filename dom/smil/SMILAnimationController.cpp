@@ -51,8 +51,6 @@ SMILAnimationController::~SMILAnimationController() {
   NS_ASSERTION(mAnimationElementTable.IsEmpty(),
                "Animation controller shouldn't be tracking any animation"
                " elements when it dies");
-  MOZ_RELEASE_ASSERT(!mRegisteredWithRefreshDriver,
-                     "Leaving stale entry in refresh driver's observer list");
 }
 
 void SMILAnimationController::Disconnect() {
@@ -61,9 +59,6 @@ void SMILAnimationController::Disconnect() {
              "Expecting to disconnect when doc is sole remaining owner");
   NS_ASSERTION(mPauseState & SMILTimeContainer::PAUSE_PAGEHIDE,
                "Expecting to be paused for pagehide before disconnect");
-
-  StopSampling(GetRefreshDriver());
-
   mDocument = nullptr;  // (raw pointer)
 }
 
@@ -92,13 +87,11 @@ SMILTime SMILAnimationController::GetParentTime() const {
   return (SMILTime)(mCurrentSampleTime - mStartTime).ToMilliseconds();
 }
 
-//----------------------------------------------------------------------
-// nsARefreshObserver methods:
-NS_IMPL_ADDREF(SMILAnimationController)
-NS_IMPL_RELEASE(SMILAnimationController)
-
 // nsRefreshDriver Callback function
 void SMILAnimationController::WillRefresh(mozilla::TimeStamp aTime) {
+  if (!mIsSampling) {
+    return;
+  }
   // Although we never expect aTime to go backwards, when we initialise the
   // animation controller, if we can't get hold of a refresh driver we
   // initialise mCurrentSampleTime to Now(). It may be possible that after
@@ -143,6 +136,7 @@ void SMILAnimationController::WillRefresh(mozilla::TimeStamp aTime) {
   mCurrentSampleTime = aTime;
 
   Sample();
+  UpdateSampling();
 }
 
 //----------------------------------------------------------------------
@@ -192,19 +186,6 @@ void SMILAnimationController::Traverse(
 void SMILAnimationController::Unlink() { mLastCompositorTable = nullptr; }
 
 //----------------------------------------------------------------------
-// Refresh driver lifecycle related methods
-
-void SMILAnimationController::NotifyRefreshDriverCreated(
-    nsRefreshDriver* aRefreshDriver) {
-  UpdateSampling();
-}
-
-void SMILAnimationController::NotifyRefreshDriverDestroying(
-    nsRefreshDriver* aRefreshDriver) {
-  StopSampling(aRefreshDriver);
-}
-
-//----------------------------------------------------------------------
 // Timer-related implementation helpers
 
 bool SMILAnimationController::ShouldSample() const {
@@ -214,49 +195,26 @@ bool SMILAnimationController::ShouldSample() const {
 
 void SMILAnimationController::UpdateSampling() {
   const bool shouldSample = ShouldSample();
-  const bool isSampling = mRegisteredWithRefreshDriver;
-  if (shouldSample == isSampling) {
+  if (!shouldSample) {
+    mIsSampling = false;
     return;
   }
-
-  nsRefreshDriver* driver = GetRefreshDriver();
-  if (!driver) {
-    return;
-  }
-
-  if (shouldSample) {
+  mDocument->MaybeScheduleRenderingPhases(
+      {RenderingPhase::UpdateAnimationsAndSendEvents});
+  if (!mIsSampling) {
+    mIsSampling = true;
     // We're effectively resuming from a pause so update our current sample time
     // or else it will confuse our "average time between samples" calculations.
     mCurrentSampleTime = mozilla::TimeStamp::Now();
-    driver->AddRefreshObserver(this, FlushType::Style, "SMIL animations");
-    mRegisteredWithRefreshDriver = true;
+    // TODO(emilio): Not doing the sync first sample breaks
+    // test_smilDynamicDelayedBeginElement.xhtml which tests for this
+    // explicitly. Maybe we can avoid this?
     Sample();  // Run the first sample manually.
-  } else {
-    StopSampling(driver);
-  }
-}
-
-void SMILAnimationController::StopSampling(nsRefreshDriver* aRefreshDriver) {
-  if (aRefreshDriver && mRegisteredWithRefreshDriver) {
-    // NOTE: The document might already have been detached from its PresContext
-    // (and RefreshDriver), which would make GetRefreshDriver() return null.
-    MOZ_ASSERT(!GetRefreshDriver() || aRefreshDriver == GetRefreshDriver(),
-               "Stopping sampling with wrong refresh driver");
-    aRefreshDriver->RemoveRefreshObserver(this, FlushType::Style);
-    mRegisteredWithRefreshDriver = false;
   }
 }
 
 //----------------------------------------------------------------------
 // Sample-related methods and callbacks
-
-static void ProcessDiscards(
-    const SMILAnimationController::DiscardArray& aDiscards) {
-  SMILAnimationController::DiscardArray::ForwardIterator iter(aDiscards);
-  while (iter.HasMore()) {
-    iter.GetNext()->Remove();
-  }
-}
 
 void SMILAnimationController::DoSample() {
   DoSample(true);  // Skip unchanged time containers
@@ -330,16 +288,12 @@ void SMILAnimationController::DoSample(bool aSkipUnchangedContainers) {
   nsTArray<RefPtr<SVGAnimationElement>> animElems(
       mAnimationElementTable.Count());
 
-  SMILAnimationController::DiscardArray discards;
-
   for (SVGAnimationElement* animElem : mAnimationElementTable.Keys()) {
-    SampleTimedElement(animElem, discards, &activeContainers);
+    SampleTimedElement(animElem, &activeContainers);
     AddAnimationToCompositorTable(animElem, currentCompositorTable.get());
     animElems.AppendElement(animElem);
   }
   activeContainers.Clear();
-  ProcessDiscards(discards);
-  discards.Clear();
 
   // STEP 4: Compare previous sample's compositors against this sample's.
   // (Transfer cached base values across, & remove animation effects from
@@ -481,8 +435,6 @@ void SMILAnimationController::DoMilestoneSamples() {
     // dependencies will be appropriately resolved.
     sampleTime = std::max(nextMilestone.mTime, sampleTime);
 
-    SMILAnimationController::DiscardArray discards;
-
     for (RefPtr<dom::SVGAnimationElement>& elem : elements) {
       MOZ_ASSERT(elem, "nullptr animation element in list");
       SMILTimeContainer* container = elem->GetTimeContainer();
@@ -500,21 +452,17 @@ void SMILAnimationController::DoMilestoneSamples() {
           std::max<SMILTime>(0, containerTimeValue.GetMillis());
 
       if (nextMilestone.mIsEnd) {
-        elem->TimedElement().SampleEndAt(containerTime, discards);
+        elem->TimedElement().SampleEndAt(containerTime);
       } else {
-        elem->TimedElement().SampleAt(containerTime, discards);
+        elem->TimedElement().SampleAt(containerTime);
       }
     }
-
-    elements.Clear();
-    ProcessDiscards(discards);
   }
 }
 
 /*static*/
 void SMILAnimationController::SampleTimedElement(
-    SVGAnimationElement* aElement, DiscardArray& aDiscards,
-    TimeContainerHashtable* aActiveContainers) {
+    SVGAnimationElement* aElement, TimeContainerHashtable* aActiveContainers) {
   SMILTimeContainer* timeContainer = aElement->GetTimeContainer();
   if (!timeContainer) return;
 
@@ -533,7 +481,7 @@ void SMILAnimationController::SampleTimedElement(
 
   MOZ_ASSERT(!timeContainer->IsSeeking(),
              "Doing a regular sample but the time container is still seeking");
-  aElement->TimedElement().SampleAt(containerTime, aDiscards);
+  aElement->TimedElement().SampleAt(containerTime);
 }
 
 /*static*/

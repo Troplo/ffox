@@ -17,19 +17,19 @@ add_task(async function test_translations_panel_retry() {
     "The button is available."
   );
 
-  await FullPageTranslationsTestUtils.assertPageIsUntranslated(runInPage);
+  await FullPageTranslationsTestUtils.assertPageIsNotTranslated(runInPage);
 
   await FullPageTranslationsTestUtils.openPanel({
     expectedFromLanguage: "es",
     expectedToLanguage: "en",
-    onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewDefault,
+    onOpenPanel: FullPageTranslationsTestUtils.assertPanelViewIntro,
   });
 
   await FullPageTranslationsTestUtils.clickTranslateButton({
     downloadHandler: resolveDownloads,
   });
 
-  await FullPageTranslationsTestUtils.assertPageIsTranslated({
+  await FullPageTranslationsTestUtils.assertOnlyIntersectingNodesAreTranslated({
     fromLanguage: "es",
     toLanguage: "en",
     runInPage,
@@ -49,7 +49,7 @@ add_task(async function test_translations_panel_retry() {
     pivotTranslation: true,
   });
 
-  await FullPageTranslationsTestUtils.assertPageIsTranslated({
+  await FullPageTranslationsTestUtils.assertOnlyIntersectingNodesAreTranslated({
     fromLanguage: "es",
     toLanguage: "fr",
     runInPage,

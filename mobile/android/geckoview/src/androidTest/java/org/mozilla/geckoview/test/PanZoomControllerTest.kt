@@ -5,7 +5,12 @@ import android.view.InputDevice
 import android.view.MotionEvent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.MediumTest
-import org.hamcrest.Matchers.* // ktlint-disable no-wildcard-imports
+import org.hamcrest.Matchers.closeTo
+import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.greaterThan
+import org.hamcrest.Matchers.greaterThanOrEqualTo
+import org.hamcrest.Matchers.lessThan
+import org.hamcrest.Matchers.lessThanOrEqualTo
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.geckoview.GeckoResult
@@ -15,7 +20,6 @@ import org.mozilla.geckoview.GeckoSession.ScrollPositionUpdate
 import org.mozilla.geckoview.PanZoomController
 import org.mozilla.geckoview.ScreenLength
 import org.mozilla.geckoview.test.rule.GeckoSessionTestRule.WithDisplay
-import java.lang.Math
 import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
@@ -759,8 +763,8 @@ class PanZoomControllerTest : BaseSessionTest() {
                 lessThanOrEqualTo(updates[i + 1].scrollY),
             )
             assertThat(
-                "scroll source is reported correctly for user scroll",
-                updates[i].source,
+                "scroll source is reported correctly for user scroll (${updates[i].scrollY} to ${updates[i + 1].scrollY})",
+                updates[i + 1].source,
                 equalTo(ScrollPositionUpdate.SOURCE_USER_INTERACTION),
             )
         }
@@ -779,11 +783,10 @@ class PanZoomControllerTest : BaseSessionTest() {
                 updates[i].scrollY,
                 greaterThanOrEqualTo(updates[i + 1].scrollY),
             )
-            // TODO(bug 1940581): We want SOURCE_OTHER reported in this case
             assertThat(
-                "scroll source is reported correctly for script scroll",
-                updates[i].source,
-                equalTo(ScrollPositionUpdate.SOURCE_USER_INTERACTION),
+                "scroll source is reported correctly for script scroll (${updates[i].scrollY} to ${updates[i + 1].scrollY})",
+                updates[i + 1].source,
+                equalTo(ScrollPositionUpdate.SOURCE_OTHER),
             )
         }
 

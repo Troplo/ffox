@@ -29,7 +29,6 @@
 #include "mozilla/dom/WheelEventBinding.h"
 #include "mozilla/dom/WindowGlobalChild.h"
 #include "mozilla/EventStateManager.h"
-#include "mozilla/ImageInputTelemetry.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MouseEvents.h"
 #include "mozilla/PresShell.h"
@@ -46,7 +45,7 @@
 
 #include "HTMLDataListElement.h"
 #include "HTMLFormSubmissionConstants.h"
-#include "mozilla/Telemetry.h"
+#include "mozilla/glean/DomMetrics.h"
 #include "nsBaseCommandController.h"
 #include "nsIStringBundle.h"
 #include "nsFocusManager.h"
@@ -152,7 +151,7 @@ namespace mozilla::dom {
 static int32_t gSelectTextFieldOnFocus;
 UploadLastDir* HTMLInputElement::gUploadLastDir;
 
-static const nsAttrValue::EnumTable kInputTypeTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kInputTypeTable[] = {
     {"button", FormControlType::InputButton},
     {"checkbox", FormControlType::InputCheckbox},
     {"color", FormControlType::InputColor},
@@ -177,19 +176,20 @@ static const nsAttrValue::EnumTable kInputTypeTable[] = {
     // "text" must be last for ParseAttribute to work right.  If you add things
     // before it, please update kInputDefaultType.
     {"text", FormControlType::InputText},
-    {nullptr, 0}};
+};
 
 // Default type is 'text'.
-static const nsAttrValue::EnumTable* kInputDefaultType =
-    &kInputTypeTable[std::size(kInputTypeTable) - 2];
+static constexpr const nsAttrValue::EnumTableEntry* kInputDefaultType =
+    &kInputTypeTable[std::size(kInputTypeTable) - 1];
 
-static const nsAttrValue::EnumTable kCaptureTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kCaptureTable[] = {
     {"user", nsIFilePicker::captureUser},
     {"environment", nsIFilePicker::captureEnv},
     {"", nsIFilePicker::captureDefault},
-    {nullptr, nsIFilePicker::captureNone}};
+};
 
-static const nsAttrValue::EnumTable* kCaptureDefault = &kCaptureTable[2];
+static constexpr const nsAttrValue::EnumTableEntry* kCaptureDefault =
+    &kCaptureTable[2];
 
 using namespace blink;
 
@@ -489,8 +489,6 @@ HTMLInputElement::nsFilePickerShownCallback::Done(
 
       OwningFileOrDirectory* element = newFilesOrDirectories.AppendElement();
       element->SetAsFile() = domBlob->ToFile();
-
-      ImageInputTelemetry::MaybeRecordFilePickerImageInputTelemetry(domBlob);
     }
   } else {
     MOZ_ASSERT(mode == nsIFilePicker::modeOpen ||
@@ -540,8 +538,6 @@ HTMLInputElement::nsFilePickerShownCallback::Done(
 
       OwningFileOrDirectory* element = newFilesOrDirectories.AppendElement();
       element->SetAsFile() = file;
-
-      ImageInputTelemetry::MaybeRecordFilePickerImageInputTelemetry(blob);
     } else if (tmp) {
       RefPtr<Directory> directory = static_cast<Directory*>(tmp.get());
       OwningFileOrDirectory* element = newFilesOrDirectories.AppendElement();
@@ -576,6 +572,36 @@ HTMLInputElement::nsFilePickerShownCallback::Done(
 
   if (StaticPrefs::dom_webkitBlink_dirPicker_enabled() &&
       mInput->HasAttr(nsGkAtoms::webkitdirectory)) {
+#ifdef MOZ_WIDGET_ANDROID
+    // Android 13 or later cannot enumerate files into user directory due to
+    // no permission. So we store file list into file picker.
+    FallibleTArray<RefPtr<BlobImpl>> filesInWebKitDirectory;
+
+    nsCOMPtr<nsISimpleEnumerator> iter;
+    if (NS_SUCCEEDED(
+            mFilePicker->GetDomFilesInWebKitDirectory(getter_AddRefs(iter))) &&
+        iter) {
+      nsCOMPtr<nsISupports> supports;
+
+      bool loop = true;
+      while (NS_SUCCEEDED(iter->HasMoreElements(&loop)) && loop) {
+        iter->GetNext(getter_AddRefs(supports));
+        if (supports) {
+          RefPtr<BlobImpl> file = static_cast<File*>(supports.get())->Impl();
+          MOZ_ASSERT(file);
+          if (!filesInWebKitDirectory.AppendElement(file, fallible)) {
+            return nsresult::NS_ERROR_OUT_OF_MEMORY;
+          }
+        }
+      }
+    }
+
+    if (!filesInWebKitDirectory.IsEmpty()) {
+      dispatchChangeEventCallback->Callback(NS_OK, filesInWebKitDirectory);
+      return NS_OK;
+    }
+#endif
+
     ErrorResult error;
     GetFilesHelper* helper = mInput->GetOrCreateGetFilesHelper(true, error);
     if (NS_WARN_IF(error.Failed())) {
@@ -1221,7 +1247,9 @@ void HTMLInputElement::BeforeSetAttr(int32_t aNameSpaceID, nsAtom* aName,
     }
 
     if (aName == nsGkAtoms::webkitdirectory) {
-      Telemetry::Accumulate(Telemetry::WEBKIT_DIRECTORY_USED, true);
+      glean::dom::webkit_directory_used
+          .EnumGet(glean::dom::WebkitDirectoryUsedLabel::eTrue)
+          .Add();
     }
   }
 
@@ -1734,7 +1762,7 @@ void HTMLInputElement::SetValue(const nsAString& aValue, CallerType aCallerType,
 
 HTMLDataListElement* HTMLInputElement::GetList() const {
   nsAutoString dataListId;
-  GetAttr(nsGkAtoms::list_, dataListId);
+  GetAttr(nsGkAtoms::list, dataListId);
   if (dataListId.IsEmpty()) {
     return nullptr;
   }
@@ -2398,10 +2426,10 @@ nsISelectionController* HTMLInputElement::GetSelectionController() {
   return nullptr;
 }
 
-nsFrameSelection* HTMLInputElement::GetConstFrameSelection() {
+nsFrameSelection* HTMLInputElement::GetIndependentFrameSelection() const {
   TextControlState* state = GetEditorState();
   if (state) {
-    return state->GetConstFrameSelection();
+    return state->GetIndependentFrameSelection();
   }
   return nullptr;
 }
@@ -3080,7 +3108,7 @@ void HTMLInputElement::Select() {
   MOZ_ASSERT(state, "Single line text controls are expected to have a state");
 
   if (FocusState() != FocusTristate::eUnfocusable) {
-    RefPtr<nsFrameSelection> fs = state->GetConstFrameSelection();
+    RefPtr<nsFrameSelection> fs = state->GetIndependentFrameSelection();
     if (fs && fs->MouseDownRecorded()) {
       // This means that we're being called while the frame selection has a
       // mouse down event recorded to adjust the caret during the mouse up
@@ -3322,8 +3350,10 @@ void HTMLInputElement::LegacyPreActivationBehavior(
     aVisitor.mItemFlags |= NS_ORIGINAL_CHECKED_VALUE;
   }
 
-  // out-of-spec legacy pre-activation behavior needed because of bug 1803805
-  if (mForm) {
+  // out-of-spec legacy pre-activation behavior needed because of bug 1803805.
+  // XXXedgar: We exclude the radio type because `mItemData` is already used to
+  // store the originally selected radio button above.
+  if (mForm && mType != FormControlType::InputRadio) {
     aVisitor.mItemFlags |= NS_IN_SUBMIT_CLICK;
     aVisitor.mItemData = static_cast<Element*>(mForm);
     // tell the form that we are about to enter a click handler.
@@ -3918,7 +3948,6 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
               aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
             }
           }
-
         } break;  // eKeyPress
 
         case eMouseDown:
@@ -4025,10 +4054,6 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
                     aVisitor.mEvent->mOriginalTarget == clearButton) {
                   SetUserInput(EmptyString(),
                                *nsContentUtils::GetSystemPrincipal());
-                  // TODO(emilio): This should focus the input, but calling
-                  // SetFocus(this, FLAG_NOSCROLL) for some reason gets us into
-                  // an inconsistent state where we're focused but don't match
-                  // :focus-visible / :focus.
                 }
               }
             } else if (mType == FormControlType::InputPassword) {
@@ -4037,10 +4062,6 @@ nsresult HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor) {
                 auto* reveal = textControlFrame->GetButton();
                 if (reveal && aVisitor.mEvent->mOriginalTarget == reveal) {
                   SetRevealPassword(!RevealPassword());
-                  // TODO(emilio): This should focus the input, but calling
-                  // SetFocus(this, FLAG_NOSCROLL) for some reason gets us into
-                  // an inconsistent state where we're focused but don't match
-                  // :focus-visible / :focus.
                 }
               }
             }
@@ -5424,18 +5445,14 @@ bool HTMLInputElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
                                       const nsAString& aValue,
                                       nsIPrincipal* aMaybeScriptedPrincipal,
                                       nsAttrValue& aResult) {
-  // We can't make these static_asserts because kInputDefaultType and
-  // kInputTypeTable aren't constexpr.
-  MOZ_ASSERT(
+  static_assert(
       FormControlType(kInputDefaultType->value) == FormControlType::InputText,
       "Someone forgot to update kInputDefaultType when adding a new "
       "input type.");
-  MOZ_ASSERT(kInputTypeTable[std::size(kInputTypeTable) - 1].tag == nullptr,
-             "Last entry in the table must be the nullptr guard");
-  MOZ_ASSERT(
-      FormControlType(kInputTypeTable[std::size(kInputTypeTable) - 2].value) ==
+  static_assert(
+      FormControlType(kInputTypeTable[std::size(kInputTypeTable) - 1].value) ==
           FormControlType::InputText,
-      "Next to last entry in the table must be the \"text\" entry");
+      "Last entry in the table must be the \"text\" entry");
 
   if (aNamespaceID == kNameSpaceID_None) {
     if (aAttribute == nsGkAtoms::type) {
@@ -5445,7 +5462,8 @@ bool HTMLInputElement::ParseAttribute(int32_t aNamespaceID, nsAtom* aAttribute,
         // There's no public way to set an nsAttrValue to an enum value, but we
         // can just re-parse with a table that doesn't have any types other than
         // "text" in it.
-        aResult.ParseEnumValue(aValue, kInputDefaultType, false,
+        MOZ_ASSERT(&Span(kInputTypeTable).Last<1>()[0] == kInputDefaultType);
+        aResult.ParseEnumValue(aValue, Span(kInputTypeTable).Last<1>(), false,
                                kInputDefaultType);
       }
 
@@ -7477,7 +7495,9 @@ void HTMLInputElement::GetWebkitEntries(
     return;
   }
 
-  Telemetry::Accumulate(Telemetry::BLINK_FILESYSTEM_USED, true);
+  glean::dom::blink_filesystem_used
+      .EnumGet(glean::dom::BlinkFilesystemUsedLabel::eTrue)
+      .Add();
   aSequence.AppendElements(mFileData->mEntries);
 }
 

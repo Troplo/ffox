@@ -60,7 +60,7 @@ def build(ctx, lib):
             return build_required(lib, dir)
 
         files = [f for f in os.listdir(dir) if f.endswith(".d.json")]
-        if not len(files):
+        if not files:
             return build_required(lib, f"*.d.json files in {dir}")
 
         return node(ctx, "build_xpcom", lib_dts, dir, *files)
@@ -98,7 +98,7 @@ def setup(ctx):
 
 @SubCommand("ts", "update", description="Update tools/@types libraries.")
 def update(ctx):
-    typelib_dir = mozpath.join(ctx.topsrcdir, "tools/@types")
+    typelib_dir = mozpath.join(ctx.topsrcdir, "tools/@types/generated")
     platforms = ["darwin", "linux", "win32"]
 
     for lib in targets + platforms:
@@ -120,10 +120,45 @@ def update(ctx):
 
 
 @SubCommand("ts", "glean", description="Build Glean bindings.")
-@CommandArgument("path", help="Path to a (dir with) metrics.yaml.")
-def glean(ctx, path):
+def glean(ctx):
+    sys.path.append(mozpath.join(ctx.topsrcdir, "toolkit/components/glean/"))
+    from metrics_index import metrics_yamls, pings_yamls
+
+    typelib_dir = mozpath.join(ctx.topsrcdir, "tools/@types/generated")
+
     maybe_setup(ctx)
-    return node(ctx, "build_glean", ctx.topsrcdir, path, "tools/@types")
+    return node(
+        ctx, "build_glean", ctx.topsrcdir, typelib_dir, *metrics_yamls, *pings_yamls
+    )
+
+
+@SubCommand("ts", "paths", description="Build module path mapping.")
+def paths(ctx):
+    maybe_setup(ctx)
+    lib = mozpath.join(ctx.topsrcdir, "tools/@types/generated/tspaths.json")
+    lazy = mozpath.join(ctx.topsrcdir, "tools/@types/generated/lib.gecko.modules.d.ts")
+    return node(ctx, "build_paths", ctx.topsrcdir, lib, lazy)
+
+
+@SubCommand("ts", "subs", description="Emit substitution .d.ts for processed sources.")
+def subs(ctx):
+    maybe_setup(ctx)
+    processed = [
+        # AppConstants.sys.mjs has a (better) manually created declaration file.
+        "dist/bin/browser/modules/policies/schema.sys.mjs",
+        "dist/bin/modules/Readerable.sys.mjs",
+        "toolkit/components/nimbus/FeatureManifest.sys.mjs",
+        "toolkit/components/promiseworker/worker/PromiseWorker.js",
+        "toolkit/components/promiseworker/worker/PromiseWorker.mjs",
+        "toolkit/components/resistfingerprinting/RFPTargetConstants.sys.mjs",
+    ]
+    args = ["--declaration", "--emitDeclarationOnly", "--allowJs", "--outDir"]
+    subs_dir = mozpath.join(ctx.topsrcdir, "tools/@types/subs")
+
+    for file in processed:
+        path = mozpath.join(ctx.topobjdir, file)
+        print(f"[INFO] {path} -> {subs_dir}/{mozpath.basename(path)}")
+        node(ctx, "node_modules/typescript/bin/tsc", *args, subs_dir, path)
 
 
 def node(ctx, script, *args):

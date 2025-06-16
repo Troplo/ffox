@@ -372,8 +372,9 @@
       }
 
       let stopwatchid = this.container.getAttribute("stopwatchid");
+      let timerId;
       if (stopwatchid) {
-        TelemetryStopwatch.start(stopwatchid);
+        timerId = Glean.browserTimings[stopwatchid].start();
       }
 
       // Call this before setting the 'ignorefocus' attribute because this
@@ -395,7 +396,7 @@
       }
 
       if (stopwatchid) {
-        TelemetryStopwatch.finish(stopwatchid);
+        Glean.browserTimings[stopwatchid].stopAndAccumulate(timerId);
       }
     }
 
@@ -954,7 +955,7 @@
       this.insertBefore(start, this.firstChild);
 
       let end = MozXULElement.parseXULToFragment(
-        `<spacer class="tabs-right" flex="1"/>`
+        `<spacer class="tabs-right"/>`
       );
       this.insertBefore(end, null);
 

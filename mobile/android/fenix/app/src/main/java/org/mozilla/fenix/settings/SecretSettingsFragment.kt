@@ -14,6 +14,9 @@ import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SwitchPreference
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import mozilla.components.support.remotesettings.RemoteSettingsServer
+import mozilla.components.support.remotesettings.RemoteSettingsServerConfig
+import mozilla.components.support.remotesettings.into
 import org.mozilla.fenix.BuildConfig
 import org.mozilla.fenix.Config
 import org.mozilla.fenix.FeatureFlags
@@ -60,21 +63,20 @@ class SecretSettingsFragment : PreferenceFragmentCompat() {
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
-        requirePreference<SwitchPreference>(R.string.pref_key_toolbar_show_navigation_toolbar).apply {
-            isVisible = Config.channel.isNightlyOrDebug
-            isChecked = context.settings().navigationToolbarEnabled
-            onPreferenceChangeListener = SharedPreferenceUpdater()
-        }
-
-        requirePreference<SwitchPreference>(R.string.pref_key_enable_compose_top_sites).apply {
-            isVisible = Config.channel.isNightlyOrDebug
-            isChecked = context.settings().enableComposeTopSites
+        requirePreference<SwitchPreference>(R.string.pref_key_enable_composable_toolbar).apply {
+            isVisible = Config.channel.isDebug
+            isChecked = context.settings().shouldUseComposableToolbar
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
         requirePreference<SwitchPreference>(R.string.pref_key_use_new_bookmarks_ui).apply {
             isVisible = true
             isChecked = context.settings().useNewBookmarks
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreference>(R.string.pref_key_enable_compose_logins).apply {
+            isChecked = context.settings().enableComposeLogins
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
@@ -86,6 +88,12 @@ class SecretSettingsFragment : PreferenceFragmentCompat() {
         requirePreference<SwitchPreference>(R.string.pref_key_enable_menu_redesign).apply {
             isVisible = Config.channel.isNightlyOrDebug
             isChecked = context.settings().enableMenuRedesign
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreference>(R.string.pref_key_enable_homepage_searchbar).apply {
+            isVisible = Config.channel.isNightlyOrDebug
+            isChecked = context.settings().enableHomepageSearchBar
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
@@ -122,8 +130,20 @@ class SecretSettingsFragment : PreferenceFragmentCompat() {
         }
 
         requirePreference<SwitchPreference>(R.string.pref_key_enable_trending_searches).apply {
-            isVisible = Config.channel.isNightlyOrDebug
+            isVisible = true
             isChecked = context.settings().isTrendingSearchesVisible
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreference>(R.string.pref_key_enable_recent_searches).apply {
+            isVisible = true
+            isChecked = context.settings().isRecentSearchesVisible
+            onPreferenceChangeListener = SharedPreferenceUpdater()
+        }
+
+        requirePreference<SwitchPreference>(R.string.pref_key_enable_shortcuts_suggestions).apply {
+            isVisible = true
+            isChecked = context.settings().isShortcutSuggestionsVisible
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 
@@ -149,7 +169,7 @@ class SecretSettingsFragment : PreferenceFragmentCompat() {
         }
 
         requirePreference<SwitchPreference>(R.string.pref_key_doh_settings_enabled).apply {
-            isVisible = Config.channel.isDebug
+            isVisible = true
             isChecked = context.settings().showDohEntryPoint
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
@@ -185,20 +205,43 @@ class SecretSettingsFragment : PreferenceFragmentCompat() {
         requirePreference<SwitchPreference>(R.string.pref_key_remote_server_prod).apply {
             isVisible = true
             isChecked = context.settings().useProductionRemoteSettingsServer
-            onPreferenceChangeListener = SharedPreferenceUpdater()
+            onPreferenceChangeListener = object : SharedPreferenceUpdater() {
+                override fun onPreferenceChange(preference: Preference, newValue: Any?): Boolean {
+                    val service =
+                        context.components.remoteSettingsService.value.remoteSettingsService
+                    service.updateConfig(
+                        RemoteSettingsServerConfig(
+                            server = if (newValue as? Boolean == true) {
+                                RemoteSettingsServer.Prod.into()
+                            } else {
+                                RemoteSettingsServer.Stage.into()
+                            },
+                        ).into(),
+                    )
+                    service.sync()
+                    return super.onPreferenceChange(preference, newValue)
+                }
+            }
+        }
+
+        requirePreference<SwitchPreference>(R.string.pref_key_use_remote_search_configuration).apply {
+            isVisible = true
+            isChecked = context.settings().useRemoteSearchConfiguration
+            onPreferenceChangeListener = object : SharedPreferenceUpdater() {
+                override fun onPreferenceChange(preference: Preference, newValue: Any?): Boolean {
+                    if (newValue as? Boolean == true) {
+                        context.components.remoteSettingsSyncScheduler.registerForSync()
+                    } else {
+                        context.components.remoteSettingsSyncScheduler.unregisterForSync()
+                    }
+                    return super.onPreferenceChange(preference, newValue)
+                }
+            }
         }
 
         requirePreference<SwitchPreference>(R.string.pref_key_microsurvey_feature_enabled).apply {
             isVisible = true
             isChecked = context.settings().microsurveyFeatureEnabled
-            onPreferenceChangeListener = SharedPreferenceUpdater()
-        }
-
-        requirePreference<SwitchPreference>(
-            R.string.pref_key_set_as_default_browser_prompt_enabled,
-        ).apply {
-            isVisible = true
-            isChecked = context.settings().setAsDefaultBrowserPromptForExistingUsersEnabled
             onPreferenceChangeListener = SharedPreferenceUpdater()
         }
 

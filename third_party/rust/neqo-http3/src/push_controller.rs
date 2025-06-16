@@ -7,7 +7,7 @@
 use std::{
     cell::RefCell,
     collections::VecDeque,
-    fmt::{Debug, Display},
+    fmt::{self, Debug, Display, Formatter},
     mem,
     rc::Rc,
     slice::SliceIndex,
@@ -77,7 +77,7 @@ impl ActivePushStreams {
             return None;
         }
 
-        let inx = usize::try_from(u64::from(push_id - self.first_push_id)).unwrap();
+        let inx = usize::try_from(u64::from(push_id - self.first_push_id)).ok()?;
         if inx >= self.push_streams.len() {
             self.push_streams.resize(inx + 1, PushState::Init);
         }
@@ -116,7 +116,7 @@ impl ActivePushStreams {
                     .filter(|&e| e == &PushState::Closed)
                     .count(),
             )
-            .unwrap()
+            .expect("usize fits in u64")
     }
 
     pub fn clear(&mut self) {
@@ -157,7 +157,7 @@ pub struct PushController {
 }
 
 impl Display for PushController {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Push controller")
     }
 }

@@ -405,7 +405,8 @@ function transformTraceResource(traceResource) {
           source: frame[TRACER_FIELDS_INDEXES.FRAME_URL],
           sourceId: frame[TRACER_FIELDS_INDEXES.FRAME_SOURCEID],
           line: frame[TRACER_FIELDS_INDEXES.FRAME_LINE],
-          column: frame[TRACER_FIELDS_INDEXES.FRAME_COLUMN],
+          // tracer's column is 0-based while frame uses 1-based numbers
+          column: frame[TRACER_FIELDS_INDEXES.FRAME_COLUMN] + 1,
         },
         depth,
         implementation: frame[TRACER_FIELDS_INDEXES.FRAME_IMPLEMENTATION],
@@ -846,18 +847,18 @@ function createSimpleTableMessage(columns, items, timeStamp) {
  * Given the a regular warning message, compute the label of the warning group the message
  * could be in.
  * For example, if the message text is:
- * The resource at “http://evil.com” was blocked because content blocking is enabled
+ * The resource at “http://evil.com” was blocked because Enhanced Tracking Protection is enabled
  *
  * it may be turned into
  *
- * The resource at “<URL>” was blocked because content blocking is enabled
+ * The resource at “<URL>” was blocked because Enhanced Tracking Protection is enabled
  *
  * @param {ConsoleMessage} firstMessage
  * @returns {String} The computed label
  */
 function getWarningGroupLabel(firstMessage) {
   if (
-    isContentBlockingMessage(firstMessage) ||
+    isEnhancedTrackingProtectionMessage(firstMessage) ||
     isStorageIsolationMessage(firstMessage) ||
     isTrackingProtectionMessage(firstMessage)
   ) {
@@ -942,7 +943,7 @@ function getWarningGroupType(message) {
     return null;
   }
 
-  if (isContentBlockingMessage(message)) {
+  if (isEnhancedTrackingProtectionMessage(message)) {
     return MESSAGE_TYPE.CONTENT_BLOCKING_GROUP;
   }
 
@@ -998,11 +999,11 @@ function isWarningGroup(message) {
 }
 
 /**
- * Returns true if the message is a content blocking message.
+ * Returns true if the message is an Enhanced Tracking Protection message.
  * @param {ConsoleMessage} message
  * @returns {Boolean}
  */
-function isContentBlockingMessage(message) {
+function isEnhancedTrackingProtectionMessage(message) {
   const { category } = message;
   return (
     category == "cookieBlockedPermission" ||
@@ -1122,7 +1123,7 @@ module.exports = {
   getNaturalOrder,
   getParentWarningGroupMessageId,
   getWarningGroupType,
-  isContentBlockingMessage,
+  isEnhancedTrackingProtectionMessage,
   isGroupType,
   isMessageNetworkError,
   isPacketPrivate,

@@ -94,7 +94,7 @@ pub trait DynCommandEncoder: DynResource + core::fmt::Debug {
     unsafe fn begin_render_pass(
         &mut self,
         desc: &RenderPassDescriptor<dyn DynQuerySet, dyn DynTextureView>,
-    );
+    ) -> Result<(), DeviceError>;
     unsafe fn end_render_pass(&mut self);
 
     unsafe fn set_render_pipeline(&mut self, pipeline: &dyn DynRenderPipeline);
@@ -130,6 +130,12 @@ pub trait DynCommandEncoder: DynResource + core::fmt::Debug {
         first_instance: u32,
         instance_count: u32,
     );
+    unsafe fn draw_mesh_tasks(
+        &mut self,
+        group_count_x: u32,
+        group_count_y: u32,
+        group_count_z: u32,
+    );
     unsafe fn draw_indirect(
         &mut self,
         buffer: &dyn DynBuffer,
@@ -137,6 +143,12 @@ pub trait DynCommandEncoder: DynResource + core::fmt::Debug {
         draw_count: u32,
     );
     unsafe fn draw_indexed_indirect(
+        &mut self,
+        buffer: &dyn DynBuffer,
+        offset: wgt::BufferAddress,
+        draw_count: u32,
+    );
+    unsafe fn draw_mesh_tasks_indirect(
         &mut self,
         buffer: &dyn DynBuffer,
         offset: wgt::BufferAddress,
@@ -151,6 +163,14 @@ pub trait DynCommandEncoder: DynResource + core::fmt::Debug {
         max_count: u32,
     );
     unsafe fn draw_indexed_indirect_count(
+        &mut self,
+        buffer: &dyn DynBuffer,
+        offset: wgt::BufferAddress,
+        count_buffer: &dyn DynBuffer,
+        count_offset: wgt::BufferAddress,
+        max_count: u32,
+    );
+    unsafe fn draw_mesh_tasks_indirect_count(
         &mut self,
         buffer: &dyn DynBuffer,
         offset: wgt::BufferAddress,
@@ -374,7 +394,7 @@ impl<C: CommandEncoder + DynResource> DynCommandEncoder for C {
     unsafe fn begin_render_pass(
         &mut self,
         desc: &RenderPassDescriptor<dyn DynQuerySet, dyn DynTextureView>,
-    ) {
+    ) -> Result<(), DeviceError> {
         let color_attachments = desc
             .color_attachments
             .iter()
@@ -404,7 +424,7 @@ impl<C: CommandEncoder + DynResource> DynCommandEncoder for C {
                     .occlusion_query_set
                     .map(|set| set.expect_downcast_ref()),
             };
-        unsafe { C::begin_render_pass(self, &desc) };
+        unsafe { C::begin_render_pass(self, &desc) }
     }
 
     unsafe fn end_render_pass(&mut self) {
@@ -473,6 +493,15 @@ impl<C: CommandEncoder + DynResource> DynCommandEncoder for C {
         };
     }
 
+    unsafe fn draw_mesh_tasks(
+        &mut self,
+        group_count_x: u32,
+        group_count_y: u32,
+        group_count_z: u32,
+    ) {
+        unsafe { C::draw_mesh_tasks(self, group_count_x, group_count_y, group_count_z) };
+    }
+
     unsafe fn draw_indirect(
         &mut self,
         buffer: &dyn DynBuffer,
@@ -491,6 +520,16 @@ impl<C: CommandEncoder + DynResource> DynCommandEncoder for C {
     ) {
         let buffer = buffer.expect_downcast_ref();
         unsafe { C::draw_indexed_indirect(self, buffer, offset, draw_count) };
+    }
+
+    unsafe fn draw_mesh_tasks_indirect(
+        &mut self,
+        buffer: &dyn DynBuffer,
+        offset: wgt::BufferAddress,
+        draw_count: u32,
+    ) {
+        let buffer = buffer.expect_downcast_ref();
+        unsafe { C::draw_mesh_tasks_indirect(self, buffer, offset, draw_count) };
     }
 
     unsafe fn draw_indirect_count(
@@ -520,6 +559,28 @@ impl<C: CommandEncoder + DynResource> DynCommandEncoder for C {
         let count_buffer = count_buffer.expect_downcast_ref();
         unsafe {
             C::draw_indexed_indirect_count(
+                self,
+                buffer,
+                offset,
+                count_buffer,
+                count_offset,
+                max_count,
+            )
+        };
+    }
+
+    unsafe fn draw_mesh_tasks_indirect_count(
+        &mut self,
+        buffer: &dyn DynBuffer,
+        offset: wgt::BufferAddress,
+        count_buffer: &dyn DynBuffer,
+        count_offset: wgt::BufferAddress,
+        max_count: u32,
+    ) {
+        let buffer = buffer.expect_downcast_ref();
+        let count_buffer = count_buffer.expect_downcast_ref();
+        unsafe {
+            C::draw_mesh_tasks_indirect_count(
                 self,
                 buffer,
                 offset,
@@ -669,6 +730,7 @@ impl<'a> ColorAttachment<'a, dyn DynTextureView> {
     pub fn expect_downcast<B: DynTextureView>(&self) -> ColorAttachment<'a, B> {
         ColorAttachment {
             target: self.target.expect_downcast(),
+            depth_slice: self.depth_slice,
             resolve_target: self.resolve_target.as_ref().map(|rt| rt.expect_downcast()),
             ops: self.ops,
             clear_value: self.clear_value,

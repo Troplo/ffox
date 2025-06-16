@@ -11,7 +11,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   AddonManager: "resource://gre/modules/AddonManager.sys.mjs",
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
   CustomizableUI: "resource:///modules/CustomizableUI.sys.mjs",
-  ExperimentManager: "resource://nimbus/lib/ExperimentManager.sys.mjs",
+  ExperimentAPI: "resource://nimbus/ExperimentAPI.sys.mjs",
   FxAccounts: "resource://gre/modules/FxAccounts.sys.mjs",
   MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
   PlacesTransactions: "resource://gre/modules/PlacesTransactions.sys.mjs",
@@ -24,7 +24,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   // eslint-disable-next-line mozilla/no-browser-refs-in-toolkit
   Spotlight: "resource:///modules/asrouter/Spotlight.sys.mjs",
   UIState: "resource://services-sync/UIState.sys.mjs",
-  UITour: "resource:///modules/UITour.sys.mjs",
+  UITour: "moz-src:///browser/components/uitour/UITour.sys.mjs",
 });
 
 export const SpecialMessageActions = {
@@ -205,12 +205,7 @@ export const SpecialMessageActions = {
       "browser.migrate.content-modal.import-all.enabled",
       "browser.migrate.preferences-entrypoint.enabled",
       "browser.shell.checkDefaultBrowser",
-      "browser.shopping.experience2023.active",
-      "browser.shopping.experience2023.optedIn",
-      "browser.shopping.experience2023.survey.optedInTime",
-      "browser.shopping.experience2023.survey.hasSeen",
-      "browser.shopping.experience2023.survey.pdpVisits",
-      "browser.shopping.experience2023.firstImpressionTime",
+      "browser.shell.setDefaultGuidanceNotifications",
       "browser.startup.homepage",
       "browser.startup.windowsLaunchOnLogin.disableLaunchOnLoginPrompt",
       "browser.privateWindowSeparation.enabled",
@@ -227,6 +222,10 @@ export const SpecialMessageActions = {
       "sidebar.visibility",
       "browser.crashReports.unsubmittedCheck.autoSubmit2",
       "datareporting.healthreport.uploadEnabled",
+      "datareporting.policy.currentPolicyVersion",
+      "datareporting.policy.dataSubmissionPolicyAcceptedVersion",
+      "datareporting.policy.dataSubmissionPolicyNotifiedTime",
+      "datareporting.policy.minimumPolicyVersion",
     ];
 
     if (
@@ -238,6 +237,12 @@ export const SpecialMessageActions = {
     // If pref has no value, reset it, otherwise set it to desired value
     switch (typeof pref.value) {
       case "object":
+        if (pref.value.timestamp) {
+          Services.prefs.setStringPref(pref.name, Date.now().toString());
+        } else {
+          Services.prefs.clearUserPref(pref.name);
+        }
+        break;
       case "undefined":
         Services.prefs.clearUserPref(pref.name);
         break;
@@ -471,11 +476,6 @@ export const SpecialMessageActions = {
     await lazy.SelectableProfileService.createNewProfile();
   },
 
-  // For mocking during tests.
-  get _experimentManager() {
-    return lazy.ExperimentManager;
-  },
-
   async submitOnboardingOptOutPing() {
     // `onboarding-opt-out` pings can always be sent.
     GleanPings.onboardingOptOut.setEnabled(true);
@@ -484,7 +484,7 @@ export const SpecialMessageActions = {
     // therefore needs to capture experiments and rollouts independently.  This
     // data layout agrees with the `nimbus-targeting-context` ping for ease of
     // analysis.
-    let ctx = this._experimentManager.createTargetingContext();
+    let ctx = lazy.ExperimentAPI.manager.createTargetingContext();
 
     Glean.onboardingOptOut.activeExperiments.set(await ctx.activeExperiments);
     Glean.onboardingOptOut.activeRollouts.set(await ctx.activeRollouts);
@@ -752,6 +752,10 @@ export const SpecialMessageActions = {
         break;
       case "SUBMIT_ONBOARDING_OPT_OUT_PING":
         this.submitOnboardingOptOutPing();
+        break;
+      case "SET_SEARCH_MODE":
+        window.gURLBar.searchMode = action.data;
+        window.gURLBar.focus();
         break;
     }
     return undefined;

@@ -91,6 +91,10 @@ this.test = class extends ExtensionAPI {
           return Preferences.get(prefs);
         },
 
+        /* Clears a given user preference. */
+        async clearUserPref(pref) {
+          Services.prefs.clearUserPref(pref);
+        },
         /* Gets link color for a given selector. */
         async getLinkColor(tabId, selector) {
           return getActorForTab(tabId, "TestSupport").sendQuery(
@@ -258,6 +262,13 @@ this.test = class extends ExtensionAPI {
               bubbles: true,
               detail: languageState,
             })
+          );
+        },
+
+        async setHandlingUserInput(tabId, handlingUserInput) {
+          return getActorForTab(tabId, "TestSupport").sendQuery(
+            "SetHandlingUserInput",
+            { handlingUserInput }
           );
         },
       },

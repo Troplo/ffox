@@ -24,6 +24,7 @@
 #include "mozilla/dom/HTMLCanvasElement.h"
 #include "mozilla/dom/RemoteBrowser.h"
 #include "mozilla/dom/Selection.h"
+#include "mozilla/dom/ViewTransition.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/ServiceWorkerRegistration.h"
 #include "mozilla/dom/SVGElement.h"
@@ -81,13 +82,13 @@
 #include "mozilla/SVGClipPathFrame.h"
 #include "mozilla/SVGMaskFrame.h"
 #include "mozilla/SVGObserverUtils.h"
-#include "mozilla/Telemetry.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
 #include "mozilla/ViewportFrame.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "ActiveLayerTracker.h"
 #include "nsEscape.h"
+#include "nsPresContextInlines.h"
 #include "nsPrintfCString.h"
 #include "UnitTransforms.h"
 #include "LayerAnimationInfo.h"
@@ -709,6 +710,7 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mInTransform(false),
       mInEventsOnly(false),
       mInFilter(false),
+      mInViewTransitionCapture(false),
       mInPageSequence(false),
       mIsInChromePresContext(false),
       mSyncDecodeImages(false),
@@ -1139,7 +1141,6 @@ static bool DisplayListIsNonBlank(nsDisplayList* aList) {
   for (nsDisplayItem* i : *aList) {
     switch (i->GetType()) {
       case DisplayItemType::TYPE_COMPOSITOR_HITTEST_INFO:
-      case DisplayItemType::TYPE_CANVAS_BACKGROUND_COLOR:
       case DisplayItemType::TYPE_CANVAS_BACKGROUND_IMAGE:
         continue;
       case DisplayItemType::TYPE_SOLID_COLOR:
@@ -1666,6 +1667,11 @@ void nsDisplayListBuilder::AdjustWindowDraggingRegion(nsIFrame* aFrame) {
   if (styleUI->mWindowDragging == StyleWindowDragging::Default) {
     // This frame has the default value and doesn't influence the window
     // dragging region.
+    return;
+  }
+
+  if (!aFrame->StyleVisibility()->IsVisible()) {
+    // Invisible frames don't influence the window dragging region.
     return;
   }
 
@@ -2294,14 +2300,15 @@ void nsDisplayList::PaintRoot(nsDisplayListBuilder* aBuilder, gfxContext* aCtx,
 
       wrManager->EndTransactionWithoutLayer(this, aBuilder,
                                             std::move(wrFilters), nullptr,
-                                            aDisplayListBuildTime.valueOr(0.0));
+                                            aDisplayListBuildTime.valueOr(0.0),
+                                            aFlags & PAINT_COMPOSITE_OFFSCREEN);
     }
 
-    if (presContext->RefreshDriver()->HasScheduleFlush()) {
+    if (presContext->RefreshDriver()->IsInRefresh() ||
+        presContext->RefreshDriver()->IsPaintPending()) {
       presContext->NotifyInvalidation(layerManager->GetLastTransactionId(),
                                       frame->GetRect());
     }
-
     return;
   }
 
@@ -2336,12 +2343,12 @@ struct FramesWithDepth {
   explicit FramesWithDepth(float aDepth) : mDepth(aDepth) {}
 
   bool operator<(const FramesWithDepth& aOther) const {
-    if (!FuzzyEqual(mDepth, aOther.mDepth, 0.1f)) {
-      // We want to sort so that the shallowest item (highest depth value) is
-      // first
-      return mDepth > aOther.mDepth;
-    }
-    return false;
+    // We want to sort so that the shallowest item (highest depth value) is
+    // first. Round to have some error tolerance (multiply with 8 translates
+    // effectively to <<3).
+    double lDepth = round(mDepth * 8.);
+    double rDepth = round(aOther.mDepth * 8.);
+    return lDepth > rDepth;
   }
   bool operator==(const FramesWithDepth& aOther) const {
     return this == &aOther;
@@ -2763,6 +2770,9 @@ nsRect nsDisplaySolidColor::GetBounds(nsDisplayListBuilder* aBuilder,
 
 void nsDisplaySolidColor::Paint(nsDisplayListBuilder* aBuilder,
                                 gfxContext* aCtx) {
+  if (!NS_GET_A(mColor)) {
+    return;
+  }
   int32_t appUnitsPerDevPixel = mFrame->PresContext()->AppUnitsPerDevPixel();
   DrawTarget* drawTarget = aCtx->GetDrawTarget();
   Rect rect = NSRectToSnappedRect(GetPaintRect(aBuilder, aCtx),
@@ -2780,6 +2790,9 @@ bool nsDisplaySolidColor::CreateWebRenderCommands(
     wr::DisplayListBuilder& aBuilder, wr::IpcResourceUpdateQueue& aResources,
     const StackingContextHelper& aSc, RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
+  if (!NS_GET_A(mColor)) {
+    return true;
+  }
   LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(
       mBounds, mFrame->PresContext()->AppUnitsPerDevPixel());
   wr::LayoutRect r = wr::ToLayoutRect(bounds);
@@ -5203,10 +5216,10 @@ bool nsDisplayOwnLayer::CreateWebRenderCommands(
     const StackingContextHelper& aSc, RenderRootStateManager* aManager,
     nsDisplayListBuilder* aDisplayListBuilder) {
   Maybe<wr::WrAnimationProperty> prop;
-  bool needsProp = aManager->LayerManager()->AsyncPanZoomEnabled() &&
-                   (IsScrollThumbLayer() || IsZoomingLayer() ||
-                    ShouldGetFixedAnimationId() ||
-                    (IsRootScrollbarContainer() && HasDynamicToolbar()));
+  const bool needsProp = aManager->LayerManager()->AsyncPanZoomEnabled() &&
+                         (IsScrollThumbLayer() || IsZoomingLayer() ||
+                          ShouldGetFixedAnimationId() ||
+                          (IsRootScrollbarContainer() && HasDynamicToolbar()));
 
   if (needsProp) {
     // APZ is enabled and this is a scroll thumb or zooming layer, so we need
@@ -5228,12 +5241,12 @@ bool nsDisplayOwnLayer::CreateWebRenderCommands(
   params.animation = prop.ptrOr(nullptr);
   params.clip =
       wr::WrStackingContextClip::ClipChain(aBuilder.CurrentClipChainId());
-  if (IsScrollbarContainer() && IsRootScrollbarContainer()) {
+  const bool rootScrollbarContainer = IsRootScrollbarContainer();
+  if (rootScrollbarContainer) {
     params.prim_flags |= wr::PrimitiveFlags::IS_SCROLLBAR_CONTAINER;
   }
-  if (IsZoomingLayer() ||
-      (ShouldGetFixedAnimationId() ||
-       (IsRootScrollbarContainer() && HasDynamicToolbar()))) {
+  if (IsZoomingLayer() || ShouldGetFixedAnimationId() ||
+      (rootScrollbarContainer && HasDynamicToolbar())) {
     params.is_2d_scale_translation = true;
     params.should_snap = true;
   }
@@ -5302,6 +5315,48 @@ void nsDisplayOwnLayer::WriteDebugInfo(std::stringstream& aStream) {
                  .get();
 }
 
+bool nsDisplayViewTransitionCapture::CreateWebRenderCommands(
+    wr::DisplayListBuilder& aBuilder, wr::IpcResourceUpdateQueue& aResources,
+    const StackingContextHelper& aSc, RenderRootStateManager* aManager,
+    nsDisplayListBuilder* aDisplayListBuilder) {
+  Maybe<wr::SnapshotInfo> si;
+  nsPresContext* pc = mFrame->PresContext();
+  nsIFrame* capturedFrame =
+      mIsRoot ? pc->FrameConstructor()->GetRootElementStyleFrame() : mFrame;
+  const auto captureRect = mIsRoot
+                               ? ViewTransition::SnapshotContainingBlockRect(pc)
+                               : mFrame->InkOverflowRectRelativeToSelf();
+  auto key = [&]() -> Maybe<wr::SnapshotImageKey> {
+    auto* vt = pc->Document()->GetActiveViewTransition();
+    if (NS_WARN_IF(!vt)) {
+      return Nothing();
+    }
+    const auto* key =
+        vt->GetImageKeyForCapturedFrame(capturedFrame, aManager, aResources);
+    return key ? Some(wr::SnapshotImageKey{*key}) : Nothing();
+  }();
+  VT_LOG_DEBUG(
+      "nsDisplayViewTransitionCapture::CreateWebrenderCommands(%s, key=%s)",
+      capturedFrame->ListTag().get(), ToString(key).c_str());
+  wr::StackingContextParams params;
+  params.clip =
+      wr::WrStackingContextClip::ClipChain(aBuilder.CurrentClipChainId());
+  if (key) {
+    si.emplace(wr::SnapshotInfo{
+        .key = *key,
+        .area = wr::ToLayoutRect(LayoutDeviceRect::FromAppUnits(
+            captureRect + ToReferenceFrame(), pc->AppUnitsPerDevPixel())),
+        .detached = true,
+    });
+    params.snapshot = si.ptr();
+  }
+  StackingContextHelper sc(aSc, GetActiveScrolledRoot(), mFrame, this, aBuilder,
+                           params);
+  nsDisplayWrapList::CreateWebRenderCommands(aBuilder, aResources, sc, aManager,
+                                             aDisplayListBuilder);
+  return true;
+}
+
 nsDisplaySubDocument::nsDisplaySubDocument(nsDisplayListBuilder* aBuilder,
                                            nsIFrame* aFrame,
                                            nsSubDocumentFrame* aSubDocFrame,
@@ -5309,7 +5364,6 @@ nsDisplaySubDocument::nsDisplaySubDocument(nsDisplayListBuilder* aBuilder,
                                            nsDisplayOwnLayerFlags aFlags)
     : nsDisplayOwnLayer(aBuilder, aFrame, aList,
                         aBuilder->CurrentActiveScrolledRoot(), aFlags),
-      mScrollParentId(aBuilder->GetCurrentScrollParentId()),
       mShouldFlatten(false),
       mSubDocFrame(aSubDocFrame) {
   MOZ_COUNT_CTOR(nsDisplaySubDocument);
@@ -7136,8 +7190,7 @@ void nsDisplayTransform::HitTest(nsDisplayListBuilder* aBuilder,
 
   GetChildren()->HitTest(aBuilder, resultingRect, aState, aOutFrames);
 
-  if (aState->mHitOccludingItem && !testingPoint &&
-      !mChildBounds.Contains(aRect)) {
+  if (aState->mHitOccludingItem && !testingPoint && !mBounds.Contains(aRect)) {
     MOZ_ASSERT(aBuilder->HitTestIsForVisibility());
     // We're hit-testing a rect that's bigger than our child bounds, but
     // resultingRect is clipped by our bounds (in ProjectRectBounds above), so
@@ -7171,14 +7224,17 @@ float nsDisplayTransform::GetHitDepthAtPoint(nsDisplayListBuilder* aBuilder,
 
   Matrix4x4 inverse = matrix;
   inverse.Invert();
-  Point4D point =
-      inverse.ProjectPoint(Point(NSAppUnitsToFloatPixels(aPoint.x, factor),
-                                 NSAppUnitsToFloatPixels(aPoint.y, factor)));
 
-  Point point2d = point.As2DPoint();
-
-  Point3D transformed = matrix.TransformPoint(Point3D(point2d.x, point2d.y, 0));
-  return transformed.z;
+  // Compute the value z so that (aPoint.x, aPoint.y, z, 1) gets transformed by
+  // inverse to the z=0 plane. This is the same thing that
+  // Matrix4x4Typed::ProjectPoint does, but we are only interested in the z
+  // value, not the projected point, thus we extract the formula here, look
+  // there for how this equation is determined.
+  // https://searchfox.org/mozilla-central/rev/bd4d1cd1ca3037e6dc8d4081a4303824880b1b45/gfx/2d/Matrix.h#724
+  return -(NSAppUnitsToFloatPixels(aPoint.x, factor) * inverse._13 +
+           NSAppUnitsToFloatPixels(aPoint.y, factor) * inverse._23 +
+           inverse._43) /
+         inverse._33;
 }
 
 /* The transform is opaque iff the transform consists solely of scales and

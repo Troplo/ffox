@@ -44,6 +44,7 @@ class WebCompatReporterFragment : ComposeFragment() {
                 browserStore = requireComponents.core.store,
                 appStore = requireComponents.appStore,
                 scope = viewModelScope,
+                nimbusApi = requireComponents.nimbus.sdk,
             ),
         )
     }
@@ -67,7 +68,7 @@ class WebCompatReporterFragment : ComposeFragment() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 webCompatReporterStore.navEvents.collect { navEvent ->
                     when (navEvent) {
-                        is WebCompatReporterAction.SendMoreInfoClicked -> {
+                        is WebCompatReporterAction.SendMoreInfoSubmitted -> {
                             (activity as HomeActivity).openToBrowserAndLoad(
                                 searchTermOrURL = "$WEB_COMPAT_REPORTER_URL${webCompatReporterStore.state.enteredUrl}",
                                 newTab = true,

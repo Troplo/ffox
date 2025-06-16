@@ -83,7 +83,7 @@ class LoadListener {
     }
 
     if (requestFailed || this._countRead == 0) {
-      lazy.logConsole.warn("loadListener: request failed!");
+      lazy.logConsole.debug("loadListener: request failed!");
       // send null so the callback can deal with the failure
       this._bytes = null;
     } else if (!this._expectedContentType.test(this._channel.contentType)) {
@@ -112,7 +112,13 @@ class LoadListener {
     callback.onRedirectVerifyCallback(Cr.NS_OK);
   }
 
-  // nsIInterfaceRequestor
+  /**
+   * nsIInterfaceRequestor
+   *
+   * @template {nsIID} T
+   * @param {T} iid
+   * @returns {nsQIResult<T>}
+   */
   getInterface(iid) {
     return this.QueryInterface(iid);
   }
@@ -486,12 +492,13 @@ export var SearchUtils = {
 
   /**
    * Fetches an icon without sending cookies to the page and returns
-   * the data and the mime type. Rejects if the icon cannot be fetched.
+   * the data and the mime type.
    *
    * @param {string|nsIURI} uri
    *  The URI to the icon.
    * @returns {Promise<[Uint8Array, string]>}
-   *   An array containing the data and the mime type.
+   *   Resolves to an array containing the data and the mime type.
+   *   Rejects if the icon cannot be fetched.
    */
   async fetchIcon(uri) {
     return new Promise((resolve, reject) => {
@@ -501,7 +508,8 @@ export var SearchUtils = {
         /^image\//,
         (byteArray, contentType) => {
           if (!byteArray) {
-            reject(new Error(""));
+            reject(new Error("Unable to fetch icon."));
+            return;
           }
           resolve([Uint8Array.from(byteArray), contentType]);
         }
@@ -588,7 +596,7 @@ export var SearchUtils = {
     let stream = imgTools.encodeScaledImage(container, "image/png", size, size);
     let streamSize = stream.available();
     if (streamSize > SearchUtils.MAX_ICON_SIZE) {
-      throw new Error("Icon is too big");
+      throw new Error("Rescaled icon still is too big");
     }
 
     let bis = new BinaryInputStream(stream);

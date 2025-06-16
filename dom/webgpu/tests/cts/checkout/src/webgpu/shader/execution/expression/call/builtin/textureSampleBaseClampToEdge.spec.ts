@@ -3,13 +3,13 @@ Execution tests for textureSampleBaseClampToEdge
 `;
 
 import { makeTestGroup } from '../../../../../../common/framework/test_group.js';
-import { GPUTest } from '../../../../../gpu_test.js';
+import { AllFeaturesMaxLimitsGPUTest, GPUTest } from '../../../../../gpu_test.js';
 import { TexelView } from '../../../../../util/texture/texel_view.js';
 
 import {
   checkCallResults,
   createTextureWithRandomDataAndGetTexels,
-  createVideoFrameWithRandomDataAndGetTexels,
+  createCanvasWithRandomDataAndGetTexels,
   doTextureCalls,
   generateTextureBuiltinInputs2D,
   kSamplePointMethods,
@@ -18,10 +18,9 @@ import {
   kShortShaderStages,
   TextureCall,
   vec2,
-  WGSLTextureSampleTest,
 } from './texture_utils.js';
 
-export const g = makeTestGroup(WGSLTextureSampleTest);
+export const g = makeTestGroup(AllFeaturesMaxLimitsGPUTest);
 
 async function createTextureAndDataForTest(
   t: GPUTest,
@@ -33,7 +32,12 @@ async function createTextureAndDataForTest(
   videoFrame?: VideoFrame;
 }> {
   if (isExternal) {
-    const { texels, videoFrame } = createVideoFrameWithRandomDataAndGetTexels(descriptor.size);
+    t.skipIf(typeof OffscreenCanvas === 'undefined', 'OffscreenCanvas is not supported');
+    const { texels, canvas } = createCanvasWithRandomDataAndGetTexels(descriptor.size);
+
+    t.skipIf(typeof VideoFrame === 'undefined', 'VideoFrames are not supported');
+    const videoFrame = new VideoFrame(canvas, { timestamp: 0 });
+
     const texture = t.device.importExternalTexture({ source: videoFrame });
     return { texels, texture, videoFrame };
   } else {

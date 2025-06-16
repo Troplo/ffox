@@ -35,7 +35,7 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   LanguageDetector:
     "resource://gre/modules/translations/LanguageDetector.sys.mjs",
-  ReaderWorker: "resource://gre/modules/reader/ReaderWorker.sys.mjs",
+  ReaderWorker: "moz-src:///toolkit/components/reader/ReaderWorker.sys.mjs",
   Readerable: "resource://gre/modules/Readerable.sys.mjs",
 });
 
@@ -462,18 +462,19 @@ export var ReaderMode = {
   _assignLanguage(article) {
     return lazy.LanguageDetector.detectLanguage(article.textContent).then(
       result => {
-        article.language = result.confident ? result.language : null;
+        article.detectedLanguage = result.confident ? result.language : null;
       }
     );
   },
 
   _maybeAssignTextDirection(article) {
-    // TODO: Remove the hardcoded language codes below once bug 1320265 is resolved.
+    // Assign `article.dir` a value if not set and if we have a valid detected language.
     if (
       !article.dir &&
-      ["ar", "fa", "he", "ug", "ur"].includes(article.language)
+      typeof article.detectedLanguage === "string" &&
+      article.detectedLanguage
     ) {
-      article.dir = "rtl";
+      article.dir = Services.intl.getScriptDirection(article.detectedLanguage);
     }
   },
 
@@ -483,7 +484,7 @@ export var ReaderMode = {
    * @param article the article object to assign the reading time estimate to.
    */
   _assignReadTime(article) {
-    let lang = article.language || "en";
+    let lang = article.detectedLanguage || "en";
     const readingSpeed = this._getReadingSpeedForLanguage(lang);
     const charactersPerMinuteLow = readingSpeed.cpm - readingSpeed.variance;
     const charactersPerMinuteHigh = readingSpeed.cpm + readingSpeed.variance;
@@ -512,12 +513,12 @@ export var ReaderMode = {
       ["fr", { cpm: 998, variance: 126 }],
       ["he", { cpm: 833, variance: 130 }],
       ["it", { cpm: 950, variance: 140 }],
-      ["jw", { cpm: 357, variance: 56 }],
+      ["ja", { cpm: 357, variance: 56 }],
       ["nl", { cpm: 978, variance: 143 }],
       ["pl", { cpm: 916, variance: 126 }],
       ["pt", { cpm: 913, variance: 145 }],
       ["ru", { cpm: 986, variance: 175 }],
-      ["sk", { cpm: 885, variance: 145 }],
+      ["sl", { cpm: 885, variance: 145 }],
       ["sv", { cpm: 917, variance: 156 }],
       ["tr", { cpm: 1054, variance: 156 }],
       ["zh", { cpm: 255, variance: 29 }],

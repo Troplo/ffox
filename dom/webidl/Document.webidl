@@ -122,8 +122,8 @@ interface Document : Node {
 
 // https://html.spec.whatwg.org/multipage/dom.html#the-document-object
 partial interface Document {
-  [Pref="dom.webcomponents.shadowdom.declarative.enabled", Throws]
-  static Document parseHTMLUnsafe((TrustedHTML or DOMString) html);
+  [Throws, NeedsSubjectPrincipal=NonSystem]
+  static Document parseHTMLUnsafe((TrustedHTML or DOMString) html, optional SetHTMLUnsafeOptions options = {});
 
   [PutForwards=href, LegacyUnforgeable] readonly attribute Location? location;
   [SetterThrows]                           attribute DOMString domain;
@@ -373,7 +373,9 @@ partial interface Document {
 //  Mozilla extensions of various sorts
 partial interface Document {
   // @deprecated We are going to remove these (bug 1584269).
+  [Pref="dom.events.script_execute.enabled"]
   attribute EventHandler onbeforescriptexecute;
+  [Pref="dom.events.script_execute.enabled"]
   attribute EventHandler onafterscriptexecute;
 
   // Creates a new XUL element regardless of the document's default type.
@@ -382,6 +384,12 @@ partial interface Document {
   // Wether the document was loaded using a nsXULPrototypeDocument.
   [ChromeOnly]
   readonly attribute boolean loadedFromPrototype;
+
+  // Whether we're in android's Picture-in-Picture mode.
+  // Top level document only (for now, if we want to deal with iframes, please
+  // also fix bug 1959448 while at it).
+  [Func="Document::CallerIsSystemPrincipalOrWebCompatAddon"]
+  readonly attribute boolean inAndroidPipMode;
 
   // The principal to use for the storage area of this document
   [ChromeOnly]
@@ -434,6 +442,9 @@ partial interface Document {
 
   [ChromeOnly]
   attribute boolean devToolsAnonymousAndShadowEventsEnabled;
+
+  [ChromeOnly]
+  attribute boolean pausedByDevTools;
 
   [ChromeOnly, BinaryName="contentLanguageForBindings"] readonly attribute DOMString contentLanguage;
 
@@ -513,12 +524,8 @@ partial interface Document {
  * content on top of the current page displayed in the document.
  */
 partial interface Document {
-  /**
-   * If aForce is true, tries to update layout to be able to insert the element
-   * synchronously.
-   */
   [ChromeOnly, NewObject, Throws]
-  AnonymousContent insertAnonymousContent(optional boolean aForce = false);
+  AnonymousContent insertAnonymousContent();
 
   /**
    * Removes the element inserted into the CanvasFrame given an AnonymousContent
@@ -551,7 +558,7 @@ partial interface Document {
 // webcompat extension the ability to request the storage access for a given
 // third party.
 partial interface Document {
-  [Func="Document::CallerCanAccessPrivilegeSSA", NewObject]
+  [Func="Document::CallerIsSystemPrincipalOrWebCompatAddon", NewObject]
   Promise<undefined> requestStorageAccessForOrigin(DOMString thirdPartyOrigin, optional boolean requireUserInteraction = true);
 };
 
@@ -752,3 +759,9 @@ partial interface Document {
 
 // https://github.com/w3c/csswg-drafts/pull/10767 for the name divergence in the spec
 callback ViewTransitionUpdateCallback = Promise<any> ();
+
+// https://wicg.github.io/sanitizer-api/#sanitizer-api
+partial interface Document {
+  [Throws, Pref="dom.security.sanitizer.enabled"]
+  static Document parseHTML(DOMString html, optional SetHTMLOptions options = {});
+};

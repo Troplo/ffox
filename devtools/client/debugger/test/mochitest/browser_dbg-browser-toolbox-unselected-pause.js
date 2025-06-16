@@ -29,12 +29,12 @@ add_task(async function () {
     waitForState,
     waitForSelectedSource,
     waitForLoadedScopes,
+    waitForInlinePreviews,
     waitForElement,
     findElement,
     getSelector,
     findElementWithSelector,
     createLocation,
-    isCm6Enabled,
     getEditorContent,
     getCMEditor,
   });

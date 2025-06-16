@@ -81,6 +81,8 @@ https_first_disabled = true
 
 ["browser_canvascompare_popups_data.js"]
 
+["browser_color_scheme.js"]
+
 ["browser_cross_origin_isolated_animation_api.js"]
 
 ["browser_cross_origin_isolated_performance_api.js"]
@@ -98,9 +100,6 @@ skip-if = [
 ["browser_exslt_time_precision.js"]
 
 ["browser_exslt_timezone_load.js"]
-skip-if = [
-  "os == 'win' && os_version == '11.26100'", # Bug 1952711
-]
 
 ["browser_hwconcurrency_etp_iframes.js"]
 
@@ -163,5 +162,3 @@ https_first_disabled = true
 ["browser_spoofing_keyboard_event.js"]
 
 ["browser_timezone.js"]
-
-["browser_color_scheme.js"]

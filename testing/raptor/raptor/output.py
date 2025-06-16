@@ -39,7 +39,7 @@ METRIC_BLOCKLIST = [
 
 
 @six.add_metaclass(ABCMeta)
-class PerftestOutput(object):
+class PerftestOutput:
     """Abstract base class to handle output of perftest results"""
 
     def __init__(
@@ -379,7 +379,7 @@ class PerftestOutput(object):
             correctionFactor = 3
             results = _filter(vals)
 
-            # stylebench has 5 tests, each of these are made of up 5 subtests
+            # stylebench has 6 tests. Five of them are made of up 5 subtests
             #
             #   * Adding classes.
             #   * Removing classes.
@@ -411,11 +411,44 @@ class PerftestOutput(object):
             #
             # We receive 76 entries per test, which ads up to 380. We want to use
             # the 5 test entries, not the rest.
-            if len(results) != 380:
+            #
+            # Then there's the sixth "Dynamic media queries" test, which gives
+            # results for viewports in increments of 50px like:
+            #
+            #   Dynamic media queries/Resizing to 300px - 0/Sync
+            #   Dynamic media queries/Resizing to 300px - 0/Async
+            #   Dynamic media queries/Resizing to 300px - 0
+            #   Dynamic media queries/Resizing to 350px - 0/Sync
+            #   Dynamic media queries/Resizing to 350px - 0/Async
+            #   Dynamic media queries/Resizing to 350px - 0
+            #   ...
+            #   Dynamic media queries/Resizing to 800px - 0/Sync
+            #   Dynamic media queries/Resizing to 800px - 0/Async
+            #   Dynamic media queries/Resizing to 800px - 0
+            #   Dynamic media queries/Resizing to 350px - 1/Sync
+            #   Dynamic media queries/Resizing to 350px - 1/Async
+            #   Dynamic media queries/Resizing to 350px - 1
+            #   Dynamic media queries/Resizing to 400px - 1/Sync
+            #   Dynamic media queries/Resizing to 400px - 1/Async
+            #   Dynamic media queries/Resizing to 400px - 1
+            #   ...
+            #   Dynamic media queries/Resizing to 800px - 4/Sync
+            #   Dynamic media queries/Resizing to 800px - 4/Async
+            #   Dynamic media queries/Resizing to 800px - 4
+            #   Dynamic media queries <- What we want
+            #
+            # So len([300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800]) is 11.
+            #
+            # So, 11 (subtests) *
+            #     5 (repetitions) *
+            #     3 (entries per repetition (sync/async/sum)) =
+            #     165 entries for test before the sum.
+            EXPECTED_ENTRIES = 380 + 166
+            if len(results) != EXPECTED_ENTRIES:
                 raise Exception(
-                    "StyleBench requires 380 entries, found: %s instead" % len(results)
+                    f"StyleBench requires {EXPECTED_ENTRIES} entries, found: {len(results)} instead"
                 )
-            results = results[75::76]
+            results = results[:380][75::76] + [results[-1]]
             # pylint --py3k W1619
             return 60 * 1000 / filters.geometric_mean(results) / correctionFactor
 
@@ -742,9 +775,7 @@ class PerftestOutput(object):
                         3,
                     )
                 except TypeError as e:
-                    LOG.warning(
-                        "[{}][{}] : {} - {}".format(suite, sub, e.__class__.__name__, e)
-                    )
+                    LOG.warning(f"[{suite}][{sub}] : {e.__class__.__name__} - {e}")
 
                 if sub not in _subtests:
                     # subtest not added yet, first pagecycle, so add new one
@@ -818,7 +849,7 @@ class PerftestOutput(object):
 
         failed_tests = []
         for pagecycle in data:
-            for _sub, _value in six.iteritems(pagecycle[0]):
+            for _sub, _value in pagecycle[0].items():
                 if _value["decodedFrames"] == 0:
                     failed_tests.append(
                         "%s test Failed. decodedFrames %s droppedFrames %s."
@@ -840,16 +871,12 @@ class PerftestOutput(object):
 
                 # build a list of subtests and append all related replicates
                 create_subtest_entry(
-                    "{}_decoded_frames".format(_sub),
+                    f"{_sub}_decoded_frames",
                     _value["decodedFrames"],
                     lower_is_better=False,
                 )
-                create_subtest_entry(
-                    "{}_dropped_frames".format(_sub), _value["droppedFrames"]
-                )
-                create_subtest_entry(
-                    "{}_%_dropped_frames".format(_sub), percent_dropped
-                )
+                create_subtest_entry(f"{_sub}_dropped_frames", _value["droppedFrames"])
+                create_subtest_entry(f"{_sub}_%_dropped_frames", percent_dropped)
 
         # Check if any youtube test failed and generate exception
         if len(failed_tests) > 0:

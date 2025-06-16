@@ -9,14 +9,14 @@ import {
   kMaxUnsignedLongValue,
   kMaxUnsignedLongLongValue } from
 '../../../../../constants.js';
-import { kResourceStates } from '../../../../../gpu_test.js';
-import { ValidationTest } from '../../../validation_test.js';
+import { kResourceStates, AllFeaturesMaxLimitsGPUTest } from '../../../../../gpu_test.js';
+import * as vtu from '../../../validation_test_utils.js';
 
 const kIndirectMultiDrawTestParams = kUnitCaseParamsBuilder.
 combine('indexed', [true, false]).
 combine('useDrawCountBuffer', [true, false]);
 
-class F extends ValidationTest {
+class F extends AllFeaturesMaxLimitsGPUTest {
   makeIndexBuffer() {
     return this.createBufferTracked({
       size: 16,
@@ -33,10 +33,6 @@ desc(
 Tests indirect and draw count buffers must be valid.
   `
 ).
-beforeAllSubcases((t) => {
-  t.selectDeviceOrSkipTestCase('chromium-experimental-multi-draw-indirect');
-}).
-
 paramsSubcasesOnly(
   kIndirectMultiDrawTestParams.
   combine('indirectState', kResourceStates).
@@ -52,20 +48,21 @@ paramsSubcasesOnly(
   )
 ).
 fn((t) => {
+  t.skipIfDeviceDoesNotHaveFeature('chromium-experimental-multi-draw-indirect');
   const { indexed, indirectState, useDrawCountBuffer, drawCountState } = t.params;
-  const indirectBuffer = t.createBufferWithState(indirectState, {
+  const indirectBuffer = vtu.createBufferWithState(t, indirectState, {
     size: 256,
     usage: GPUBufferUsage.INDIRECT
   });
   const drawCountBuffer = useDrawCountBuffer ?
-  t.createBufferWithState(drawCountState, {
+  vtu.createBufferWithState(t, drawCountState, {
     size: 256,
     usage: GPUBufferUsage.INDIRECT
   }) :
   undefined;
 
   const { encoder, validateFinishAndSubmit } = t.createEncoder('render pass');
-  encoder.setPipeline(t.createNoOpRenderPipeline());
+  encoder.setPipeline(vtu.createNoOpRenderPipeline(t));
   if (indexed) {
     encoder.setIndexBuffer(t.makeIndexBuffer(), 'uint32');
 
@@ -96,11 +93,9 @@ paramsSubcasesOnly(
   // drawCountMismatched only matters if useDrawCountBuffer=true
   .filter((p) => p.useDrawCountBuffer || !p.drawCountMismatched)
 ).
-beforeAllSubcases((t) => {
-  t.selectDeviceOrSkipTestCase('chromium-experimental-multi-draw-indirect');
-  t.selectMismatchedDeviceOrSkipTestCase(undefined);
-}).
+beforeAllSubcases((t) => t.usesMismatchedDevice()).
 fn((t) => {
+  t.skipIfDeviceDoesNotHaveFeature('chromium-experimental-multi-draw-indirect');
   const { indexed, useDrawCountBuffer, indirectMismatched, drawCountMismatched } = t.params;
 
   const indirectDevice = indirectMismatched ? t.mismatchedDevice : t.device;
@@ -122,7 +117,7 @@ fn((t) => {
   undefined;
 
   const { encoder, validateFinish } = t.createEncoder('render pass');
-  encoder.setPipeline(t.createNoOpRenderPipeline());
+  encoder.setPipeline(vtu.createNoOpRenderPipeline(t));
   if (indexed) {
     encoder.setIndexBuffer(t.makeIndexBuffer(), 'uint32');
 
@@ -140,9 +135,6 @@ desc(
 Tests indirect and draw count buffers must have 'Indirect' usage.
   `
 ).
-beforeAllSubcases((t) => {
-  t.selectDeviceOrSkipTestCase('chromium-experimental-multi-draw-indirect');
-}).
 paramsSubcasesOnly(
   kIndirectMultiDrawTestParams.
   combine('indirectUsage', [
@@ -157,6 +149,7 @@ paramsSubcasesOnly(
   )
 ).
 fn((t) => {
+  t.skipIfDeviceDoesNotHaveFeature('chromium-experimental-multi-draw-indirect');
   const { indexed, indirectUsage, useDrawCountBuffer, drawCountUsage } = t.params;
 
   const indirectBuffer = t.createBufferTracked({
@@ -171,7 +164,7 @@ fn((t) => {
   undefined;
 
   const { encoder, validateFinish } = t.createEncoder('render pass');
-  encoder.setPipeline(t.createNoOpRenderPipeline());
+  encoder.setPipeline(vtu.createNoOpRenderPipeline(t));
   if (indexed) {
     encoder.setIndexBuffer(t.makeIndexBuffer(), 'uint32');
 
@@ -192,9 +185,6 @@ desc(
 Tests indirect and draw count offsets must be a multiple of 4.
   `
 ).
-beforeAllSubcases((t) => {
-  t.selectDeviceOrSkipTestCase('chromium-experimental-multi-draw-indirect');
-}).
 paramsSubcasesOnly(
   kIndirectMultiDrawTestParams.combineWithParams([
   // Valid
@@ -209,6 +199,7 @@ paramsSubcasesOnly(
   )
 ).
 fn((t) => {
+  t.skipIfDeviceDoesNotHaveFeature('chromium-experimental-multi-draw-indirect');
   const { indexed, indirectOffset, useDrawCountBuffer, drawCountOffset } = t.params;
 
   const indirectBuffer = t.createBufferTracked({
@@ -223,7 +214,7 @@ fn((t) => {
   undefined;
 
   const { encoder, validateFinish } = t.createEncoder('render pass');
-  encoder.setPipeline(t.createNoOpRenderPipeline());
+  encoder.setPipeline(vtu.createNoOpRenderPipeline(t));
   if (indexed) {
     encoder.setIndexBuffer(t.makeIndexBuffer(), 'uint32');
 
@@ -287,10 +278,8 @@ combine('indexed', [true, false]) //
   yield { offset: 0, maxDrawCount: kMaxUnsignedLongValue, bufferSize: 1024 };
 })
 ).
-beforeAllSubcases((t) => {
-  t.selectDeviceOrSkipTestCase('chromium-experimental-multi-draw-indirect');
-}).
 fn((t) => {
+  t.skipIfDeviceDoesNotHaveFeature('chromium-experimental-multi-draw-indirect');
   const { indexed, offset, maxDrawCount, bufferSize } = t.params;
 
   const indirectBuffer = t.createBufferTracked({
@@ -299,7 +288,7 @@ fn((t) => {
   });
 
   const { encoder, validateFinish } = t.createEncoder('render pass');
-  encoder.setPipeline(t.createNoOpRenderPipeline());
+  encoder.setPipeline(vtu.createNoOpRenderPipeline(t));
   if (indexed) {
     encoder.setIndexBuffer(t.makeIndexBuffer(), 'uint32');
 
@@ -336,10 +325,8 @@ combine('indexed', [true, false]) //
 { offset: kMaxUnsignedLongLongValue, bufferSize: 1024 }]
 )
 ).
-beforeAllSubcases((t) => {
-  t.selectDeviceOrSkipTestCase('chromium-experimental-multi-draw-indirect');
-}).
 fn((t) => {
+  t.skipIfDeviceDoesNotHaveFeature('chromium-experimental-multi-draw-indirect');
   const { indexed, bufferSize, offset } = t.params;
 
   const indirectBuffer = t.createBufferTracked({
@@ -352,7 +339,7 @@ fn((t) => {
   });
 
   const { encoder, validateFinish } = t.createEncoder('render pass');
-  encoder.setPipeline(t.createNoOpRenderPipeline());
+  encoder.setPipeline(vtu.createNoOpRenderPipeline(t));
   if (indexed) {
     encoder.setIndexBuffer(t.makeIndexBuffer(), 'uint32');
 

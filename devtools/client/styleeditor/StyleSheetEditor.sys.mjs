@@ -24,6 +24,11 @@ loader.lazyGetter(lazy, "BufferStream", () => {
     "setData"
   );
 });
+loader.lazyRequireGetter(
+  lazy,
+  "CSSCompleter",
+  "resource://devtools/client/shared/sourceeditor/css-autocompleter.js"
+);
 
 ChromeUtils.defineESModuleGetters(lazy, {
   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
@@ -81,7 +86,7 @@ const STYLE_SHEET_UPDATE_CAUSED_BY_STYLE_EDITOR = "styleeditor";
  *        panel window for style editor
  * @param {Number} styleSheetFriendlyIndex
  *        Optional Integer representing the index of the current stylesheet
- *        among all stylesheets of its type (inline or user-created)
+ *        among all stylesheets of its type (inline, constructed or user-created)
  */
 export function StyleSheetEditor(resource, win, styleSheetFriendlyIndex) {
   EventEmitter.decorate(this);
@@ -191,16 +196,16 @@ StyleSheetEditor.prototype = {
       return this.savedFile.leafName;
     }
 
+    const index = this.styleSheetFriendlyIndex;
     if (this._isNew) {
-      const index = this.styleSheetFriendlyIndex + 1 || 0;
       return getString("newStyleSheet", index);
     }
 
+    if (this.styleSheet.constructed) {
+      return getString("constructedStyleSheet", index);
+    }
+
     if (!this.styleSheet.href) {
-      // TODO(bug 1809107): Probably a different index + string for
-      // constructable stylesheets, they can't be meaningfully edited right now
-      // because we don't have their original text.
-      const index = this.styleSheetFriendlyIndex + 1 || 0;
       return getString("inlineStyleSheet", index);
     }
 
@@ -688,7 +693,7 @@ StyleSheetEditor.prototype = {
   async _highlightSelectorAt(x, y) {
     const pos = this.sourceEditor.getPositionFromCoords({ left: x, top: y });
     const info = this.sourceEditor.getInfoAt(pos);
-    if (!info || info.state !== "selector") {
+    if (!info || info.state !== lazy.CSSCompleter.CSS_STATE_SELECTOR) {
       return;
     }
 

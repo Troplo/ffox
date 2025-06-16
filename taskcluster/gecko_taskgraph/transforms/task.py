@@ -200,6 +200,8 @@ task_description_schema = Schema(
         },
         # Override the default priority for the project
         Optional("priority"): str,
+        # Override the default 5 retries
+        Optional("retries"): int,
     }
 )
 
@@ -219,6 +221,7 @@ V2_ROUTE_TEMPLATES = [
     "index.{trust-domain}.v2.{project}.pushdate.{build_date}.latest.{product}.{job-name}",
     "index.{trust-domain}.v2.{project}.pushlog-id.{pushlog_id}.{product}.{job-name}",
     "index.{trust-domain}.v2.{project}.revision.{branch_rev}.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.revision.{branch_git_rev}.{product}.{job-name}",
 ]
 
 # {central, inbound, autoland} write to a "trunk" index prefix. This facilitates
@@ -232,6 +235,7 @@ V2_SHIPPABLE_TEMPLATES = [
     "index.{trust-domain}.v2.{project}.shippable.{build_date}.revision.{branch_rev}.{product}.{job-name}",  # noqa - too long
     "index.{trust-domain}.v2.{project}.shippable.{build_date}.latest.{product}.{job-name}",
     "index.{trust-domain}.v2.{project}.shippable.revision.{branch_rev}.{product}.{job-name}",
+    "index.{trust-domain}.v2.{project}.shippable.revision.{branch_git_rev}.{product}.{job-name}",
 ]
 
 V2_SHIPPABLE_L10N_TEMPLATES = [
@@ -259,6 +263,12 @@ TREEHERDER_ROUTE_ROOT = "tc-treeherder"
 def get_branch_rev(config):
     return config.params[
         "{}head_rev".format(config.graph_config["project-repo-param-prefix"])
+    ]
+
+
+def get_branch_git_rev(config):
+    return config.params[
+        "{}head_git_rev".format(config.graph_config["project-repo-param-prefix"])
     ]
 
 
@@ -1521,6 +1531,177 @@ def build_treescript_payload(config, task, task_def):
 
 
 @payload_builder(
+    "landoscript",
+    schema={
+        Required("lando-repo"): str,
+        Optional("hg-repo-url"): str,
+        Optional("ignore-closed-tree"): bool,
+        Optional("dontbuild"): bool,
+        Optional("tags"): [Any("buildN", "release", None)],
+        Optional("force-dry-run"): bool,
+        Optional("android-l10n-import-info"): {
+            Required("from-repo-url"): str,
+            Required("toml-info"): [
+                {
+                    Required("toml-path"): str,
+                    Required("dest-path"): str,
+                }
+            ],
+        },
+        Optional("android-l10n-sync-info"): {
+            Required("from-branch"): str,
+            Required("toml-info"): [
+                {
+                    Required("toml-path"): str,
+                }
+            ],
+        },
+        Optional("l10n-bump-info"): [
+            {
+                Required("name"): str,
+                Required("path"): str,
+                Optional("l10n-repo-url"): str,
+                Optional("l10n-repo-target-branch"): str,
+                Optional("ignore-config"): object,
+                Required("platform-configs"): [
+                    {
+                        Required("platforms"): [str],
+                        Required("path"): str,
+                        Optional("format"): str,
+                    }
+                ],
+            }
+        ],
+        Optional("bump-files"): [str],
+        Optional("merge-info"): object,
+    },
+)
+def build_landoscript_payload(config, task, task_def):
+    worker = task["worker"]
+    release_config = get_release_config(config)
+    task_def["payload"] = {"actions": [], "lando_repo": worker["lando-repo"]}
+    actions = task_def["payload"]["actions"]
+
+    if worker.get("ignore-closed-tree") is not None:
+        task_def["payload"]["ignore_closed_tree"] = worker["ignore-closed-tree"]
+
+    if worker.get("dontbuild"):
+        task_def["payload"]["dontbuild"] = True
+
+    if worker.get("force-dry-run"):
+        task_def["payload"]["dry_run"] = True
+
+    if worker.get("android-l10n-import-info"):
+        android_l10n_import_info = {}
+        for k, v in worker["android-l10n-import-info"].items():
+            android_l10n_import_info[k.replace("-", "_")] = worker[
+                "android-l10n-import-info"
+            ][k]
+        android_l10n_import_info["toml_info"] = [
+            {
+                param_name.replace("-", "_"): param_value
+                for param_name, param_value in entry.items()
+            }
+            for entry in worker["android-l10n-import-info"]["toml-info"]
+        ]
+        task_def["payload"]["android_l10n_import_info"] = android_l10n_import_info
+        actions.append("android_l10n_import")
+
+    if worker.get("android-l10n-sync-info"):
+        android_l10n_sync_info = {}
+        for k, v in worker["android-l10n-sync-info"].items():
+            android_l10n_sync_info[k.replace("-", "_")] = worker[
+                "android-l10n-sync-info"
+            ][k]
+        android_l10n_sync_info["toml_info"] = [
+            {
+                param_name.replace("-", "_"): param_value
+                for param_name, param_value in entry.items()
+            }
+            for entry in worker["android-l10n-sync-info"]["toml-info"]
+        ]
+        task_def["payload"]["android_l10n_sync_info"] = android_l10n_sync_info
+        actions.append("android_l10n_sync")
+
+    if worker.get("l10n-bump-info"):
+        l10n_bump_info = []
+        l10n_repo_urls = set()
+        for lbi in worker["l10n-bump-info"]:
+            new_lbi = {}
+            if "l10n-repo-url" in lbi:
+                l10n_repo_urls.add(lbi["l10n-repo-url"])
+            for k, v in lbi.items():
+                new_lbi[k.replace("-", "_")] = lbi[k]
+            l10n_bump_info.append(new_lbi)
+
+        task_def["payload"]["l10n_bump_info"] = l10n_bump_info
+        if len(l10n_repo_urls) > 1:
+            raise Exception(
+                "Must use the same l10n-repo-url for all files in the same task!"
+            )
+        elif len(l10n_repo_urls) == 1:
+            actions.append("l10n_bump")
+
+    if worker.get("tags"):
+        tag_names = []
+        product = task["shipping-product"].upper()
+        version = release_config["version"].replace(".", "_")
+        buildnum = release_config["build_number"]
+        if "buildN" in worker["tags"]:
+            tag_names.extend(
+                [
+                    f"{product}_{version}_BUILD{buildnum}",
+                ]
+            )
+        if "release" in worker["tags"]:
+            tag_names.extend([f"{product}_{version}_RELEASE"])
+        tag_info = {
+            "tags": tag_names,
+            "hg_repo_url": worker["hg-repo-url"],
+            "revision": config.params[
+                "{}head_rev".format(worker.get("repo-param-prefix", ""))
+            ],
+        }
+        task_def["payload"]["tag_info"] = tag_info
+        actions.append("tag")
+
+    if worker.get("bump-files"):
+        bump_info = {}
+        bump_info["next_version"] = release_config["next_version"]
+        bump_info["files"] = worker["bump-files"]
+        task_def["payload"]["version_bump_info"] = bump_info
+        actions.append("version_bump")
+
+    if worker.get("merge-info"):
+        merge_info = {
+            merge_param_name.replace("-", "_"): merge_param_value
+            for merge_param_name, merge_param_value in worker["merge-info"].items()
+            if merge_param_name != "version-files"
+        }
+        merge_info["version_files"] = [
+            {
+                file_param_name.replace("-", "_"): file_param_value
+                for file_param_name, file_param_value in file_entry.items()
+            }
+            for file_entry in worker["merge-info"]["version-files"]
+        ]
+        # hack alert: co-opt the l10n_bump_info into the merge_info section
+        # this should be cleaned up to avoid l10n_bump_info ever existing
+        # in the payload
+        if task_def["payload"].get("l10n_bump_info"):
+            actions.remove("l10n_bump")
+            merge_info["l10n_bump_info"] = task_def["payload"].pop("l10n_bump_info")
+
+        task_def["payload"]["merge_info"] = merge_info
+        actions.append("merge_day")
+
+    scopes = set(task_def.get("scopes", []))
+    scopes.add(f"project:releng:lando:repo:{worker['lando-repo']}")
+    scopes.update([f"project:releng:lando:action:{action}" for action in actions])
+    task_def["scopes"] = sorted(scopes)
+
+
+@payload_builder(
     "invalid",
     schema={
         # an invalid task is one which should never actually be created; this is used in
@@ -1552,25 +1733,44 @@ def set_implementation(config, tasks):
     Set the worker implementation based on the worker-type alias.
     """
     for task in tasks:
-        worker = task.setdefault("worker", {})
-        if "implementation" in task["worker"]:
-            yield task
-            continue
-
-        impl, os = worker_type_implementation(
+        default_worker_implementation, default_os = worker_type_implementation(
             config.graph_config, config.params, task["worker-type"]
         )
 
+        worker = task.setdefault("worker", {})
         tags = task.setdefault("tags", {})
-        tags["worker-implementation"] = impl
+
+        worker_implementation = worker.get(
+            "implementation", default_worker_implementation
+        )
+        tag_worker_implementation = _get_worker_implementation_tag(
+            config, task["worker-type"], worker_implementation
+        )
+        if worker_implementation:
+            worker["implementation"] = worker_implementation
+            tags["worker-implementation"] = tag_worker_implementation
+
+        os = worker.get("os", default_os)
         if os:
             tags["os"] = os
-
-        worker["implementation"] = impl
-        if os:
             worker["os"] = os
 
         yield task
+
+
+def _get_worker_implementation_tag(config, task_worker_type, worker_implementation):
+    # Scriptworkers have different types of payload and each sets its own
+    # worker-implementation. Per bug 1955941, we want to bundle them all in one category
+    # through their tags.
+    provisioner_id, _ = get_worker_type(
+        config.graph_config,
+        config.params,
+        task_worker_type,
+    )
+    if provisioner_id in ("scriptworker-k8s", "scriptworker-prov-v1"):
+        return "scriptworker"
+
+    return worker_implementation
 
 
 @transforms.add
@@ -1649,7 +1849,7 @@ def task_name_from_label(config, tasks):
         if "label" not in task:
             if taskname is None:
                 raise Exception("task has neither a name nor a label")
-            task["label"] = "{}-{}".format(config.kind, taskname)
+            task["label"] = f"{config.kind}-{taskname}"
         yield task
 
 
@@ -1700,11 +1900,19 @@ def add_generic_index_routes(config, task):
     subs["product"] = index["product"]
     subs["trust-domain"] = config.graph_config["trust-domain"]
     subs["branch_rev"] = get_branch_rev(config)
+    try:
+        subs["branch_git_rev"] = get_branch_git_rev(config)
+    except KeyError:
+        pass
 
     project = config.params.get("project")
 
     for tpl in V2_ROUTE_TEMPLATES:
-        routes.append(tpl.format(**subs))
+        try:
+            routes.append(tpl.format(**subs))
+        except KeyError:
+            # Ignore errors that arise from branch_git_rev not being set.
+            pass
 
     # Additionally alias all tasks for "trunk" repos into a common
     # namespace.
@@ -1733,9 +1941,17 @@ def add_shippable_index_routes(config, task):
     subs["product"] = index["product"]
     subs["trust-domain"] = config.graph_config["trust-domain"]
     subs["branch_rev"] = get_branch_rev(config)
+    try:
+        subs["branch_git_rev"] = get_branch_git_rev(config)
+    except KeyError:
+        pass
 
     for tpl in V2_SHIPPABLE_TEMPLATES:
-        routes.append(tpl.format(**subs))
+        try:
+            routes.append(tpl.format(**subs))
+        except KeyError:
+            # Ignore errors that arise from branch_git_rev not being set.
+            pass
 
     # Also add routes for en-US
     task = add_shippable_l10n_index_routes(config, task, force_locale="en-US")
@@ -2139,6 +2355,8 @@ def build_task(config, tasks):
 
         if task.get("requires", None):
             task_def["requires"] = task["requires"]
+        if task.get("retries") is not None:
+            task_def["retries"] = task["retries"]
 
         if task_th:
             # link back to treeherder in description
@@ -2192,7 +2410,7 @@ def build_task(config, tasks):
             )
         attributes.setdefault("shipping_product", task["shipping-product"])
 
-        # Set MOZ_AUTOMATION on all jobs.
+        # Set some MOZ_* settings  on all jobs.
         if task["worker"]["implementation"] in (
             "generic-worker",
             "docker-worker",
@@ -2200,7 +2418,15 @@ def build_task(config, tasks):
             payload = task_def.get("payload")
             if payload:
                 env = payload.setdefault("env", {})
-                env["MOZ_AUTOMATION"] = "1"
+                env.update(
+                    {
+                        "MOZ_AUTOMATION": "1",
+                        "MOZ_BUILD_DATE": config.params["moz_build_date"],
+                        "MOZ_SCM_LEVEL": config.params["level"],
+                        "MOZ_SOURCE_CHANGESET": get_branch_rev(config),
+                        "MOZ_SOURCE_REPO": get_branch_repo(config),
+                    }
+                )
 
         dependencies = task.get("dependencies", {})
         if_dependencies = task.get("if-dependencies", [])

@@ -63,7 +63,6 @@
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/ServoTraversalStatistics.h"
-#include "mozilla/Telemetry.h"
 #include "mozilla/TimelineManager.h"
 #include "mozilla/RWLock.h"
 #include "mozilla/dom/Element.h"
@@ -310,7 +309,6 @@ bool Gecko_AnimationNameMayBeReferencedFromStyle(
 
 float Gecko_GetScrollbarInlineSize(const nsPresContext* aPc) {
   MOZ_ASSERT(aPc);
-  AutoWriteLock guard(*sServoFFILock);  // We read some look&feel values.
   auto overlay = aPc->UseOverlayScrollbars() ? nsITheme::Overlay::Yes
                                              : nsITheme::Overlay::No;
   LayoutDeviceIntCoord size =
@@ -749,20 +747,16 @@ nscolor Gecko_ComputeSystemColor(StyleSystemColor aColor, const Document* aDoc,
   }
 
   auto useStandins = LookAndFeel::ShouldUseStandins(*aDoc, aColor);
-
-  AutoWriteLock guard(*sServoFFILock);
   return LookAndFeel::Color(aColor, colorScheme, useStandins);
 }
 
 int32_t Gecko_GetLookAndFeelInt(int32_t aId) {
   auto intId = static_cast<LookAndFeel::IntID>(aId);
-  AutoWriteLock guard(*sServoFFILock);
   return LookAndFeel::GetInt(intId);
 }
 
 float Gecko_GetLookAndFeelFloat(int32_t aId) {
   auto id = static_cast<LookAndFeel::FloatID>(aId);
-  AutoWriteLock guard(*sServoFFILock);
   return LookAndFeel::GetFloat(id);
 }
 
@@ -940,7 +934,6 @@ void Gecko_nsFont_InitSystem(nsFont* aDest, StyleSystemFont aFontId,
   // itself, so this will do.
   new (aDest) nsFont(defaultVariableFont);
 
-  AutoWriteLock guard(*sServoFFILock);
   nsLayoutUtils::ComputeSystemFont(aDest, aFontId, defaultVariableFont,
                                    aDocument);
 }
@@ -1292,8 +1285,8 @@ void AssertIsMainThreadOrServoFontMetricsLocked() {
 GeckoFontMetrics Gecko_GetFontMetrics(const nsPresContext* aPresContext,
                                       bool aIsVertical,
                                       const nsStyleFont* aFont,
-                                      Length aFontSize, bool aUseUserFontSet,
-                                      bool aRetrieveMathScales) {
+                                      Length aFontSize,
+                                      StyleQueryFontMetricsFlags flags) {
   AutoWriteLock guard(*sServoFFILock);
 
   // Getting font metrics can require some main thread only work to be
@@ -1309,13 +1302,14 @@ GeckoFontMetrics Gecko_GetFontMetrics(const nsPresContext* aPresContext,
 
   nsPresContext* presContext = const_cast<nsPresContext*>(aPresContext);
   RefPtr<nsFontMetrics> fm = nsLayoutUtils::GetMetricsFor(
-      presContext, aIsVertical, aFont, aFontSize, aUseUserFontSet);
+      presContext, aIsVertical, aFont, aFontSize,
+      bool(flags & StyleQueryFontMetricsFlags::USE_USER_FONT_SET));
   auto* fontGroup = fm->GetThebesFontGroup();
-  auto metrics = fontGroup->GetMetricsForCSSUnits(fm->Orientation());
+  auto metrics = fontGroup->GetMetricsForCSSUnits(fm->Orientation(), flags);
 
   float scriptPercentScaleDown = 0;
   float scriptScriptPercentScaleDown = 0;
-  if (aRetrieveMathScales) {
+  if (flags & StyleQueryFontMetricsFlags::NEEDS_MATH_SCALES) {
     RefPtr<gfxFont> font = fontGroup->GetFirstValidFont();
     if (font->TryGetMathTable()) {
       scriptPercentScaleDown = static_cast<float>(

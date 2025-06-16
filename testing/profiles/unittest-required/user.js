@@ -6,7 +6,6 @@
 // NOTE: Toggling prefs for testing features should happen in
 // unittest-features/user.js or in harness/test manifests, not here!
 /* globals user_pref */
-user_pref("accessibility.typeaheadfind.autostart", false);
 // Make sure Shield doesn't hit the network.
 user_pref("app.normandy.api_url", "");
 // Make sure the notification permission migration test doesn't hit the network.
@@ -123,7 +122,7 @@ user_pref("geo.provider.testing", true);
 user_pref("geo.provider.network.logging.enabled", true);
 user_pref("geo.provider.network.scan", false);
 user_pref("geo.provider.network.timeToWaitBeforeSending", 2000);
-user_pref("geo.provider.network.url", "http://{server}/tests/dom/tests/mochitest/geolocation/network_geolocation.sjs");
+user_pref("geo.provider.network.url", "http://{server}/tests/dom/geolocation/test/mochitest/network_geolocation.sjs");
 user_pref("gfx.color_management.force_srgb", true);
 user_pref("gfx.logging.level", 1);
 // We don't want to hit the real Firefox Accounts server for tests.  We don't
@@ -220,7 +219,7 @@ user_pref("ui.caretBlinkTime", -1);
 // Disable scrollbar animations. Tests that count paints / refresh driver ticks
 // shouldn't need to account for them.
 user_pref("ui.scrollbarFadeDuration", 0);
-user_pref("webextensions.tests", true);
+
 // Disable intermittent telemetry collection
 user_pref("toolkit.telemetry.initDelay", 99999999);
 

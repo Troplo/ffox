@@ -16,15 +16,26 @@ ChromeUtils.defineLazyGetter(lazy, "console", () => {
  * Abstract class for handling captchas.
  */
 class CaptchaHandler {
+  static type = "abstract";
+
   /**
    * @param {CaptchaDetectionChild} actor - The window actor.
    * @param {Event} _event - The initial event that created the actor.
+   * @param {boolean} skipConstructedNotif - Whether to skip the constructed notification. Used for captchas with multiple frames.
    */
-  constructor(actor, _event) {
+  constructor(actor, _event, skipConstructedNotif = false) {
     /** @type {CaptchaDetectionChild} */
     this.actor = actor;
-    this.tabId = this.actor.docShell.browserChild.tabId;
-    this.isPBM = this.actor.browsingContext.usePrivateBrowsing;
+    if (!skipConstructedNotif) {
+      this.notifyConstructed();
+    }
+  }
+
+  notifyConstructed() {
+    lazy.console.debug(`CaptchaHandler constructed: ${this.constructor.type}`);
+    this.actor.sendAsyncMessage("CaptchaHandler:Constructed", {
+      type: this.constructor.type,
+    });
   }
 
   static matches(_document) {
@@ -32,11 +43,7 @@ class CaptchaHandler {
   }
 
   updateState(state) {
-    this.actor.sendAsyncMessage("CaptchaState:Update", {
-      tabId: this.tabId,
-      isPBM: this.isPBM,
-      state,
-    });
+    this.actor.sendAsyncMessage("CaptchaState:Update", state);
   }
 
   onActorDestroy() {
@@ -73,8 +80,18 @@ class GoogleRecaptchaV2Handler extends CaptchaHandler {
   #enabled;
   #mutationObserver;
 
+  static type = "g-recaptcha-v2";
+
   constructor(actor, event) {
-    super(actor, event);
+    super(
+      actor,
+      event,
+      actor.document.location.pathname.endsWith("/bframe") ||
+        (Cu.isInAutomation &&
+          actor.document.location.pathname.endsWith(
+            "g_recaptcha_v2_checkbox.html"
+          ))
+    );
     this.#enabled = true;
     this.#mutationObserver = new this.actor.contentWindow.MutationObserver(
       this.#mutationHandler.bind(this)
@@ -92,14 +109,17 @@ class GoogleRecaptchaV2Handler extends CaptchaHandler {
       return (
         document
           .getElementById("captchaType")
-          ?.getAttribute("data-captcha-type") === "g-recaptcha-v2"
+          ?.getAttribute("data-captcha-type") === GoogleRecaptchaV2Handler.type
       );
     }
 
-    return [
-      "https://www.google.com/recaptcha/api2/",
-      "https://www.google.com/recaptcha/enterprise/",
-    ].some(match => document.location.href.startsWith(match));
+    return (
+      [
+        "https://www.google.com/recaptcha/api2/",
+        "https://www.google.com/recaptcha/enterprise/",
+      ].some(match => document.location.href.startsWith(match)) &&
+      !document.location.search.includes("size=invisible")
+    );
   }
 
   #mutationHandler(_mutations, observer) {
@@ -116,7 +136,7 @@ class GoogleRecaptchaV2Handler extends CaptchaHandler {
     const checkmark = this.actor.document.getElementById("recaptcha-anchor");
     if (checkmark && checkmark.ariaChecked === "true") {
       this.updateState({
-        type: "g-recaptcha-v2",
+        type: GoogleRecaptchaV2Handler.type,
         changes: "GotCheckmark",
       });
       this.#enabled = false;
@@ -127,7 +147,7 @@ class GoogleRecaptchaV2Handler extends CaptchaHandler {
     const images = this.actor.document.getElementById("rc-imageselect");
     if (images) {
       this.updateState({
-        type: "g-recaptcha-v2",
+        type: GoogleRecaptchaV2Handler.type,
         changes: "ImagesShown",
       });
       this.#enabled = false;
@@ -158,6 +178,8 @@ class CFTurnstileHandler extends CaptchaHandler {
   #observingShadowRoot;
   #mutationObserver;
 
+  static type = "cf-turnstile";
+
   constructor(actor, event) {
     super(actor, event);
     this.#observingShadowRoot = false;
@@ -173,18 +195,20 @@ class CFTurnstileHandler extends CaptchaHandler {
     });
   }
 
+  static matchesRegex = new RegExp(
+    "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/.+?/turnstile/if/ov2/av0/rcv/"
+  );
+
   static matches(document) {
     if (Cu.isInAutomation) {
       return (
         document
           .getElementById("captchaType")
-          ?.getAttribute("data-captcha-type") === "cf-turnstile"
+          ?.getAttribute("data-captcha-type") === CFTurnstileHandler.type
       );
     }
 
-    return document.location.href.startsWith(
-      "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/rcv/"
-    );
+    return CFTurnstileHandler.matchesRegex.test(document.location.href);
   }
 
   #mutationHandler(_mutations, observer) {
@@ -220,7 +244,7 @@ class CFTurnstileHandler extends CaptchaHandler {
         if (fail.style.display !== "none") {
           lazy.console.debug("Captcha failed");
           this.updateState({
-            type: "cf-turnstile",
+            type: CFTurnstileHandler.type,
             result: "Failed",
           });
           observer.disconnect();
@@ -230,7 +254,7 @@ class CFTurnstileHandler extends CaptchaHandler {
         if (success.style.display !== "none") {
           lazy.console.debug("Captcha succeeded");
           this.updateState({
-            type: "cf-turnstile",
+            type: CFTurnstileHandler.type,
             result: "Succeeded",
           });
           observer.disconnect();
@@ -262,13 +286,15 @@ class CFTurnstileHandler extends CaptchaHandler {
  * when the captcha is completed.
  */
 class DatadomeHandler extends CaptchaHandler {
+  static type = "datadome";
+
   constructor(actor, event) {
     super(actor, event);
 
     event.stopImmediatePropagation();
 
     this.actor
-      .sendQuery("CaptchaDetection:Init", { type: "datadome" })
+      .sendQuery("CaptchaDetection:Init", { type: DatadomeHandler.type })
       .then(() => {
         // re-dispatch the event
         event.target.dispatchEvent(event);
@@ -280,7 +306,7 @@ class DatadomeHandler extends CaptchaHandler {
       return (
         document
           .getElementById("captchaType")
-          ?.getAttribute("data-captcha-type") === "datadome"
+          ?.getAttribute("data-captcha-type") === DatadomeHandler.type
       );
     }
 
@@ -305,18 +331,22 @@ class HCaptchaHandler extends CaptchaHandler {
   #checked;
   #mutationObserver;
 
-  constructor(actor, event) {
-    super(actor, event);
+  static type = "hCaptcha";
 
+  constructor(actor, event) {
     let params = null;
     try {
-      params = new URLSearchParams(this.actor.document.location.hash.slice(1));
+      params = new URLSearchParams(actor.document.location.hash.slice(1));
     } catch {
       // invalid URL
+      super(actor, event, true);
       return;
     }
 
     const frameType = params.get("frame");
+
+    super(actor, event, frameType === "challenge");
+
     if (frameType === "challenge") {
       this.#initChallengeHandler();
     } else if (frameType === "checkbox") {
@@ -329,14 +359,17 @@ class HCaptchaHandler extends CaptchaHandler {
       return (
         document
           .getElementById("captchaType")
-          ?.getAttribute("data-captcha-type") === "hCaptcha"
+          ?.getAttribute("data-captcha-type") === HCaptchaHandler.type
       );
     }
 
     return (
       document.location.href.startsWith(
         "https://newassets.hcaptcha.com/captcha/v1/"
-      ) && document.location.pathname.endsWith("/static/hcaptcha.html")
+      ) &&
+      document.location.pathname.endsWith("/static/hcaptcha.html") &&
+      !document.location.hash.includes("size=invisible") &&
+      !document.location.hash.includes("frame=checkbox-invisible")
     );
   }
 
@@ -362,7 +395,7 @@ class HCaptchaHandler extends CaptchaHandler {
     }
 
     this.updateState({
-      type: "hCaptcha",
+      type: HCaptchaHandler.type,
       changes: "shown",
     });
     observer.disconnect();
@@ -389,7 +422,7 @@ class HCaptchaHandler extends CaptchaHandler {
     if (checkbox?.ariaChecked === "true") {
       this.#checked = true;
       this.updateState({
-        type: "hCaptcha",
+        type: HCaptchaHandler.type,
         changes: "passed",
       });
       observer.disconnect();
@@ -411,10 +444,12 @@ class HCaptchaHandler extends CaptchaHandler {
  * the parent actor with the state of the captcha.
  */
 class ArkoseLabsHandler extends CaptchaHandler {
+  static type = "arkoseLabs";
+
   constructor(actor) {
     super(actor);
-    this.actor.sendAsyncMessage("CaptchaDetection:Init", {
-      type: "arkoseLabs",
+    this.actor.sendQuery("CaptchaDetection:Init", {
+      type: ArkoseLabsHandler.type,
     });
   }
 
@@ -423,7 +458,7 @@ class ArkoseLabsHandler extends CaptchaHandler {
       return (
         document
           .getElementById("captchaType")
-          ?.getAttribute("data-captcha-type") === "arkoseLabs"
+          ?.getAttribute("data-captcha-type") === ArkoseLabsHandler.type
       );
     }
 
@@ -484,9 +519,7 @@ export class CaptchaDetectionChild extends JSWindowActorChild {
     }
 
     if (event.type === "pagehide") {
-      this.sendAsyncMessage("TabState:Closed", {
-        tabId: this.docShell.browserChild.tabId,
-      });
+      this.sendAsyncMessage("Page:Hide");
     }
 
     this.handler?.handleEvent(event);

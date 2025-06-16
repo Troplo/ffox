@@ -8,9 +8,11 @@
 "use strict";
 
 ChromeUtils.defineESModuleGetters(this, {
-  AmpMatchingStrategy: "resource://gre/modules/RustSuggest.sys.mjs",
+  AmpMatchingStrategy:
+    "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
   AmpSuggestions: "resource:///modules/urlbar/private/AmpSuggestions.sys.mjs",
-  SuggestionProvider: "resource://gre/modules/RustSuggest.sys.mjs",
+  SuggestionProvider:
+    "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
 });
 
 const SPONSORED_SEARCH_STRING = "amp";
@@ -46,6 +48,7 @@ const REMOTE_SETTINGS_RESULTS = [
     url: "http://" + PREFIX_SUGGESTIONS_STRIPPED_URL,
     title: "HTTP Suggestion",
     keywords: [HTTP_SEARCH_STRING],
+    full_keywords: [[HTTP_SEARCH_STRING, 1]],
     click_url: "http://example.com/http-click",
     impression_url: "http://example.com/http-impression",
     advertiser: "HttpAdvertiser",
@@ -57,6 +60,7 @@ const REMOTE_SETTINGS_RESULTS = [
     url: "https://" + PREFIX_SUGGESTIONS_STRIPPED_URL,
     title: "https suggestion",
     keywords: [HTTPS_SEARCH_STRING],
+    full_keywords: [[HTTPS_SEARCH_STRING, 1]],
     click_url: "http://click.reporting.test.com/prefix",
     impression_url: "http://impression.reporting.test.com/prefix",
     advertiser: "TestAdvertiserPrefix",
@@ -68,6 +72,7 @@ const REMOTE_SETTINGS_RESULTS = [
     url: TIMESTAMP_SUGGESTION_URL,
     title: "Timestamp suggestion",
     keywords: [TIMESTAMP_SEARCH_STRING],
+    full_keywords: [[TIMESTAMP_SEARCH_STRING, 1]],
     click_url: TIMESTAMP_SUGGESTION_CLICK_URL,
     impression_url: "http://impression.reporting.test.com/timestamp",
     advertiser: "TestAdvertiserTimestamp",
@@ -88,6 +93,10 @@ const REMOTE_SETTINGS_RESULTS = [
       "amp full keyword",
       "xyz",
     ],
+    full_keywords: [
+      ["amp full keyword", 5],
+      ["xyz", 1],
+    ],
     title: "AMP suggestion with full keyword and prefix keywords",
     url: "https://example.com/amp-full-keyword",
   }),
@@ -99,6 +108,7 @@ const REMOTE_SETTINGS_RESULTS = [
       "wikipedia full keywor",
       "wikipedia full keyword",
     ],
+    full_keywords: [["wikipedia full keyword", 5]],
     title: "Wikipedia suggestion with full keyword and prefix keywords",
     url: "https://example.com/wikipedia-full-keyword",
   }),
@@ -167,23 +177,10 @@ add_setup(async function init() {
   );
 
   UrlbarPrefs.set("scotchBonnet.enableOverride", false);
+  UrlbarPrefs.set("quicksuggest.ampTopPickCharThreshold", 0);
 
-  const testDataTypeResults = [
-    Object.assign({}, REMOTE_SETTINGS_RESULTS[0], { title: "test-data-type" }),
-  ];
-
-  await QuickSuggestTestUtils.ensureQuickSuggestInit({
-    remoteSettingsRecords: [
-      {
-        type: "data",
-        attachment: REMOTE_SETTINGS_RESULTS,
-      },
-      {
-        type: "test-data-type",
-        attachment: testDataTypeResults,
-      },
-    ],
-  });
+  await QuickSuggestTestUtils.ensureQuickSuggestInit();
+  await resetRemoteSettingsData();
 });
 
 add_task(async function telemetryType_sponsored() {
@@ -404,7 +401,7 @@ add_task(async function emptySearchStringsAndSpaces() {
       matches: [],
     });
     Assert.ok(
-      !UrlbarProviderQuickSuggest.isActive(context),
+      !(await UrlbarProviderQuickSuggest.isActive(context)),
       "Provider should not be active for search string: " + msg
     );
   }
@@ -1084,6 +1081,7 @@ add_task(async function dedupeAgainstURL_timestamps() {
   );
 
   function getPayload(result, keysToIgnore = []) {
+    keysToIgnore.push("suggestionObject");
     let payload = {};
     for (let [key, value] of Object.entries(result.payload)) {
       if (value !== undefined && !keysToIgnore.includes(key)) {
@@ -1160,157 +1158,8 @@ add_task(async function dedupeAgainstURL_timestamps() {
   await PlacesUtils.history.clear();
 });
 
-// Tests the API for blocking suggestions and the backing pref.
-add_task(async function blockedSuggestionsAPI() {
-  // Start with no blocked suggestions.
-  await QuickSuggest.blockedSuggestions.clear();
-  Assert.equal(
-    QuickSuggest.blockedSuggestions._test_digests.size,
-    0,
-    "blockedSuggestions._test_digests is empty"
-  );
-  Assert.equal(
-    UrlbarPrefs.get("quicksuggest.blockedDigests"),
-    "",
-    "quicksuggest.blockedDigests is an empty string"
-  );
-
-  // Make some URLs.
-  let urls = [];
-  for (let i = 0; i < 3; i++) {
-    urls.push("http://example.com/" + i);
-  }
-
-  // Block each URL in turn and make sure previously blocked URLs are still
-  // blocked and the remaining URLs are not blocked.
-  for (let i = 0; i < urls.length; i++) {
-    await QuickSuggest.blockedSuggestions.add(urls[i]);
-    for (let j = 0; j < urls.length; j++) {
-      Assert.equal(
-        await QuickSuggest.blockedSuggestions.has(urls[j]),
-        j <= i,
-        `Suggestion at index ${j} is blocked or not as expected`
-      );
-    }
-  }
-
-  // Make sure all URLs are blocked for good measure.
-  for (let url of urls) {
-    Assert.ok(
-      await QuickSuggest.blockedSuggestions.has(url),
-      `Suggestion is blocked: ${url}`
-    );
-  }
-
-  // Check `blockedSuggestions._test_digests` and `quicksuggest.blockedDigests`.
-  Assert.equal(
-    QuickSuggest.blockedSuggestions._test_digests.size,
-    urls.length,
-    "blockedSuggestions._test_digests has correct size"
-  );
-  let array = JSON.parse(UrlbarPrefs.get("quicksuggest.blockedDigests"));
-  Assert.ok(Array.isArray(array), "Parsed value of pref is an array");
-  Assert.equal(array.length, urls.length, "Array has correct length");
-
-  // Write some junk to `quicksuggest.blockedDigests`.
-  // `blockedSuggestions._test_digests` should not be changed and all previously
-  // blocked URLs should remain blocked.
-  UrlbarPrefs.set("quicksuggest.blockedDigests", "not a json array");
-  await QuickSuggest.blockedSuggestions._test_readyPromise;
-  for (let url of urls) {
-    Assert.ok(
-      await QuickSuggest.blockedSuggestions.has(url),
-      `Suggestion remains blocked: ${url}`
-    );
-  }
-  Assert.equal(
-    QuickSuggest.blockedSuggestions._test_digests.size,
-    urls.length,
-    "blockedSuggestions._test_digests still has correct size"
-  );
-
-  // Block a new URL. All URLs should remain blocked and the pref should be
-  // updated.
-  let newURL = "http://example.com/new-block";
-  await QuickSuggest.blockedSuggestions.add(newURL);
-  urls.push(newURL);
-  for (let url of urls) {
-    Assert.ok(
-      await QuickSuggest.blockedSuggestions.has(url),
-      `Suggestion is blocked: ${url}`
-    );
-  }
-  Assert.equal(
-    QuickSuggest.blockedSuggestions._test_digests.size,
-    urls.length,
-    "blockedSuggestions._test_digests has correct size"
-  );
-  array = JSON.parse(UrlbarPrefs.get("quicksuggest.blockedDigests"));
-  Assert.ok(Array.isArray(array), "Parsed value of pref is an array");
-  Assert.equal(array.length, urls.length, "Array has correct length");
-
-  // Add a new URL digest directly to the JSON'ed array in the pref.
-  newURL = "http://example.com/direct-to-pref";
-  urls.push(newURL);
-  array = JSON.parse(UrlbarPrefs.get("quicksuggest.blockedDigests"));
-  array.push(await QuickSuggest.blockedSuggestions._test_getDigest(newURL));
-  UrlbarPrefs.set("quicksuggest.blockedDigests", JSON.stringify(array));
-  await QuickSuggest.blockedSuggestions._test_readyPromise;
-
-  // All URLs should remain blocked and the new URL should be blocked.
-  for (let url of urls) {
-    Assert.ok(
-      await QuickSuggest.blockedSuggestions.has(url),
-      `Suggestion is blocked: ${url}`
-    );
-  }
-  Assert.equal(
-    QuickSuggest.blockedSuggestions._test_digests.size,
-    urls.length,
-    "blockedSuggestions._test_digests has correct size"
-  );
-
-  // Clear the pref. All URLs should be unblocked.
-  UrlbarPrefs.clear("quicksuggest.blockedDigests");
-  await QuickSuggest.blockedSuggestions._test_readyPromise;
-  for (let url of urls) {
-    Assert.ok(
-      !(await QuickSuggest.blockedSuggestions.has(url)),
-      `Suggestion is no longer blocked: ${url}`
-    );
-  }
-  Assert.equal(
-    QuickSuggest.blockedSuggestions._test_digests.size,
-    0,
-    "blockedSuggestions._test_digests is now empty"
-  );
-
-  // Block all the URLs again and test `blockedSuggestions.clear()`.
-  for (let url of urls) {
-    await QuickSuggest.blockedSuggestions.add(url);
-  }
-  for (let url of urls) {
-    Assert.ok(
-      await QuickSuggest.blockedSuggestions.has(url),
-      `Suggestion is blocked: ${url}`
-    );
-  }
-  await QuickSuggest.blockedSuggestions.clear();
-  for (let url of urls) {
-    Assert.ok(
-      !(await QuickSuggest.blockedSuggestions.has(url)),
-      `Suggestion is no longer blocked: ${url}`
-    );
-  }
-  Assert.equal(
-    QuickSuggest.blockedSuggestions._test_digests.size,
-    0,
-    "blockedSuggestions._test_digests is now empty"
-  );
-});
-
-// Tests blocking real `UrlbarResult`s.
-add_task(async function block() {
+// Tests `UrlbarResult` dismissal.
+add_task(async function dismissResult() {
   UrlbarPrefs.set("suggest.quicksuggest.nonsponsored", true);
   UrlbarPrefs.set("suggest.quicksuggest.sponsored", true);
   await QuickSuggestTestUtils.forceSync();
@@ -1336,8 +1185,16 @@ add_task(async function block() {
       matches: [expectedResult],
     });
 
-    // Block it.
-    await QuickSuggest.blockedSuggestions.blockResult(context.results[0]);
+    // Dismiss it.
+    await QuickSuggest.dismissResult(context.results[0]);
+    Assert.ok(
+      await QuickSuggest.isResultDismissed(context.results[0]),
+      "isResultDismissed should return true"
+    );
+    Assert.ok(
+      await QuickSuggest.canClearDismissedSuggestions(),
+      "canClearDismissedSuggestions should return true"
+    );
 
     // Do another search. The result shouldn't be added.
     await check_results({
@@ -1348,12 +1205,20 @@ add_task(async function block() {
       matches: [],
     });
 
-    await QuickSuggest.blockedSuggestions.clear();
+    await QuickSuggest.clearDismissedSuggestions();
+    Assert.ok(
+      !(await QuickSuggest.isResultDismissed(context.results[0])),
+      "isResultDismissed should return false"
+    );
+    Assert.ok(
+      !(await QuickSuggest.canClearDismissedSuggestions()),
+      "canClearDismissedSuggestions should return false"
+    );
   }
 });
 
-// Tests blocking a real `UrlbarResult` whose URL has a timestamp template.
-add_task(async function block_timestamp() {
+// Tests dismissing a `UrlbarResult` whose URL has a timestamp template.
+add_task(async function dismissResultWithTimestamp() {
   UrlbarPrefs.set("suggest.quicksuggest.sponsored", true);
   UrlbarPrefs.set("suggest.quicksuggest.nonsponsored", true);
   await QuickSuggestTestUtils.forceSync();
@@ -1382,8 +1247,16 @@ add_task(async function block_timestamp() {
     "The actual result's originalUrl should be the raw suggestion URL with a timestamp template"
   );
 
-  // Block the result.
-  await QuickSuggest.blockedSuggestions.blockResult(result);
+  // Dismiss the result.
+  await QuickSuggest.dismissResult(result);
+  Assert.ok(
+    await QuickSuggest.isResultDismissed(result),
+    "isResultDismissed should return true"
+  );
+  Assert.ok(
+    await QuickSuggest.canClearDismissedSuggestions(),
+    "canClearDismissedSuggestions should return true"
+  );
 
   // Do another search. The result shouldn't be added.
   await check_results({
@@ -1393,7 +1266,16 @@ add_task(async function block_timestamp() {
     }),
     matches: [],
   });
-  await QuickSuggest.blockedSuggestions.clear();
+
+  await QuickSuggest.clearDismissedSuggestions();
+  Assert.ok(
+    !(await QuickSuggest.isResultDismissed(context.results[0])),
+    "isResultDismissed should return false"
+  );
+  Assert.ok(
+    !(await QuickSuggest.canClearDismissedSuggestions()),
+    "canClearDismissedSuggestions should return false"
+  );
 });
 
 add_task(async function sponsoredPriority_normal() {
@@ -1438,12 +1320,7 @@ async function doSponsoredPriorityTest({
     quickSuggestSponsoredPriority: true,
   });
 
-  await QuickSuggestTestUtils.setRemoteSettingsRecords([
-    {
-      type: "data",
-      attachment: remoteSettingsData,
-    },
-  ]);
+  await resetRemoteSettingsData(remoteSettingsData);
   await QuickSuggestTestUtils.setConfig(remoteSettingsConfig);
 
   await check_results({
@@ -1455,12 +1332,7 @@ async function doSponsoredPriorityTest({
   });
 
   await cleanUpNimbusEnable();
-  await QuickSuggestTestUtils.setRemoteSettingsRecords([
-    {
-      type: "data",
-      attachment: REMOTE_SETTINGS_RESULTS,
-    },
-  ]);
+  await resetRemoteSettingsData();
   await QuickSuggestTestUtils.setConfig(QuickSuggestTestUtils.DEFAULT_CONFIG);
 }
 
@@ -1912,4 +1784,20 @@ async function doAmpMatchingStrategyTest({
   }
 
   sandbox.restore();
+}
+
+async function resetRemoteSettingsData(data = REMOTE_SETTINGS_RESULTS) {
+  let isAmp = suggestion => suggestion.iab_category == "22 - Shopping";
+  await QuickSuggestTestUtils.setRemoteSettingsRecords([
+    {
+      collection: QuickSuggestTestUtils.RS_COLLECTION.AMP,
+      type: QuickSuggestTestUtils.RS_TYPE.AMP,
+      attachment: data.filter(isAmp),
+    },
+    {
+      collection: QuickSuggestTestUtils.RS_COLLECTION.OTHER,
+      type: QuickSuggestTestUtils.RS_TYPE.WIKIPEDIA,
+      attachment: data.filter(s => !isAmp(s)),
+    },
+  ]);
 }

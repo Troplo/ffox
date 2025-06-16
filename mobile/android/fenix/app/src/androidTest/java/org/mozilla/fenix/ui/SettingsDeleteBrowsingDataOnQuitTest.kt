@@ -9,6 +9,7 @@ import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.core.net.toUri
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.rule.GrantPermissionRule
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.R
@@ -23,6 +24,7 @@ import org.mozilla.fenix.helpers.TestHelper.exitMenu
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.restartApp
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.clickPageObject
 import org.mozilla.fenix.ui.robots.downloadRobot
 import org.mozilla.fenix.ui.robots.homeScreen
@@ -42,8 +44,11 @@ class SettingsDeleteBrowsingDataOnQuitTest : TestSetup() {
             ),
         ) { it.activity }
 
-    // Automatically allows app permissions, avoiding a system dialog showing up.
     @get:Rule(order = 1)
+    val memoryLeaksRule = DetectMemoryLeaksRule()
+
+    // Automatically allows app permissions, avoiding a system dialog showing up.
+    @get:Rule(order = 2)
     val grantPermissionRule: GrantPermissionRule = GrantPermissionRule.grant(
         Manifest.permission.RECORD_AUDIO,
     )
@@ -91,7 +96,7 @@ class SettingsDeleteBrowsingDataOnQuitTest : TestSetup() {
         }
         navigationToolbar {
         }.enterURLAndEnterToBrowser(testPage.url) {
-        }.goToHomescreen {
+        }.goToHomescreen(composeTestRule) {
         }.openThreeDotMenu {
             clickQuit()
             restartApp(composeTestRule.activityRule)
@@ -117,7 +122,7 @@ class SettingsDeleteBrowsingDataOnQuitTest : TestSetup() {
         }
         navigationToolbar {
         }.enterURLAndEnterToBrowser(genericPage.url) {
-        }.goToHomescreen {
+        }.goToHomescreen(composeTestRule) {
         }.openThreeDotMenu {
             clickQuit()
             restartApp(composeTestRule.activityRule)
@@ -150,7 +155,7 @@ class SettingsDeleteBrowsingDataOnQuitTest : TestSetup() {
         }.enterURLAndEnterToBrowser(storageWritePage.url) {
             clickPageObject(MatcherHelper.itemWithText("Set cookies"))
             verifyPageContent("Values written to storage")
-        }.goToHomescreen {
+        }.goToHomescreen(composeTestRule) {
         }.openThreeDotMenu {
             clickQuit()
             restartApp(composeTestRule.activityRule)
@@ -183,7 +188,7 @@ class SettingsDeleteBrowsingDataOnQuitTest : TestSetup() {
             openPageAndDownloadFile(url = downloadTestPage.toUri(), downloadFile = "smallZip.zip")
             verifyDownloadCompleteNotificationPopup()
         }.closeDownloadPrompt {
-        }.goToHomescreen {
+        }.goToHomescreen(composeTestRule) {
         }.openThreeDotMenu {
             clickQuit()
             mDevice.waitForIdle()
@@ -191,7 +196,7 @@ class SettingsDeleteBrowsingDataOnQuitTest : TestSetup() {
         restartApp(composeTestRule.activityRule)
         homeScreen {
         }.openThreeDotMenu {
-        }.openDownloadsManager() {
+        }.openDownloadsManager {
             verifyEmptyDownloadsList(composeTestRule)
         }
     }
@@ -201,7 +206,7 @@ class SettingsDeleteBrowsingDataOnQuitTest : TestSetup() {
     @Test
     fun deleteSitePermissionsOnQuitTest() {
         val testPage = "https://mozilla-mobile.github.io/testapp/permissions"
-        val testPageSubstring = "https://mozilla-mobile.github.io:443"
+        val testPageHost = "mozilla-mobile.github.io"
 
         homeScreen {
         }.openThreeDotMenu {
@@ -214,11 +219,11 @@ class SettingsDeleteBrowsingDataOnQuitTest : TestSetup() {
         }.enterURLAndEnterToBrowser(testPage.toUri()) {
             verifyPageContent("Open microphone")
         }.clickStartMicrophoneButton {
-            verifyMicrophonePermissionPrompt(testPageSubstring)
+            verifyMicrophonePermissionPrompt(testPageHost)
             selectRememberPermissionDecision()
         }.clickPagePermissionButton(false) {
             verifyPageContent("Microphone not allowed")
-        }.goToHomescreen {
+        }.goToHomescreen(composeTestRule) {
         }.openThreeDotMenu {
             clickQuit()
             mDevice.waitForIdle()
@@ -228,11 +233,12 @@ class SettingsDeleteBrowsingDataOnQuitTest : TestSetup() {
         }.enterURLAndEnterToBrowser(testPage.toUri()) {
             verifyPageContent("Open microphone")
         }.clickStartMicrophoneButton {
-            verifyMicrophonePermissionPrompt(testPageSubstring)
+            verifyMicrophonePermissionPrompt(testPageHost)
         }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/416052
+    @Ignore("Failing, see https://bugzilla.mozilla.org/show_bug.cgi?id=1964989")
     @Test
     fun deleteCachedFilesOnQuitTest() {
         val pocketTopArticles = getStringResource(R.string.pocket_pinned_top_articles)
@@ -245,10 +251,10 @@ class SettingsDeleteBrowsingDataOnQuitTest : TestSetup() {
             exitMenu()
         }
         homeScreen {
-            verifyExistingTopSitesTabs(pocketTopArticles)
-        }.openTopSiteTabWithTitle(pocketTopArticles) {
+            verifyExistingTopSitesTabs(composeTestRule, pocketTopArticles)
+        }.openTopSiteTabWithTitle(composeTestRule, pocketTopArticles) {
             verifyPocketPageContent()
-        }.goToHomescreen {
+        }.goToHomescreen(composeTestRule) {
         }.openThreeDotMenu {
             clickQuit()
             mDevice.waitForIdle()

@@ -6,26 +6,37 @@
 
 use std::{cmp::max, time::Duration};
 
+use neqo_common::MAX_VARINT;
+
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
     connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
-    recv_stream::RECV_BUFFER_SIZE,
+    recv_stream::INITIAL_RECV_WINDOW_SIZE,
     rtt::GRANULARITY,
     stream_id::StreamType,
-    tparams::{self, PreferredAddress, TransportParameter, TransportParametersHandler},
-    tracking::DEFAULT_ACK_DELAY,
+    tparams::{
+        PreferredAddress, TransportParameter,
+        TransportParameterId::{
+            self, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, InitialMaxData,
+            InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni,
+            InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxDatagramFrameSize,
+            MinAckDelay,
+        },
+        TransportParametersHandler,
+    },
+    tracking::DEFAULT_LOCAL_ACK_DELAY,
     version::{Version, VersionConfig},
     CongestionControlAlgorithm, Res,
 };
 
-const LOCAL_MAX_DATA: u64 = 0x3FFF_FFFF_FFFF_FFFF; // 2^62-1
+const LOCAL_MAX_DATA: u64 = MAX_VARINT;
 const LOCAL_STREAM_LIMIT_BIDI: u64 = 16;
 const LOCAL_STREAM_LIMIT_UNI: u64 = 16;
 /// See `ConnectionParameters.ack_ratio` for a discussion of this value.
 pub const ACK_RATIO_SCALE: u8 = 10;
 /// By default, aim to have the peer acknowledge 4 times per round trip time.
 /// See `ConnectionParameters.ack_ratio` for more.
-const DEFAULT_ACK_RATIO: u8 = 4 * ACK_RATIO_SCALE;
+pub const DEFAULT_ACK_RATIO: u8 = 4 * ACK_RATIO_SCALE;
 /// The local value for the idle timeout period.
 const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
@@ -44,7 +55,7 @@ pub enum PreferredAddressConfig {
 /// `ConnectionParameters` use for setting initial value for QUIC parameters.
 /// This collects configuration like initial limits, protocol version, and
 /// congestion control algorithm.
-#[allow(clippy::struct_excessive_bools)] // We need that many, sorry.
+#[expect(clippy::struct_excessive_bools, reason = "We need that many, sorry.")]
 #[derive(Debug, Clone)]
 pub struct ConnectionParameters {
     versions: VersionConfig,
@@ -83,8 +94,12 @@ pub struct ConnectionParameters {
     pacing: bool,
     /// Whether the connection performs PLPMTUD.
     pmtud: bool,
+    /// Whether PMTUD should take the local interface MTU into account.
+    pmtud_iface_mtu: bool,
     /// Whether the connection should use SNI slicing.
     sni_slicing: bool,
+    /// Whether to enable mlkem768nistp256-sha256.
+    mlkem: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -93,9 +108,12 @@ impl Default for ConnectionParameters {
             versions: VersionConfig::default(),
             cc_algorithm: CongestionControlAlgorithm::Cubic,
             max_data: LOCAL_MAX_DATA,
-            max_stream_data_bidi_remote: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
-            max_stream_data_bidi_local: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
-            max_stream_data_uni: u64::try_from(RECV_BUFFER_SIZE).unwrap(),
+            max_stream_data_bidi_remote: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+                .expect("usize fits in u64"),
+            max_stream_data_bidi_local: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+                .expect("usize fits in u64"),
+            max_stream_data_uni: u64::try_from(INITIAL_RECV_WINDOW_SIZE)
+                .expect("usize fits in u64"),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: DEFAULT_ACK_RATIO,
@@ -109,7 +127,9 @@ impl Default for ConnectionParameters {
             disable_migration: false,
             pacing: true,
             pmtud: false,
+            pmtud_iface_mtu: true,
             sni_slicing: true,
+            mlkem: true,
         }
     }
 }
@@ -371,6 +391,17 @@ impl ConnectionParameters {
     }
 
     #[must_use]
+    pub const fn pmtud_iface_mtu_enabled(&self) -> bool {
+        self.pmtud_iface_mtu
+    }
+
+    #[must_use]
+    pub const fn pmtud_iface_mtu(mut self, pmtud_iface_mtu: bool) -> Self {
+        self.pmtud_iface_mtu = pmtud_iface_mtu;
+        self
+    }
+
+    #[must_use]
     pub const fn sni_slicing_enabled(&self) -> bool {
         self.sni_slicing
     }
@@ -378,6 +409,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn sni_slicing(mut self, sni_slicing: bool) -> Self {
         self.sni_slicing = sni_slicing;
+        self
+    }
+
+    #[must_use]
+    pub const fn mlkem_enabled(&self) -> bool {
+        self.mlkem
+    }
+
+    #[must_use]
+    pub const fn mlkem(mut self, mlkem: bool) -> Self {
+        self.mlkem = mlkem;
         self
     }
 
@@ -392,53 +434,48 @@ impl ConnectionParameters {
     ) -> Res<TransportParametersHandler> {
         let mut tps = TransportParametersHandler::new(role, self.versions.clone());
         // default parameters
-        tps.local.set_integer(
-            tparams::ACTIVE_CONNECTION_ID_LIMIT,
+        tps.local_mut().set_integer(
+            ActiveConnectionIdLimit,
             u64::try_from(LOCAL_ACTIVE_CID_LIMIT)?,
         );
         if self.disable_migration {
-            tps.local.set_empty(tparams::DISABLE_MIGRATION);
+            tps.local_mut().set_empty(DisableMigration);
         }
         if self.grease {
-            tps.local.set_empty(tparams::GREASE_QUIC_BIT);
+            tps.local_mut().set_empty(GreaseQuicBit);
         }
-        tps.local.set_integer(
-            tparams::MAX_ACK_DELAY,
-            u64::try_from(DEFAULT_ACK_DELAY.as_millis())?,
+        tps.local_mut().set_integer(
+            MaxAckDelay,
+            u64::try_from(DEFAULT_LOCAL_ACK_DELAY.as_millis())?,
         );
-        tps.local.set_integer(
-            tparams::MIN_ACK_DELAY,
-            u64::try_from(GRANULARITY.as_micros())?,
-        );
+        tps.local_mut()
+            .set_integer(MinAckDelay, u64::try_from(GRANULARITY.as_micros())?);
 
         // set configurable parameters
-        tps.local
-            .set_integer(tparams::INITIAL_MAX_DATA, self.max_data);
-        tps.local.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_BIDI_LOCAL,
+        tps.local_mut().set_integer(InitialMaxData, self.max_data);
+        tps.local_mut().set_integer(
+            InitialMaxStreamDataBidiLocal,
             self.max_stream_data_bidi_local,
         );
-        tps.local.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_BIDI_REMOTE,
+        tps.local_mut().set_integer(
+            InitialMaxStreamDataBidiRemote,
             self.max_stream_data_bidi_remote,
         );
-        tps.local.set_integer(
-            tparams::INITIAL_MAX_STREAM_DATA_UNI,
-            self.max_stream_data_uni,
-        );
-        tps.local
-            .set_integer(tparams::INITIAL_MAX_STREAMS_BIDI, self.max_streams_bidi);
-        tps.local
-            .set_integer(tparams::INITIAL_MAX_STREAMS_UNI, self.max_streams_uni);
-        tps.local.set_integer(
-            tparams::IDLE_TIMEOUT,
+        tps.local_mut()
+            .set_integer(InitialMaxStreamDataUni, self.max_stream_data_uni);
+        tps.local_mut()
+            .set_integer(InitialMaxStreamsBidi, self.max_streams_bidi);
+        tps.local_mut()
+            .set_integer(InitialMaxStreamsUni, self.max_streams_uni);
+        tps.local_mut().set_integer(
+            TransportParameterId::IdleTimeout,
             u64::try_from(self.idle_timeout.as_millis()).unwrap_or(0),
         );
         if let PreferredAddressConfig::Address(preferred) = &self.preferred_address {
             if role == Role::Server {
                 let (cid, srt) = cid_manager.preferred_address_cid()?;
-                tps.local.set(
-                    tparams::PREFERRED_ADDRESS,
+                tps.local_mut().set(
+                    TransportParameterId::PreferredAddress,
                     TransportParameter::PreferredAddress {
                         v4: preferred.ipv4(),
                         v6: preferred.ipv6(),
@@ -448,8 +485,8 @@ impl ConnectionParameters {
                 );
             }
         }
-        tps.local
-            .set_integer(tparams::MAX_DATAGRAM_FRAME_SIZE, self.datagram_size);
+        tps.local_mut()
+            .set_integer(MaxDatagramFrameSize, self.datagram_size);
         Ok(tps)
     }
 }

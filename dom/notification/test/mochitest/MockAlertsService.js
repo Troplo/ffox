@@ -29,9 +29,20 @@ function mockServicesChromeScript() {
       // fake async alert show event
       if (listener) {
         setTimeout(() => {
+          if (this.mockFailure) {
+            listener.observe(null, "alertfinished", alert.cookie);
+            return;
+          }
+
           listener.observe(null, "alertshow", alert.cookie);
           if (this.autoClick) {
-            listener.observe(null, "alertclickcallback", alert.cookie);
+            let subject;
+            if (typeof this.autoClick === "string") {
+              subject = alert.actions.filter(
+                ac => ac.action === this.autoClick
+              )[0];
+            }
+            listener.observe(subject, "alertclickcallback", alert.cookie);
           }
         }, 100);
       }
@@ -132,8 +143,12 @@ function mockServicesChromeScript() {
     mockAlertsService.closeAlert(alertName)
   );
 
-  addMessageListener("mock-alert-service:enable-autoclick", () => {
-    mockAlertsService.autoClick = true;
+  addMessageListener("mock-alert-service:enable-autoclick", action => {
+    mockAlertsService.autoClick = action || true;
+  });
+
+  addMessageListener("mock-alert-service:mock-failure", action => {
+    mockAlertsService.mockFailure = action || true;
   });
 
   addMessageListener("mock-alert-service:get-notification-ids", () =>
@@ -194,8 +209,17 @@ const MockAlertsService = {
       alertName
     );
   },
-  async enableAutoClick() {
-    await this._chromeScript.sendQuery("mock-alert-service:enable-autoclick");
+  async enableAutoClick(action) {
+    await this._chromeScript.sendQuery(
+      "mock-alert-service:enable-autoclick",
+      action
+    );
+  },
+  async mockFailure(action) {
+    await this._chromeScript.sendQuery(
+      "mock-alert-service:mock-failure",
+      action
+    );
   },
   async getNotificationIds() {
     return await this._chromeScript.sendQuery(

@@ -28,11 +28,10 @@ import mozilla.components.feature.top.sites.DefaultTopSitesStorage
 import mozilla.components.feature.top.sites.PinnedSiteStorage
 import mozilla.components.feature.top.sites.TopSite
 import mozilla.components.support.base.feature.ViewBoundFeatureWrapper
-import mozilla.components.support.utils.ManufacturerCodes
+import mozilla.components.support.utils.BuildManufacturerChecker
 import mozilla.components.ui.widgets.withCenterAlignedButtons
 import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.fenix.BrowserDirection
-import org.mozilla.fenix.FeatureFlags
 import org.mozilla.fenix.GleanMetrics.AppMenu
 import org.mozilla.fenix.GleanMetrics.Collections
 import org.mozilla.fenix.GleanMetrics.Events
@@ -101,6 +100,8 @@ class DefaultBrowserToolbarMenuController(
         val sessionUseCases = activity.components.useCases.sessionUseCases
         val customTabUseCases = activity.components.useCases.customTabsUseCases
         val tabsUseCases = activity.components.useCases.tabsUseCases
+        val fenixBrowserUseCases = activity.components.useCases.fenixBrowserUseCases
+
         trackToolbarItemInteraction(item)
 
         when (item) {
@@ -294,7 +295,7 @@ class DefaultBrowserToolbarMenuController(
                         if (isInstallable()) {
                             addToHomescreen()
                         } else {
-                            if (ManufacturerCodes.isXiaomi) {
+                            if (BuildManufacturerChecker().isXiaomi()) {
                                 val directions =
                                     BrowserFragmentDirections.actionBrowserFragmentToCreateXiaomiShortcutFragment()
                                 navController.navigateSafe(R.id.browserFragment, directions)
@@ -372,6 +373,12 @@ class DefaultBrowserToolbarMenuController(
                 )
             }
             is ToolbarMenu.Item.NewTab -> {
+                if (settings.enableHomepageAsNewTab) {
+                    fenixBrowserUseCases.addNewHomepageTab(
+                        private = currentSession?.content?.private ?: false,
+                    )
+                }
+
                 navController.navigate(
                     BrowserFragmentDirections.actionGlobalHome(focusOnAddressBar = true),
                 )
@@ -400,7 +407,7 @@ class DefaultBrowserToolbarMenuController(
             }
             is ToolbarMenu.Item.ReportBrokenSite -> {
                 currentSession?.content?.url?.let { tabUrl ->
-                    if (FeatureFlags.webCompatReporter && settings.isTelemetryEnabled) {
+                    if (settings.isTelemetryEnabled) {
                         navController.navigate(
                             directions = BrowserFragmentDirections
                                 .actionBrowserFragmentToWebCompatReporterFragment(

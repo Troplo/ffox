@@ -32,15 +32,9 @@
   <string name="tab_tray_close_multiselect_content_description">لە دۆخی دیاریکردنی چەندیی دەربچۆ</string>
   <!-- Content description for save to collection button while in multiselect mode in tab tray -->
   <string name="tab_tray_collection_button_multiselect_content_description">بازدەرە دیاریکراوەکان هەڵبگرە لە کۆمەڵەکە</string>
-  <!-- Content description on checkmark while tab is selected in multiselect mode in tab tray -->
-  <string name="tab_tray_multiselect_selected_content_description" moz:removedIn="136" tools:ignore="UnusedResources">دیاریکرا</string>
   <!-- About content. %1$s is the name of the app (for example "Firefox"). -->
   <string name="about_content">%1$s بەرهەم هێنراوە لە لایەن مۆزیلاوە.</string>
-  <string name="private_browsing_common_myths">
-       چەند ئەفسانەییەک دەربارەی گەڕانی تایبەتیی
-    </string>
-  <!-- Text for the negative button to decline adding a Private Browsing shortcut to the Home screen -->
-  <string name="cfr_neg_button_text" moz:removedIn="138" tools:ignore="UnusedResources">نا سوپاس</string>
+  <string name="private_browsing_common_myths">چەند ئەفسانەییەک دەربارەی گەڕانی تایبەتیی</string>
   <!-- Text for the positive action button -->
   <string name="open_in_app_cfr_positive_button_text">بڕۆ بۆ ڕێکخستن</string>
   <!-- Text for the negative action button -->
@@ -141,7 +135,7 @@
   <!-- Button in the search suggestions onboarding that does not allow search suggestions in private sessions -->
   <string name="search_suggestions_onboarding_do_not_allow_button">ڕێگە مەدە</string>
   <!-- Search suggestion onboarding hint title text -->
-  <string name="search_suggestions_onboarding_title">ڕێگە دەدەی  بە پێشنیاری گەڕان لە دانییشتنی شاراوەی تایبەت؟</string>
+  <string name="search_suggestions_onboarding_title">ڕێگە دەدەی بە پێشنیاری گەڕان لە دانییشتنی شاراوەی تایبەت؟</string>
   <!-- Search engine suggestion title text. %s is the name of the suggested engine. -->
   <string name="search_engine_suggestions_title">بگەڕێ بۆ %s</string>
   <!-- Search engine suggestion description text -->
@@ -218,7 +212,7 @@
   <!-- Preference title for switch preference to show search suggestions also in private mode -->
   <string name="preferences_show_search_suggestions_in_private">لە دانیشتنی تایبەت پیشانی بدە</string>
   <!-- Preference title for switch preference to suggest browsing history when searching -->
-  <string name="preferences_search_browsing_history">بگەڕێ لە مێژووی کار </string>
+  <string name="preferences_search_browsing_history">بگەڕێ لە مێژووی کار</string>
   <!-- Preference title for switch preference to suggest bookmarks when searching -->
   <string name="preferences_search_bookmarks">گەڕان لە نیشانەکراوەکان</string>
   <!-- Preference title for switch preference to suggest synced tabs when searching -->
@@ -299,10 +293,6 @@
   <string name="exceptions_empty_message_description">هەڵاوێردی ڕێگەتپێدەدات کە پارێزگاریکردن لە چاودێری ناکارا بکەیت بۆ چەند ماڵپەڕێکی دیاریکراو.</string>
   <!-- Text displayed when there are no exceptions, with learn more link that brings users to a tracking protection SUMO page -->
   <string name="exceptions_empty_message_learn_more_link">زیاتر بزانە</string>
-  <!-- Preference description for usage and technical data collection. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="preferences_usage_data_description" tools:ignore="UnusedResources" moz:removedIn="136">چوستی وێبگەڕ، بەکارهێنانی و زانیاری خوازراوی وێبگەڕەکەت بڵاوەپێدەکات لەگەڵ مۆزیلا بۆ ئەوەی یارمەتیمان بدات %1$s باشتر بکەین</string>
-  <!-- Preference switch for marketing data collection -->
-  <string name="preferences_marketing_data" tools:ignore="UnusedResources" moz:removedIn="136">زانیاری بازاڕیکردن</string>
   <!-- Title for studies preferences -->
   <string name="preference_experiments_2">توێژینەوە</string>
   <!-- Summary for studies preferences -->
@@ -316,7 +306,7 @@
 
     Instructions on how to access pairing
   -->
-  <string name="pair_instructions_2">کۆدی QR سکان بکە کە لە &lt;b&gt;firefox.com/pair&lt;/b&gt; پیشان دەدرێت</string>
+  <string name="pair_instructions_2"><![CDATA[کۆدی QR سکان بکە کە لە <b>firefox.com/pair</b> پیشان دەدرێت]]></string>
   <!--
     Toolbar Preferences
 
@@ -417,14 +407,6 @@
   <string name="close_tabs_after_one_week_summary">داخستن دووای یەک هەفتە</string>
   <!-- Summary for tabs preference when auto closing tabs setting is set to auto close tabs after one month -->
   <string name="close_tabs_after_one_month_summary">داخستن دووای یەک مانگ</string>
-  <!--
-    Sessions
-
-    Title for the list of tabs in the current private session
-  -->
-  <string name="tabs_header_private_tabs_title" moz:removedIn="136" tools:ignore="UnusedResources">بازدەرە تایبەتەکان</string>
-  <!-- Title for the list of tabs in the synced tabs -->
-  <string name="tabs_header_synced_tabs_title" moz:removedIn="136" tools:ignore="UnusedResources">بازدەرە هاوکاتپێکراوەکان</string>
   <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
   <string name="add_tab">بازدەر زیادبکە</string>
   <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
@@ -503,22 +485,10 @@
   <!-- Text shown when no history exists -->
   <string name="history_empty_message">هیچ مێژووییەک نیە</string>
   <!--
-    Downloads
-
-    Text for the snackbar to confirm that multiple downloads items have been removed
-  -->
-  <string name="download_delete_multiple_items_snackbar_1">داگرتنەکان سڕانەوە</string>
-  <!-- Text for the snackbar to confirm that a single download item has been removed. %1$s is the name of the download item. -->
-  <string name="download_delete_single_item_snackbar">%1$s سڕایەوە</string>
-  <!-- Text shown when no download exists -->
-  <string name="download_empty_message_1">هیچ پەڕەیەکی داگیراو نیە</string>
-  <!--
     History multi select title in app bar
     %1$d is the number of downloads selected
   -->
   <string name="download_multi_select_title">%1$d دیاریکراوە</string>
-  <!-- Text for the button to remove a single download item -->
-  <string name="download_delete_item_1">بیسڕەوە</string>
   <!--
     Crashes
 
@@ -859,7 +829,7 @@
   <!-- Title of QR Pairing Fragment -->
   <string name="sync_scan_code">کۆدەکە سکان بکە</string>
   <!-- Instructions on how to access pairing -->
-  <string name="sign_in_instructions" tools:ignore="BrandUsage">لەسەر کۆمپیوتەرەکەت فایەرفۆکس بکەرەوە بچۆ &lt;b&gt;https://firefox.com/pair&lt;/b&gt;</string>
+  <string name="sign_in_instructions" tools:ignore="BrandUsage"><![CDATA[لەسەر کۆمپیوتەرەکەت فایەرفۆکس بکەرەوە بچۆ <b>https://firefox.com/pair</b>]]></string>
   <!-- Text shown for sign in pairing when ready -->
   <string name="sign_in_ready_for_scan">ئامادەیە بۆ سکان</string>
   <!-- Text shown for settings option for sign with pairing -->
@@ -867,7 +837,7 @@
   <!-- Text shown for settings option for sign with email -->
   <string name="sign_in_with_email">دەتوانیت پۆستی ئەلیکترۆنی بەکارببەیت</string>
   <!-- Text shown for settings option for create new account text.'Firefox' intentionally hardcoded here. -->
-  <string name="sign_in_create_account_text" tools:ignore="BrandUsage">هەژمارت نیە؟ &lt;u&gt; دانەیەک درووست بکە&lt;/u&gt; بۆ هاوکاتگەری پێکردن لەنێوان ئامێرەکان.</string>
+  <string name="sign_in_create_account_text" tools:ignore="BrandUsage"><![CDATA[هەژمارت نیە؟ <u> دانەیەک درووست بکە</u> بۆ هاوکاتگەری پێکردن لەنێوان ئامێرەکان.]]></string>
   <!-- Option to continue signing out of account shown in confirmation dialog to sign out of account -->
   <string name="sign_out_disconnect">دەرچوون</string>
   <!-- Option to cancel signing out shown in confirmation dialog to sign out of account -->
@@ -1057,7 +1027,7 @@
   <!-- Text shown when a user leaves out the required template string -->
   <string name="search_add_custom_engine_error_missing_template">دڵنیابە کە دەقی نووسراو دەگنوجێت لەگەڵ شێوازی نموونەکە</string>
   <!-- Text shown when we aren't able to validate the custom search query. %s is the url of the custom search engine. -->
-  <string name="search_add_custom_engine_error_cannot_reach">هەڵە لە پەیوەندیکردن بە “%s”</string>
+  <string name="search_add_custom_engine_error_cannot_reach" moz:removedIn="140" tools:ignore="UnusedResources">هەڵە لە پەیوەندیکردن بە “%s”</string>
   <!-- Text shown when a user creates a new search engine. %s is the url of the custom search engine. -->
   <string name="search_add_custom_engine_success_message">%s درووستکرا</string>
   <!-- Text shown when a user successfully edits a custom search engine. %s is the url of the custom search engine. -->
@@ -1069,9 +1039,9 @@
   <!-- First step for the allowing a permission -->
   <string name="phone_feature_blocked_step_settings">1. بڕۆ بۆ ڕێکسختنەکانی ئەندرۆید</string>
   <!-- Second step for the allowing a permission -->
-  <string name="phone_feature_blocked_step_permissions">2. پەنجە بنێ بە &lt;b&gt;ڕێگەپێدانەکان&lt;/b&gt;</string>
+  <string name="phone_feature_blocked_step_permissions"><![CDATA[2. پەنجە بنێ بە <b>ڕێگەپێدانەکان</b>]]></string>
   <!-- Third step for the allowing a permission (%1$s is the permission name, for example "Camera"). -->
-  <string name="phone_feature_blocked_step_feature">&lt;b&gt;%1$s&lt;/b&gt; بجوڵێنە بۆ کاراکردن</string>
+  <string name="phone_feature_blocked_step_feature"><![CDATA[<b>%1$s</b> بجوڵێنە بۆ کاراکردن]]></string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for all sites -->
   <string name="confirm_clear_permissions_on_all_sites">تۆ دڵنیایت لە لابردنی هەموو دەسەڵاتەکان لە هەموو ماڵپەڕەکان؟</string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for a site -->

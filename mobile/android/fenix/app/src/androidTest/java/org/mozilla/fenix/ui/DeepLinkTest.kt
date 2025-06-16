@@ -4,11 +4,13 @@
 
 package org.mozilla.fenix.ui
 
+import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.DeepLinkRobot
 
 /**
@@ -28,22 +30,26 @@ class DeepLinkTest : TestSetup() {
     private val robot = DeepLinkRobot()
 
     @get:Rule
-    val activityIntentTestRule = HomeActivityIntentTestRule(
-        isHomeOnboardingDialogEnabled = false,
-        isNavigationBarCFREnabled = false,
-        isNavigationToolbarEnabled = false,
-        isMenuRedesignEnabled = false,
-        isMenuRedesignCFREnabled = false,
-    )
+    val activityTestRule =
+        AndroidComposeTestRule(
+            HomeActivityIntentTestRule(
+                isHomeOnboardingDialogEnabled = false,
+                isMenuRedesignEnabled = false,
+                isMenuRedesignCFREnabled = false,
+            ),
+        ) { it.activity }
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     @Test
     fun openHomeScreen() {
         robot.openHomeScreen {
-            verifyHomeComponent()
+            verifyHomeComponent(activityTestRule)
         }
         robot.openSettings { /* move away from the home screen */ }
         robot.openHomeScreen {
-            verifyHomeComponent()
+            verifyHomeComponent(activityTestRule)
         }
     }
 
@@ -58,9 +64,9 @@ class DeepLinkTest : TestSetup() {
 
     @Test
     fun openBookmarks() {
-        robot.openBookmarks {
+        robot.openBookmarks(activityTestRule) {
             // verify we can see headings.
-            verifyFolderTitle("Desktop Bookmarks")
+            verifyEmptyBookmarksMenuView()
         }
     }
 
@@ -74,7 +80,7 @@ class DeepLinkTest : TestSetup() {
     @Test
     fun openCollections() {
         robot.openCollections {
-            verifyCollectionsHeader()
+            verifyCollectionsHeader(activityTestRule)
         }
     }
 

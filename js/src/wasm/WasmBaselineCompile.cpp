@@ -1189,6 +1189,7 @@ void BaseCompiler::patchHotnessCheck(CodeOffset offset, uint32_t step) {
   // Zero makes the hotness check pointless.  Above 127 is not representable in
   // the short-form Intel encoding.
   MOZ_RELEASE_ASSERT(step > 0 && step <= 127);
+  MOZ_ASSERT(!masm.oom());
   masm.patchSub32FromMemAndBranchIfNegative(offset, Imm32(step));
 }
 
@@ -3604,7 +3605,7 @@ bool BaseCompiler::jumpConditionalWithResults(BranchState* b, Cond cond,
 }
 
 bool BaseCompiler::jumpConditionalWithResults(BranchState* b, RegRef object,
-                                              RefType sourceType,
+                                              MaybeRefType sourceType,
                                               RefType destType,
                                               bool onSuccess) {
   // Temporarily take the result registers so that branchIfRefSubtype
@@ -4186,6 +4187,11 @@ bool BaseCompiler::emitEnd() {
           size_t loopBytecodeSize =
               iter_.lastOpcodeOffset() - controlItem().loopBytecodeStart;
           uint32_t step = BlockSizeToDownwardsStep(loopBytecodeSize);
+          // Don't try to patch the check if we've OOM'd, since the check might
+          // not actually exist.
+          if (masm.oom()) {
+            return false;
+          }
           patchHotnessCheck(controlItem().offsetOfCtrDec, step);
         }
       }
@@ -7253,8 +7259,47 @@ void BaseCompiler::emitPreBarrier(RegPtr valueAddr) {
   masm.bind(&skipBarrier);
 }
 
-bool BaseCompiler::emitPostBarrierImprecise(const Maybe<RegRef>& object,
-                                            RegPtr valueAddr, RegRef value) {
+bool BaseCompiler::emitPostBarrierWholeCell(RegRef object, RegRef value,
+                                            RegPtr temp) {
+  // We must force a sync before the guard so that locals are in a consistent
+  // location for whether or not the post-barrier call is taken.
+  sync();
+
+  // Emit guards to skip the post-barrier call if it is not needed.
+  Label skipBarrier;
+  EmitWasmPostBarrierGuard(masm, mozilla::Some(object), temp, value,
+                           &skipBarrier);
+
+#ifdef RABALDR_PIN_INSTANCE
+  Register instance(InstanceReg);
+#else
+  Register instance(temp);
+  fr.loadInstancePtr(instance);
+#endif
+  CheckWholeCellLastElementCache(masm, instance, object, temp, &skipBarrier);
+
+  movePtr(RegPtr(object), temp);
+
+  // Push `object` and `value` to preserve them across the call.
+  pushRef(object);
+  pushRef(value);
+
+  pushPtr(temp);
+  if (!emitInstanceCall(SASigPostBarrierWholeCell)) {
+    return false;
+  }
+
+  // Restore `object` and `value`.
+  popRef(value);
+  popRef(object);
+
+  masm.bind(&skipBarrier);
+  return true;
+}
+
+bool BaseCompiler::emitPostBarrierEdgeImprecise(const Maybe<RegRef>& object,
+                                                RegPtr valueAddr,
+                                                RegRef value) {
   // We must force a sync before the guard so that locals are in a consistent
   // location for whether or not the post-barrier call is taken.
   sync();
@@ -7275,7 +7320,7 @@ bool BaseCompiler::emitPostBarrierImprecise(const Maybe<RegRef>& object,
   // instance area, and we are careful so that the GC will not run while the
   // post-barrier call is active, so push a uintptr_t value.
   pushPtr(valueAddr);
-  if (!emitInstanceCall(SASigPostBarrier)) {
+  if (!emitInstanceCall(SASigPostBarrierEdge)) {
     return false;
   }
 
@@ -7289,9 +7334,9 @@ bool BaseCompiler::emitPostBarrierImprecise(const Maybe<RegRef>& object,
   return true;
 }
 
-bool BaseCompiler::emitPostBarrierPrecise(const Maybe<RegRef>& object,
-                                          RegPtr valueAddr, RegRef prevValue,
-                                          RegRef value) {
+bool BaseCompiler::emitPostBarrierEdgePrecise(const Maybe<RegRef>& object,
+                                              RegPtr valueAddr,
+                                              RegRef prevValue, RegRef value) {
   // Push `object` and `value` to preserve them across the call.
   if (object) {
     pushRef(*object);
@@ -7301,7 +7346,7 @@ bool BaseCompiler::emitPostBarrierPrecise(const Maybe<RegRef>& object,
   // Push the arguments and call the precise post-barrier
   pushPtr(valueAddr);
   pushRef(prevValue);
-  if (!emitInstanceCall(SASigPostBarrierPrecise)) {
+  if (!emitInstanceCall(SASigPostBarrierEdgePrecise)) {
     return false;
   }
 
@@ -7335,10 +7380,17 @@ bool BaseCompiler::emitBarrieredStore(const Maybe<RegRef>& object,
   masm.storePtr(value, Address(valueAddr, 0));
 
   // The post-barrier preserves object and value.
-  if (postBarrierKind == PostBarrierKind::Precise) {
-    return emitPostBarrierPrecise(object, valueAddr, prevValue, value);
+  if (postBarrierKind == PostBarrierKind::Imprecise) {
+    return emitPostBarrierEdgeImprecise(object, valueAddr, value);
   }
-  return emitPostBarrierImprecise(object, valueAddr, value);
+  if (postBarrierKind == PostBarrierKind::Precise) {
+    return emitPostBarrierEdgePrecise(object, valueAddr, prevValue, value);
+  }
+  if (postBarrierKind == PostBarrierKind::WholeCell) {
+    // valueAddr is reused as a temp register.
+    return emitPostBarrierWholeCell(object.value(), value, valueAddr);
+  }
+  MOZ_CRASH("unknown barrier kind");
 }
 
 void BaseCompiler::emitBarrieredClear(RegPtr valueAddr) {
@@ -7355,7 +7407,7 @@ void BaseCompiler::emitBarrieredClear(RegPtr valueAddr) {
 //
 // GC proposal.
 
-RegPtr BaseCompiler::loadTypeDefInstanceData(uint32_t typeIndex) {
+RegPtr BaseCompiler::loadAllocSiteInstanceData(uint32_t allocSiteIndex) {
   RegPtr rp = needPtr();
   RegPtr instance;
 #ifndef RABALDR_PIN_INSTANCE
@@ -7365,11 +7417,19 @@ RegPtr BaseCompiler::loadTypeDefInstanceData(uint32_t typeIndex) {
   // We can use the pinned instance register.
   instance = RegPtr(InstanceReg);
 #endif
-  masm.computeEffectiveAddress(
-      Address(instance, Instance::offsetInData(
-                            codeMeta_.offsetOfTypeDefInstanceData(typeIndex))),
-      rp);
+  masm.loadPtr(Address(instance, Instance::offsetOfAllocSites()), rp);
+
+  ScratchI32 scratch(*this);
+  CodeOffset offset = masm.move32WithPatch(scratch);
+  masm.allocSitesPatches()[allocSiteIndex].setPatchOffset(offset.offset());
+  masm.addPtr(scratch, rp);
   return rp;
+}
+
+bool BaseCompiler::readAllocSiteIndex(uint32_t* index) {
+  *index = masm.allocSitesPatches().length();
+  masm.append(wasm::AllocSitePatch());
+  return !masm.oom();
 }
 
 RegPtr BaseCompiler::loadSuperTypeVector(uint32_t typeIndex) {
@@ -7405,8 +7465,8 @@ void BaseCompiler::SignalNullCheck::emitTrapSite(BaseCompiler* bc,
                                                  FaultingCodeOffset fco,
                                                  TrapMachineInsn tmi) {
   MacroAssembler& masm = bc->masm;
-  masm.append(wasm::Trap::NullPointerDereference,
-              wasm::TrapSite(tmi, fco, bc->trapSiteDesc()));
+  masm.append(wasm::Trap::NullPointerDereference, tmi, fco.get(),
+              bc->trapSiteDesc());
 }
 
 template <typename NullCheckPolicy>
@@ -7608,7 +7668,7 @@ bool BaseCompiler::emitGcStructSet(RegRef object, RegPtr areaBase,
 
   // emitBarrieredStore preserves object and value
   if (!emitBarrieredStore(Some(object), valueAddr, value.ref(), preBarrierKind,
-                          PostBarrierKind::Imprecise)) {
+                          PostBarrierKind::WholeCell)) {
     return false;
   }
   freeRef(value.ref());
@@ -7671,7 +7731,8 @@ bool BaseCompiler::emitGcArraySet(RegRef object, RegPtr data, RegI32 index,
 
 template <bool ZeroFields>
 bool BaseCompiler::emitStructAlloc(uint32_t typeIndex, RegRef* object,
-                                   bool* isOutlineStruct, RegPtr* outlineBase) {
+                                   bool* isOutlineStruct, RegPtr* outlineBase,
+                                   uint32_t allocSiteIndex) {
   const TypeDef& typeDef = (*codeMeta_.types)[typeIndex];
   const StructType& structType = typeDef.structType();
   gc::AllocKind allocKind = WasmStructObject::allocKindForTypeDef(&typeDef);
@@ -7687,7 +7748,8 @@ bool BaseCompiler::emitStructAlloc(uint32_t typeIndex, RegRef* object,
   // Allocate an uninitialized struct. This requires the type definition
   // for the struct to be pushed on the stack. This will trap on OOM.
   if (*isOutlineStruct) {
-    pushPtr(loadTypeDefInstanceData(typeIndex));
+    pushI32(int32_t(typeIndex));
+    pushPtr(loadAllocSiteInstanceData(allocSiteIndex));
     if (!emitInstanceCall(ZeroFields ? SASigStructNewOOL_true
                                      : SASigStructNewOOL_false)) {
       return false;
@@ -7703,28 +7765,36 @@ bool BaseCompiler::emitStructAlloc(uint32_t typeIndex, RegRef* object,
     needRef(*object);
 #ifndef RABALDR_PIN_INSTANCE
     // We reuse the result register for the instance.
-    instance = RegPtr(ReturnReg);
+    instance = needPtr();
     fr.loadInstancePtr(instance);
 #else
     // We can use the pinned instance register.
     instance = RegPtr(InstanceReg);
 #endif
 
-    RegPtr typeDefData = loadTypeDefInstanceData(typeIndex);
-    RegPtr temp1 = needPtr();
-    RegPtr temp2 = needPtr();
+    RegPtr allocSite = loadAllocSiteInstanceData(allocSiteIndex);
+
+    size_t offsetOfTypeDefData = wasm::Instance::offsetInData(
+        codeMeta_.offsetOfTypeDefInstanceData(typeIndex));
 
     Label success;
     Label fail;
-    masm.wasmNewStructObject(instance, *object, typeDefData, temp1, temp2,
-                             &fail, allocKind, ZeroFields);
-    freePtr(temp1);
-    freePtr(temp2);
+    {
+      ScratchPtr scratch(*this);
+
+      masm.wasmNewStructObject(instance, *object, allocSite, scratch,
+                               offsetOfTypeDefData, &fail, allocKind,
+                               ZeroFields);
+    }
     masm.jump(&success);
 
     masm.bind(&fail);
+#ifndef RABALDR_PIN_INSTANCE
+    freePtr(instance);
+#endif
     freeRef(*object);
-    pushPtr(typeDefData);
+    pushI32(int32_t(typeIndex));
+    pushPtr(allocSite);
     if (!emitInstanceCall(ZeroFields ? SASigStructNewIL_true
                                      : SASigStructNewIL_false)) {
       return false;
@@ -7750,6 +7820,11 @@ bool BaseCompiler::emitStructNew() {
     return false;
   }
 
+  uint32_t allocSiteIndex;
+  if (!readAllocSiteIndex(&allocSiteIndex)) {
+    return false;
+  }
+
   if (deadCode_) {
     return true;
   }
@@ -7761,7 +7836,7 @@ bool BaseCompiler::emitStructNew() {
   RegPtr outlineBase;
   bool isOutlineStruct;
   if (!emitStructAlloc<false>(typeIndex, &object, &isOutlineStruct,
-                              &outlineBase)) {
+                              &outlineBase, allocSiteIndex)) {
     return false;
   }
 
@@ -7837,6 +7912,12 @@ bool BaseCompiler::emitStructNewDefault() {
   if (!iter_.readStructNewDefault(&typeIndex)) {
     return false;
   }
+
+  uint32_t allocSiteIndex;
+  if (!readAllocSiteIndex(&allocSiteIndex)) {
+    return false;
+  }
+
   if (deadCode_) {
     return true;
   }
@@ -7844,8 +7925,8 @@ bool BaseCompiler::emitStructNewDefault() {
   RegRef object;
   bool isOutlineStruct;
   RegPtr outlineBase;
-  if (!emitStructAlloc<true>(typeIndex, &object, &isOutlineStruct,
-                             &outlineBase)) {
+  if (!emitStructAlloc<true>(typeIndex, &object, &isOutlineStruct, &outlineBase,
+                             allocSiteIndex)) {
     return false;
   }
 
@@ -7970,7 +8051,8 @@ bool BaseCompiler::emitStructSet() {
 
 template <bool ZeroFields>
 bool BaseCompiler::emitArrayAlloc(uint32_t typeIndex, RegRef object,
-                                  RegI32 numElements, uint32_t elemSize) {
+                                  RegI32 numElements, uint32_t elemSize,
+                                  uint32_t allocSiteIndex) {
   // We eagerly sync the value stack to the machine stack here so as not to
   // confuse things with the conditional instance call below.
   sync();
@@ -7979,27 +8061,35 @@ bool BaseCompiler::emitArrayAlloc(uint32_t typeIndex, RegRef object,
 #ifndef RABALDR_PIN_INSTANCE
   // We reuse the object register for the instance. This is ok because object is
   // not live until instance is dead.
-  instance = RegPtr(object);
+  instance = needPtr();
   fr.loadInstancePtr(instance);
 #else
   // We can use the pinned instance register.
   instance = RegPtr(InstanceReg);
 #endif
 
-  RegPtr typeDefData = loadTypeDefInstanceData(typeIndex);
-  RegPtr temp = needPtr();
+  RegPtr allocSite = loadAllocSiteInstanceData(allocSiteIndex);
+
+  size_t offsetOfTypeDefData = wasm::Instance::offsetInData(
+      codeMeta_.offsetOfTypeDefInstanceData(typeIndex));
 
   Label success;
   Label fail;
-  masm.wasmNewArrayObject(instance, object, numElements, typeDefData, temp,
-                          &fail, elemSize, ZeroFields);
-  freePtr(temp);
+  {
+    ScratchPtr scratch(*this);
+    masm.wasmNewArrayObject(instance, object, numElements, allocSite, scratch,
+                            offsetOfTypeDefData, &fail, elemSize, ZeroFields);
+  }
   masm.jump(&success);
 
   masm.bind(&fail);
+#ifndef RABALDR_PIN_INSTANCE
+  freePtr(instance);
+#endif
   freeRef(object);
   pushI32(numElements);
-  pushPtr(typeDefData);
+  pushI32(int32_t(typeIndex));
+  pushPtr(allocSite);
   if (!emitInstanceCall(ZeroFields ? SASigArrayNew_true
                                    : SASigArrayNew_false)) {
     return false;
@@ -8012,8 +8102,8 @@ bool BaseCompiler::emitArrayAlloc(uint32_t typeIndex, RegRef object,
 
 template <bool ZeroFields>
 bool BaseCompiler::emitArrayAllocFixed(uint32_t typeIndex, RegRef object,
-                                       uint32_t numElements,
-                                       uint32_t elemSize) {
+                                       uint32_t numElements, uint32_t elemSize,
+                                       uint32_t allocSiteIndex) {
   SymbolicAddressSignature fun =
       ZeroFields ? SASigArrayNew_true : SASigArrayNew_false;
 
@@ -8024,10 +8114,10 @@ bool BaseCompiler::emitArrayAllocFixed(uint32_t typeIndex, RegRef object,
   uint32_t storageBytes =
       WasmArrayObject::calcStorageBytesUnchecked(elemSize, numElements);
   if (storageBytes > WasmArrayObject_MaxInlineBytes) {
-    RegPtr typeDefData = loadTypeDefInstanceData(typeIndex);
     freeRef(object);
     pushI32(numElements);
-    pushPtr(typeDefData);
+    pushI32(int32_t(typeIndex));
+    pushPtr(loadAllocSiteInstanceData(allocSiteIndex));
     if (!emitInstanceCall(fun)) {
       return false;
     }
@@ -8044,29 +8134,38 @@ bool BaseCompiler::emitArrayAllocFixed(uint32_t typeIndex, RegRef object,
 #ifndef RABALDR_PIN_INSTANCE
   // We reuse the object register for the instance. This is ok because object is
   // not live until instance is dead.
-  instance = RegPtr(object);
+  instance = needPtr();
   fr.loadInstancePtr(instance);
 #else
   // We can use the pinned instance register.
   instance = RegPtr(InstanceReg);
 #endif
 
-  RegPtr typeDefData = loadTypeDefInstanceData(typeIndex);
+  RegPtr allocSite = loadAllocSiteInstanceData(allocSiteIndex);
   RegPtr temp1 = needPtr();
-  RegPtr temp2 = needPtr();
+
+  size_t offsetOfTypeDefData = wasm::Instance::offsetInData(
+      codeMeta_.offsetOfTypeDefInstanceData(typeIndex));
 
   Label success;
   Label fail;
-  masm.wasmNewArrayObjectFixed(instance, object, typeDefData, temp1, temp2,
-                               &fail, numElements, storageBytes, ZeroFields);
+  {
+    ScratchPtr scratch(*this);
+    masm.wasmNewArrayObjectFixed(instance, object, allocSite, temp1, scratch,
+                                 offsetOfTypeDefData, &fail, numElements,
+                                 storageBytes, ZeroFields);
+  }
   freePtr(temp1);
-  freePtr(temp2);
   masm.jump(&success);
 
   masm.bind(&fail);
+#ifndef RABALDR_PIN_INSTANCE
+  freePtr(instance);
+#endif
   freeRef(object);
   pushI32(numElements);
-  pushPtr(typeDefData);
+  pushI32(int32_t(typeIndex));
+  pushPtr(allocSite);
   if (!emitInstanceCall(fun)) {
     return false;
   }
@@ -8081,6 +8180,11 @@ bool BaseCompiler::emitArrayNew() {
   uint32_t typeIndex;
   Nothing nothing;
   if (!iter_.readArrayNew(&typeIndex, &nothing, &nothing)) {
+    return false;
+  }
+
+  uint32_t allocSiteIndex;
+  if (!readAllocSiteIndex(&allocSiteIndex)) {
     return false;
   }
 
@@ -8099,7 +8203,7 @@ bool BaseCompiler::emitArrayNew() {
   RegRef object = needRef();
   RegI32 numElements = popI32();
   if (!emitArrayAlloc<false>(typeIndex, object, numElements,
-                             arrayType.elementType().size())) {
+                             arrayType.elementType().size(), allocSiteIndex)) {
     return false;
   }
 
@@ -8152,6 +8256,11 @@ bool BaseCompiler::emitArrayNewFixed() {
     return false;
   }
 
+  uint32_t allocSiteIndex;
+  if (!readAllocSiteIndex(&allocSiteIndex)) {
+    return false;
+  }
+
   if (deadCode_) {
     return true;
   }
@@ -8167,7 +8276,8 @@ bool BaseCompiler::emitArrayNewFixed() {
 
   RegRef object = needRef();
   if (!emitArrayAllocFixed<false>(typeIndex, object, numElements,
-                                  arrayType.elementType().size())) {
+                                  arrayType.elementType().size(),
+                                  allocSiteIndex)) {
     return false;
   }
 
@@ -8221,6 +8331,11 @@ bool BaseCompiler::emitArrayNewDefault() {
     return false;
   }
 
+  uint32_t allocSiteIndex;
+  if (!readAllocSiteIndex(&allocSiteIndex)) {
+    return false;
+  }
+
   if (deadCode_) {
     return true;
   }
@@ -8230,7 +8345,7 @@ bool BaseCompiler::emitArrayNewDefault() {
   RegRef object = needRef();
   RegI32 numElements = popI32();
   if (!emitArrayAlloc<true>(typeIndex, object, numElements,
-                            arrayType.elementType().size())) {
+                            arrayType.elementType().size(), allocSiteIndex)) {
     return false;
   }
 
@@ -8245,11 +8360,17 @@ bool BaseCompiler::emitArrayNewData() {
     return false;
   }
 
+  uint32_t allocSiteIndex;
+  if (!readAllocSiteIndex(&allocSiteIndex)) {
+    return false;
+  }
+
   if (deadCode_) {
     return true;
   }
 
-  pushPtr(loadTypeDefInstanceData(typeIndex));
+  pushI32(int32_t(typeIndex));
+  pushPtr(loadAllocSiteInstanceData(allocSiteIndex));
   pushI32(int32_t(segIndex));
 
   // The call removes 4 items from the stack: the segment byte offset and
@@ -8265,11 +8386,17 @@ bool BaseCompiler::emitArrayNewElem() {
     return false;
   }
 
+  uint32_t allocSiteIndex;
+  if (!readAllocSiteIndex(&allocSiteIndex)) {
+    return false;
+  }
+
   if (deadCode_) {
     return true;
   }
 
-  pushPtr(loadTypeDefInstanceData(typeIndex));
+  pushI32(int32_t(typeIndex));
+  pushPtr(loadAllocSiteInstanceData(allocSiteIndex));
   pushI32(int32_t(segIndex));
 
   // The call removes 4 items from the stack: the segment element offset and
@@ -8311,7 +8438,7 @@ bool BaseCompiler::emitArrayInitElem() {
     return true;
   }
 
-  pushPtr(loadTypeDefInstanceData(typeIndex));
+  pushI32(int32_t(typeIndex));
   pushI32(int32_t(segIndex));
 
   // The call removes 6 items from the stack: the array, array index, segment
@@ -8816,7 +8943,7 @@ bool BaseCompiler::emitRefTest(bool nullable) {
 
   BranchIfRefSubtypeRegisters regs =
       allocRegistersForBranchIfRefSubtype(destType);
-  masm.branchWasmRefIsSubtype(ref, sourceType, destType, &success,
+  masm.branchWasmRefIsSubtype(ref, MaybeRefType(sourceType), destType, &success,
                               /*onSuccess=*/true, regs.superSTV, regs.scratch1,
                               regs.scratch2);
   freeRegistersForBranchIfRefSubtype(regs);
@@ -8850,7 +8977,7 @@ bool BaseCompiler::emitRefCast(bool nullable) {
   Label success;
   BranchIfRefSubtypeRegisters regs =
       allocRegistersForBranchIfRefSubtype(destType);
-  masm.branchWasmRefIsSubtype(ref, sourceType, destType, &success,
+  masm.branchWasmRefIsSubtype(ref, MaybeRefType(sourceType), destType, &success,
                               /*onSuccess=*/true, regs.superSTV, regs.scratch1,
                               regs.scratch2);
   freeRegistersForBranchIfRefSubtype(regs);
@@ -8865,7 +8992,8 @@ bool BaseCompiler::emitRefCast(bool nullable) {
 bool BaseCompiler::emitBrOnCastCommon(bool onSuccess,
                                       uint32_t labelRelativeDepth,
                                       const ResultType& labelType,
-                                      RefType sourceType, RefType destType) {
+                                      MaybeRefType sourceType,
+                                      RefType destType) {
   Control& target = controlItem(labelRelativeDepth);
   target.bceSafeOnExit &= bceSafe_;
 
@@ -8918,7 +9046,7 @@ bool BaseCompiler::emitBrOnCast(bool onSuccess) {
   }
 
   return emitBrOnCastCommon(onSuccess, labelRelativeDepth, labelType,
-                            sourceType, destType);
+                            MaybeRefType(sourceType), destType);
 }
 
 bool BaseCompiler::emitAnyConvertExtern() {
@@ -10216,7 +10344,12 @@ bool BaseCompiler::emitBody() {
 
 #ifdef JS_ION_PERF
   bool spewerEnabled = perfSpewer_.needsToRecordInstruction();
+#else
+  bool spewerEnabled = false;
 #endif
+  bool debugEnabled = compilerEnv_.debugEnabled();
+  // Fold the debug and profiler checks into a single bool.
+  bool hasPerInstrCheck = spewerEnabled || debugEnabled;
 
   for (;;) {
     Nothing unused_a, unused_b, unused_c;
@@ -10357,28 +10490,29 @@ bool BaseCompiler::emitBody() {
     OpBytes op{};
     CHECK(iter_.readOp(&op));
 
-    // When compilerEnv_.debugEnabled(), some operators get a breakpoint site.
-    if (compilerEnv_.debugEnabled() && op.shouldHaveBreakpoint() &&
-        !deadCode_) {
-      if (previousBreakablePoint_ != masm.currentOffset()) {
-        // TODO sync only registers that can be clobbered by the exit
-        // prologue/epilogue or disable these registers for use in
-        // baseline compiler when compilerEnv_.debugEnabled() is set.
-        sync();
+    if (MOZ_UNLIKELY(hasPerInstrCheck)) {
+      // When compilerEnv_.debugEnabled(), some operators get a breakpoint site.
+      if (debugEnabled && op.shouldHaveBreakpoint() && !deadCode_) {
+        if (previousBreakablePoint_ != masm.currentOffset()) {
+          // TODO sync only registers that can be clobbered by the exit
+          // prologue/epilogue or disable these registers for use in
+          // baseline compiler when compilerEnv_.debugEnabled() is set.
+          sync();
 
-        insertBreakablePoint(CallSiteKind::Breakpoint);
-        if (!createStackMap("debug: per-insn breakpoint")) {
-          return false;
+          insertBreakablePoint(CallSiteKind::Breakpoint);
+          if (!createStackMap("debug: per-insn breakpoint")) {
+            return false;
+          }
+          previousBreakablePoint_ = masm.currentOffset();
         }
-        previousBreakablePoint_ = masm.currentOffset();
       }
-    }
 
 #ifdef JS_ION_PERF
-    if (MOZ_UNLIKELY(spewerEnabled)) {
-      perfSpewer_.recordInstruction(masm, op);
-    }
+      if (spewerEnabled) {
+        perfSpewer_.recordInstruction(masm, op);
+      }
 #endif
+    }
 
     // Going below framePushedAtEntryToBody would imply that we've
     // popped off the machine stack, part of the frame created by
@@ -12354,6 +12488,7 @@ bool js::wasm::BaselineCompileFunctions(const CodeMetadata& codeMeta,
 
     size_t unwindInfoBefore = masm.codeRangeUnwindInfos().length();
     size_t callRefMetricsBefore = masm.callRefMetricsPatches().length();
+    size_t allocSitesBefore = masm.allocSitesPatches().length();
 
     // One-pass baseline compilation.
 
@@ -12371,6 +12506,8 @@ bool js::wasm::BaselineCompileFunctions(const CodeMetadata& codeMeta,
         unwindInfoBefore != masm.codeRangeUnwindInfos().length();
     size_t callRefMetricsAfter = masm.callRefMetricsPatches().length();
     size_t callRefMetricsLength = callRefMetricsAfter - callRefMetricsBefore;
+    size_t allocSitesAfter = masm.allocSitesPatches().length();
+    size_t allocSitesLength = allocSitesAfter - allocSitesBefore;
 
     // Record this function's code range
     if (!code->codeRanges.emplaceBack(func.index, offsets, hasUnwindInfo)) {
@@ -12380,7 +12517,8 @@ bool js::wasm::BaselineCompileFunctions(const CodeMetadata& codeMeta,
     // Record this function's specific feature usage
     if (!code->funcs.emplaceBack(
             func.index, f.iter_.featureUsage(),
-            CallRefMetricsRange(callRefMetricsBefore, callRefMetricsLength))) {
+            CallRefMetricsRange(callRefMetricsBefore, callRefMetricsLength),
+            AllocSitesRange(allocSitesBefore, allocSitesLength))) {
       return false;
     }
 

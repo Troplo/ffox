@@ -361,6 +361,7 @@ export class _CardGrid extends React.PureComponent {
     const listFeedSelectedFeed = prefs[PREF_LIST_FEED_SELECTED_FEED];
     const billboardEnabled = prefs[PREF_BILLBOARD_ENABLED];
     const leaderboardEnabled = prefs[PREF_LEADERBOARD_ENABLED];
+
     // filter out recs that should be in ListFeed
     const recs = this.props.data.recommendations
       .filter(item => !item.feedName)
@@ -378,7 +379,7 @@ export class _CardGrid extends React.PureComponent {
           rec.placeholder ||
           (rec.flight_id &&
             !spocsStartupCacheEnabled &&
-            this.props.App.isForStartupCache) ? (
+            this.props.App.isForStartupCache.App) ? (
           <PlaceholderDSCard key={`dscard-${index}`} />
         ) : (
           <DSCard
@@ -392,10 +393,11 @@ export class _CardGrid extends React.PureComponent {
             time_to_read={rec.time_to_read}
             title={rec.title}
             topic={rec.topic}
+            features={rec.features}
             showTopics={showTopics}
             selectedTopics={selectedTopics}
-            availableTopics={availableTopics}
             excerpt={rec.excerpt}
+            availableTopics={availableTopics}
             url={rec.url}
             id={rec.id}
             shim={rec.shim}
@@ -425,6 +427,7 @@ export class _CardGrid extends React.PureComponent {
             received_rank={rec.received_rank}
             format={rec.format}
             alt_text={rec.alt_text}
+            isTimeSensitive={rec.isTimeSensitive}
           />
         )
       );
@@ -482,7 +485,11 @@ export class _CardGrid extends React.PureComponent {
 
     // if a banner ad is enabled and we have any available, place them in the grid
     const { spocs } = this.props.DiscoveryStream;
-    if ((billboardEnabled || leaderboardEnabled) && spocs.data.newtab_spocs) {
+
+    if (
+      (billboardEnabled || leaderboardEnabled) &&
+      spocs?.data?.newtab_spocs?.items
+    ) {
       // Only render one AdBanner in the grid -
       // Prioritize rendering a leaderboard if it exists,
       // otherwise render a billboard
@@ -526,6 +533,7 @@ export class _CardGrid extends React.PureComponent {
               type={this.props.type}
               firstVisibleTimestamp={this.props.firstVisibleTimestamp}
               row={row}
+              prefs={prefs}
             />
           );
         };
@@ -620,7 +628,6 @@ export class _CardGrid extends React.PureComponent {
   }
 
   renderGridClassName() {
-    const prefs = this.props.Prefs.values;
     const {
       hybridLayout,
       hideCardBackground,
@@ -628,19 +635,6 @@ export class _CardGrid extends React.PureComponent {
       compactGrid,
       hideDescriptions,
     } = this.props;
-
-    const adSizingVariantAEnabled = prefs["newtabAdSize.variant-a"];
-    const adSizingVariantBEnabled = prefs["newtabAdSize.variant-b"];
-    const adSizingVariantEnabled =
-      adSizingVariantAEnabled || adSizingVariantBEnabled;
-
-    let adSizingVariantClassName = "";
-    if (adSizingVariantEnabled) {
-      // Ad sizing experiment variant, we want to ensure only 1 of these is ever enabled.
-      adSizingVariantClassName = adSizingVariantAEnabled
-        ? `ad-sizing-variant-a`
-        : `ad-sizing-variant-b`;
-    }
 
     const hideCardBackgroundClass = hideCardBackground
       ? `ds-card-grid-hide-background`
@@ -656,7 +650,7 @@ export class _CardGrid extends React.PureComponent {
       ? `ds-card-grid-hybrid-layout`
       : ``;
 
-    const gridClassName = `ds-card-grid ${hybridLayoutClassName} ${hideCardBackgroundClass} ${fourCardLayoutClass} ${hideDescriptionsClassName} ${compactGridClassName} ${adSizingVariantClassName}`;
+    const gridClassName = `ds-card-grid ${hybridLayoutClassName} ${hideCardBackgroundClass} ${fourCardLayoutClass} ${hideDescriptionsClassName} ${compactGridClassName}`;
     return gridClassName;
   }
 

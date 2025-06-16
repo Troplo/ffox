@@ -146,7 +146,7 @@ function testInstallDialogIncognitoCheckbox(
   // If the incognito toggle is expected to be in the first install dialog
   // verify that it is found and visible and toggle it.
   const privateBrowsingCheckbox = installDialog.querySelector(
-    ".webext-perm-privatebrowsing checkbox"
+    ".webext-perm-privatebrowsing moz-checkbox"
   );
   is(
     !privateBrowsingCheckbox,
@@ -202,7 +202,7 @@ function testInstallDialogIncognitoCheckbox(
   );
 
   if (toggleIncognito === true) {
-    privateBrowsingCheckbox.checked = !privateBrowsingCheckbox.checked;
+    privateBrowsingCheckbox.click();
   }
 }
 
@@ -1574,6 +1574,8 @@ add_setup(async function () {
       ["extensions.InstallTriggerImpl.enabled", true],
       // Relax the user input requirements while running this test.
       ["xpinstall.userActivation.required", false],
+      // Bug 721336 - Use sync XHR system requests
+      ["network.xhr.block_sync_system_requests", false],
     ],
   });
 

@@ -51,6 +51,18 @@
         ]
       },
       {
+        "name": "clearUserPref",
+        "type": "function",
+        "async": true,
+        "description": "Clears the user pref.",
+        "parameters": [
+          {
+            "name": "pref",
+            "type": "string"
+          }
+        ]
+      },
+      {
         "name": "getLinkColor",
         "type": "function",
         "async": true,
@@ -310,6 +322,23 @@
             "type": "object",
             "properties": {},
             "additionalProperties": { "type": "any" }
+          }
+        ]
+      },
+
+      {
+        "name": "setHandlingUserInput",
+        "type": "function",
+        "async": true,
+        "description": "Invokes nsIDOMWindowUtils.setHandlingUserInput to simulate user input activation.",
+        "parameters": [
+          {
+            "type": "number",
+            "name": "tabId"
+          },
+          {
+            "type": "boolean",
+            "name": "handlingUserInput"
           }
         ]
       }

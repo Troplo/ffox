@@ -4,13 +4,15 @@
 
 "use strict";
 
-/* globals browser, InterventionHelpers, module */
+/* globals browser, InterventionHelpers */
 
 class Interventions {
   constructor(availableInterventions, customFunctions) {
     this.INTERVENTION_PREF = "perform_injections";
 
     this._interventionsEnabled = true;
+
+    this._readyPromise = new Promise(done => (this._resolveReady = done));
 
     this._availableInterventions = Object.entries(availableInterventions).map(
       ([id, obj]) => {
@@ -20,11 +22,12 @@ class Interventions {
     );
     this._customFunctions = customFunctions;
 
-    // We do not try to enable/disable until we finish any such previous operation.
-    this._enablingOrDisablingOperationInProgress = Promise.resolve();
-
     this._activeListenersPerIntervention = new Map();
     this._contentScriptsPerIntervention = new Map();
+  }
+
+  ready() {
+    return this._readyPromise;
   }
 
   bindAboutCompatBroker(broker) {
@@ -32,33 +35,52 @@ class Interventions {
   }
 
   bootup() {
-    browser.testUtils.interventionsInactive();
     browser.aboutConfigPrefs.onPrefChange.addListener(() => {
       this.checkInterventionPref();
     }, this.INTERVENTION_PREF);
     this.checkInterventionPref();
   }
 
-  checkInterventionPref() {
-    browser.aboutConfigPrefs.getPref(this.INTERVENTION_PREF).then(value => {
-      if (value === undefined) {
-        browser.aboutConfigPrefs.setPref(this.INTERVENTION_PREF, true);
-      } else if (value === false) {
-        this.disableInterventions();
+  async updateInterventions(_data) {
+    const data = structuredClone(_data);
+    await this.disableInterventions(data);
+    await this.enableInterventions(data);
+    for (const intervention of data) {
+      const { id } = intervention;
+      const i = this._availableInterventions.findIndex(v => v.id === id);
+      if (i > -1) {
+        this._availableInterventions[i] = intervention;
       } else {
-        this.enableInterventions();
+        this._availableInterventions.push(intervention);
+      }
+    }
+    return data;
+  }
+
+  checkInterventionPref() {
+    navigator.locks.request("pref_check_lock", async () => {
+      const value = await browser.aboutConfigPrefs.getPref(
+        this.INTERVENTION_PREF
+      );
+      if (value === undefined) {
+        await browser.aboutConfigPrefs.setPref(this.INTERVENTION_PREF, true);
+      } else if (value === false) {
+        await this.disableInterventions();
+      } else {
+        await this.enableInterventions();
       }
     });
   }
 
   checkOverridePref() {
-    browser.aboutConfigPrefs.getPref(this.OVERRIDE_PREF).then(value => {
+    navigator.locks.request("pref_check_lock", async () => {
+      const value = await browser.aboutConfigPrefs.getPref(this.OVERRIDE_PREF);
       if (value === undefined) {
-        browser.aboutConfigPrefs.setPref(this.OVERRIDE_PREF, true);
+        await browser.aboutConfigPrefs.setPref(this.OVERRIDE_PREF, true);
       } else if (value === false) {
-        this.unregisterUAOverrides();
+        await this.unregisterUAOverrides();
       } else {
-        this.registerUAOverrides();
+        await this.registerUAOverrides();
       }
     });
   }
@@ -67,55 +89,98 @@ class Interventions {
     return this._availableInterventions;
   }
 
+  _getActiveInterventionById(whichId) {
+    return this._availableInterventions.find(({ id }) => id === whichId);
+  }
+
   isEnabled() {
     return this._interventionsEnabled;
   }
 
-  async enableInterventions() {
-    await this._enablingOrDisablingOperationInProgress;
-
-    this._enablingOrDisablingOperationInProgress = new Promise(done => {
-      this._enableInterventionsNow();
-      done();
+  async enableInterventions(whichInterventions = this._availableInterventions) {
+    return navigator.locks.request("intervention_lock", async () => {
+      await this._enableInterventionsNow(whichInterventions);
     });
-
-    return this._enablingOrDisablingOperationInProgress;
   }
 
-  async disableInterventions() {
-    await this._enablingOrDisablingOperationInProgress;
-
-    this._enablingOrDisablingOperationInProgress = new Promise(done => {
-      for (const config of this._availableInterventions) {
-        this._disableInterventionNow(config);
+  async disableInterventions(
+    whichInterventions = this._availableInterventions
+  ) {
+    return navigator.locks.request("intervention_lock", async () => {
+      for (const config of whichInterventions) {
+        await this._disableInterventionNow(config);
       }
 
       this._interventionsEnabled = false;
       this._aboutCompatBroker.portsToAboutCompatTabs.broadcast({
         interventionsChanged: false,
       });
-
-      browser.testUtils.interventionsInactive();
-      done();
     });
-
-    return this._enablingOrDisablingOperationInProgress;
   }
 
-  async _enableInterventionsNow() {
-    await this._enablingOrDisablingOperationInProgress;
+  #checkedPrefListeners = new Map();
+  #checkedPrefCache = new Map();
 
+  async onCheckedPrefChanged(pref) {
+    navigator.locks.request("pref_check_lock", async () => {
+      this.#checkedPrefCache.delete(pref);
+      const toRecheck = this._availableInterventions.filter(cfg =>
+        cfg.interventions.find(i => i.pref_check && pref in i.pref_check)
+      );
+      await this.updateInterventions(toRecheck);
+    });
+  }
+
+  async _check_for_needed_prefs(intervention) {
+    if (!intervention.pref_check) {
+      return true;
+    }
+    for (const pref of Object.keys(intervention.pref_check ?? {})) {
+      if (!this.#checkedPrefListeners.has(pref)) {
+        const listener = () => this.onCheckedPrefChanged(pref);
+        this.#checkedPrefListeners.set(pref, listener);
+        await browser.aboutConfigPrefs.onPrefChange.addListener(listener, pref);
+      }
+    }
+    for (const [pref, value] of Object.entries(intervention.pref_check ?? {})) {
+      if (!this.#checkedPrefCache.has(pref)) {
+        this.#checkedPrefCache.set(
+          pref,
+          await browser.aboutConfigPrefs.getPref(pref)
+        );
+      }
+      if (value !== this.#checkedPrefCache.get(pref)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  async _enableInterventionsNow(whichInterventions) {
     const skipped = [];
 
-    const { version } = await browser.runtime.getBrowserInfo();
+    const channel = await browser.appConstants.getEffectiveUpdateChannel();
+    const version =
+      this.versionForTesting ??
+      (await browser.runtime.getBrowserInfo()).version;
     const cleanVersion = parseFloat(version.match(/\d+(\.\d+)?/)[0]);
 
     const { os } = await browser.runtime.getPlatformInfo();
     this.currentPlatform = os;
 
-    for (const config of this._availableInterventions) {
+    for (const config of whichInterventions) {
       for (const intervention of config.interventions) {
-        if (await InterventionHelpers.shouldSkip(intervention, cleanVersion)) {
+        intervention.enabled = false;
+        if (!(await this._check_for_needed_prefs(intervention))) {
+          continue;
+        }
+        if (
+          await InterventionHelpers.shouldSkip(
+            intervention,
+            cleanVersion,
+            channel
+          )
+        ) {
           continue;
         }
         if (!(await InterventionHelpers.checkPlatformMatches(intervention))) {
@@ -148,34 +213,23 @@ class Interventions {
 
     this._interventionsEnabled = true;
     this._aboutCompatBroker.portsToAboutCompatTabs.broadcast({
-      interventionsChanged: this._aboutCompatBroker.filterInterventions(
-        this._availableInterventions
-      ),
+      interventionsChanged:
+        this._aboutCompatBroker.filterInterventions(whichInterventions),
     });
 
-    await browser.testUtils.interventionsActive();
+    this._resolveReady();
   }
 
   async enableIntervention(config) {
-    await this._enablingOrDisablingOperationInProgress;
-
-    this._enablingOrDisablingOperationInProgress = new Promise(done => {
-      this._enableInterventionNow(config);
-      done();
+    return navigator.locks.request("intervention_lock", async () => {
+      await this._enableInterventionNow(config);
     });
-
-    return this._enablingOrDisablingOperationInProgress;
   }
 
   async disableIntervention(config) {
-    await this._enablingOrDisablingOperationInProgress;
-
-    this._enablingOrDisablingOperationInProgress = new Promise(done => {
-      this._disableInterventionNow(config);
-      done();
+    return navigator.locks.request("intervention_lock", async () => {
+      await this._disableInterventionNow(config);
     });
-
-    return this._enablingOrDisablingOperationInProgress;
   }
 
   async _enableInterventionNow(config) {
@@ -194,16 +248,44 @@ class Interventions {
       .filter(v => v !== undefined);
 
     for (const intervention of config.interventions) {
+      if (!intervention.enabled) {
+        continue;
+      }
+
       await this._changeCustomFuncs("enable", label, intervention, config);
-      await this._enableContentScripts(label, intervention, matches);
+      if (intervention.content_scripts) {
+        await this._enableContentScripts(
+          config.id,
+          label,
+          intervention,
+          matches
+        );
+      }
       await this._enableUAOverrides(label, intervention, matches);
       await this._enableRequestBlocks(label, intervention, blocks);
+    }
+
+    if (!this._getActiveInterventionById(config.id)) {
+      this._availableInterventions.push(config);
+      console.info("Added webcompat intervention", config.id, config);
+    } else {
+      for (const [index, oldConfig] of this._availableInterventions.entries()) {
+        if (oldConfig.id === config.id && oldConfig !== config) {
+          console.info("Replaced webcompat intervention", oldConfig.id, config);
+          this._availableInterventions[index] = config;
+        }
+      }
     }
 
     config.active = true;
   }
 
-  async _disableInterventionNow(config) {
+  async _disableInterventionNow(_config) {
+    const config = this._getActiveInterventionById(_config?.id ?? _config);
+    if (!config) {
+      return;
+    }
+
     const { active, label, interventions } = config;
 
     if (!active) {
@@ -211,8 +293,14 @@ class Interventions {
     }
 
     for (const intervention of interventions) {
+      if (!intervention.enabled) {
+        continue;
+      }
+
       await this._changeCustomFuncs("disable", label, intervention, config);
-      await this._disableContentScripts(label, intervention);
+      if (intervention.content_scripts) {
+        await this._disableContentScripts(label, intervention);
+      }
 
       // This covers both request blocks and ua_string cases
       const listeners = this._activeListenersPerIntervention.get(intervention);
@@ -232,13 +320,15 @@ class Interventions {
       this._customFunctions
     )) {
       if (customFuncName in intervention) {
-        try {
-          await customFunc[action](config, intervention);
-        } catch (e) {
-          console.trace(
-            `Error while calling custom function ${customFuncName}.${action} for ${label}:`,
-            e
-          );
+        for (const details of intervention[customFuncName]) {
+          try {
+            await customFunc[action](details, config);
+          } catch (e) {
+            console.trace(
+              `Error while calling custom function ${customFuncName}.${action} for ${label}:`,
+              e
+            );
+          }
         }
       }
     }
@@ -323,11 +413,7 @@ class Interventions {
     console.info(`Blocking requests as specified for ${label}`);
   }
 
-  async _enableContentScripts(label, intervention, matches) {
-    if (!("content_scripts" in intervention)) {
-      return;
-    }
-
+  async _enableContentScripts(bug, label, intervention, matches) {
     const scriptsToReg = this._buildContentScriptRegistrations(
       label,
       intervention,
@@ -385,7 +471,7 @@ class Interventions {
 
   _buildContentScriptRegistrations(label, intervention, matches) {
     const registration = {
-      id: `webcompat intervention for ${label}`,
+      id: `webcompat intervention for ${label}: ${JSON.stringify(intervention.content_scripts)}`,
       matches,
       persistAcrossSessions: false,
     };
@@ -423,5 +509,3 @@ class Interventions {
     return [registration];
   }
 }
-
-module.exports = Interventions;

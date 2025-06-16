@@ -3,16 +3,12 @@
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
 import { PureComponent } from "devtools/client/shared/vendor/react";
-import {
-  div,
-  textarea,
-} from "devtools/client/shared/vendor/react-dom-factories";
+import { div } from "devtools/client/shared/vendor/react-dom-factories";
 import ReactDOM from "devtools/client/shared/vendor/react-dom";
 import PropTypes from "devtools/client/shared/vendor/react-prop-types";
 import { connect } from "devtools/client/shared/vendor/react-redux";
 import { toEditorLine } from "../../utils/editor/index";
 import { createEditor } from "../../utils/editor/create-editor";
-import { prefs, features } from "../../utils/prefs";
 import actions from "../../actions/index";
 import { markerTypes } from "../../constants";
 
@@ -74,8 +70,15 @@ export class ConditionalPanel extends PureComponent {
    *        conditional breakpoint/logpoint
    */
   saveAndClose = (expression = null) => {
-    if (expression) {
-      this.setBreakpoint(expression.trim());
+    if (typeof expression === "string") {
+      const trimmedExpression = expression.trim();
+      if (trimmedExpression) {
+        this.setBreakpoint(trimmedExpression);
+      } else if (this.props.breakpoint) {
+        // if the user was editing the condition/log of an existing breakpoint,
+        // we remove the condition/log.
+        this.setBreakpoint(null);
+      }
     }
 
     this.props.closeConditionalPanel();
@@ -179,7 +182,7 @@ export class ConditionalPanel extends PureComponent {
         };
 
         const breakpointPanelEditor = createEditor({
-          cm6: features.codemirrorNext,
+          cm6: true,
           readOnly: false,
           lineNumbers: false,
           placeholder: L10N.getStr(
@@ -213,24 +216,11 @@ export class ConditionalPanel extends PureComponent {
 
   // FIXME: https://bugzilla.mozilla.org/show_bug.cgi?id=1774507
   UNSAFE_componentWillMount() {
-    if (features.codemirrorNext) {
-      this.showConditionalPanel();
-    } else {
-      this.renderToWidget(this.props);
-    }
-  }
-
-  // FIXME: https://bugzilla.mozilla.org/show_bug.cgi?id=1774507
-  UNSAFE_componentWillUpdate() {
-    if (!features.codemirrorNext) {
-      this.clearConditionalPanel();
-    }
+    this.showConditionalPanel();
   }
 
   componentDidUpdate(prevProps) {
-    if (features.codemirrorNext) {
-      this.showConditionalPanel(prevProps);
-    }
+    this.showConditionalPanel(prevProps);
     this.keepFocusOnInput();
   }
 
@@ -239,12 +229,8 @@ export class ConditionalPanel extends PureComponent {
     // user closes the conditional panel. Clear the widget, and re-render it
     // as soon as this component gets remounted
     const { editor } = this.props;
-    if (features.codemirrorNext) {
-      editor.removeLineContentMarker(markerTypes.CONDITIONAL_BP_MARKER);
-      this.removeBreakpointPanelEditor();
-    } else {
-      this.clearConditionalPanel();
-    }
+    editor.removeLineContentMarker(markerTypes.CONDITIONAL_BP_MARKER);
+    this.removeBreakpointPanelEditor();
   }
 
   renderToWidget(props) {
@@ -287,47 +273,12 @@ export class ConditionalPanel extends PureComponent {
   }
 
   setupAndAppendInlineEditor = (el, editor) => {
-    const { log } = this.props;
+    editor.appendToLocalElement(el);
+    editor.on("blur", e => this.onBlur(e));
 
-    if (features.codemirrorNext) {
-      editor.appendToLocalElement(el);
-      editor.on("blur", e => this.onBlur(e));
-
-      editor.setText(this.getDefaultValue());
-      editor.focus();
-      editor.selectAll();
-    } else {
-      const codeMirror = editor.CodeMirror.fromTextArea(el, {
-        mode: "javascript",
-        theme: "mozilla",
-        placeholder: L10N.getStr(
-          log
-            ? "editor.conditionalPanel.logPoint.placeholder2"
-            : "editor.conditionalPanel.placeholder2"
-        ),
-        cursorBlinkRate: prefs.cursorBlinkRate,
-      });
-
-      codeMirror.on("keydown", (cm, e) => {
-        if (e.key === "Enter") {
-          e.codemirrorIgnore = true;
-        }
-      });
-
-      codeMirror.on("blur", (cm, e) => this.onBlur(e));
-
-      const codeMirrorWrapper = codeMirror.getWrapperElement();
-
-      codeMirrorWrapper.addEventListener("keydown", e => {
-        codeMirror.save();
-        this.onKey(e);
-      });
-
-      this.input = el;
-      this.codeMirror = codeMirror;
-      codeMirror.focus();
-      codeMirror.execCommand("selectAll");
-    }
+    editor.setText(this.getDefaultValue());
+    editor.focus();
+    editor.selectAll();
   };
 
   getDefaultValue() {
@@ -339,7 +290,6 @@ export class ConditionalPanel extends PureComponent {
 
   renderConditionalPanel(props, editor) {
     const { log } = props;
-    const defaultValue = this.getDefaultValue();
 
     const panel = document.createElement("div");
     // CodeMirror6 can't have margin on a block widget, so we need to wrap the actual
@@ -360,15 +310,10 @@ export class ConditionalPanel extends PureComponent {
           },
           "»"
         ),
-        features.codemirrorNext
-          ? div({
-              className: "inline-codemirror-container",
-              ref: el => this.setupAndAppendInlineEditor(el, editor),
-            })
-          : textarea({
-              defaultValue,
-              ref: input => this.setupAndAppendInlineEditor(input, editor),
-            })
+        div({
+          className: "inline-codemirror-container",
+          ref: el => this.setupAndAppendInlineEditor(el, editor),
+        })
       )
     );
 

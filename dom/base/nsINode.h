@@ -40,6 +40,7 @@ class nsAttrChildContentList;
 template <typename T>
 class nsCOMArray;
 class nsDOMAttributeMap;
+class nsFrameSelection;
 class nsGenericHTMLElement;
 class nsIAnimationObserver;
 class nsIContent;
@@ -64,6 +65,7 @@ template <typename T>
 class Maybe;
 class PresShell;
 class TextEditor;
+class WidgetEvent;
 namespace dom {
 /**
  * @return true if aChar is what the WHATWG defines as a 'ascii whitespace'.
@@ -94,6 +96,7 @@ class Element;
 class EventHandlerNonNull;
 template <typename T>
 class FlatTreeAncestorsOfTypeIterator;
+class HTMLDialogElement;
 template <typename T>
 class InclusiveAncestorsOfTypeIterator;
 template <typename T>
@@ -112,6 +115,7 @@ class Text;
 class TextOrElementOrDocument;
 struct DOMPointInit;
 struct GetRootNodeOptions;
+enum class AllowRangeCrossShadowBoundary : bool;  // defined in AbstractRange.h
 enum class CallerType : uint32_t;
 }  // namespace dom
 }  // namespace mozilla
@@ -378,7 +382,7 @@ class nsINode : public mozilla::dom::EventTarget {
   template <class T>
   using Sequence = mozilla::dom::Sequence<T>;
 
-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_INODE_IID)
+  NS_INLINE_DECL_STATIC_IID(NS_INODE_IID)
 
   // The |aNodeSize| outparam on this function is where the actual node size
   // value is put. It gets added to the appropriate value within |aSizes| by
@@ -563,6 +567,11 @@ class nsINode : public mozilla::dom::EventTarget {
    */
   mozilla::dom::Element* GetTopmostClickedPopover() const;
 
+  /**
+   * https://html.spec.whatwg.org/multipage/interactive-elements.html#nearest-clicked-dialog
+   */
+  mozilla::dom::HTMLDialogElement* NearestClickedDialog(mozilla::WidgetEvent*);
+
   bool IsNode() const final { return true; }
 
   NS_IMPL_FROMEVENTTARGET_HELPER(nsINode, IsNode())
@@ -681,6 +690,9 @@ class nsINode : public mozilla::dom::EventTarget {
    * @return the number of children
    */
   uint32_t GetChildCount() const { return mChildCount; }
+
+  /** Get the number of flat tree children */
+  uint32_t GetFlatTreeChildCount() const;
 
   /**
    * NOTE: this function is going to be removed soon (hopefully!) Don't use it
@@ -1178,7 +1190,7 @@ class nsINode : public mozilla::dom::EventTarget {
    *   2. For contents that are slotted into a UA shadow tree, use its
    *   parent rather than the slot element.
    */
-  inline nsIContent* GetFlattenedTreeParentNodeForSelection() const;
+  inline nsINode* GetFlattenedTreeParentNodeForSelection() const;
 
   inline mozilla::dom::Element* GetFlattenedTreeParentElement() const;
   inline mozilla::dom::Element* GetFlattenedTreeParentElementForStyle() const;
@@ -1632,10 +1644,6 @@ class nsINode : public mozilla::dom::EventTarget {
     return ChromeOnlyAccess() && !HasBeenInUAWidget();
   }
 
-  const nsIContent* GetChromeOnlyAccessSubtreeRootParent() const {
-    return GetClosestNativeAnonymousSubtreeRootParentOrHost();
-  }
-
   bool IsInShadowTree() const { return HasFlag(NODE_IS_IN_SHADOW_TREE); }
 
   /**
@@ -1729,16 +1737,31 @@ class nsINode : public mozilla::dom::EventTarget {
   MOZ_CAN_RUN_SCRIPT mozilla::dom::Element* GetAnonymousRootElementOfTextEditor(
       mozilla::TextEditor** aTextEditor = nullptr);
 
+  enum class IgnoreOwnIndependentSelection : bool { No, Yes };
+  using AllowCrossShadowBoundary = mozilla::dom::AllowRangeCrossShadowBoundary;
+
   /**
-   * Get the nearest selection root, ie. the node that will be selected if the
-   * user does "Select All" while the focus is in this node. Note that if this
-   * node is not in an editor, the result comes from the nsFrameSelection that
-   * is related to aPresShell, so the result might not be the ancestor of this
-   * node. Be aware that if this node and the computed selection limiter are
-   * not in same subtree, this returns the root content of the closeset subtree.
+   * Get the selection root for this node.
+   * Note that if this node is not in an editor, the result comes from the
+   * nsFrameSelection that is related to aPresShell, so the result might not be
+   * the ancestor of this node.
+   * Be aware that if this node and the computed selection limiter are not in
+   * same subtree, this returns the root content of the closest subtree.
+   *
+   * @param aIgnoreOwnIndependentSelection
+   *                    If "Yes", return selection root for selecting this node.
+   *                    If "No", return independent selection root which is
+   *                    in a native anonymous subtree hosted by this node.
+   *                    For example, when this is a text control element,
+   *                    return the document's selection root if "No" or return
+   *                    the native anonymous <div> if "Yes".
    */
   MOZ_CAN_RUN_SCRIPT nsIContent* GetSelectionRootContent(
-      mozilla::PresShell* aPresShell, bool aAllowCrossShadowBoundary = false);
+      mozilla::PresShell* aPresShell,
+      IgnoreOwnIndependentSelection aIgnoreOwnIndependentSelection,
+      AllowCrossShadowBoundary aAllowCrossShadowBoundary);
+
+  [[nodiscard]] nsFrameSelection* GetFrameSelection() const;
 
   bool HasScheduledSelectionChangeEvent() {
     return HasFlag(NODE_HAS_SCHEDULED_SELECTION_CHANGE_EVENT);
@@ -2052,25 +2075,25 @@ class nsINode : public mozilla::dom::EventTarget {
   void SetBoolFlag(BooleanFlag name, bool value) {
     static_assert(BooleanFlagCount <= 8 * sizeof(mBoolFlags),
                   "Too many boolean flags");
-    mBoolFlags = (mBoolFlags & ~(1 << name)) | (value << name);
+    mBoolFlags = (mBoolFlags & ~(1U << name)) | (value << name);
   }
 
   void SetBoolFlag(BooleanFlag name) {
     static_assert(BooleanFlagCount <= 8 * sizeof(mBoolFlags),
                   "Too many boolean flags");
-    mBoolFlags |= (1 << name);
+    mBoolFlags |= (1U << name);
   }
 
   void ClearBoolFlag(BooleanFlag name) {
     static_assert(BooleanFlagCount <= 8 * sizeof(mBoolFlags),
                   "Too many boolean flags");
-    mBoolFlags &= ~(1 << name);
+    mBoolFlags &= ~(1U << name);
   }
 
   bool GetBoolFlag(BooleanFlag name) const {
     static_assert(BooleanFlagCount <= 8 * sizeof(mBoolFlags),
                   "Too many boolean flags");
-    return mBoolFlags & (1 << name);
+    return mBoolFlags & (1U << name);
   }
 
  public:
@@ -2294,10 +2317,7 @@ class nsINode : public mozilla::dom::EventTarget {
                         ErrorResult& aRv) const;
   bool HasChildNodes() const { return HasChildren(); }
 
-  // See nsContentUtils::PositionIsBefore for aThisIndex and aOtherIndex usage.
-  uint16_t CompareDocumentPosition(
-      nsINode& aOther, mozilla::Maybe<uint32_t>* aThisIndex = nullptr,
-      mozilla::Maybe<uint32_t>* aOtherIndex = nullptr) const;
+  uint16_t CompareDocumentPosition(const nsINode& aOther) const;
   void GetNodeValue(nsAString& aNodeValue) { GetNodeValueInternal(aNodeValue); }
   MOZ_CAN_RUN_SCRIPT virtual void SetNodeValue(const nsAString& aNodeValue,
                                                mozilla::ErrorResult& aError) {
@@ -2443,6 +2463,11 @@ class nsINode : public mozilla::dom::EventTarget {
   nsIWeakReference* GetExistingWeakReference() {
     return HasSlots() ? GetExistingSlots()->mWeakReference : nullptr;
   }
+
+  MOZ_CAN_RUN_SCRIPT
+  void RevealAncestorHiddenUntilFoundAndFireBeforematchEvent(ErrorResult& aRv);
+
+  void RevealAncestorClosedDetails();
 
  protected:
   // Override this function to create a custom slots class.
@@ -2598,8 +2623,6 @@ inline nsINode* NODE_FROM(C& aContent, D& aDocument) {
   if (aContent) return static_cast<nsINode*>(aContent);
   return static_cast<nsINode*>(aDocument);
 }
-
-NS_DEFINE_STATIC_IID_ACCESSOR(nsINode, NS_INODE_IID)
 
 inline nsISupports* ToSupports(nsINode* aPointer) { return aPointer; }
 

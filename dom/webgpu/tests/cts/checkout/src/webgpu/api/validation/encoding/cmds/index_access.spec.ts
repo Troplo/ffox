@@ -3,9 +3,9 @@ Validation tests for indexed draws accessing the index buffer.
 `;
 
 import { makeTestGroup } from '../../../../../common/framework/test_group.js';
-import { ValidationTest } from '../../validation_test.js';
+import { AllFeaturesMaxLimitsGPUTest } from '../../../../gpu_test.js';
 
-class F extends ValidationTest {
+class F extends AllFeaturesMaxLimitsGPUTest {
   createIndexBuffer(indexData: Iterable<number>): GPUBuffer {
     return this.makeBufferWithContents(new Uint32Array(indexData), GPUBufferUsage.INDEX);
   }

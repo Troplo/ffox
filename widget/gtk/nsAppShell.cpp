@@ -20,6 +20,7 @@
 #include "mozilla/ProfilerThreadSleep.h"
 #include "mozilla/Unused.h"
 #include "mozilla/GUniquePtr.h"
+#include "mozilla/StaticPrefs_widget.h"
 #include "mozilla/WidgetUtils.h"
 #include "nsIPowerManagerService.h"
 #ifdef MOZ_ENABLE_DBUS

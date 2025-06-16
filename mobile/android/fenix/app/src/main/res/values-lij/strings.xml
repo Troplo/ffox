@@ -30,8 +30,6 @@
   -->
   <string name="private_browsing_placeholder_description_2">%1$s o scancella a teu stöia de navegaçion e riçerche quande særi i feuggi e-i barcoin de navegaçion privâ. Sciben che questo o no te fa deventâ anònimo co-i sciti ò co-o fornitô de Internet, o l\'agiutta in a mantegnî privòu cöse ti fæ in linea a-i atri utenti de sto computer.</string>
   <string name="private_browsing_common_myths">Miti comuin in sciâ navegaçion privâ</string>
-  <!-- Text for the negative button to decline adding a Private Browsing shortcut to the Home screen -->
-  <string name="cfr_neg_button_text" moz:removedIn="138" tools:ignore="UnusedResources">No graçie</string>
   <!--
     Home screen icons - Long press shortcuts
 
@@ -246,10 +244,6 @@
   <string name="exceptions_empty_message_description">Con Eceçioin ti peu dizativâ a proteçion anti-traciamento pe-i sciti seleçionæ.</string>
   <!-- Text displayed when there are no exceptions, with learn more link that brings users to a tracking protection SUMO page -->
   <string name="exceptions_empty_message_learn_more_link">Atre informaçioin</string>
-  <!-- Preference description for usage and technical data collection. %1$s is the name of the app (for example "Firefox"). -->
-  <string name="preferences_usage_data_description" tools:ignore="UnusedResources" moz:removedIn="136">Condividdi con Mozilla informaçioin in sce prestaçioin, uzo, hardware e personalizaçioin do navegatô pe contribuî a-o megioamento de %1$s</string>
-  <!-- Preference switch for marketing data collection -->
-  <string name="preferences_marketing_data" tools:ignore="UnusedResources" moz:removedIn="136">Dæti de marketing</string>
   <!-- Preference for reconnecting to FxA sync -->
   <string name="preferences_sync_sign_in_to_reconnect">Acedi pe conetite torna</string>
   <!-- Preference for removing FxA account -->
@@ -259,7 +253,7 @@
 
     Instructions on how to access pairing
   -->
-  <string name="pair_instructions_2">Scançionn-a o còdice QR mostrou in sce &lt;b&gt;firefox.com/pair&lt;/b&gt;</string>
+  <string name="pair_instructions_2"><![CDATA[Scançionn-a o còdice QR mostrou in sce <b>firefox.com/pair</b>]]></string>
   <!--
     Toolbar Preferences
 
@@ -302,12 +296,6 @@
   <string name="settings_title">Inpostaçioin</string>
   <!-- Content description (not visible, for screen readers etc.): "Close button for library settings" -->
   <string name="content_description_close_button">Særa</string>
-  <!--
-    Sessions
-
-    Title for the list of tabs in the current private session
-  -->
-  <string name="tabs_header_private_tabs_title" moz:removedIn="136" tools:ignore="UnusedResources">Feuggi privæ</string>
   <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
   <string name="add_tab">Azonzi feuggio</string>
   <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
@@ -681,7 +669,7 @@
   <!-- Title of QR Pairing Fragment -->
   <string name="sync_scan_code">Scançionn-a o còdice</string>
   <!-- Instructions on how to access pairing -->
-  <string name="sign_in_instructions" tools:ignore="BrandUsage">Arvi Firefox in sciô computer e vanni chi &lt;b&gt;https://firefox.com/pair&lt;/b&gt;</string>
+  <string name="sign_in_instructions" tools:ignore="BrandUsage"><![CDATA[Arvi Firefox in sciô computer e vanni chi <b>https://firefox.com/pair</b>]]></string>
   <!-- Text shown for sign in pairing when ready -->
   <string name="sign_in_ready_for_scan">Pronto pe-a scançion</string>
   <!-- Text shown for settings option for sign with pairing -->
@@ -753,7 +741,7 @@
   <!-- Category of trackers (cross-site tracking cookies) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_cookies_title">Cookie che tracian inter-scito</string>
   <!-- Description of cross-site tracking cookies that can be blocked by Enhanced Tracking Protection -->
-  <string name="etp_cookies_description">Blòcca i cookie che e ræ de publicitæ e soçietæ de analixi dæti deuvian pe arecheugge i dæti de navegaçion quande ti passi da un scito a l\’atro.</string>
+  <string name="etp_cookies_description">Blòcca i cookie che e ræ de publicitæ e soçietæ de analixi dæti deuvian pe arecheugge i dæti de navegaçion quande ti passi da un scito a l\\’atro.</string>
   <!-- Category of trackers (cryptominers) that can be blocked by Enhanced Tracking Protection -->
   <string name="etp_cryptominers_title">Cryptominer</string>
   <!-- Description of cryptominers that can be blocked by Enhanced Tracking Protection -->
@@ -877,7 +865,7 @@
   <!-- Text shown when a user leaves out the required template string -->
   <string name="search_add_custom_engine_error_missing_template">Contròlla che a stringa de riçerca a segge into formou d\'ezenpio.</string>
   <!-- Text shown when we aren't able to validate the custom search query. %s is the url of the custom search engine. -->
-  <string name="search_add_custom_engine_error_cannot_reach">Erô de conescion a “%s”</string>
+  <string name="search_add_custom_engine_error_cannot_reach" moz:removedIn="140" tools:ignore="UnusedResources">Erô de conescion a “%s”</string>
   <!-- Text shown when a user creates a new search engine. %s is the url of the custom search engine. -->
   <string name="search_add_custom_engine_success_message">%s creou</string>
   <!-- Text shown when a user successfully edits a custom search engine. %s is the url of the custom search engine. -->
@@ -889,9 +877,9 @@
   <!-- First step for the allowing a permission -->
   <string name="phone_feature_blocked_step_settings">1. Arvi e inpostaçioin de Android</string>
   <!-- Second step for the allowing a permission -->
-  <string name="phone_feature_blocked_step_permissions">2. Tocca &lt;b&gt;Permissi (ò in italian Autorizzazioni)&lt;/b&gt;</string>
+  <string name="phone_feature_blocked_step_permissions"><![CDATA[2. Tocca <b>Permissi (ò in italian Autorizzazioni)</b>]]></string>
   <!-- Third step for the allowing a permission (%1$s is the permission name, for example "Camera"). -->
-  <string name="phone_feature_blocked_step_feature">3. Metti &lt;b&gt;%1$s&lt;/b&gt; in sce Permetti (ò consenti in italian)</string>
+  <string name="phone_feature_blocked_step_feature"><![CDATA[3. Metti <b>%1$s</b> in sce Permetti (ò consenti in italian)]]></string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for all sites -->
   <string name="confirm_clear_permissions_on_all_sites">Te seguo de scancelâ tutti i permissi de tutti i sciti?</string>
   <!-- Confirmation message for a dialog confirming if the user wants to delete all the permissions for a site -->

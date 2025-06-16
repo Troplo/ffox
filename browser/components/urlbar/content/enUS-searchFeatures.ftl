@@ -39,22 +39,11 @@ urlbar-group-addon =
 urlbar-group-mdn =
   .label = Recommended resource
 
-# Label shown above a Pocket suggestion in the urlbar results.
-urlbar-group-pocket =
-  .label = Recommended reads
-
 # A label shown above urlbar suggestions for businesses and other locations
 # in the user's city or a city they included in their search string (e.g., Yelp
 # suggestions).
 urlbar-group-local =
   .label = Local recommendations
-
-# Label shown above sponsored suggestions in the urlbar results.
-urlbar-group-sponsored =
-  .label = Sponsored
-
-# A message shown in a result when the user gives feedback on it.
-firefox-suggest-feedback-acknowledgment = Thanks for your feedback
 
 # A message that replaces a result when the user dismisses a single suggestion.
 firefox-suggest-dismissal-acknowledgment-one = Thanks for your feedback. You won’t see this suggestion again.
@@ -133,8 +122,6 @@ firefox-suggest-weather-sponsored = { $provider } · Sponsored
 
 ## These strings are used as labels of menu items in the result menu.
 
-firefox-suggest-command-show-less-frequently =
-  .label = Show less frequently
 firefox-suggest-command-dont-show-this =
   .label = Don’t show this
 firefox-suggest-command-dont-show-mdn =
@@ -143,8 +130,6 @@ firefox-suggest-command-not-relevant =
   .label = Not relevant
 firefox-suggest-command-not-interested =
   .label = Not interested
-firefox-suggest-weather-command-inaccurate-location =
-  .label = Report inaccurate location
 firefox-suggest-command-manage-fakespot =
   .label = Manage { -fakespot-brand-name } suggestions
 firefox-suggest-command-dont-show-this-suggestion =
@@ -163,17 +148,13 @@ firefox-suggest-addons-recommended = Recommended
 # MDN.
 firefox-suggest-mdn-bottom-text = { -mdn-brand-name }
 
-## These strings are used for Pocket suggestions in the urlbar.
-
-# This string is shown in Pocket suggestions and indicates the suggestion is
-# from Pocket and is related to a particular keyword that matches the user's
-# search string.
-# Variables:
-#   $keywordSubstringTyped (string) - The part of the suggestion keyword that the user typed
-#   $keywordSubstringNotTyped (string) - The part of the suggestion keyword that the user did not yet type
-firefox-suggest-pocket-bottom-text = { -pocket-brand-name } · Related to <strong>{ $keywordSubstringTyped }</strong>{ $keywordSubstringNotTyped }
-
 ## These strings are used for Yelp suggestions in the urlbar.
+
+# This string is shown as the title in Yelp suggestions when the suggestion
+# subject is a general service instead of a business name.
+# Variables:
+#   $service (string) - The title of the service, e.g., "coffee shops".
+firefox-suggest-yelp-service-title = Top results for { $service }
 
 # This string is shown in Yelp suggestions and indicates the suggestion is for
 # Yelp.
@@ -291,7 +272,7 @@ firefox-suggest-onboarding-main-accept-option-label = Allow. <a data-l10n-name="
 firefox-suggest-onboarding-main-accept-option-label-2 = Enable
 
 firefox-suggest-onboarding-main-accept-option-description-1 = Help improve the { -firefox-suggest-brand-name } feature with more relevant suggestions. Your search queries will be processed.
-firefox-suggest-onboarding-main-accept-option-description-2 = Recommended for people who support improving the { -firefox-suggest-brand-name } feature.  Your search queries will be processed.
+firefox-suggest-onboarding-main-accept-option-description-2 = Recommended for people who support improving the { -firefox-suggest-brand-name } feature. Your search queries will be processed.
 firefox-suggest-onboarding-main-accept-option-description-3 = Help improve the { -firefox-suggest-brand-name } experience. Your search queries will be processed.
 
 firefox-suggest-onboarding-main-reject-option-label = Don’t allow.

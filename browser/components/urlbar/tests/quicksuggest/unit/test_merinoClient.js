@@ -7,9 +7,9 @@
 "use strict";
 
 ChromeUtils.defineESModuleGetters(this, {
-  ExperimentFakes: "resource://testing-common/NimbusTestUtils.sys.mjs",
   MerinoClient: "resource:///modules/MerinoClient.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
+  NimbusTestUtils: "resource://testing-common/NimbusTestUtils.sys.mjs",
 });
 
 // Set the `merino.timeoutMs` pref to a large value so that the client will not
@@ -250,6 +250,20 @@ async function doFetchAndGetCalls(client, fetchArgs) {
   MerinoTestUtils.server.requestHandler = null;
   return callsByProvider;
 }
+
+// Checks a 204 "No content" response.
+add_task(async function noContent() {
+  MerinoTestUtils.server.response = { status: 204 };
+  await fetchAndCheckSuggestions({ expected: [] });
+
+  Assert.equal(
+    gClient.lastFetchStatus,
+    "no_suggestion",
+    "The request should have been recorded as no_suggestion"
+  );
+
+  MerinoTestUtils.server.reset();
+});
 
 // Checks a response that's valid but also has some unexpected properties.
 add_task(async function unexpectedResponseProperties() {
@@ -698,7 +712,7 @@ async function fetchAndCheckSuggestions({
 }
 
 async function withExperiment(values, callback) {
-  const doExperimentCleanup = await ExperimentFakes.enrollWithFeatureConfig(
+  const doExperimentCleanup = await NimbusTestUtils.enrollWithFeatureConfig(
     {
       featureId: NimbusFeatures.urlbar.featureId,
       value: {
@@ -712,5 +726,5 @@ async function withExperiment(values, callback) {
     }
   );
   await callback();
-  doExperimentCleanup();
+  await doExperimentCleanup();
 }

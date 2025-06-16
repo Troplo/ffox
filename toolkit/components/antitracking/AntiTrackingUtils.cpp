@@ -573,6 +573,11 @@ AntiTrackingUtils::GetStoragePermissionStateInParent(nsIChannel* aChannel) {
     return nsILoadInfo::NoStoragePermission;
   }
 
+  RefPtr<net::HttpBaseChannel> httpBaseChannel = do_QueryObject(aChannel);
+  if (httpBaseChannel && httpBaseChannel->HasRedirectTaintedOrigin()) {
+    return nsILoadInfo::NoStoragePermission;
+  }
+
   if (policyType == ExtContentPolicy::TYPE_SUBDOCUMENT) {
     // For loads of framed documents, we only use storage access
     // if the load is the result of a same-origin, same-site-initiated
@@ -1033,7 +1038,10 @@ bool AntiTrackingUtils::IsThirdPartyDocument(Document* aDocument) {
     }
 
     RefPtr<BrowsingContext> bc = aDocument->GetBrowsingContext();
-    return bc ? IsThirdPartyContext(bc) : true;
+    if (bc && bc->IsInProcess()) {
+      return IsThirdPartyContext(bc);
+    }
+    return true;
   }
 
   nsresult rv = tpuService->IsThirdPartyChannel(aDocument->GetChannel(),

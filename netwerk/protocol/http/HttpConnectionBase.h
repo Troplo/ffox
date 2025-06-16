@@ -31,7 +31,7 @@ namespace net {
 
 class nsHttpHandler;
 class ASpdySession;
-class Http3WebTransportSession;
+class WebTransportSessionBase;
 
 enum class ConnectionState : uint32_t {
   HALF_OPEN = 0,
@@ -64,7 +64,7 @@ MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(ConnectionExperienceState);
 
 class HttpConnectionBase : public nsSupportsWeakReference {
  public:
-  NS_DECLARE_STATIC_IID_ACCESSOR(HTTPCONNECTIONBASE_IID)
+  NS_INLINE_DECL_STATIC_IID(HTTPCONNECTIONBASE_IID)
 
   HttpConnectionBase();
 
@@ -97,7 +97,7 @@ class HttpConnectionBase : public nsSupportsWeakReference {
                                                nsIAsyncInputStream**,
                                                nsIAsyncOutputStream**) = 0;
 
-  Http3WebTransportSession* GetWebTransportSession(
+  virtual WebTransportSessionBase* GetWebTransportSession(
       nsAHttpTransaction* aTransaction) {
     return nullptr;
   }
@@ -199,8 +199,6 @@ class HttpConnectionBase : public nsSupportsWeakReference {
 
   ConnectionCloseReason mCloseReason = ConnectionCloseReason::UNSET;
 };
-
-NS_DEFINE_STATIC_IID_ACCESSOR(HttpConnectionBase, HTTPCONNECTIONBASE_IID)
 
 #define NS_DECL_HTTPCONNECTIONBASE                                             \
   [[nodiscard]] nsresult Activate(nsAHttpTransaction*, uint32_t, int32_t)      \

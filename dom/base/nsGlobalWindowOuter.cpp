@@ -221,7 +221,7 @@
 
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/Services.h"
-#include "mozilla/Telemetry.h"
+#include "mozilla/glean/DomMetrics.h"
 #include "mozilla/dom/Location.h"
 #include "nsHTMLDocument.h"
 #include "nsWrapperCacheInlines.h"
@@ -230,7 +230,6 @@
 #include "nsSandboxFlags.h"
 #include "nsXULControllers.h"
 #include "mozilla/dom/AudioContext.h"
-#include "mozilla/dom/BrowserElementDictionariesBinding.h"
 #include "mozilla/dom/BrowsingContextGroup.h"
 #include "mozilla/dom/cache/CacheStorage.h"
 #include "mozilla/dom/Console.h"
@@ -1813,7 +1812,7 @@ void nsGlobalWindowOuter::SetInitialPrincipal(
 
 class WindowStateHolder final : public nsISupports {
  public:
-  NS_DECLARE_STATIC_IID_ACCESSOR(WINDOWSTATEHOLDER_IID)
+  NS_INLINE_DECL_STATIC_IID(WINDOWSTATEHOLDER_IID)
   NS_DECL_ISUPPORTS
 
   explicit WindowStateHolder(nsGlobalWindowInner* aWindow);
@@ -1833,8 +1832,6 @@ class WindowStateHolder final : public nsISupports {
   // window ends up recalculating it anyway.
   JS::PersistentRooted<JSObject*> mInnerWindowReflector;
 };
-
-NS_DEFINE_STATIC_IID_ACCESSOR(WindowStateHolder, WINDOWSTATEHOLDER_IID)
 
 WindowStateHolder::WindowStateHolder(nsGlobalWindowInner* aWindow)
     : mInnerWindow(aWindow),
@@ -2224,7 +2221,9 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
       newInnerGlobal = newInnerWindow->GetWrapper();
     } else {
       newInnerWindow = nsGlobalWindowInner::Create(this, thisChrome, aActor);
-      if (StaticPrefs::dom_timeout_defer_during_load()) {
+      if (StaticPrefs::dom_timeout_defer_during_load() &&
+          !aDocument->NodePrincipal()->IsURIInPrefList(
+              "dom.timeout.defer_during_load.force-disable")) {
         // ensure the initial loading state is known
         newInnerWindow->SetActiveLoadingState(
             aDocument->GetReadyStateEnum() ==
@@ -3299,10 +3298,10 @@ Nullable<WindowProxyHolder> nsGlobalWindowOuter::IndexedGetterOuter(
   BrowsingContext* bc = GetBrowsingContext();
   NS_ENSURE_TRUE(bc, nullptr);
 
-  Span<RefPtr<BrowsingContext>> children = bc->NonSyntheticChildren();
+  BrowsingContext* child = bc->NonSyntheticLightDOMChildAt(aIndex);
 
-  if (aIndex < children.Length()) {
-    return WindowProxyHolder(children[aIndex]);
+  if (child) {
+    return WindowProxyHolder(child);
   }
   return nullptr;
 }
@@ -3799,7 +3798,8 @@ double nsGlobalWindowOuter::GetScrollYOuter() { return GetScrollXY(false).y; }
 
 uint32_t nsGlobalWindowOuter::Length() {
   BrowsingContext* bc = GetBrowsingContext();
-  return bc ? bc->NonSyntheticChildren().Length() : 0;
+  NS_ENSURE_TRUE(bc, 0);
+  return bc->NonSyntheticLightDOMChildrenCount();
 }
 
 Nullable<WindowProxyHolder> nsGlobalWindowOuter::GetTopOuter() {
@@ -3832,43 +3832,6 @@ bool nsGlobalWindowOuter::DispatchCustomEvent(
   }
 
   return defaultActionEnabled;
-}
-
-bool nsGlobalWindowOuter::DispatchResizeEvent(const CSSIntSize& aSize) {
-  ErrorResult res;
-  RefPtr<Event> domEvent =
-      mDoc->CreateEvent(u"CustomEvent"_ns, CallerType::System, res);
-  if (res.Failed()) {
-    return false;
-  }
-
-  // We don't init the AutoJSAPI with ourselves because we don't want it
-  // reporting errors to our onerror handlers.
-  AutoJSAPI jsapi;
-  jsapi.Init();
-  JSContext* cx = jsapi.cx();
-  JSAutoRealm ar(cx, GetWrapperPreserveColor());
-
-  DOMWindowResizeEventDetail detail;
-  detail.mWidth = aSize.width;
-  detail.mHeight = aSize.height;
-  JS::Rooted<JS::Value> detailValue(cx);
-  if (!ToJSValue(cx, detail, &detailValue)) {
-    return false;
-  }
-
-  CustomEvent* customEvent = static_cast<CustomEvent*>(domEvent.get());
-  customEvent->InitCustomEvent(cx, u"DOMWindowResize"_ns,
-                               /* aCanBubble = */ true,
-                               /* aCancelable = */ true, detailValue);
-
-  domEvent->SetTrusted(true);
-  domEvent->WidgetEventPtr()->mFlags.mOnlyChromeDispatch = true;
-
-  nsCOMPtr<EventTarget> target = this;
-  domEvent->SetTarget(target);
-
-  return target->DispatchEvent(*domEvent, CallerType::System, IgnoreErrors());
 }
 
 bool nsGlobalWindowOuter::WindowExists(const nsAString& aName,
@@ -4100,8 +4063,8 @@ FullscreenTransitionTask::Run() {
     NS_NewTimerWithObserver(getter_AddRefs(mTimer), observer, timeout,
                             nsITimer::TYPE_ONE_SHOT);
   } else if (stage == eAfterToggle) {
-    Telemetry::AccumulateTimeDelta(Telemetry::FULLSCREEN_TRANSITION_BLACK_MS,
-                                   mFullscreenChangeStartTime);
+    glean::dom::fullscreen_transition_black.AccumulateRawDuration(
+        TimeStamp::Now() - mFullscreenChangeStartTime);
     mWidget->PerformFullscreenTransition(nsIWidget::eAfterFullscreenToggle,
                                          mDuration.mFadeOut, mTransitionData,
                                          this);
@@ -5955,9 +5918,12 @@ void nsGlobalWindowOuter::CloseOuter(bool aTrustedCaller) {
     nsresult rv = mDoc->GetURL(url);
     NS_ENSURE_SUCCESS_VOID(rv);
 
+    RefPtr<ChildSHistory> csh =
+        nsDocShell::Cast(mDocShell)->GetSessionHistory();
+
     if (!StringBeginsWith(url, u"about:neterror"_ns) &&
         !mBrowsingContext->GetTopLevelCreatedByWebContent() &&
-        !aTrustedCaller && !IsOnlyTopLevelDocumentInSHistory()) {
+        !aTrustedCaller && csh && csh->Count() > 1) {
       bool allowClose =
           mAllowScriptsToClose ||
           Preferences::GetBool("dom.allow_scripts_to_close_windows", true);
@@ -5998,23 +5964,6 @@ void nsGlobalWindowOuter::CloseOuter(bool aTrustedCaller) {
   }
 
   FinalClose();
-}
-
-bool nsGlobalWindowOuter::IsOnlyTopLevelDocumentInSHistory() {
-  NS_ENSURE_TRUE(mDocShell && mBrowsingContext, false);
-  // Disabled since IsFrame() is buggy in Fission
-  // MOZ_ASSERT(mBrowsingContext->IsTop());
-
-  if (mozilla::SessionHistoryInParent()) {
-    return mBrowsingContext->GetIsSingleToplevelInHistory();
-  }
-
-  RefPtr<ChildSHistory> csh = nsDocShell::Cast(mDocShell)->GetSessionHistory();
-  if (csh && csh->LegacySHistory()) {
-    return csh->LegacySHistory()->IsEmptyOrHasEntriesForSingleTopLevelPage();
-  }
-
-  return false;
 }
 
 nsresult nsGlobalWindowOuter::Close() {
@@ -6933,6 +6882,13 @@ nsresult nsGlobalWindowOuter::OpenInternal(
 void nsGlobalWindowOuter::MaybeAllowStorageForOpenedWindow(nsIURI* aURI) {
   nsGlobalWindowInner* inner = GetCurrentInnerWindowInternal(this);
   if (NS_WARN_IF(!inner)) {
+    return;
+  }
+
+  // Don't trigger the heuristic for third-party trackers.
+  if (StaticPrefs::
+          privacy_restrict3rdpartystorage_heuristic_exclude_third_party_trackers() &&
+      nsContentUtils::IsThirdPartyTrackingResourceWindow(inner)) {
     return;
   }
 

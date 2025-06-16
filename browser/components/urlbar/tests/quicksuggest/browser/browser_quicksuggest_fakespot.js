@@ -5,19 +5,10 @@
 
 // Test for Fakespot suggestions.
 
+// Trying to avoid CI timeouts in verify (TV) mode, especially on Mac.
+requestLongerTimeout(5);
+
 const REMOTE_SETTINGS_RECORDS = [
-  {
-    type: "icon",
-    id: "icon-fakespot-amazon",
-    attachmentMimetype: "image/png",
-    attachment: [1, 2, 3],
-  },
-  {
-    type: "icon",
-    id: "icon-fakespot-bestbuy",
-    attachmentMimetype: "image/svg+xml",
-    attachment: [4, 5, 6],
-  },
   {
     collection: "fakespot-suggest-products",
     type: "fakespot-suggestions",
@@ -131,7 +122,10 @@ const HELP_URL =
 
 add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
-    set: [["browser.search.suggest.enabled", false]],
+    set: [
+      ["browser.search.suggest.enabled", false],
+      ["browser.urlbar.suggest.quickactions", false],
+    ],
   });
 
   await QuickSuggestTestUtils.ensureQuickSuggestInit({
@@ -385,15 +379,15 @@ async function doShowLessFrequently({
 add_task(async function resultMenu_not_relevant() {
   await doDismiss({
     menu: "not_relevant",
-    assert: resuilt => {
+    assert: result => {
       Assert.ok(
-        QuickSuggest.blockedSuggestions.isResultBlocked(resuilt),
-        "The URL should be register as blocked"
+        QuickSuggest.isResultDismissed(result),
+        "The result should be dismissed"
       );
     },
   });
 
-  await QuickSuggest.blockedSuggestions.clear();
+  await QuickSuggest.clearDismissedSuggestions();
 });
 
 // Tests the "Not interested" result menu dismissal command.
@@ -421,6 +415,9 @@ async function doDismiss({ menu, assert }) {
   let result = details.result;
 
   // Click the command.
+  let dismissalPromise = TestUtils.topicObserved(
+    "quicksuggest-dismissals-changed"
+  );
   await UrlbarTestUtils.openResultMenuAndClickItem(
     window,
     ["[data-l10n-id=firefox-suggest-command-manage-fakespot]", menu],
@@ -429,6 +426,8 @@ async function doDismiss({ menu, assert }) {
       openByMouse: true,
     }
   );
+  info("Awaiting dismissal promise");
+  await dismissalPromise;
 
   // The row should be a tip now.
   Assert.ok(gURLBar.view.isOpen, "The view should remain open after dismissal");
@@ -560,55 +559,6 @@ add_task(async function ratingAndTotalReviewsLabel() {
         ".urlbarView-dynamic-fakespot-rating-and-total-reviews"
       ).textContent,
       expected
-    );
-
-    await UrlbarTestUtils.promisePopupClose(window);
-  }
-});
-
-// Test the icons.
-add_task(async function icons() {
-  const testData = [
-    {
-      input: "png image",
-      expectedIcon: REMOTE_SETTINGS_RECORDS.find(
-        r => r.id == "icon-fakespot-amazon"
-      ),
-    },
-    {
-      input: "svg image",
-      expectedIcon: REMOTE_SETTINGS_RECORDS.find(
-        r => r.id == "icon-fakespot-bestbuy"
-      ),
-    },
-    { input: "no image", expectedIcon: null },
-  ];
-
-  for (const { input, expectedIcon } of testData) {
-    await UrlbarTestUtils.promiseAutocompleteResultPopup({
-      window,
-      value: input,
-    });
-    Assert.equal(UrlbarTestUtils.getResultCount(window), 2);
-
-    const { element } = await UrlbarTestUtils.getDetailsOfResultAt(window, 1);
-    const src = element.row.querySelector(
-      ".urlbarView-dynamic-fakespot-icon"
-    ).src;
-
-    if (!expectedIcon) {
-      Assert.equal(src, "");
-      return;
-    }
-
-    const content = await fetch(src);
-    const blob = await content.blob();
-    const bytes = await blob.bytes();
-
-    Assert.equal(blob.type, expectedIcon.attachmentMimetype);
-    Assert.equal(
-      new TextDecoder().decode(bytes),
-      JSON.stringify(expectedIcon.attachment)
     );
 
     await UrlbarTestUtils.promisePopupClose(window);

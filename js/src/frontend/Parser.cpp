@@ -2016,12 +2016,6 @@ FullParseHandler::ModuleNodeResult Parser<FullParseHandler, Unit>::moduleBody(
       ->value()
       ->setClosedOver();
 
-  if (options().deoptimizeModuleGlobalVars) {
-    for (BindingIter bi = modulepc.varScope().bindings(pc_); bi; bi++) {
-      bi.setClosedOver();
-    }
-  }
-
   if (!CheckParseTree(this->fc_, alloc_, stmtList)) {
     return errorResult();
   }
@@ -2571,8 +2565,8 @@ bool GeneralParser<ParseHandler, Unit>::matchOrInsertSemicolon(
 
 #ifdef ENABLE_EXPLICIT_RESOURCE_MANAGEMENT
     if (options().explicitResourceManagement() &&
-        !this->pc_->isUsingSyntaxAllowed() &&
-        anyChars.currentToken().type == TokenKind::Using) {
+        anyChars.currentToken().type == TokenKind::Using &&
+        !this->pc_->isUsingSyntaxAllowed()) {
       error(JSMSG_USING_OUTSIDE_BLOCK_OR_MODULE);
       return false;
     }

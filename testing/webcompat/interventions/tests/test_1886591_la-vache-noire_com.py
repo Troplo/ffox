@@ -12,19 +12,13 @@ async def is_cookie_banner_visible(client):
         """
         document.body.style.overflow = "hidden"; // hide scrollbars for consistency
         const b = arguments[0].getBoundingClientRect();
-        return window.innerHeight - b.y == b.height;
+        return Math.abs(window.innerHeight - b.y - b.height) < 1;
     """,
         cookies,
     )
 
 
 @pytest.mark.asyncio
-@pytest.mark.with_interventions
-async def test_enabled(client):
-    assert await is_cookie_banner_visible(client)
-
-
-@pytest.mark.asyncio
 @pytest.mark.without_interventions
 async def test_disabled(client):
-    assert not await is_cookie_banner_visible(client)
+    assert await is_cookie_banner_visible(client)

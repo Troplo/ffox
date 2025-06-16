@@ -93,8 +93,6 @@ genai-header-close-button =
 
 genai-provider-view-details =
     .label = View chatbot details
-genai-provider-about-chatbots =
-    .label = About these chatbots
 genai-options-reload-generic =
     .label = Reload AI chatbot
 # $provider (string) - name of the provider
@@ -109,9 +107,16 @@ genai-options-about-chatbot =
 
 ## Chatbot onboarding
 
+genai-chatbot-contextual-title = Use an AI chatbot without switching tabs
+genai-chatbot-contextual-subtitle = Chat and browse side-by-side when you add an AI chatbot in the { -brand-short-name } sidebar.
+genai-chatbot-contextual-button = Choose a chatbot
+
 genai-onboarding-header = Summarize, brainstorm, and more as you browse
+genai-onboarding-choose-header = Choose an AI chatbot to use in the { -brand-short-name } sidebar
 # "Switch anytime" refers to allowing the user to switch to a different chatbot.
 genai-onboarding-description = Choose an AI chatbot to use in the { -brand-short-name } sidebar. We’ll show details about each chatbot when you select it. Switch anytime. <a data-l10n-name="learn-more">Learn more</a>
+# "Switch anytime" refers to allowing the user to switch to a different chatbot.
+genai-onboarding-choose-description = Switch anytime. For help choosing, <a data-l10n-name="learn-more">learn more about each chatbot</a>.
 genai-onboarding-primary = Continue
 genai-onboarding-secondary = Close
 genai-onboarding-claude-tooltip =
@@ -157,3 +162,29 @@ genai-onboarding-huggingchat-switch = Switch between a diverse set of open model
 genai-onboarding-huggingchat-price-2 = Free; account required after a certain number of requests
 genai-onboarding-lechat-generate = Generate text and code
 genai-onboarding-lechat-price = Free; account required
+
+## Model Optin Component
+
+genai-model-optin-continue =
+  .label = Continue
+
+genai-model-optin-optout =
+  .label = Cancel
+
+genai-model-optin-cancel =
+  .label = Cancel
+
+## Link previews
+
+# ‘min’ is short for “minute”
+# ‘mins’ is short for “minutes”
+# An estimate for how long it takes to read an article,
+# expressed as a range covering both slow and fast readers.
+# Variables:
+#   $rangePlural (String): The plural category of the range, using the same set as for numbers.
+#   $range (String): The range of minutes as a localised string. Examples: "3-7", "~1".
+link-preview-reading-time =
+    { $rangePlural ->
+        [one] { $range } min reading time
+       *[other] { $range } mins reading time
+    }

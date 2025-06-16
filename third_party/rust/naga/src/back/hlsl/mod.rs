@@ -114,10 +114,12 @@ mod ray;
 mod storage;
 mod writer;
 
-use std::fmt::Error as FmtError;
+use alloc::{string::String, vec::Vec};
+use core::fmt::Error as FmtError;
+
 use thiserror::Error;
 
-use crate::{back, proc};
+use crate::{back, ir, proc};
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize))]
@@ -149,6 +151,7 @@ pub struct OffsetsBindTarget {
     pub size: u32,
 }
 
+#[cfg(any(feature = "serialize", feature = "deserialize"))]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize))]
 #[cfg_attr(feature = "deserialize", derive(serde::Deserialize))]
 struct BindingMapSerialization {
@@ -172,7 +175,7 @@ where
 }
 
 // Using `BTreeMap` instead of `HashMap` so that we can hash itself.
-pub type BindingMap = std::collections::BTreeMap<crate::ResourceBinding, BindTarget>;
+pub type BindingMap = alloc::collections::BTreeMap<crate::ResourceBinding, BindTarget>;
 
 /// A HLSL shader model version.
 #[allow(non_snake_case, non_camel_case_types)]
@@ -215,6 +218,7 @@ impl crate::ShaderStage {
             Self::Vertex => "vs",
             Self::Fragment => "ps",
             Self::Compute => "cs",
+            Self::Task | Self::Mesh => unreachable!(),
         }
     }
 }
@@ -267,6 +271,7 @@ impl Default for SamplerHeapBindTargets {
     }
 }
 
+#[cfg(any(feature = "serialize", feature = "deserialize"))]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize))]
 #[cfg_attr(feature = "deserialize", derive(serde::Deserialize))]
 struct SamplerIndexBufferBindingSerialization {
@@ -296,8 +301,9 @@ where
 
 // We use a BTreeMap here so that we can hash it.
 pub type SamplerIndexBufferBindingMap =
-    std::collections::BTreeMap<SamplerIndexBufferKey, BindTarget>;
+    alloc::collections::BTreeMap<SamplerIndexBufferKey, BindTarget>;
 
+#[cfg(any(feature = "serialize", feature = "deserialize"))]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize))]
 #[cfg_attr(feature = "deserialize", derive(serde::Deserialize))]
 struct DynamicStorageBufferOffsetTargetSerialization {
@@ -322,7 +328,7 @@ where
     Ok(map)
 }
 
-pub type DynamicStorageBufferOffsetsTargets = std::collections::BTreeMap<u32, OffsetsBindTarget>;
+pub type DynamicStorageBufferOffsetsTargets = alloc::collections::BTreeMap<u32, OffsetsBindTarget>;
 
 /// Shorthand result used internally by the backend
 type BackendResult = Result<(), Error>;
@@ -387,9 +393,9 @@ impl Default for Options {
             fake_missing_bindings: true,
             special_constants_binding: None,
             sampler_heap_target: SamplerHeapBindTargets::default(),
-            sampler_buffer_binding_map: std::collections::BTreeMap::default(),
+            sampler_buffer_binding_map: alloc::collections::BTreeMap::default(),
             push_constants_target: None,
-            dynamic_storage_buffer_offsets_targets: std::collections::BTreeMap::new(),
+            dynamic_storage_buffer_offsets_targets: alloc::collections::BTreeMap::new(),
             zero_initialize_workgroup_memory: true,
             restrict_indexing: true,
             force_loop_bounding: true,
@@ -428,6 +434,22 @@ pub struct ReflectionInfo {
     pub entry_point_names: Vec<Result<String, EntryPointError>>,
 }
 
+/// A subset of options that are meant to be changed per pipeline.
+#[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize))]
+#[cfg_attr(feature = "deserialize", derive(serde::Deserialize))]
+#[cfg_attr(feature = "deserialize", serde(default))]
+pub struct PipelineOptions {
+    /// The entry point to write.
+    ///
+    /// Entry points are identified by a shader stage specification,
+    /// and a name.
+    ///
+    /// If `None`, all entry points will be written. If `Some` and the entry
+    /// point is not found, an error will be thrown while writing.
+    pub entry_point: Option<(ir::ShaderStage, String)>,
+}
+
 #[derive(Error, Debug)]
 pub enum Error {
     #[error(transparent)]
@@ -440,20 +462,30 @@ pub enum Error {
     Custom(String),
     #[error("overrides should not be present at this stage")]
     Override,
+    #[error(transparent)]
+    ResolveArraySizeError(#[from] proc::ResolveArraySizeError),
+    #[error("entry point with stage {0:?} and name '{1}' not found")]
+    EntryPointNotFound(ir::ShaderStage, String),
+}
+
+#[derive(PartialEq, Eq, Hash)]
+enum WrappedType {
+    ZeroValue(help::WrappedZeroValue),
+    ArrayLength(help::WrappedArrayLength),
+    ImageQuery(help::WrappedImageQuery),
+    ImageLoadScalar(crate::Scalar),
+    Constructor(help::WrappedConstructor),
+    StructMatrixAccess(help::WrappedStructMatrixAccess),
+    MatCx2(help::WrappedMatCx2),
+    Math(help::WrappedMath),
+    UnaryOp(help::WrappedUnaryOp),
+    BinaryOp(help::WrappedBinaryOp),
+    Cast(help::WrappedCast),
 }
 
 #[derive(Default)]
 struct Wrapped {
-    zero_values: crate::FastHashSet<help::WrappedZeroValue>,
-    array_lengths: crate::FastHashSet<help::WrappedArrayLength>,
-    image_queries: crate::FastHashSet<help::WrappedImageQuery>,
-    image_load_scalars: crate::FastHashSet<crate::Scalar>,
-    constructors: crate::FastHashSet<help::WrappedConstructor>,
-    struct_matrix_access: crate::FastHashSet<help::WrappedStructMatrixAccess>,
-    mat_cx2s: crate::FastHashSet<help::WrappedMatCx2>,
-    math: crate::FastHashSet<help::WrappedMath>,
-    unary_op: crate::FastHashSet<help::WrappedUnaryOp>,
-    binary_op: crate::FastHashSet<help::WrappedBinaryOp>,
+    types: crate::FastHashSet<WrappedType>,
     /// If true, the sampler heaps have been written out.
     sampler_heaps: bool,
     // Mapping from SamplerIndexBufferKey to the name the namer returned.
@@ -461,15 +493,12 @@ struct Wrapped {
 }
 
 impl Wrapped {
+    fn insert(&mut self, r#type: WrappedType) -> bool {
+        self.types.insert(r#type)
+    }
+
     fn clear(&mut self) {
-        self.array_lengths.clear();
-        self.image_queries.clear();
-        self.constructors.clear();
-        self.struct_matrix_access.clear();
-        self.mat_cx2s.clear();
-        self.math.clear();
-        self.unary_op.clear();
-        self.binary_op.clear();
+        self.types.clear();
     }
 }
 
@@ -508,8 +537,10 @@ pub struct Writer<'a, W> {
     namer: proc::Namer,
     /// HLSL backend options
     options: &'a Options,
+    /// Per-stage backend options
+    pipeline_options: &'a PipelineOptions,
     /// Information about entry point arguments and result types.
-    entry_point_io: Vec<writer::EntryPointInterface>,
+    entry_point_io: crate::FastHashMap<usize, writer::EntryPointInterface>,
     /// Set of expressions that have associated temporary variables
     named_expressions: crate::NamedExpressions,
     wrapped: Wrapped,

@@ -52,7 +52,6 @@
   <string name="menu_settings">Կարգավորումներ</string>
   <string name="menu_about">Մասին</string>
   <string name="menu_help">Օգնություն</string>
-  <string name="menu_rights" moz:removedIn="137">Ձեր իրավունքները</string>
   <!--
     Menu item: This is the label for a menu entry that shows how many trackers have been blocked
     for the currently loaded website. The number of blocked trackers is shown below this label.
@@ -372,11 +371,6 @@
     item in the list of browsers. Clicking it will open the app store installed on the device (usually that's Google Play).
   -->
   <string name="download_firefox" tools:ignore="BrandUsage">Ներբեռնել Firefox-ը</string>
-  <!--
-    Text shown in the "Your rights" screen.
-    %1$s will be replaced with the name of the app (e.g. Firefox Focus)
-  -->
-  <string name="your_rights_content1" moz:removedIn="137">%1$s-ը անվճար և բաց կոդով ծրագիր է Mozilla-ի և այլ մասնակիցների կողմից:</string>
   <!-- Text shown in prompts for GeckoView -->
   <string name="gv_prompt_username_hint">Օգտվողի անուն</string>
   <string name="gv_prompt_password_hint">Գաղտնաբառ</string>
@@ -454,9 +448,9 @@
   <!-- Preference for block autoplay audio and video -->
   <string name="preference_block_autoplay_audio_video">Արգելափակել ձայնանյութը և տեսանյութը</string>
   <!-- Learn more link for studies, links to an article for more information about studies. -->
-  <string name="studies_learn_more">Իմանալ ավելին</string>
+  <string name="studies_learn_more" moz:removedIn="140">Իմանալ ավելին</string>
   <!-- Title of the remove studies button -->
-  <string name="studies_remove">Հեռացնել</string>
+  <string name="studies_remove" moz:removedIn="140">Հեռացնել</string>
   <!--
     Button for the fingerprint authentication dialog box that is shown to the user when sharing a link to the app
     while the user has biometric authentication enabled. When pressed, the user's previous session is cleared, and the shared link is opened.

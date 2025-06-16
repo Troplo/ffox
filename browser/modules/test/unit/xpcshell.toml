@@ -1,8 +1,13 @@
 [DEFAULT]
 head =  ''
 firefox-appdir = "browser"
-skip-if = ["os == 'android'"] # bug 1730213
 tags = "os_integration"
+
+["test_ContextId_LegacyBackend.js"]
+prefs = ["browser.contextual-services.contextId.rust-component.enabled=false"]
+
+["test_ContextId_RustBackend.js"]
+prefs = ["browser.contextual-services.contextId.rust-component.enabled=true"]
 
 ["test_Dedupe.js"]
 

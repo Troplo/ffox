@@ -18,6 +18,7 @@
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_media.h"
 #include "mozilla/glean/GfxMetrics.h"
+#include "mozilla/glean/IpcMetrics.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TelemetryIPC.h"
 #include "mozilla/dom/CheckerboardReportService.h"
@@ -320,10 +321,9 @@ mozilla::ipc::IPCResult GPUChild::RecvAddMemoryReport(
 
 void GPUChild::ActorDestroy(ActorDestroyReason aWhy) {
   if (aWhy == AbnormalShutdown || mUnexpectedShutdown) {
-    Telemetry::Accumulate(
-        Telemetry::SUBPROCESS_ABNORMAL_ABORT,
-        nsDependentCString(XRE_GeckoProcessTypeToString(GeckoProcessType_GPU)),
-        1);
+    nsAutoCString processType(
+        XRE_GeckoProcessTypeToString(GeckoProcessType_GPU));
+    glean::subprocess::abnormal_abort.Get(processType).Add(1);
 
     nsAutoString dumpId;
     if (!mCreatedPairedMinidumps) {
@@ -338,6 +338,7 @@ void GPUChild::ActorDestroy(ActorDestroyReason aWhy) {
       RefPtr<nsHashPropertyBag> props = new nsHashPropertyBag();
       props->SetPropertyAsBool(u"abnormal"_ns, true);
       props->SetPropertyAsAString(u"dumpID"_ns, dumpId);
+      props->SetPropertyAsACString(u"processType"_ns, processType);
       obsvc->NotifyObservers((nsIPropertyBag2*)props,
                              "compositor:process-aborted", nullptr);
     }

@@ -283,13 +283,25 @@ FxAccountsWebChannel.prototype = {
         break;
       case COMMAND_LOGIN:
         await this._helpers.login(data);
+        await this._channel.send(
+          { command, messageId: message.messageId, data: { ok: true } },
+          sendingContext
+        );
         break;
       case COMMAND_OAUTH:
         await this._helpers.oauthLogin(data);
+        await this._channel.send(
+          { command, messageId: message.messageId, data: { ok: true } },
+          sendingContext
+        );
         break;
       case COMMAND_LOGOUT:
       case COMMAND_DELETE:
         await this._helpers.logout(data.uid);
+        await this._channel.send(
+          { command, messageId: message.messageId, data: { ok: true } },
+          sendingContext
+        );
         break;
       case COMMAND_CAN_LINK_ACCOUNT:
         {
@@ -337,10 +349,18 @@ FxAccountsWebChannel.prototype = {
         break;
       case COMMAND_SYNC_PREFERENCES:
         this._helpers.openSyncPreferences(browser, data.entryPoint);
+        this._channel.send(
+          { command, messageId: message.messageId, data: { ok: true } },
+          sendingContext
+        );
         break;
       case COMMAND_PAIR_PREFERENCES:
         if (lazy.pairingEnabled) {
           let win = browser.ownerGlobal;
+          this._channel.send(
+            { command, messageId: message.messageId, data: { ok: true } },
+            sendingContext
+          );
           win.openTrustedLinkIn(
             "about:preferences?action=pair#sync",
             "current"
@@ -349,9 +369,17 @@ FxAccountsWebChannel.prototype = {
         break;
       case COMMAND_FIREFOX_VIEW:
         this._helpers.openFirefoxView(browser, data.entryPoint);
+        this._channel.send(
+          { command, messageId: message.messageId, data: { ok: true } },
+          sendingContext
+        );
         break;
       case COMMAND_CHANGE_PASSWORD:
         await this._helpers.changePassword(data);
+        await this._channel.send(
+          { command, messageId: message.messageId, data: { ok: true } },
+          sendingContext
+        );
         break;
       case COMMAND_FXA_STATUS:
         log.debug("fxa_status received");
@@ -393,11 +421,18 @@ FxAccountsWebChannel.prototype = {
           );
         });
         break;
-      default:
-        log.warn("Unrecognized FxAccountsWebChannel command", command);
+      default: {
+        let errorMessage = "Unrecognized FxAccountsWebChannel command";
+        log.warn(errorMessage, command);
+        this._channel.send({
+          command,
+          messageId: message.messageId,
+          data: { error: errorMessage },
+        });
         // As a safety measure we also terminate any pending FxA pairing flow.
         lazy.FxAccountsPairingFlow.finalizeAll();
         break;
+      }
     }
   },
 
@@ -761,11 +796,8 @@ FxAccountsWebChannelHelpers.prototype = {
     // with FxA as part of a Sync flow should work all the time. If
     // Sync is broken in PB mode, users will think Firefox is broken.
     // See https://bugzilla.mozilla.org/show_bug.cgi?id=1323853
-    //
-    // XXX - This hard-coded context seems bad?
     let pb = this.isPrivateBrowsingMode(sendingContext);
-    let ok =
-      !pb || service === "sync" || context === "fx_desktop_v3" || isPairing;
+    let ok = !pb || service === "sync" || isPairing;
     log.debug(
       `fxa status ok=${ok} - private=${pb}, service=${service}, context=${context}, pairing=${isPairing}`
     );
@@ -943,9 +975,9 @@ FxAccountsWebChannelHelpers.prototype = {
    */
   async _getProfileAssociatedWithAcct(acctEmail) {
     let profiles = await this._getAllProfiles();
-    let currentProfile = await this._getCurrentProfileName();
+    let currentProfileName = await this._getCurrentProfileName();
     for (let profile of profiles) {
-      if (profile.name === currentProfile.name) {
+      if (profile.name === currentProfileName) {
         continue; // Skip current profile
       }
 

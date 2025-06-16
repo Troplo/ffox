@@ -23,13 +23,11 @@
 /// "UT" means an arbitrary `UniFfiTag` type.
 use crate::{
     check_remaining, derive_ffi_traits, ffi_converter_rust_buffer_lift_and_lower, metadata,
-    ConvertError, FfiConverter, Lift, LiftArgsError, LiftRef, LiftReturn, Lower, LowerError,
-    LowerReturn, MetadataBuffer, Result, RustBuffer, RustCallError, TypeId,
-    UnexpectedUniFFICallbackError,
+    ConvertError, FfiConverter, Lift, LiftRef, LiftReturn, Lower, LowerError, LowerReturn,
+    MetadataBuffer, Result, RustBuffer, RustCallError, TypeId, UnexpectedUniFFICallbackError,
 };
 use anyhow::bail;
 use bytes::buf::{Buf, BufMut};
-use paste::paste;
 use std::{
     collections::HashMap,
     convert::TryFrom,
@@ -43,44 +41,42 @@ use std::{
 /// Numeric primitives have a straightforward mapping into C-compatible numeric types,
 /// sice they are themselves a C-compatible numeric type!
 macro_rules! impl_ffi_converter_for_num_primitive {
-    ($T:ty, $type_code:expr) => {
-        paste! {
-            unsafe impl<UT> FfiConverter<UT> for $T {
-                type FfiType = $T;
+    ($T:ty, $type_code:expr, $get:ident, $put:ident) => {
+        unsafe impl<UT> FfiConverter<UT> for $T {
+            type FfiType = $T;
 
-                fn lower(obj: $T) -> Self::FfiType {
-                    obj
-                }
-
-                fn try_lift(v: Self::FfiType) -> Result<$T> {
-                    Ok(v)
-                }
-
-                fn write(obj: $T, buf: &mut Vec<u8>) {
-                    buf.[<put_ $T>](obj);
-                }
-
-                fn try_read(buf: &mut &[u8]) -> Result<$T> {
-                    check_remaining(buf, std::mem::size_of::<$T>())?;
-                    Ok(buf.[<get_ $T>]())
-                }
-
-                const TYPE_ID_META: MetadataBuffer = MetadataBuffer::from_code($type_code);
+            fn lower(obj: $T) -> Self::FfiType {
+                obj
             }
+
+            fn try_lift(v: Self::FfiType) -> Result<$T> {
+                Ok(v)
+            }
+
+            fn write(obj: $T, buf: &mut Vec<u8>) {
+                buf.$put(obj);
+            }
+
+            fn try_read(buf: &mut &[u8]) -> Result<$T> {
+                check_remaining(buf, std::mem::size_of::<$T>())?;
+                Ok(buf.$get())
+            }
+
+            const TYPE_ID_META: MetadataBuffer = MetadataBuffer::from_code($type_code);
         }
     };
 }
 
-impl_ffi_converter_for_num_primitive!(u8, metadata::codes::TYPE_U8);
-impl_ffi_converter_for_num_primitive!(i8, metadata::codes::TYPE_I8);
-impl_ffi_converter_for_num_primitive!(u16, metadata::codes::TYPE_U16);
-impl_ffi_converter_for_num_primitive!(i16, metadata::codes::TYPE_I16);
-impl_ffi_converter_for_num_primitive!(u32, metadata::codes::TYPE_U32);
-impl_ffi_converter_for_num_primitive!(i32, metadata::codes::TYPE_I32);
-impl_ffi_converter_for_num_primitive!(u64, metadata::codes::TYPE_U64);
-impl_ffi_converter_for_num_primitive!(i64, metadata::codes::TYPE_I64);
-impl_ffi_converter_for_num_primitive!(f32, metadata::codes::TYPE_F32);
-impl_ffi_converter_for_num_primitive!(f64, metadata::codes::TYPE_F64);
+impl_ffi_converter_for_num_primitive!(u8, metadata::codes::TYPE_U8, get_u8, put_u8);
+impl_ffi_converter_for_num_primitive!(i8, metadata::codes::TYPE_I8, get_i8, put_i8);
+impl_ffi_converter_for_num_primitive!(u16, metadata::codes::TYPE_U16, get_u16, put_u16);
+impl_ffi_converter_for_num_primitive!(i16, metadata::codes::TYPE_I16, get_i16, put_i16);
+impl_ffi_converter_for_num_primitive!(u32, metadata::codes::TYPE_U32, get_u32, put_u32);
+impl_ffi_converter_for_num_primitive!(i32, metadata::codes::TYPE_I32, get_i32, put_i32);
+impl_ffi_converter_for_num_primitive!(u64, metadata::codes::TYPE_U64, get_u64, put_u64);
+impl_ffi_converter_for_num_primitive!(i64, metadata::codes::TYPE_I64, get_i64, put_i64);
+impl_ffi_converter_for_num_primitive!(f32, metadata::codes::TYPE_F32, get_f32, put_f32);
+impl_ffi_converter_for_num_primitive!(f64, metadata::codes::TYPE_F64, get_f64, put_f64);
 
 /// Support for passing boolean values via the FFI.
 ///
@@ -474,6 +470,7 @@ impl<UT> TypeId<UT> for () {
 // Implement LowerReturn/LiftReturn for `Result<R, E>`.  This is where we handle exceptions/Err
 // results.
 
+#[cfg(not(all(target_arch = "wasm32", feature = "wasm-unstable-single-threaded")))]
 unsafe impl<UT, R, E> LowerReturn<UT> for Result<R, E>
 where
     R: LowerReturn<UT>,
@@ -488,13 +485,29 @@ where
         }
     }
 
-    fn handle_failed_lift(error: LiftArgsError) -> Result<Self::ReturnType, RustCallError> {
+    fn handle_failed_lift(error: crate::LiftArgsError) -> Result<Self::ReturnType, RustCallError> {
         match error.error.downcast::<E>() {
             Ok(downcast) => Err(RustCallError::Error(E::lower_error(downcast))),
             Err(e) => {
                 let msg = format!("Failed to convert arg '{}': {e}", error.arg_name);
                 Err(RustCallError::InternalError(msg))
             }
+        }
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "wasm-unstable-single-threaded"))]
+unsafe impl<UT, R, E> LowerReturn<UT> for Result<R, E>
+where
+    R: LowerReturn<UT>,
+    E: LowerError<UT> + Display + Debug + 'static,
+{
+    type ReturnType = R::ReturnType;
+
+    fn lower_return(v: Self) -> Result<Self::ReturnType, RustCallError> {
+        match v {
+            Ok(r) => R::lower_return(r),
+            Err(e) => Err(RustCallError::Error(E::lower_error(e))),
         }
     }
 }

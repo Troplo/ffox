@@ -231,15 +231,6 @@ struct ReflowInput : public SizeComputationInput {
   // This takes on an arbitrary value the first time a block is reflowed
   nscoord mBlockDelta = 0;
 
-  // If a ReflowInput finds itself initialized with an unconstrained
-  // inline-size, it will look up its parentReflowInput chain for a reflow input
-  // with an orthogonal writing mode and a non-NS_UNCONSTRAINEDSIZE value for
-  // orthogonal limit; when it finds such a reflow input, it will use its
-  // orthogonal-limit value to constrain inline-size.
-  // This is initialized to NS_UNCONSTRAINEDSIZE (so it will be ignored),
-  // but reset to a suitable value for the reflow root by PresShell.
-  nscoord mOrthogonalLimit = NS_UNCONSTRAINEDSIZE;
-
   // Physical accessors for the private fields. They are needed for
   // compatibility with not-yet-updated code. New code should use the accessors
   // for logical coordinates, unless the code really works on physical
@@ -457,6 +448,9 @@ struct ReflowInput : public SizeComputationInput {
     // Does frame height depend on an ancestor table-cell?
     bool mHeightDependsOnAncestorCell : 1;
 
+    // Is this the final reflow of an orthogonal table-cell, after row sizing?
+    bool mOrthogonalCellFinalReflow : 1;
+
     // nsColumnSetFrame is balancing columns
     bool mIsColumnBalancing : 1;
 
@@ -539,13 +533,7 @@ struct ReflowInput : public SizeComputationInput {
   // is from the top of the frame tree.
   int16_t mReflowDepth = 0;
 
-  // Logical and physical accessors for the resize flags.
-  bool IsHResize() const {
-    return mWritingMode.IsVertical() ? mFlags.mIsBResize : mFlags.mIsIResize;
-  }
-  bool IsVResize() const {
-    return mWritingMode.IsVertical() ? mFlags.mIsIResize : mFlags.mIsBResize;
-  }
+  // Accessors for the resize flags.
   bool IsIResize() const { return mFlags.mIsIResize; }
   bool IsBResize() const { return mFlags.mIsBResize; }
   bool IsBResizeForWM(WritingMode aWM) const {
@@ -558,20 +546,6 @@ struct ReflowInput : public SizeComputationInput {
     // pessimistic when orthogonal.
     return !aWM.IsOrthogonalTo(mWritingMode) ? mFlags.mIsBResizeForPercentages
                                              : IsIResize();
-  }
-  void SetHResize(bool aValue) {
-    if (mWritingMode.IsVertical()) {
-      mFlags.mIsBResize = aValue;
-    } else {
-      mFlags.mIsIResize = aValue;
-    }
-  }
-  void SetVResize(bool aValue) {
-    if (mWritingMode.IsVertical()) {
-      mFlags.mIsIResize = aValue;
-    } else {
-      mFlags.mIsBResize = aValue;
-    }
   }
   void SetIResize(bool aValue) { mFlags.mIsIResize = aValue; }
   void SetBResize(bool aValue) { mFlags.mIsBResize = aValue; }

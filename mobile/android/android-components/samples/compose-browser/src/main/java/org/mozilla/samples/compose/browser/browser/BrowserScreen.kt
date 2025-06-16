@@ -21,22 +21,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.navigation.NavController
 import mozilla.components.browser.state.helper.Target
+import mozilla.components.compose.base.theme.AcornTheme
 import mozilla.components.compose.browser.awesomebar.AwesomeBar
 import mozilla.components.compose.browser.toolbar.BrowserToolbar
-import mozilla.components.compose.browser.toolbar.concept.Action.ActionButton
-import mozilla.components.compose.browser.toolbar.concept.Action.CustomAction
 import mozilla.components.compose.browser.toolbar.store.BrowserEditToolbarAction
 import mozilla.components.compose.browser.toolbar.store.BrowserToolbarAction
-import mozilla.components.compose.browser.toolbar.store.BrowserToolbarState
 import mozilla.components.compose.browser.toolbar.store.BrowserToolbarStore
-import mozilla.components.compose.browser.toolbar.store.DisplayState
 import mozilla.components.compose.engine.WebContent
-import mozilla.components.compose.tabstray.TabCounterButton
 import mozilla.components.compose.tabstray.TabList
 import mozilla.components.concept.awesomebar.AwesomeBar
 import mozilla.components.feature.awesomebar.provider.ClipboardSuggestionProvider
@@ -48,8 +43,7 @@ import mozilla.components.lib.state.Store
 import mozilla.components.lib.state.ext.composableStore
 import mozilla.components.lib.state.ext.observeAsComposableState
 import mozilla.components.lib.state.ext.observeAsState
-import mozilla.components.ui.icons.R
-import org.mozilla.samples.compose.browser.BrowserComposeActivity.Companion.ROUTE_SETTINGS
+import org.mozilla.samples.compose.browser.browser.BrowserToolbarMiddleware.Companion.Dependencies
 import org.mozilla.samples.compose.browser.components
 
 /**
@@ -59,32 +53,19 @@ import org.mozilla.samples.compose.browser.components
 @Composable
 fun BrowserScreen(navController: NavController) {
     val target = Target.SelectedTab
+    val context = LocalContext.current
 
     val store = composableStore<BrowserScreenState, BrowserScreenAction> { restoredState ->
         BrowserScreenStore(restoredState ?: BrowserScreenState())
     }
     val toolbarStore = remember {
         BrowserToolbarStore(
-            initialState = BrowserToolbarState(
-                displayState = DisplayState(
-                    hint = "Search or enter address",
-                    browserActions = listOf(
-                        CustomAction(
-                            content = {
-                                TabCounterButton(
-                                    store = components().store,
-                                    onClicked = { store.dispatch(BrowserScreenAction.ShowTabs) },
-                                )
-                            },
-                        ),
-                        ActionButton(
-                            icon = R.drawable.mozac_ic_ellipsis_vertical_24,
-                            contentDescription = null,
-                            tint = Color.Black.toArgb(),
-                            onClick = {
-                                navController.navigate(ROUTE_SETTINGS)
-                            },
-                        ),
+            middleware = listOf(
+                BrowserToolbarMiddleware(
+                    initialDependencies = Dependencies(
+                        context = context,
+                        navController = navController,
+                        browserScreenStore = store,
                     ),
                 ),
             ),
@@ -99,53 +80,55 @@ fun BrowserScreen(navController: NavController) {
     BackHandler(enabled = toolbarState.isEditMode()) {
         toolbarStore.dispatch(BrowserToolbarAction.ToggleEditMode(false))
     }
-
-    Box {
-        Column {
-            BrowserToolbar(
-                store = toolbarStore,
-                browserStore = components().store,
-                target = target,
-                onTextCommit = { text ->
-                    toolbarStore.dispatch(BrowserToolbarAction.ToggleEditMode(false))
-                    loadUrl(text)
-                },
-                onTextEdit = { text ->
-                    toolbarStore.dispatch(BrowserEditToolbarAction.UpdateEditText(text))
-                },
-                onDisplayToolbarClick = {
-                    toolbarStore.dispatch(BrowserToolbarAction.ToggleEditMode(true))
-                },
-            )
-
-            Box {
-                WebContent(
-                    components().engine,
-                    components().store,
-                    Target.SelectedTab,
+    AcornTheme {
+        Box {
+            Column {
+                BrowserToolbar(
+                    store = toolbarStore,
+                    browserStore = components().store,
+                    target = target,
+                    onTextCommit = { text ->
+                        toolbarStore.dispatch(BrowserToolbarAction.ToggleEditMode(false))
+                        loadUrl(text)
+                    },
+                    onTextEdit = { text ->
+                        toolbarStore.dispatch(BrowserEditToolbarAction.UpdateEditText(text))
+                    },
                 )
 
-                val url = toolbarState.editState.editText
-                if (toolbarState.isEditMode() && url != null) {
-                    Suggestions(
-                        url,
-                        onSuggestionClicked = { suggestion ->
-                            toolbarStore.dispatch(BrowserToolbarAction.ToggleEditMode(false))
-                            suggestion.onSuggestionClicked?.invoke()
-                        },
-                        onAutoComplete = { suggestion ->
-                            toolbarStore.dispatch(BrowserEditToolbarAction.UpdateEditText(suggestion.editSuggestion!!))
-                        },
+                Box {
+                    WebContent(
+                        components().engine,
+                        components().store,
+                        Target.SelectedTab,
                     )
+
+                    val url = toolbarState.editState.editText
+                    if (toolbarState.isEditMode() && url != null) {
+                        Suggestions(
+                            url,
+                            onSuggestionClicked = { suggestion ->
+                                toolbarStore.dispatch(BrowserToolbarAction.ToggleEditMode(false))
+                                suggestion.onSuggestionClicked?.invoke()
+                            },
+                            onAutoComplete = { suggestion ->
+                                toolbarStore.dispatch(
+                                    BrowserEditToolbarAction.UpdateEditText(
+                                        suggestion.editSuggestion!!,
+                                    ),
+                                )
+                            },
+                        )
+                    }
                 }
             }
-        }
 
-        if (showTabs.value == true) {
-            TabsTray(
-                store = store,
-                toolbarStore = toolbarStore,
-            )
+            if (showTabs.value == true) {
+                TabsTray(
+                    store = store,
+                    toolbarStore = toolbarStore,
+                )
+            }
         }
     }
 }

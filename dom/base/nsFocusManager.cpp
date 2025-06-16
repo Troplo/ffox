@@ -169,8 +169,8 @@ NS_IMPL_CYCLE_COLLECTION_WEAK(nsFocusManager, mActiveWindow,
                               mActiveBrowsingContextInChrome, mFocusedWindow,
                               mFocusedBrowsingContextInContent,
                               mFocusedBrowsingContextInChrome, mFocusedElement,
-                              mFirstBlurEvent, mFirstFocusEvent,
-                              mWindowBeingLowered, mDelayedBlurFocusEvents)
+                              mFirstBlurEvent, mWindowBeingLowered,
+                              mDelayedBlurFocusEvents)
 
 StaticRefPtr<nsFocusManager> nsFocusManager::sInstance;
 bool nsFocusManager::sTestMode = false;
@@ -249,7 +249,6 @@ nsFocusManager::Observe(nsISupports* aSubject, const char* aTopic,
     mFocusedBrowsingContextInChrome = nullptr;
     mFocusedElement = nullptr;
     mFirstBlurEvent = nullptr;
-    mFirstFocusEvent = nullptr;
     mWindowBeingLowered = nullptr;
     mDelayedBlurFocusEvents.Clear();
   }
@@ -2581,6 +2580,9 @@ void nsFocusManager::FixUpFocusAfterFrameLoaderChange(Element& aElement) {
     // If we're remote, activate the frame.
     ActivateRemoteFrameIfNeeded(aElement, GenerateFocusActionId());
   }
+  RefPtr<nsPresContext> presContext = aElement.OwnerDoc()->GetPresContext();
+  IMEStateManager::OnChangeFocus(presContext, &aElement,
+                                 InputContextAction::CAUSE_UNKNOWN);
 }
 
 void nsFocusManager::Focus(
@@ -2594,8 +2596,7 @@ void nsFocusManager::Focus(
     return;
   }
 
-  if (aElement &&
-      (aElement == mFirstFocusEvent || aElement == mFirstBlurEvent)) {
+  if (aElement && aElement == mFirstBlurEvent) {
     return;
   }
 
@@ -2655,12 +2656,6 @@ void nsFocusManager::Focus(
       }
     }
     return;
-  }
-
-  Maybe<AutoRestore<RefPtr<Element>>> ar;
-  if (!mFirstFocusEvent) {
-    ar.emplace(mFirstFocusEvent);
-    mFirstFocusEvent = aElement;
   }
 
   LOGCONTENT("Element %s has been focused", aElement);
@@ -3306,9 +3301,9 @@ void nsFocusManager::GetSelectionLocation(Document* aDocument,
       domSelection->IsCollapsed()) {
     nsIFrame* startFrame = start->GetPrimaryFrame();
     // Yes, indeed we were at the end of the last node
-    nsIFrame* limiter =
+    const Element* const limiter =
         domSelection && domSelection->GetAncestorLimiter()
-            ? domSelection->GetAncestorLimiter()->GetPrimaryFrame()
+            ? domSelection->GetAncestorLimiter()
             : nullptr;
     nsFrameIterator frameIterator(presContext, startFrame,
                                   nsFrameIterator::Type::Leaf,
@@ -4415,8 +4410,10 @@ nsresult nsFocusManager::GetNextTabbableContent(
         }
       }
 
-      if (!aForward) {
-        if (InvokerForPopoverShowingState(currentContent)) {
+      if (!aForward && InvokerForPopoverShowingState(currentContent)) {
+        int32_t tabIndex = frame->IsFocusable().mTabIndex;
+        if (tabIndex >= 0 &&
+            (aIgnoreTabIndex || aCurrentTabIndex == tabIndex)) {
           RefPtr<nsIContent> popover =
               currentContent->GetEffectivePopoverTargetElement();
           nsIContent* contentToFocus = GetNextTabbableContentInScope(
@@ -5555,10 +5552,6 @@ void nsFocusManager::MarkUncollectableForCCGeneration(uint32_t aGeneration) {
   }
   if (sInstance->mFirstBlurEvent) {
     sInstance->mFirstBlurEvent->OwnerDoc()->MarkUncollectableForCCGeneration(
-        aGeneration);
-  }
-  if (sInstance->mFirstFocusEvent) {
-    sInstance->mFirstFocusEvent->OwnerDoc()->MarkUncollectableForCCGeneration(
         aGeneration);
   }
 }

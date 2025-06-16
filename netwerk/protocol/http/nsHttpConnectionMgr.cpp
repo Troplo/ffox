@@ -774,28 +774,6 @@ HttpConnectionBase* nsHttpConnectionMgr::FindCoalescableConnectionByHashKey(
   return nullptr;
 }
 
-static void BuildOriginFrameHashKey(nsACString& newKey,
-                                    nsHttpConnectionInfo* ci,
-                                    const nsACString& host, int32_t port) {
-  newKey.Assign(host);
-  if (ci->GetAnonymous()) {
-    newKey.AppendLiteral("~A:");
-  } else {
-    newKey.AppendLiteral("~.:");
-  }
-  if (ci->GetFallbackConnection()) {
-    newKey.AppendLiteral("~F:");
-  } else {
-    newKey.AppendLiteral("~.:");
-  }
-  newKey.AppendInt(port);
-  newKey.AppendLiteral("/[");
-  nsAutoCString suffix;
-  ci->GetOriginAttributes().CreateSuffix(suffix);
-  newKey.Append(suffix);
-  newKey.AppendLiteral("]viaORIGIN.FRAME");
-}
-
 HttpConnectionBase* nsHttpConnectionMgr::FindCoalescableConnection(
     ConnectionEntry* ent, bool justKidding, bool aNoHttp2, bool aNoHttp3) {
   MOZ_ASSERT(!aNoHttp2 || !aNoHttp3);
@@ -809,13 +787,11 @@ HttpConnectionBase* nsHttpConnectionMgr::FindCoalescableConnection(
     return nullptr;
   }
   // First try and look it up by origin frame
-  nsCString newKey;
-  BuildOriginFrameHashKey(newKey, ci, ci->GetOrigin(), ci->OriginPort());
   HttpConnectionBase* conn = FindCoalescableConnectionByHashKey(
-      ent, newKey, justKidding, aNoHttp2, aNoHttp3);
+      ent, ent->OriginFrameHashKey(), justKidding, aNoHttp2, aNoHttp3);
   if (conn) {
     LOG(("FindCoalescableConnection(%s) match conn %p on frame key %s\n",
-         ci->HashKey().get(), conn, newKey.get()));
+         ci->HashKey().get(), conn, ent->OriginFrameHashKey().get()));
     return conn;
   }
 
@@ -1046,9 +1022,11 @@ bool nsHttpConnectionMgr::DispatchPendingQ(
     bool alreadyDnsAndConnectSocketOrWaitingForTLS =
         pendingTransInfo->IsAlreadyClaimedInitializingConn();
 
+    // The transaction could be closed after calling TryDispatchTransaction
     rv = TryDispatchTransaction(ent, alreadyDnsAndConnectSocketOrWaitingForTLS,
                                 pendingTransInfo);
-    if (NS_SUCCEEDED(rv) || (rv != NS_ERROR_NOT_AVAILABLE)) {
+    if (NS_SUCCEEDED(rv) || (rv != NS_ERROR_NOT_AVAILABLE) ||
+        pendingTransInfo->Transaction()->Closed()) {
       if (NS_SUCCEEDED(rv)) {
         LOG(("  dispatching pending transaction...\n"));
       } else {
@@ -1100,7 +1078,7 @@ void nsHttpConnectionMgr::PreparePendingQForDispatching(
   }
 
   // Only have to get transactions from the queue whose window id is 0.
-  if (!gHttpHandler->ActiveTabPriority()) {
+  if (!StaticPrefs::network_http_active_tab_priority()) {
     ent->AppendPendingQForFocusedWindow(0, pendingQ, availableConnections);
     return;
   }
@@ -1450,8 +1428,14 @@ nsresult nsHttpConnectionMgr::TryDispatchTransaction(
           // No limit for number of websockets, dispatch transaction to the
           // tunnel
           RefPtr<nsHttpConnection> connToTunnel;
-          connTCP->CreateTunnelStream(trans, getter_AddRefs(connToTunnel),
-                                      true);
+          nsresult rv = connTCP->CreateTunnelStream(
+              trans, getter_AddRefs(connToTunnel), true);
+          if (rv == NS_ERROR_WEBTRANSPORT_SESSION_LIMIT_EXCEEDED) {
+            LOG(
+                ("TryingDispatchTransaction: WebTransport session limit "
+                 "exceeded"));
+            return rv;
+          }
           ent->InsertIntoExtendedCONNECTConns(connToTunnel);
           trans->SetConnection(nullptr);
           connToTunnel
@@ -1459,7 +1443,7 @@ nsresult nsHttpConnectionMgr::TryDispatchTransaction(
           if (trans->IsWebsocketUpgrade()) {
             trans->SetIsHttp2Websocket(true);
           }
-          nsresult rv = DispatchTransaction(ent, trans, connToTunnel);
+          rv = DispatchTransaction(ent, trans, connToTunnel);
           // need to undo NonSticky bypass for transaction reset to continue
           // for correct websocket upgrade handling
           trans->MakeSticky();
@@ -1800,20 +1784,6 @@ nsresult nsHttpConnectionMgr::ProcessNewTransaction(nsHttpTransaction* trans) {
                   MarkerThreadId::MainThread(), UrlMarker, trans->GetUrl(),
                   TimeDuration::Zero(), trans->ChannelId());
 
-  RefPtr<Http2PushedStreamWrapper> pushedStreamWrapper =
-      trans->GetPushedStream();
-  if (pushedStreamWrapper) {
-    Http2PushedStream* pushedStream = pushedStreamWrapper->GetStream();
-    if (pushedStream) {
-      RefPtr<Http2Session> session = pushedStream->Session();
-      LOG(("  ProcessNewTransaction %p tied to h2 session push %p\n", trans,
-           session.get()));
-      return session->AddStream(trans, trans->Priority(), nullptr)
-                 ? NS_OK
-                 : NS_ERROR_UNEXPECTED;
-    }
-  }
-
   nsresult rv = NS_OK;
   nsHttpConnectionInfo* ci = trans->ConnectionInfo();
   MOZ_ASSERT(ci);
@@ -1826,7 +1796,7 @@ nsresult nsHttpConnectionMgr::ProcessNewTransaction(nsHttpTransaction* trans) {
       trans->Caps() & NS_HTTP_DISALLOW_HTTP3, &isWildcard);
   MOZ_ASSERT(ent);
 
-  if (gHttpHandler->EchConfigEnabled(ci->IsHttp3())) {
+  if (nsHttpHandler::EchConfigEnabled(ci->IsHttp3())) {
     ent->MaybeUpdateEchConfig(ci);
   }
 
@@ -3359,7 +3329,7 @@ void nsHttpConnectionMgr::OnMsgUpdateCurrentBrowserId(int32_t aLoading,
   uint64_t previousId = mCurrentBrowserId;
   mCurrentBrowserId = id;
 
-  if (gHttpHandler->ActiveTabPriority()) {
+  if (StaticPrefs::network_http_active_tab_priority()) {
     NotifyConnectionOfBrowserIdChange(previousId);
   }
 
@@ -3513,7 +3483,7 @@ void nsHttpConnectionMgr::DoSpeculativeConnection(
       aTrans->ConnectionInfo(), false, aTrans->Caps() & NS_HTTP_DISALLOW_SPDY,
       aTrans->Caps() & NS_HTTP_DISALLOW_HTTP3, &isWildcard);
   if (!aFetchHTTPSRR &&
-      gHttpHandler->EchConfigEnabled(aTrans->ConnectionInfo()->IsHttp3())) {
+      nsHttpHandler::EchConfigEnabled(aTrans->ConnectionInfo()->IsHttp3())) {
     // This happens when this is called from
     // SpeculativeTransaction::OnHTTPSRRAvailable. We have to update this
     // entry's echConfig so that the newly created connection can use the latest
@@ -3655,8 +3625,8 @@ void nsHttpConnectionMgr::RegisterOriginCoalescingKey(HttpConnectionBase* conn,
     return;
   }
 
-  nsCString newKey;
-  BuildOriginFrameHashKey(newKey, ci, host, port);
+  nsAutoCString newKey;
+  nsHttpConnectionInfo::BuildOriginFrameHashKey(newKey, ci, host, port);
   mCoalescingHash.GetOrInsertNew(newKey, 1)->AppendElement(
       do_GetWeakReference(static_cast<nsISupportsWeakReference*>(conn)));
 
@@ -3672,6 +3642,18 @@ bool nsHttpConnectionMgr::GetConnectionData(nsTArray<HttpRetParams>* aArg) {
       continue;
     }
     aArg->AppendElement(ent->GetConnectionData());
+  }
+
+  return true;
+}
+
+bool nsHttpConnectionMgr::GetHttp3ConnectionStatsData(
+    nsTArray<Http3ConnectionStatsParams>* aArg) {
+  for (const RefPtr<ConnectionEntry>& ent : mCT.Values()) {
+    if (ent->mConnInfo->GetPrivate()) {
+      continue;
+    }
+    aArg->AppendElement(ent->GetHttp3ConnectionStatsData());
   }
 
   return true;

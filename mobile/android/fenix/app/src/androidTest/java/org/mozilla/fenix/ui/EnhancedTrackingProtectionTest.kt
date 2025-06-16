@@ -8,7 +8,6 @@ import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.core.net.toUri
 import androidx.test.espresso.Espresso.pressBack
 import mozilla.components.concept.engine.utils.EngineReleaseChannel
-import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.customannotations.SmokeTest
@@ -17,12 +16,14 @@ import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.TestAssetHelper.getEnhancedTrackingProtectionAsset
 import org.mozilla.fenix.helpers.TestAssetHelper.getGenericAsset
+import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeLong
 import org.mozilla.fenix.helpers.TestHelper.appContext
 import org.mozilla.fenix.helpers.TestHelper.exitMenu
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.restartApp
 import org.mozilla.fenix.helpers.TestHelper.scrollToElementByText
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.browserScreen
 import org.mozilla.fenix.ui.robots.enhancedTrackingProtection
 import org.mozilla.fenix.ui.robots.homeScreen
@@ -47,6 +48,9 @@ class EnhancedTrackingProtectionTest : TestSetup() {
         AndroidComposeTestRule(
             HomeActivityIntentTestRule.withDefaultSettingsOverrides(),
         ) { it.activity }
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/416046
     @Test
@@ -81,6 +85,7 @@ class EnhancedTrackingProtectionTest : TestSetup() {
             openExceptionsLearnMoreLink()
         }
         browserScreen {
+            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
             verifyETPLearnMoreURL()
         }
     }
@@ -188,7 +193,6 @@ class EnhancedTrackingProtectionTest : TestSetup() {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/339713
     // Tests removing TP exceptions individually or all at once
-    @Ignore("Failing, see: https://bugzilla.mozilla.org/show_bug.cgi?id=1865781")
     @Test
     fun clearWebsitesFromTPExceptionListTest() {
         val firstPage = getGenericAsset(mockWebServer, 1)
@@ -461,7 +465,7 @@ class EnhancedTrackingProtectionTest : TestSetup() {
             verifyTrackingProtectionWebContent("analytics not blocked")
             verifyTrackingProtectionWebContent("Fingerprinting blocked")
             verifyTrackingProtectionWebContent("Cryptomining blocked")
-        }.goToHomescreen {
+        }.goToHomescreen(activityTestRule) {
         }.togglePrivateBrowsingMode()
         navigationToolbar {
         }.enterURLAndEnterToBrowser(trackingPage.url) {
@@ -498,8 +502,8 @@ class EnhancedTrackingProtectionTest : TestSetup() {
         // With Standard TrackingProtection settings
         val genericWebPage = getGenericAsset(mockWebServer, 1)
         val testPage = mockWebServer.url("pages/cross-site-cookies.html").toString().toUri()
-        val originSite = "https://mozilla-mobile.github.io"
-        val currentSite = "http://localhost:${mockWebServer.port}"
+        val originHost = "mozilla-mobile.github.io"
+        val currentHost = "localhost"
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(genericWebPage.url) {
@@ -508,7 +512,7 @@ class EnhancedTrackingProtectionTest : TestSetup() {
         }.enterURLAndEnterToBrowser(testPage) {
             waitForPageToLoad()
         }.clickRequestStorageAccessButton {
-            verifyCrossOriginCookiesPermissionPrompt(originSite, currentSite)
+            verifyCrossOriginCookiesPermissionPrompt(originHost, currentHost)
         }.clickPagePermissionButton(allow = false) {
             verifyPageContent("access denied")
         }
@@ -521,8 +525,8 @@ class EnhancedTrackingProtectionTest : TestSetup() {
         // With Standard TrackingProtection settings
         val genericWebPage = getGenericAsset(mockWebServer, 1)
         val testPage = mockWebServer.url("pages/cross-site-cookies.html").toString().toUri()
-        val originSite = "https://mozilla-mobile.github.io"
-        val currentSite = "http://localhost:${mockWebServer.port}"
+        val originHost = "mozilla-mobile.github.io"
+        val currentHost = "localhost"
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(genericWebPage.url) {
@@ -531,7 +535,7 @@ class EnhancedTrackingProtectionTest : TestSetup() {
         }.enterURLAndEnterToBrowser(testPage) {
             waitForPageToLoad()
         }.clickRequestStorageAccessButton {
-            verifyCrossOriginCookiesPermissionPrompt(originSite, currentSite)
+            verifyCrossOriginCookiesPermissionPrompt(originHost, currentHost)
         }.clickPagePermissionButton(allow = true) {
             verifyPageContent("access granted")
         }

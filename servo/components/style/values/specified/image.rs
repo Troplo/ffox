@@ -10,7 +10,7 @@
 use crate::color::mix::ColorInterpolationMethod;
 use crate::parser::{Parse, ParserContext};
 use crate::stylesheets::CorsMode;
-use crate::values::generics::color::ColorMixFlags;
+use crate::values::generics::color::{ColorMixFlags, GenericLightDark};
 use crate::values::generics::image::{
     self as generic, Circle, Ellipse, GradientCompatMode, ShapeExtent,
 };
@@ -43,7 +43,10 @@ fn gradient_color_interpolation_method_enabled() -> bool {
 pub type Image = generic::Image<Gradient, SpecifiedUrl, Color, Percentage, Resolution>;
 
 // Images should remain small, see https://github.com/servo/servo/pull/18430
+#[cfg(feature = "gecko")]
 size_of_test!(Image, 16);
+#[cfg(feature = "servo")]
+size_of_test!(Image, 40);
 
 /// Specified values for a CSS gradient.
 /// <https://drafts.csswg.org/css-images/#gradients>
@@ -110,6 +113,10 @@ fn default_color_interpolation_method<T>(
     }
 }
 
+fn image_light_dark_enabled(context: &ParserContext) -> bool {
+    context.chrome_rules_enabled() || static_prefs::pref!("layout.css.light-dark.images.enabled")
+}
+
 #[cfg(feature = "gecko")]
 fn cross_fade_enabled() -> bool {
     static_prefs::pref!("layout.css.cross-fade.enabled")
@@ -119,7 +126,6 @@ fn cross_fade_enabled() -> bool {
 fn cross_fade_enabled() -> bool {
     false
 }
-
 
 impl SpecifiedValueInfo for Gradient {
     const SUPPORTED_TYPES: u8 = CssType::GRADIENT;
@@ -215,8 +221,8 @@ impl Image {
             return Ok(generic::Image::None);
         }
 
-        if let Ok(url) = input
-            .try_parse(|input| SpecifiedUrl::parse_with_cors_mode(context, input, cors_mode))
+        if let Ok(url) =
+            input.try_parse(|input| SpecifiedUrl::parse_with_cors_mode(context, input, cors_mode))
         {
             return Ok(generic::Image::Url(url));
         }
@@ -238,16 +244,18 @@ impl Image {
         }
 
         let function = input.expect_function()?.clone();
-        input.parse_nested_block(|input| {
-            Ok(match_ignore_ascii_case! { &function,
-                #[cfg(feature = "servo")]
-                "paint" => Self::PaintWorklet(PaintWorklet::parse_args(context, input)?),
-                "cross-fade" if cross_fade_enabled() => Self::CrossFade(Box::new(CrossFade::parse_args(context, input, cors_mode, flags)?)),
-                #[cfg(feature = "gecko")]
-                "-moz-element" => Self::Element(Self::parse_element(input)?),
-                _ => return Err(input.new_custom_error(StyleParseErrorKind::UnexpectedFunction(function))),
-            })
-        })
+        input.parse_nested_block(|input| Ok(match_ignore_ascii_case! { &function,
+            #[cfg(feature = "servo")]
+            "paint" => Self::PaintWorklet(PaintWorklet::parse_args(context, input)?),
+            "cross-fade" if cross_fade_enabled() => Self::CrossFade(Box::new(CrossFade::parse_args(context, input, cors_mode, flags)?)),
+            "light-dark" if image_light_dark_enabled(context) => Self::LightDark(Box::new(GenericLightDark::parse_args_with(input, |input| {
+                Self::parse_with_cors_mode(context, input, cors_mode, flags)
+            })?)),
+            #[cfg(feature = "gecko")]
+            "-moz-element" => Self::Element(Self::parse_element(input)?),
+            "-moz-symbolic-icon" if context.chrome_rules_enabled() => Self::MozSymbolicIcon(input.expect_ident()?.as_ref().into()),
+            _ => return Err(input.new_custom_error(StyleParseErrorKind::UnexpectedFunction(function))),
+        }))
     }
 }
 
@@ -1274,13 +1282,14 @@ impl<T> generic::ColorStop<Color, T> {
 
 impl PaintWorklet {
     #[cfg(feature = "servo")]
-    fn parse_args<'i>(input: &mut Parser<'i, '_>) -> Result<Self, ParseError<'i>> {
+    fn parse_args<'i>(context: &ParserContext, input: &mut Parser<'i, '_>) -> Result<Self, ParseError<'i>> {
+        use servo_arc::Arc;
         use crate::custom_properties::SpecifiedValue;
         let name = Atom::from(&**input.expect_ident()?);
         let arguments = input
             .try_parse(|input| {
                 input.expect_comma()?;
-                input.parse_comma_separated(SpecifiedValue::parse)
+                input.parse_comma_separated(|input| SpecifiedValue::parse(input, &context.url_data).map(Arc::new))
             })
             .unwrap_or_default();
         Ok(Self { name, arguments })

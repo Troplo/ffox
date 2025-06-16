@@ -346,12 +346,9 @@ mozilla::ipc::IPCResult SocketProcessChild::RecvSetConnectivity(
 mozilla::ipc::IPCResult SocketProcessChild::RecvInitLinuxSandbox(
     const Maybe<ipc::FileDescriptor>& aBrokerFd) {
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX)
-  int fd = -1;
-  if (aBrokerFd.isSome()) {
-    fd = aBrokerFd.value().ClonePlatformHandle().release();
-  }
   RegisterProfilerObserversForSandboxProfiler();
-  SetSocketProcessSandbox(fd);
+  SetSocketProcessSandbox(
+      SocketProcessSandboxParams::ForThisProcess(aBrokerFd));
 #endif  // XP_LINUX && MOZ_SANDBOX
   return IPC_OK();
 }
@@ -697,6 +694,31 @@ mozilla::ipc::IPCResult SocketProcessChild::RecvGetHttpConnectionData(
           [resolver{std::move(resolver)}]() {
             nsTArray<HttpRetParams> data;
             HttpInfo::GetHttpConnectionData(&data);
+            resolver->OnResolve(std::move(data));
+          }),
+      NS_DISPATCH_NORMAL);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult SocketProcessChild::RecvGetHttp3ConnectionStatsData(
+    GetHttp3ConnectionStatsDataResolver&& aResolve) {
+  if (!gSocketTransportService) {
+    aResolve(nsTArray<Http3ConnectionStatsParams>());
+    return IPC_OK();
+  }
+
+  RefPtr<DataResolver<nsTArray<Http3ConnectionStatsParams>,
+                      SocketProcessChild::GetHttp3ConnectionStatsDataResolver>>
+      resolver = new DataResolver<
+          nsTArray<Http3ConnectionStatsParams>,
+          SocketProcessChild::GetHttp3ConnectionStatsDataResolver>(
+          std::move(aResolve));
+  gSocketTransportService->Dispatch(
+      NS_NewRunnableFunction(
+          "net::SocketProcessChild::RecvGetHttpConnectionStatsData",
+          [resolver{std::move(resolver)}]() {
+            nsTArray<Http3ConnectionStatsParams> data;
+            HttpInfo::GetHttp3ConnectionStatsData(&data);
             resolver->OnResolve(std::move(data));
           }),
       NS_DISPATCH_NORMAL);

@@ -5,7 +5,6 @@
 package org.mozilla.fenix.debugsettings.ui
 
 import android.content.Intent
-import android.net.Uri
 import android.os.StrictMode
 import android.widget.Toast
 import androidx.compose.runtime.Composable
@@ -13,13 +12,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.core.net.toUri
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.createTab
 import mozilla.components.browser.state.store.BrowserStore
-import mozilla.components.compose.base.annotation.LightDarkPreview
 import mozilla.components.concept.storage.CreditCardsAddressesStorage
 import mozilla.components.concept.storage.LoginsStorage
 import mozilla.components.lib.state.ext.observeAsState
@@ -90,7 +90,7 @@ fun FenixOverlay(
                     clipboardHandler = context.components.clipboardHandler,
                     openDebugView = { debugViewLink ->
                         val intent = Intent(Intent.ACTION_VIEW)
-                        intent.data = Uri.parse(debugViewLink)
+                        intent.data = debugViewLink.toUri()
                         context.startActivity(intent)
                     },
                     showToast = { pingType ->
@@ -187,7 +187,7 @@ private fun FenixOverlay(
     }
 }
 
-@LightDarkPreview
+@PreviewLightDark
 @Composable
 private fun FenixOverlayPreview() {
     val selectedTab = createTab("https://mozilla.org")
@@ -200,6 +200,12 @@ private fun FenixOverlayPreview() {
             initialState = GleanDebugToolsState(
                 logPingsToConsoleEnabled = false,
                 debugViewTag = "",
+                pingTypes = listOf(
+                    "metrics",
+                    "baseline",
+                    "ping type 3",
+                    "ping type 4",
+                ),
             ),
         ),
         inactiveTabsEnabled = true,

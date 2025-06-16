@@ -9,8 +9,15 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.AtomicFile
 import android.util.Base64
+import androidx.core.net.toUri
+import mozilla.appservices.search.SearchEngineClassification
+import mozilla.appservices.search.SearchEngineDefinition
+import mozilla.appservices.search.SearchUrlParam
+import mozilla.components.browser.icons.decoder.ICOIconDecoder
+import mozilla.components.browser.icons.decoder.SvgIconDecoder
 import mozilla.components.browser.state.search.SearchEngine
 import mozilla.components.feature.search.middleware.SearchExtraParams
+import mozilla.components.support.images.DesiredSize
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserException
 import org.xmlpull.v1.XmlPullParserFactory
@@ -25,6 +32,8 @@ internal const val URL_TYPE_SEARCH_HTML = "text/html"
 internal const val URL_REL_MOBILE = "mobile"
 internal const val IMAGE_URI_PREFIX = "data:image/png;base64,"
 internal const val GOOGLE_ID = "google"
+private const val TARGET_SIZE = 32
+private const val MAX_SIZE = 32
 
 // List of general search engine ids, taken from
 // https://searchfox.org/mozilla-central/rev/ef0aa879e94534ffd067a3748d034540a9fc10b0/toolkit/components/search/SearchUtils.sys.mjs#200
@@ -61,6 +70,7 @@ internal class SearchEngineReader(
         var name: String? = null
         var icon: Bitmap? = null
         var inputEncoding: String? = null
+        var isGeneral: Boolean = false
 
         fun toSearchEngine() = SearchEngine(
             id = identifier,
@@ -71,7 +81,7 @@ internal class SearchEngineReader(
             suggestUrl = suggestUrl,
             trendingUrl = trendingUrl,
             inputEncoding = inputEncoding,
-            isGeneral = isGeneralSearchEngine(identifier, type),
+            isGeneral = isGeneralSearchEngine(identifier, type), // Will be replaced with builder.isGeneral
         )
 
         /**
@@ -173,7 +183,7 @@ internal class SearchEngineReader(
 
     @Throws(XmlPullParserException::class, IOException::class)
     private fun readUri(parser: XmlPullParser, template: String): Uri {
-        var uri = Uri.parse(template)
+        var uri = template.toUri()
 
         while (parser.next() != XmlPullParser.END_TAG) {
             if (parser.eventType != XmlPullParser.START_TAG) {
@@ -243,6 +253,137 @@ internal class SearchEngineReader(
         if (parser.next() == XmlPullParser.TEXT) {
             builder.inputEncoding = parser.text
             parser.nextTag()
+        }
+    }
+
+    /**
+     * Loads a <code>SearchEngine</code> from the given <code>stream</code> and assigns it the given
+     * <code>identifier</code>.
+     */
+    @Throws(IllegalArgumentException::class)
+    fun loadStreamAPI(
+        engineDefinition: SearchEngineDefinition,
+        attachmentModel: ByteArray?,
+        mimetype: String,
+        defaultIcon: Bitmap,
+    ): SearchEngine {
+        require(engineDefinition.name.isNotBlank()) { "Search engine name cannot be empty" }
+        require(engineDefinition.charset.isNotBlank()) { "Search engine charset cannot be empty" }
+        require(engineDefinition.identifier.isNotBlank()) { "Search engine identifier cannot be empty" }
+        val builder = SearchEngineBuilder(type, engineDefinition.identifier)
+        builder.name = engineDefinition.name
+        builder.inputEncoding = engineDefinition.charset
+        builder.isGeneral = engineDefinition.classification == SearchEngineClassification.GENERAL
+        readUrlAPI(engineDefinition, builder)
+        readImageAPI(attachmentModel, mimetype, builder, defaultIcon)
+
+        return builder.toSearchEngine()
+    }
+
+    @Throws(IllegalArgumentException::class)
+    private fun readUrlAPI(engineDefinition: SearchEngineDefinition, builder: SearchEngineBuilder) {
+        requireNotNull(engineDefinition.urls.search) { "Search engine URL cannot be empty" }
+        builder.resultsUrls.add(
+            buildUrlWithParams(
+                searchTermParamName = engineDefinition.urls.search.searchTermParamName,
+                params = engineDefinition.urls.search.params,
+                template = engineDefinition.urls.search.base,
+                partnerCode = engineDefinition.partnerCode,
+                builderName = builder.name,
+            ),
+        )
+        engineDefinition.urls.suggestions?.let { suggestions ->
+            builder.suggestUrl = buildUrlWithParams(
+                searchTermParamName = suggestions.searchTermParamName,
+                params = suggestions.params,
+                template = suggestions.base,
+                partnerCode = engineDefinition.partnerCode,
+                builderName = builder.name,
+            )
+        }
+        engineDefinition.urls.trending?.let { trending ->
+            builder.trendingUrl = buildUrlWithParams(
+                searchTermParamName = trending.searchTermParamName,
+                params = trending.params,
+                template = trending.base,
+                partnerCode = engineDefinition.partnerCode,
+                builderName = builder.name,
+            )
+        }
+    }
+
+    private fun buildUrlWithParams(
+        searchTermParamName: String?,
+        params: List<SearchUrlParam>,
+        template: String,
+        partnerCode: String?,
+        builderName: String?,
+    ): String {
+        return buildString {
+            val newParams = params.toMutableList()
+            if (searchTermParamName != null && !template.contains("{searchTerms}")) {
+                newParams.add(
+                    SearchUrlParam(
+                        searchTermParamName,
+                        "{searchTerms}",
+                        null,
+                        null,
+                    ),
+                )
+            }
+            append(readUriAPI(newParams, template, partnerCode))
+            searchExtraParams?.let {
+                with(it) {
+                    if (builderName == searchEngineName) {
+                        featureEnablerParam?.let { append("&$featureEnablerName=$it") }
+                        append("&$channelIdName=$channelIdParam")
+                    }
+                }
+            }
+        }
+    }
+
+    @Throws(IllegalArgumentException::class)
+    private fun readUriAPI(params: List<SearchUrlParam>, template: String, partnerCode: String?): Uri {
+        require(template.isNotBlank()) { "URI cannot be blank" }
+        val uriBuilder = template.toUri().buildUpon()
+        for (param in params) {
+            if (param.value == "{partnerCode}") {
+                uriBuilder.appendQueryParameter(param.name, partnerCode)
+            } else if (param.value != null) {
+                uriBuilder.appendQueryParameter(param.name, param.value)
+            }
+        }
+        return uriBuilder.build()
+    }
+
+    @SuppressWarnings("TooGenericExceptionCaught")
+    private fun readImageAPI(
+        attachmentModel: ByteArray?,
+        mimetype: String,
+        builder: SearchEngineBuilder,
+        defaultIcon: Bitmap,
+    ) {
+        if (attachmentModel == null) {
+            builder.icon = defaultIcon
+            return
+        }
+
+        builder.icon = when (mimetype) {
+            "image/svg+xml" -> SvgIconDecoder().decode(
+                attachmentModel,
+                DesiredSize(TARGET_SIZE, TARGET_SIZE, MAX_SIZE, 2.0f),
+            ) ?: defaultIcon
+            "image/x-icon" -> ICOIconDecoder().decode(
+                attachmentModel,
+                DesiredSize(TARGET_SIZE, TARGET_SIZE, MAX_SIZE, 2.0f),
+            ) ?: defaultIcon
+            "image/jpeg", "image/png" -> BitmapFactory.decodeByteArray(
+                attachmentModel,
+                0,
+                attachmentModel.size,
+            ) ?: defaultIcon
+            else -> defaultIcon
         }
     }
 }

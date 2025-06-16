@@ -483,6 +483,12 @@ nsresult nsHostResolver::ResolveHost(const nsACString& aHost,
   PROFILER_MARKER("nsHostResolver::ResolveHost", NETWORK, {},
                   HostResolverMarker, host, originSuffix, type, flags);
 
+  // When this pref is set, we always set the flag, to make sure consumers
+  // that forget to set the flag don't end up being a cache miss.
+  if (StaticPrefs::network_dns_always_ai_canonname()) {
+    flags |= nsIDNSService::RESOLVE_CANONICAL_NAME;
+  }
+
   // ensure that we are working with a valid hostname before proceeding.  see
   // bug 304904 for details.
   if (!net_IsValidDNSHost(host)) {
@@ -697,21 +703,16 @@ already_AddRefed<nsHostRecord> nsHostResolver::FromCache(
 
   // put reference to host record on stack...
   RefPtr<nsHostRecord> result = aRec;
-  if (IS_ADDR_TYPE(aType)) {
-    glean::dns::lookup_method.AccumulateSingleSample(METHOD_HIT);
-  }
 
-  // For entries that are in the grace period
-  // or all cached negative entries, use the cache but start a new
-  // lookup in the background
+  // For cached entries that are in the grace period or negative, use the cache
+  // but start a new lookup in the background.
+  //
+  // Also records telemetry for type of cache hit (HIT/NEGATIVE_HIT/RENEWAL).
   ConditionallyRefreshRecord(aRec, aHost, aLock);
 
   if (aRec->negative) {
     LOG(("  Negative cache entry for host [%s].\n",
          nsPromiseFlatCString(aHost).get()));
-    if (IS_ADDR_TYPE(aType)) {
-      glean::dns::lookup_method.AccumulateSingleSample(METHOD_NEGATIVE_HIT);
-    }
     aStatus = NS_ERROR_UNKNOWN_HOST;
   }
 
@@ -805,7 +806,6 @@ already_AddRefed<nsHostRecord> nsHostResolver::FromUnspecEntry(
         if (aRec->negative) {
           aStatus = NS_ERROR_UNKNOWN_HOST;
         }
-        glean::dns::lookup_method.AccumulateSingleSample(METHOD_HIT);
         ConditionallyRefreshRecord(aRec, aHost, lock);
       } else if (af == PR_AF_INET6) {
         // For AF_INET6, a new lookup means another AF_UNSPEC
@@ -819,6 +819,8 @@ already_AddRefed<nsHostRecord> nsHostResolver::FromUnspecEntry(
         result = aRec;
         aRec->negative = true;
         aStatus = NS_ERROR_UNKNOWN_HOST;
+        // this record has just been marked as negative so we record the
+        // telemetry for it.
         glean::dns::lookup_method.AccumulateSingleSample(METHOD_NEGATIVE_HIT);
       }
     }
@@ -1216,19 +1218,31 @@ nsresult nsHostResolver::NameLookup(nsHostRecord* rec,
 
 nsresult nsHostResolver::ConditionallyRefreshRecord(
     nsHostRecord* rec, const nsACString& host, const MutexAutoLock& aLock) {
-  if ((rec->CheckExpiration(TimeStamp::NowLoRes()) != nsHostRecord::EXP_VALID ||
+  if ((rec->CheckExpiration(TimeStamp::NowLoRes()) == nsHostRecord::EXP_GRACE ||
        rec->negative) &&
       !rec->mResolving && rec->RefreshForNegativeResponse()) {
     LOG(("  Using %s cache entry for host [%s] but starting async renewal.",
          rec->negative ? "negative" : "positive", host.BeginReading()));
     NameLookup(rec, aLock);
 
-    if (rec->IsAddrRecord() && !rec->negative) {
-      // negative entries are constantly being refreshed, only
-      // track positive grace period induced renewals
-      glean::dns::lookup_method.AccumulateSingleSample(METHOD_RENEWAL);
+    if (rec->IsAddrRecord()) {
+      if (!rec->negative) {
+        glean::dns::lookup_method.AccumulateSingleSample(METHOD_RENEWAL);
+      } else {
+        glean::dns::lookup_method.AccumulateSingleSample(METHOD_NEGATIVE_HIT);
+      }
+    }
+  } else if (rec->IsAddrRecord()) {
+    // it could be that the record is negative, but we haven't entered the above
+    // if condition due to the second expression being false. In that case we
+    // need to record the telemetry for the negative record here.
+    if (!rec->negative) {
+      glean::dns::lookup_method.AccumulateSingleSample(METHOD_HIT);
+    } else {
+      glean::dns::lookup_method.AccumulateSingleSample(METHOD_NEGATIVE_HIT);
     }
   }
+
   return NS_OK;
 }
 
@@ -1561,7 +1575,14 @@ nsHostResolver::LookupStatus nsHostResolver::CompleteLookupLocked(
   if (!mShutdown) {
     MutexAutoLock lock(addrRec->addr_info_lock);
     RefPtr<AddrInfo> old_addr_info;
-    if (different_rrset(addrRec->addr_info, newRRSet)) {
+    bool isDifferentRRSet = different_rrset(addrRec->addr_info, newRRSet);
+    bool isRenewal = addrRec->addr_info;
+    if (isRenewal) {
+      glean::dns::grace_period_renewal
+          .Get(isDifferentRRSet ? "different_record"_ns : "same_record"_ns)
+          .Add(1);
+    }
+    if (isDifferentRRSet) {
       LOG(("nsHostResolver record %p new gencnt\n", addrRec.get()));
       old_addr_info = addrRec->addr_info;
       addrRec->addr_info = std::move(newRRSet);

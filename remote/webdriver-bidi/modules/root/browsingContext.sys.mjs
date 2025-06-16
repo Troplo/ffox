@@ -31,6 +31,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   ProgressListener: "chrome://remote/content/shared/Navigate.sys.mjs",
   PromptListener:
     "chrome://remote/content/shared/listeners/PromptListener.sys.mjs",
+  SessionDataMethod:
+    "chrome://remote/content/shared/messagehandler/sessiondata/SessionData.sys.mjs",
   setDefaultAndAssertSerializationOptions:
     "chrome://remote/content/webdriver-bidi/RemoteValue.sys.mjs",
   TabManager: "chrome://remote/content/shared/TabManager.sys.mjs",
@@ -156,6 +158,20 @@ const WaitCondition = {
   Complete: "complete",
 };
 
+/**
+ * Used as an argument for browsingContext._updateNavigableViewport command
+ * to represent an object which holds viewport settings which should be applied.
+ *
+ * @typedef ViewportOverride
+ *
+ * @property {number|null} devicePixelRatio
+ *     A value to override device pixel ratio, or `null` to reset it to
+ *     the original value.
+ * @property {Viewport|null} viewport
+ *     Dimensions to set the viewport to, or `null` to reset it
+ *     to the original dimensions.
+ */
+
 class BrowsingContextModule extends RootBiDiModule {
   #contextListener;
   #navigationListener;
@@ -181,6 +197,10 @@ class BrowsingContextModule extends RootBiDiModule {
     this.#navigationListener.on(
       "fragment-navigated",
       this.#onFragmentNavigated
+    );
+    this.#navigationListener.on(
+      "navigation-committed",
+      this.#onNavigationCommitted
     );
     this.#navigationListener.on("navigation-failed", this.#onNavigationFailed);
     this.#navigationListener.on(
@@ -208,6 +228,10 @@ class BrowsingContextModule extends RootBiDiModule {
     this.#navigationListener.off(
       "fragment-navigated",
       this.#onFragmentNavigated
+    );
+    this.#navigationListener.off(
+      "navigation-committed",
+      this.#onNavigationCommitted
     );
     this.#navigationListener.off("navigation-failed", this.#onNavigationFailed);
     this.#navigationListener.off(
@@ -716,6 +740,8 @@ class BrowsingContextModule extends RootBiDiModule {
    * @property {Array<BrowsingContextInfo>=} children
    *     List of child browsing contexts. Only set if maxDepth hasn't been
    *     reached yet.
+   * @property {string} clientWindow
+   *     The id of the window the browsing context belongs to.
    */
 
   /**
@@ -1094,6 +1120,7 @@ class BrowsingContextModule extends RootBiDiModule {
    *     Url for the navigation.
    * @param {WaitCondition=} options.wait
    *     Wait condition for the navigation, one of "none", "interactive", "complete".
+   *     Defaults to "none".
    *
    * @returns {BrowsingContextNavigateResult}
    *     Navigation result.
@@ -1332,6 +1359,7 @@ class BrowsingContextModule extends RootBiDiModule {
    *     If true ignore the browser cache. [Not yet supported]
    * @param {WaitCondition=} options.wait
    *     Wait condition for the navigation, one of "none", "interactive", "complete".
+   *     Defaults to "none".
    *
    * @returns {BrowsingContextNavigateResult}
    *     Navigation result.
@@ -1386,7 +1414,7 @@ class BrowsingContextModule extends RootBiDiModule {
    * Set the top-level browsing context's viewport to a given dimension.
    *
    * @param {object=} options
-   * @param {string} options.context
+   * @param {string=} options.context
    *     Id of the browsing context.
    * @param {(number|null)=} options.devicePixelRatio
    *     A value to override device pixel ratio, or `null` to reset it to
@@ -1395,6 +1423,8 @@ class BrowsingContextModule extends RootBiDiModule {
    * @param {(Viewport|null)=} options.viewport
    *     Dimensions to set the viewport to, or `null` to reset it
    *     to the original dimensions.
+   * @param {Array<string>=} options.userContexts
+   *     Optional list of user context ids.
    *
    * @throws {InvalidArgumentError}
    *     Raised if an argument is of an invalid type or value.
@@ -1402,7 +1432,99 @@ class BrowsingContextModule extends RootBiDiModule {
    *     Raised when the command is called on Android.
    */
   async setViewport(options = {}) {
-    const { context: contextId, devicePixelRatio, viewport } = options;
+    const {
+      context: contextId = null,
+      devicePixelRatio,
+      viewport,
+      userContexts: userContextIds = null,
+    } = options;
+
+    const userContexts = new Set();
+
+    if (contextId !== null) {
+      lazy.assert.string(
+        contextId,
+        lazy.pprint`Expected "context" to be a string, got ${contextId}`
+      );
+    } else if (userContextIds !== null) {
+      lazy.assert.isNonEmptyArray(
+        userContextIds,
+        lazy.pprint`Expected "userContexts" to be a non-empty array, got ${userContextIds}`
+      );
+
+      for (const userContextId of userContextIds) {
+        lazy.assert.string(
+          userContextId,
+          lazy.pprint`Expected elements of "userContexts" to be a string, got ${userContextId}`
+        );
+
+        const internalId =
+          lazy.UserContextManager.getInternalIdById(userContextId);
+
+        if (internalId === null) {
+          throw new lazy.error.NoSuchUserContextError(
+            `User context with id: ${userContextId} doesn't exist`
+          );
+        }
+
+        userContexts.add(internalId);
+      }
+    } else {
+      throw new lazy.error.InvalidArgumentError(
+        `At least one of "context" or "userContexts" arguments should be provided`
+      );
+    }
+
+    if (contextId !== null && userContextIds !== null) {
+      throw new lazy.error.InvalidArgumentError(
+        `Providing both "context" and "userContexts" arguments is not supported`
+      );
+    }
+
+    if (viewport !== undefined && viewport !== null) {
+      lazy.assert.object(
+        viewport,
+        lazy.pprint`Expected "viewport" to be an object, got ${viewport}`
+      );
+
+      const { height, width } = viewport;
+      lazy.assert.positiveInteger(
+        height,
+        lazy.pprint`Expected viewport's "height" to be a positive integer, got ${height}`
+      );
+      lazy.assert.positiveInteger(
+        width,
+        lazy.pprint`Expected viewport's "width" to be a positive integer, got ${width}`
+      );
+
+      if (height > MAX_WINDOW_SIZE || width > MAX_WINDOW_SIZE) {
+        throw new lazy.error.UnsupportedOperationError(
+          `"width" or "height" cannot be larger than ${MAX_WINDOW_SIZE} px`
+        );
+      }
+    }
+
+    if (devicePixelRatio !== undefined && devicePixelRatio !== null) {
+      lazy.assert.number(
+        devicePixelRatio,
+        lazy.pprint`Expected "devicePixelRatio" to be a number or null, got ${devicePixelRatio}`
+      );
+      lazy.assert.that(
+        value => value > 0,
+        lazy.pprint`Expected "devicePixelRatio" to be greater than 0, got ${devicePixelRatio}`
+      )(devicePixelRatio);
+    }
+
+    const navigables = new Set();
+    if (contextId !== null) {
+      const navigable = this.#getBrowsingContext(contextId);
+      lazy.assert.topLevel(
+        navigable,
+        `Browsing context with id ${contextId} is not top-level`
+      );
+
+      navigables.add(navigable);
+    }
 
     if (lazy.AppInfo.isAndroid) {
       // Bug 1840084: Add Android support for modifying the viewport.
@@ -1411,96 +1533,66 @@ class BrowsingContextModule extends RootBiDiModule {
       );
     }
 
-    lazy.assert.string(
-      contextId,
-      lazy.pprint`Expected "context" to be a string, got ${contextId}`
-    );
+    const viewportOverride = {
+      devicePixelRatio,
+      viewport,
+    };
 
-    const context = this.#getBrowsingContext(contextId);
-    lazy.assert.topLevel(
-      context,
-      lazy.pprint`Browsing context with id ${contextId} is not top-level`
-    );
-
-    const browser = context.embedderElement;
-    const currentHeight = browser.clientHeight;
-    const currentWidth = browser.clientWidth;
-
-    let targetHeight, targetWidth;
-    if (viewport === undefined) {
-      // Don't modify the viewport's size.
-      targetHeight = currentHeight;
-      targetWidth = currentWidth;
-    } else if (viewport === null) {
-      // Reset viewport to the original dimensions.
-      targetHeight = browser.parentElement.clientHeight;
-      targetWidth = browser.parentElement.clientWidth;
-
-      browser.style.removeProperty("height");
-      browser.style.removeProperty("width");
+    const sessionDataItems = [];
+    if (userContextIds !== null) {
+      for (const userContext of userContexts) {
+        // Prepare the list of navigables to update.
+        lazy.UserContextManager.getTabsForUserContext(userContext).forEach(
+          tab => {
+            const contentBrowser = lazy.TabManager.getBrowserForTab(tab);
+            navigables.add(contentBrowser.browsingContext);
+          }
+        );
+        sessionDataItems.push({
+          category: "viewport-overrides",
+          moduleName: "_configuration",
+          values: [viewportOverride],
+          contextDescriptor: {
+            type: lazy.ContextDescriptorType.UserContext,
+            id: userContext,
+          },
+          method: lazy.SessionDataMethod.Add,
+        });
+      }
     } else {
-      lazy.assert.object(
-        viewport,
-        lazy.pprint`Expected "viewport" to be an object, got ${viewport}`
-      );
-
-      const { height, width } = viewport;
-      targetHeight = lazy.assert.positiveInteger(
-        height,
-        lazy.pprint`Expected viewport's "height" to be a positive integer, got ${height}`
-      );
-      targetWidth = lazy.assert.positiveInteger(
-        width,
-        lazy.pprint`Expected viewport's "width" to be a positive integer, got ${width}`
-      );
-
-      if (targetHeight > MAX_WINDOW_SIZE || targetWidth > MAX_WINDOW_SIZE) {
-        throw new lazy.error.UnsupportedOperationError(
-          `"width" or "height" cannot be larger than ${MAX_WINDOW_SIZE} px`
-        );
-      }
-
-      browser.style.setProperty("height", targetHeight + "px");
-      browser.style.setProperty("width", targetWidth + "px");
-    }
-
-    if (devicePixelRatio !== undefined) {
-      if (devicePixelRatio !== null) {
-        lazy.assert.number(
-          devicePixelRatio,
-          lazy.pprint`Expected "devicePixelRatio" to be a number or null, got ${devicePixelRatio}`
-        );
-        lazy.assert.that(
-          devicePixelRatio => devicePixelRatio > 0,
-          lazy.pprint`Expected "devicePixelRatio" to be greater than 0, got ${devicePixelRatio}`
-        )(devicePixelRatio);
-
-        context.overrideDPPX = devicePixelRatio;
-      } else {
-        // Will reset to use the global default scaling factor.
-        context.overrideDPPX = 0;
+      for (const navigable of navigables) {
+        sessionDataItems.push({
+          category: "viewport-overrides",
+          moduleName: "_configuration",
+          values: [viewportOverride],
+          contextDescriptor: {
+            type: lazy.ContextDescriptorType.TopBrowsingContext,
+            id: navigable.browserId,
+          },
+          method: lazy.SessionDataMethod.Add,
+        });
       }
     }
 
-    if (targetHeight !== currentHeight || targetWidth !== currentWidth) {
-      if (!context.isActive) {
-        // Force a synchronous update of the remote browser dimensions so that
-        // background tabs get resized.
-        browser.ownerDocument.synchronouslyUpdateRemoteBrowserDimensions(
-          /* aIncludeInactive = */ true
-        );
-      }
-      // Wait until the viewport has been resized
-      await this._forwardToWindowGlobal(
-        "_awaitViewportDimensions",
-        context.id,
-        {
-          height: targetHeight,
-          width: targetWidth,
-        },
-        { retryOnAbort: true }
+    if (sessionDataItems.length) {
+      // TODO: Bug 1953079. Saving the viewport overrides in the session data works fine
+      // with one session, but when we start supporting multiple BiDi session, we will
+      // have to rethink this approach.
+      await this.messageHandler.updateSessionData(sessionDataItems);
+    }
+
+    const commands = [];
+
+    for (const navigable of navigables) {
+      commands.push(
+        this._updateNavigableViewport({
+          navigable,
+          viewportOverride,
+        })
       );
     }
+
+    await Promise.all(commands);
   }
 
   /**
@@ -1669,6 +1761,48 @@ class BrowsingContextModule extends RootBiDiModule {
   }
 
   /**
+   * Wrapper around RootBiDiModule._emitEventForBrowsingContext to additionally
+   * check that the payload of the event contains a valid `context` id.
+   *
+   * All browsingContext module events should have such a property set, and a
+   * missing id usually indicates that the browsing context which triggered the
+   * event is out of scope for the current WebDriver BiDi session (eg. chrome or
+   * webextension).
+   *
+   * @param {string} browsingContextId
+   *     The ID of the browsing context to which the event should be emitted.
+   * @param {string} eventName
+   *     The name of the event to be emitted.
+   * @param {object} eventPayload
+   *     The payload to be sent with the event.
+   * @param {number|string} eventPayload.context
+   *     A unique context id computed by the TabManager.
+   */
+  #emitContextEventForBrowsingContext(
+    browsingContextId,
+    eventName,
+    eventPayload
+  ) {
+    // All browsingContext events should include a context id in the payload.
+    const { context = null } = eventPayload;
+    if (context === null) {
+      // If the context could not be found by the TabManager, the event is most
+      // likely related to an unsupported context: eg chrome (bug 1722679) or
+      // webextension (bug 1755014).
+      lazy.logger.trace(
+        `[${browsingContextId}] Skipping event ${eventName} because of a missing unique context id`
+      );
+      return;
+    }
+
+    this._emitEventForBrowsingContext(
+      browsingContextId,
+      eventName,
+      eventPayload
+    );
+  }
+
+  /**
    * Retrieves a browsing context based on its id.
    *
    * @param {number} contextId
@@ -1738,6 +1872,7 @@ class BrowsingContextModule extends RootBiDiModule {
       originalOpener: originalOpener === undefined ? null : originalOpener,
       url: context.currentURI.spec,
       userContext,
+      clientWindow: lazy.windowManager.getIdForBrowsingContext(context),
     };
 
     if (includeParentId) {
@@ -1768,6 +1903,12 @@ class BrowsingContextModule extends RootBiDiModule {
         return;
       }
 
+      // Filter out notifications for webextension contexts until support gets
+      // added (bug 1755014).
+      if (browsingContext.currentRemoteType === "extension") {
+        return;
+      }
+
       const browsingContextInfo = this.#getBrowsingContextInfo(
         browsingContext,
         {
@@ -1775,7 +1916,7 @@ class BrowsingContextModule extends RootBiDiModule {
         }
       );
 
-      this._emitEventForBrowsingContext(
+      this.#emitContextEventForBrowsingContext(
         browsingContext.id,
         "browsingContext.contextCreated",
         browsingContextInfo
@@ -1802,6 +1943,12 @@ class BrowsingContextModule extends RootBiDiModule {
         return;
       }
 
+      // Filter out notifications for webextension contexts until support gets
+      // added (bug 1755014).
+      if (browsingContext.currentRemoteType === "extension") {
+        return;
+      }
+
       // If this event is for a child context whose top or parent context is also destroyed,
       // we don't need to send it, in this case the event for the top/parent context is enough.
       if (
@@ -1813,7 +1960,7 @@ class BrowsingContextModule extends RootBiDiModule {
 
       const browsingContextInfo = this.#getBrowsingContextInfo(browsingContext);
 
-      this._emitEventForBrowsingContext(
+      this.#emitContextEventForBrowsingContext(
         browsingContext.id,
         "browsingContext.contextDestroyed",
         browsingContextInfo
@@ -1832,7 +1979,7 @@ class BrowsingContextModule extends RootBiDiModule {
         timestamp: Date.now(),
         url,
       };
-      this._emitEventForBrowsingContext(
+      this.#emitContextEventForBrowsingContext(
         context.id,
         "browsingContext.fragmentNavigated",
         browsingContextInfo
@@ -1843,20 +1990,20 @@ class BrowsingContextModule extends RootBiDiModule {
   #onPromptClosed = async (eventName, data) => {
     if (this.#subscribedEvents.has("browsingContext.userPromptClosed")) {
       const { contentBrowser, detail } = data;
-      const contextId = lazy.TabManager.getIdForBrowser(contentBrowser);
+      const navigableId = lazy.TabManager.getIdForBrowser(contentBrowser);
 
-      if (contextId === null) {
+      if (navigableId === null) {
         return;
       }
 
       const params = {
-        context: contextId,
+        context: navigableId,
         accepted: detail.accepted,
         type: detail.promptType,
         userText: detail.userText,
       };
-      this._emitEventForBrowsingContext(
-        contextId,
+      this.#emitContextEventForBrowsingContext(
+        contentBrowser.browsingContext.id,
         "browsingContext.userPromptClosed",
         params
       );
@@ -1874,7 +2021,7 @@ class BrowsingContextModule extends RootBiDiModule {
         return;
       }
 
-      const contextId = lazy.TabManager.getIdForBrowser(contentBrowser);
+      const navigableId = lazy.TabManager.getIdForBrowser(contentBrowser);
 
       const session = lazy.getWebDriverSessionById(
         this.messageHandler.sessionId
@@ -1882,7 +2029,7 @@ class BrowsingContextModule extends RootBiDiModule {
       const handlerConfig = session.userPromptHandler.getPromptHandler(type);
 
       const eventPayload = {
-        context: contextId,
+        context: navigableId,
         handler: handlerConfig.handler,
         message: await prompt.getText(),
         type,
@@ -1892,9 +2039,27 @@ class BrowsingContextModule extends RootBiDiModule {
         eventPayload.defaultValue = await prompt.getInputText();
       }
 
-      this._emitEventForBrowsingContext(
-        contextId,
+      this.#emitContextEventForBrowsingContext(
+        contentBrowser.browsingContext.id,
         "browsingContext.userPromptOpened",
+        eventPayload
+      );
+    }
+  };
+
+  #onNavigationCommitted = async (eventName, data) => {
+    const { navigableId, navigationId, url, contextId } = data;
+
+    if (this.#subscribedEvents.has("browsingContext.navigationCommitted")) {
+      const eventPayload = {
+        context: navigableId,
+        navigation: navigationId,
+        timestamp: Date.now(),
+        url,
+      };
+      this.#emitContextEventForBrowsingContext(
+        contextId,
+        "browsingContext.navigationCommitted",
         eventPayload
       );
     }
@@ -1910,7 +2075,7 @@ class BrowsingContextModule extends RootBiDiModule {
         timestamp: Date.now(),
         url,
       };
-      this._emitEventForBrowsingContext(
+      this.#emitContextEventForBrowsingContext(
         contextId,
         "browsingContext.navigationFailed",
         eventPayload
@@ -1929,7 +2094,7 @@ class BrowsingContextModule extends RootBiDiModule {
         timestamp: Date.now(),
         url,
       };
-      this._emitEventForBrowsingContext(
+      this.#emitContextEventForBrowsingContext(
         context.id,
         "browsingContext.navigationStarted",
         eventPayload
@@ -1992,6 +2157,7 @@ class BrowsingContextModule extends RootBiDiModule {
         break;
       }
       case "browsingContext.fragmentNavigated":
+      case "browsingContext.navigationCommitted":
       case "browsingContext.navigationFailed":
       case "browsingContext.navigationStarted": {
         this.#navigationListener.startListening();
@@ -2015,6 +2181,7 @@ class BrowsingContextModule extends RootBiDiModule {
         break;
       }
       case "browsingContext.fragmentNavigated":
+      case "browsingContext.navigationCommitted":
       case "browsingContext.navigationFailed":
       case "browsingContext.navigationStarted": {
         this.#stopListeningToNavigationEvent(event);
@@ -2066,6 +2233,76 @@ class BrowsingContextModule extends RootBiDiModule {
     }
   }
 
+  /**
+   * Update the viewport of the navigable.
+   *
+   * @param {object} options
+   * @param {BrowsingContext} options.navigable
+   *     Navigable whose viewport should be updated.
+   * @param {ViewportOverride} options.viewportOverride
+   *     Object which holds viewport settings
+   *     which should be applied.
+   */
+  async _updateNavigableViewport(options) {
+    const { navigable, viewportOverride } = options;
+    const { devicePixelRatio, viewport } = viewportOverride;
+
+    const browser = navigable.embedderElement;
+    const currentHeight = browser.clientHeight;
+    const currentWidth = browser.clientWidth;
+
+    let targetHeight, targetWidth;
+    if (viewport === undefined) {
+      // Don't modify the viewport's size.
+      targetHeight = currentHeight;
+      targetWidth = currentWidth;
+    } else if (viewport === null) {
+      // Reset viewport to the original dimensions.
+      targetHeight = browser.parentElement.clientHeight;
+      targetWidth = browser.parentElement.clientWidth;
+
+      browser.style.removeProperty("height");
+      browser.style.removeProperty("width");
+    } else {
+      const { height, width } = viewport;
+
+      targetHeight = height;
+      targetWidth = width;
+
+      browser.style.setProperty("height", targetHeight + "px");
+      browser.style.setProperty("width", targetWidth + "px");
+    }
+
+    if (devicePixelRatio !== undefined) {
+      if (devicePixelRatio !== null) {
+        navigable.overrideDPPX = devicePixelRatio;
+      } else {
+        // Will reset to use the global default scaling factor.
+        navigable.overrideDPPX = 0;
+      }
+    }
+
+    if (targetHeight !== currentHeight || targetWidth !== currentWidth) {
+      if (!navigable.isActive) {
+        // Force a synchronous update of the remote browser dimensions so that
+        // background tabs get resized.
+        browser.ownerDocument.synchronouslyUpdateRemoteBrowserDimensions(
+          /* aIncludeInactive = */ true
+        );
+      }
+      // Wait until the viewport has been resized
+      await this._forwardToWindowGlobal(
+        "_awaitViewportDimensions",
+        navigable.id,
+        {
+          height: targetHeight,
+          width: targetWidth,
+        },
+        { retryOnAbort: true }
+      );
+    }
+  }
+
   static get supportedEvents() {
     return [
       "browsingContext.contextCreated",
@@ -2073,6 +2310,7 @@ class BrowsingContextModule extends RootBiDiModule {
       "browsingContext.domContentLoaded",
       "browsingContext.fragmentNavigated",
       "browsingContext.load",
+      "browsingContext.navigationCommitted",
       "browsingContext.navigationFailed",
       "browsingContext.navigationStarted",
       "browsingContext.userPromptClosed",

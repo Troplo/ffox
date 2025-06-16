@@ -96,6 +96,7 @@ class ConnectionEntry {
   void CloseAllDnsAndConnectSockets();
 
   HttpRetParams GetConnectionData();
+  Http3ConnectionStatsParams GetHttp3ConnectionStatsData();
   void LogConnections();
 
   const RefPtr<nsHttpConnectionInfo> mConnInfo;
@@ -211,6 +212,8 @@ class ConnectionEntry {
 
   const nsTArray<RefPtr<nsIWebTransportHash>>& GetServerCertHashes();
 
+  const nsCString& OriginFrameHashKey();
+
  private:
   void InsertIntoIdleConnections_internal(nsHttpConnection* conn);
   void RemoveFromIdleConnectionsIndex(size_t inx);
@@ -236,6 +239,8 @@ class ConnectionEntry {
 
   PendingTransactionQueue mPendingQ;
   ~ConnectionEntry();
+
+  nsCString mOriginFrameHashKey;
 
   bool mRetriedDifferentIPFamilyForHttp3 = false;
 };

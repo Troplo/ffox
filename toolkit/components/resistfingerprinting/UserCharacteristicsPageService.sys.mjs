@@ -156,14 +156,15 @@ export class UserCharacteristicsPageService {
     const populateFuncs = [
       [this.populateIntlLocale, []],
       [this.populateZoomPrefs, []],
-      [this.populateDevicePixelRatio, [browser.ownerGlobal]],
       [this.populateDisabledMediaPrefs, []],
       [this.populateMathOps, []],
       [this.populateMappableData, [data.output]],
       [this.populateGamepads, [data.gamepads]],
       [this.populateClientInfo, []],
       [this.populateCPUInfo, []],
-      [this.populateWindowInfo, []],
+      [this.populateScreenInfo, []],
+      [this.populatePointerInfo, []],
+      [this.initWindowInfoActor, []],
       [
         this.populateWebGlInfo,
         [browser.ownerGlobal, browser.ownerDocument, 1, false],
@@ -264,7 +265,7 @@ export class UserCharacteristicsPageService {
     }
   }
 
-  async populateWindowInfo() {
+  async initWindowInfoActor() {
     // We use two different methods to get any loaded document.
     // First one is, DOMContentLoaded event. If the user loads
     // a new document after actor registration, we will get it.
@@ -278,27 +279,12 @@ export class UserCharacteristicsPageService {
     // existing tabs and continue on a new one before the page
     // is loaded. This is a rare case, but we want to cover it.
 
-    const { promise: screenInfoPromise, resolve: screenInfoResolve } =
-      Promise.withResolvers();
-    const { promise: pointerInfoPromise, resolve: pointerInfoResolve } =
-      Promise.withResolvers();
-
-    Services.obs.addObserver(function observe(_subject, topic, data) {
-      Services.obs.removeObserver(observe, topic);
-      screenInfoResolve(JSON.parse(data));
-    }, "user-characteristics-screen-info-done");
-
-    Services.obs.addObserver(function observe(_subject, topic, data) {
-      Services.obs.removeObserver(observe, topic);
-      pointerInfoResolve(JSON.parse(data));
-    }, "user-characteristics-pointer-info-done");
-
-    const actorName = "UserCharacteristicsWindowInfo";
     Services.obs.addObserver(function observe(_subject, topic, _data) {
       Services.obs.removeObserver(observe, topic);
       ChromeUtils.unregisterWindowActor(actorName);
     }, "user-characteristics-window-info-done");
 
+    const actorName = "UserCharacteristicsWindowInfo";
     ChromeUtils.registerWindowActor(actorName, {
       parent: {
         esModuleURI: "resource://gre/actors/UserCharacteristicsParent.sys.mjs",
@@ -323,11 +309,28 @@ export class UserCharacteristicsPageService {
         this.handledErrors.push(await stringifyError(error));
       }
     }
+  }
 
-    await Promise.all([
-      screenInfoPromise.then(data => this.collectGleanMetricsFromMap(data)),
-      pointerInfoPromise.then(data => this.collectGleanMetricsFromMap(data)),
-    ]);
+  async populateScreenInfo() {
+    const { promise, resolve } = Promise.withResolvers();
+
+    Services.obs.addObserver(function observe(_subject, topic, data) {
+      Services.obs.removeObserver(observe, topic);
+      resolve(JSON.parse(data));
+    }, "user-characteristics-screen-info-done");
+
+    await promise.then(data => this.collectGleanMetricsFromMap(data));
+  }
+
+  async populatePointerInfo() {
+    const { promise, resolve } = Promise.withResolvers();
+
+    Services.obs.addObserver(function observe(_subject, topic, data) {
+      Services.obs.removeObserver(observe, topic);
+      resolve(JSON.parse(data));
+    }, "user-characteristics-pointer-info-done");
+
+    await promise.then(data => this.collectGleanMetricsFromMap(data));
   }
 
   async populateCanvasData() {
@@ -491,12 +494,6 @@ export class UserCharacteristicsPageService {
     });
 
     Glean.characteristics.zoomCount.set(zoomPrefsCount);
-  }
-
-  async populateDevicePixelRatio(window) {
-    Glean.characteristics.pixelRatio.set(
-      (window.browsingContext.overrideDPPX || window.devicePixelRatio) * 100
-    );
   }
 
   async populateIntlLocale() {
@@ -728,14 +725,14 @@ export class UserCharacteristicsPageService {
   async populateClientInfo() {
     const buildID = Services.appinfo.appBuildID;
     const buildDate =
-      new Date(
+      Date.UTC(
         buildID.slice(0, 4),
         buildID.slice(4, 6) - 1,
         buildID.slice(6, 8),
         buildID.slice(8, 10),
         buildID.slice(10, 12),
         buildID.slice(12, 14)
-      ).getTime() / 1000;
+      ) / 1000;
 
     Glean.characteristics.version.set(Services.appinfo.version);
     Glean.characteristics.channel.set(AppConstants.MOZ_UPDATE_CHANNEL);

@@ -20,6 +20,7 @@ import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.mozilla.experiments.nimbus.internal.EnrolledExperiment
 import org.mozilla.fenix.webcompat.di.WebCompatReporterMiddlewareProvider
 import org.mozilla.fenix.webcompat.fake.FakeEngineSession
 import org.mozilla.fenix.webcompat.testdata.WebCompatTestData
@@ -32,6 +33,48 @@ class DefaultWebCompatReporterRetrievalServiceTest {
     val coroutinesTestRule = MainCoroutineRule()
 
     @Test
+    fun `WHEN Nimbus is disabled THEN WebCompatInfo has no experiments`() = runTest {
+        val nimbusExperimentsProvider = FakeNimbusExperimentsProvider()
+        val engineSession = FakeEngineSession(WebCompatTestData.basicDataJson)
+        val service = createService(engineSession = engineSession, nimbusExperimentsProvider)
+
+        assertEquals(emptyList<WebCompatInfoDto.WebCompatBrowserDto>(), service.retrieveInfo()?.browser?.experiments)
+    }
+
+    @Test
+    fun `WHEN Nimbus is enabled but no experiments THEN WebCompatInfo experiments is null`() = runTest {
+        val nimbusExperimentsProvider = FakeNimbusExperimentsProvider()
+        val engineSession = FakeEngineSession(WebCompatTestData.basicDataJson)
+        val service = createService(engineSession = engineSession, nimbusExperimentsProvider)
+
+        assertEquals(emptyList<WebCompatInfoDto.WebCompatBrowserDto>(), service.retrieveInfo()?.browser?.experiments)
+    }
+
+    @Test
+    fun `WHEN Nimbus is enabled THEN WebCompatInfo has all active experiments`() = runTest {
+        val experiments = listOf(
+            EnrolledExperiment(
+                slug = "expSlug",
+                branchSlug = "expBranch",
+                featureIds = listOf("expFeatureId"),
+                userFacingName = "expDame",
+                userFacingDescription = "expDescription",
+            ),
+        )
+
+        val nimbusExperimentsProvider = FakeNimbusExperimentsProvider(experiments) { slug ->
+            experiments.firstOrNull { it.slug == slug }?.branchSlug ?: "none"
+        }
+        val engineSession = FakeEngineSession(WebCompatTestData.basicDataJson)
+        val service = createService(engineSession = engineSession, nimbusExperimentsProvider)
+        val actual = service.retrieveInfo()?.browser?.experiments
+        val expected = listOf(
+            WebCompatInfoDto.WebCompatBrowserDto.ExperimentDto(branch = "expBranch", slug = "expSlug", kind = "nimbusExperiment"),
+        )
+        assertEquals(expected, actual)
+    }
+
+    @Test
     fun `WHEN WebCompatInfo is retrieved successfully THEN all corresponding fields in the DTO are submitted`() = runTest {
         val engineSession = FakeEngineSession(WebCompatTestData.basicDataJson)
         val service = createService(engineSession = engineSession)
@@ -41,15 +84,21 @@ class DefaultWebCompatReporterRetrievalServiceTest {
             antitracking = WebCompatInfoDto.WebCompatAntiTrackingDto(
                 blockList = "basic",
                 btpHasPurgedSite = false,
+                etpCategory = "standard",
                 hasMixedActiveContentBlocked = false,
                 hasMixedDisplayContentBlocked = false,
                 hasTrackingContentBlocked = false,
                 isPrivateBrowsing = false,
             ),
             browser = WebCompatInfoDto.WebCompatBrowserDto(
+                addons = listOf(
+                    WebCompatInfoDto.WebCompatBrowserDto.AddonDto(id = "id.temp", name = "name1", temporary = true, version = "version1"),
+                    WebCompatInfoDto.WebCompatBrowserDto.AddonDto(id = "id.perm", name = "name2", temporary = false, version = "version2"),
+                ),
                 app = WebCompatInfoDto.WebCompatBrowserDto.AppDto(
                     defaultUserAgent = "testDefaultUserAgent",
                 ),
+                experiments = emptyList(),
                 graphics = WebCompatInfoDto.WebCompatBrowserDto.GraphicsDto(
                     devices = buildJsonArray {
                         addJsonObject {
@@ -132,15 +181,21 @@ class DefaultWebCompatReporterRetrievalServiceTest {
             antitracking = WebCompatInfoDto.WebCompatAntiTrackingDto(
                 blockList = "basic",
                 btpHasPurgedSite = false,
+                etpCategory = "standard",
                 hasMixedActiveContentBlocked = false,
                 hasMixedDisplayContentBlocked = false,
                 hasTrackingContentBlocked = false,
                 isPrivateBrowsing = false,
             ),
             browser = WebCompatInfoDto.WebCompatBrowserDto(
+                addons = listOf(
+                    WebCompatInfoDto.WebCompatBrowserDto.AddonDto(id = "id.temp", name = "name1", temporary = true, version = "version1"),
+                    WebCompatInfoDto.WebCompatBrowserDto.AddonDto(id = "id.perm", name = "name2", temporary = false, version = "version2"),
+                ),
                 app = WebCompatInfoDto.WebCompatBrowserDto.AppDto(
                     defaultUserAgent = "testDefaultUserAgent",
                 ),
+                experiments = emptyList(),
                 graphics = WebCompatInfoDto.WebCompatBrowserDto.GraphicsDto(
                     devices = buildJsonArray {
                         addJsonObject {
@@ -205,7 +260,7 @@ class DefaultWebCompatReporterRetrievalServiceTest {
         assertEquals(expected, actual)
     }
 
-    private fun createService(engineSession: EngineSession): WebCompatReporterRetrievalService {
+    private fun createService(engineSession: EngineSession, nimbusExperimentsProvider: NimbusExperimentsProvider = FakeNimbusExperimentsProvider()): WebCompatReporterRetrievalService {
         val tab = createTab(
             url = "https://www.mozilla.org",
             id = "test-tab",
@@ -221,6 +276,7 @@ class DefaultWebCompatReporterRetrievalServiceTest {
         return DefaultWebCompatReporterRetrievalService(
             browserStore = browserStore,
             webCompatInfoDeserializer = webCompatInfoDeserializer,
+            nimbusExperimentsProvider = nimbusExperimentsProvider,
         )
     }
 }

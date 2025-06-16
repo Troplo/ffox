@@ -25,7 +25,9 @@ enum ResourceType {
     Sampler {
         comparison: bool,
     },
-    AccelerationStructure,
+    AccelerationStructure {
+        vertex_return: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -42,7 +44,7 @@ impl From<&ResourceType> for BindingTypeName {
             ResourceType::Buffer { .. } => BindingTypeName::Buffer,
             ResourceType::Texture { .. } => BindingTypeName::Texture,
             ResourceType::Sampler { .. } => BindingTypeName::Sampler,
-            ResourceType::AccelerationStructure => BindingTypeName::AccelerationStructure,
+            ResourceType::AccelerationStructure { .. } => BindingTypeName::AccelerationStructure,
         }
     }
 }
@@ -54,7 +56,7 @@ impl From<&BindingType> for BindingTypeName {
             BindingType::Texture { .. } => BindingTypeName::Texture,
             BindingType::StorageTexture { .. } => BindingTypeName::Texture,
             BindingType::Sampler { .. } => BindingTypeName::Sampler,
-            BindingType::AccelerationStructure => BindingTypeName::AccelerationStructure,
+            BindingType::AccelerationStructure { .. } => BindingTypeName::AccelerationStructure,
         }
     }
 }
@@ -557,8 +559,10 @@ impl Resource {
                     });
                 }
             }
-            ResourceType::AccelerationStructure => match entry.ty {
-                BindingType::AccelerationStructure => (),
+            ResourceType::AccelerationStructure { vertex_return } => match entry.ty {
+                BindingType::AccelerationStructure {
+                    vertex_return: entry_vertex_return,
+                } if vertex_return == entry_vertex_return => (),
                 _ => {
                     return Err(BindingError::WrongType {
                         binding: (&entry.ty).into(),
@@ -650,7 +654,9 @@ impl Resource {
                     },
                 }
             }
-            ResourceType::AccelerationStructure => BindingType::AccelerationStructure,
+            ResourceType::AccelerationStructure { vertex_return } => {
+                BindingType::AccelerationStructure { vertex_return }
+            }
         })
     }
 }
@@ -809,19 +815,6 @@ impl NumericType {
             _ => false,
         }
     }
-
-    fn is_compatible_with(&self, other: &NumericType) -> bool {
-        if self.scalar.kind != other.scalar.kind {
-            return false;
-        }
-        match (self.dim, other.dim) {
-            (NumericDimension::Scalar, NumericDimension::Scalar) => true,
-            (NumericDimension::Scalar, NumericDimension::Vector(_)) => true,
-            (NumericDimension::Vector(_), NumericDimension::Vector(_)) => true,
-            (NumericDimension::Matrix(..), NumericDimension::Matrix(..)) => true,
-            _ => false,
-        }
-    }
 }
 
 /// Return true if the fragment `format` is covered by the provided `output`.
@@ -949,7 +942,9 @@ impl Interface {
                     class,
                 },
                 naga::TypeInner::Sampler { comparison } => ResourceType::Sampler { comparison },
-                naga::TypeInner::AccelerationStructure => ResourceType::AccelerationStructure,
+                naga::TypeInner::AccelerationStructure { vertex_return } => {
+                    ResourceType::AccelerationStructure { vertex_return }
+                }
                 ref other => ResourceType::Buffer {
                     size: wgt::BufferSize::new(other.size(module.to_ctx()) as u64).unwrap(),
                 },
@@ -1183,7 +1178,7 @@ impl Interface {
             ];
             let total_invocations = entry_point.workgroup_size.iter().product::<u32>();
 
-            if entry_point.workgroup_size.iter().any(|&s| s == 0)
+            if entry_point.workgroup_size.contains(&0)
                 || total_invocations > self.limits.max_compute_invocations_per_workgroup
                 || entry_point.workgroup_size[0] > max_workgroup_size_limits[0]
                 || entry_point.workgroup_size[1] > max_workgroup_size_limits[1]
@@ -1213,8 +1208,10 @@ impl Interface {
                                     // For vertex attributes, there are defaults filled out
                                     // by the driver if data is not provided.
                                     naga::ShaderStage::Vertex => {
+                                        let is_compatible =
+                                            iv.ty.scalar.kind == provided.ty.scalar.kind;
                                         // vertex inputs don't count towards inter-stage
-                                        (iv.ty.is_compatible_with(&provided.ty), 0)
+                                        (is_compatible, 0)
                                     }
                                     naga::ShaderStage::Fragment => {
                                         if iv.interpolation != provided.interpolation {
@@ -1233,6 +1230,9 @@ impl Interface {
                                         )
                                     }
                                     naga::ShaderStage::Compute => (false, 0),
+                                    naga::ShaderStage::Task | naga::ShaderStage::Mesh => {
+                                        unreachable!()
+                                    }
                                 };
                                 if compatible {
                                     Ok(num_components)

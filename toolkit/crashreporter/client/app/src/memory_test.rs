@@ -7,7 +7,7 @@
 use {
     crate::std::{env, mem::size_of},
     anyhow::Context,
-    memtest::{MemtestKind, MemtestRunner, MemtestRunnerArgs},
+    memtest::{Outcome, Runner, RunnerArgs, TestKind},
     rand::{seq::SliceRandom, thread_rng},
     serde_json,
 };
@@ -28,22 +28,26 @@ pub fn main() {
             std::process::exit(1);
         }
     };
-    let mut memory = vec![0; mem_usize_count];
+    let mut memory = allocate_memory(mem_usize_count);
 
-    let memtest_runner_result = MemtestRunner::from_test_kinds(&memtest_runner_args, memtest_kinds)
+    let memtest_report_list = Runner::from_test_kinds(&memtest_runner_args, memtest_kinds)
         .run(&mut memory)
         .expect("failed to run memtest-runner");
-    println!(
-        "{}",
-        serde_json::to_string(&memtest_runner_result)
-            .expect("memtest runner results failed to serialize")
-    );
+
+    let mut output_json = serde_json::to_value(&memtest_report_list)
+        .expect("memtest report list failed to serialize");
+    output_json["memtest_failed"] = memtest_report_list
+        .iter()
+        .any(|report| matches!(report.outcome, Ok(Outcome::Fail(_))))
+        .into();
+
+    println!("{}", output_json.to_string());
 }
 
 /// Parse command line arguments and environment to return the parameters for running memtest,
-/// including a usize for the requested memory vector length, MemtestRunnerArgs and a vector of
-/// MemtestKinds to run.
-fn parse_args() -> anyhow::Result<(usize, MemtestRunnerArgs, Vec<MemtestKind>)> {
+/// including a usize for the requested memory vector length, RunnerArgs and a vector of
+/// TestKinds to run.
+fn parse_args() -> anyhow::Result<(usize, RunnerArgs, Vec<TestKind>)> {
     const KIB: usize = 1024;
     const MIB: usize = 1024 * KIB;
 
@@ -65,23 +69,45 @@ fn parse_args() -> anyhow::Result<(usize, MemtestRunnerArgs, Vec<MemtestKind>)> 
     ))
 }
 
-/// Returns a vector of MemtestKind that contains all kinds, but prioritizes the given kinds.
-fn get_memtest_kinds() -> anyhow::Result<Vec<MemtestKind>> {
+/// Returns a vector of TestKind that contains all kinds, but prioritizes the given kinds.
+fn get_memtest_kinds() -> anyhow::Result<Vec<TestKind>> {
     let env_string = env::var(ekey!("MEMTEST_KINDS")).unwrap_or_default();
 
     let specified = env_string
         .split_whitespace()
         .map(|s| s.parse().context("failed to parse memtest kinds"))
-        .collect::<anyhow::Result<Vec<MemtestKind>>>()?;
+        .collect::<anyhow::Result<Vec<TestKind>>>()?;
 
-    let mut remaining: Vec<_> = MemtestKind::ALL
+    let mut remaining: Vec<_> = TestKind::ALL
         .iter()
         .filter(|k| !specified.contains(k))
         .cloned()
         .collect();
     remaining.shuffle(&mut thread_rng());
 
-    Ok([specified, remaining].concat())
+    let mut kinds = [specified, remaining].concat();
+
+    // The Block Move Test requires special care. It only performs timeout checking during its
+    // starting and ending phase. To avoid violating the timeout limit, we only run it if it is the
+    // first test, where we are certain it has enough time to run.
+    let block_move_idx = kinds
+        .iter()
+        .position(|k| matches!(k, TestKind::BlockMove))
+        .expect("BlockMove should exist in TestKind::ALL");
+    if block_move_idx != 0 {
+        kinds.remove(block_move_idx);
+    }
+
+    Ok(kinds)
+}
+
+fn allocate_memory(mut mem_usize_count: usize) -> Vec<usize> {
+    let mut memory = Vec::new();
+    while mem_usize_count > 0 && memory.try_reserve_exact(mem_usize_count).is_err() {
+        mem_usize_count /= 2;
+    }
+    memory.resize(mem_usize_count, 0);
+    memory
 }
 
 /// Encapsulated logic for launching and interacting with a memory testing process.
@@ -92,8 +118,8 @@ pub mod child {
         process::{Child, Command, Stdio},
         time::Duration,
     };
-    use ::memtest::MemtestRunnerArgs;
     use anyhow::Context;
+    use memtest::RunnerArgs;
 
     /// The memtest child process.
     pub struct Memtest {
@@ -145,7 +171,7 @@ pub mod child {
 
     fn spawn_memtest() -> anyhow::Result<Child> {
         let memsize_mb = 1024;
-        let memtest_runner_args = MemtestRunnerArgs {
+        let memtest_runner_args = RunnerArgs {
             timeout: Duration::from_secs(3),
             mem_lock_mode: memtest::MemLockMode::Resizable,
             allow_working_set_resize: true,

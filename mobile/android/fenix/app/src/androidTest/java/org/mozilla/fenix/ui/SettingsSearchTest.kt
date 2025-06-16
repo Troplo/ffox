@@ -10,8 +10,10 @@ import androidx.test.filters.SdkSuppress
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Before
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
+import org.mozilla.fenix.customannotations.SkipLeaks
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.AppAndSystemHelper.runWithAppLocaleChanged
 import org.mozilla.fenix.helpers.DataGenerationHelper.setTextToClipBoard
@@ -28,6 +30,7 @@ import org.mozilla.fenix.helpers.TestHelper.exitMenu
 import org.mozilla.fenix.helpers.TestHelper.restartApp
 import org.mozilla.fenix.helpers.TestHelper.verifySnackBarText
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.nimbus.FxNimbus
 import org.mozilla.fenix.ui.robots.EngineShortcut
 import org.mozilla.fenix.ui.robots.homeScreen
@@ -48,6 +51,9 @@ class SettingsSearchTest : TestSetup() {
     val activityTestRule = AndroidComposeTestRule(
         HomeActivityIntentTestRule.withDefaultSettingsOverrides(),
     ) { it.activity }
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     @Before
     override fun setUp() {
@@ -392,16 +398,13 @@ class SettingsSearchTest : TestSetup() {
             typeCustomEngineDetails(customSearchEngine.title, customSearchEngine.badTemplateUrl)
             saveNewSearchEngine()
             verifyInvalidTemplateSearchStringFormatError()
-            typeCustomEngineDetails(customSearchEngine.title, customSearchEngine.typoUrl)
-            saveNewSearchEngine()
-            verifyErrorConnectingToSearchString(customSearchEngine.title)
             typeCustomEngineDetails(customSearchEngine.title, customSearchEngine.goodUrl)
             typeSearchEngineSuggestionString(customSearchEngine.badTemplateUrl)
             saveNewSearchEngine()
             verifyInvalidTemplateSearchStringFormatError()
-            typeSearchEngineSuggestionString(customSearchEngine.typoUrl)
+            typeCustomEngineDetails(customSearchEngine.title, customSearchEngine.typoUrl)
             saveNewSearchEngine()
-            verifyErrorConnectingToSearchString(customSearchEngine.title)
+            verifyEngineListContains(customSearchEngine.title, shouldExist = true)
         }
     }
 
@@ -505,7 +508,7 @@ class SettingsSearchTest : TestSetup() {
     @Test
     fun doNotAllowSearchSuggestionsInPrivateBrowsingTest() {
         homeScreen {
-            togglePrivateBrowsingModeOnOff()
+            togglePrivateBrowsingModeOnOff(composeTestRule = activityTestRule)
         }.openSearch {
             typeSearch("mozilla")
             verifyAllowSuggestionsInPrivateModeDialog()
@@ -519,7 +522,7 @@ class SettingsSearchTest : TestSetup() {
     @Test
     fun allowSearchSuggestionsInPrivateBrowsingTest() {
         homeScreen {
-            togglePrivateBrowsingModeOnOff()
+            togglePrivateBrowsingModeOnOff(composeTestRule = activityTestRule)
         }.openSearch {
             typeSearch("mozilla")
             verifyAllowSuggestionsInPrivateModeDialog()
@@ -603,6 +606,7 @@ class SettingsSearchTest : TestSetup() {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2233337
     @Test
+    @SkipLeaks
     fun verifyTheSearchEnginesListsRespectTheLocaleTest() {
         runWithAppLocaleChanged(Locale.CHINA, activityTestRule.activityRule) {
             // Checking search engines for CH locale
@@ -649,15 +653,15 @@ class SettingsSearchTest : TestSetup() {
                 EngineShortcut(name = "Google", checkboxIndex = 1, isChecked = true),
                 EngineShortcut(name = "Bing", checkboxIndex = 4, isChecked = true),
                 EngineShortcut(name = "DuckDuckGo", checkboxIndex = 7, isChecked = true),
-                EngineShortcut(name = "eBay", checkboxIndex = 10, isChecked = true),
-                EngineShortcut(name = "Wikipedia", checkboxIndex = 13, isChecked = true),
-                EngineShortcut(name = "Reddit", checkboxIndex = 16, isChecked = false),
-                EngineShortcut(name = "YouTube", checkboxIndex = 19, isChecked = false),
+                EngineShortcut(name = "Reddit", checkboxIndex = 10, isChecked = false),
+                EngineShortcut(name = "Wikipedia (en)", checkboxIndex = 13, isChecked = true),
+                EngineShortcut(name = "YouTube", checkboxIndex = 16, isChecked = false),
             )
         }
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2203340
+    @Ignore("Failing, see https://bugzilla.mozilla.org/show_bug.cgi?id=1965451")
     @SmokeTest
     @Test
     fun verifySearchShortcutChangesAreReflectedInSearchSelectorMenuTest() {

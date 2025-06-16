@@ -257,6 +257,119 @@ add_task(function test_recursive_testBeforeNextSubmit() {
   GleanPings.onePingOnly.testBeforeNextSubmit(() => {});
 });
 
+add_task(function test_testBeforeNextSubmit_error() {
+  Assert.ok("onePingOnly" in GleanPings);
+
+  let submitted = false;
+  GleanPings.onePingOnly.testBeforeNextSubmit(() => {
+    submitted = true;
+    throw new Error("oh no");
+  });
+
+  Assert.throws(
+    () => GleanPings.onePingOnly.submit(),
+    /oh no/,
+    "testBeforeNextSubmit error thrown from submit"
+  );
+
+  Assert.ok(submitted, "Did submit ping");
+});
+
+add_task(async function test_testSubmission() {
+  Assert.ok("onePingOnly" in GleanPings);
+
+  let submitReason = null;
+  await GleanPings.onePingOnly.testSubmission(
+    reason => (submitReason = reason),
+    () => GleanPings.onePingOnly.submit("raison d'être")
+  );
+
+  Assert.equal(
+    submitReason,
+    "raison d'être",
+    "ping callback called with correct reason"
+  );
+});
+
+add_task(async function test_testSubmission_async() {
+  Assert.ok("onePingOnly" in GleanPings);
+
+  const orderOfOperations = [];
+
+  // We are going to intentionally block submission so that we can delay it
+  // until after testSubmission returns a promise.
+  const blocker = Promise.withResolvers();
+
+  const testPromise = GleanPings.onePingOnly.testSubmission(
+    () => orderOfOperations.push("test-callback"),
+    async () => {
+      orderOfOperations.push("await-blocker");
+      await blocker.promise;
+      orderOfOperations.push("submit");
+      GleanPings.onePingOnly.submit();
+    }
+  );
+  orderOfOperations.push("test-submission-queued");
+
+  blocker.resolve();
+  await testPromise;
+
+  Assert.deepEqual(orderOfOperations, [
+    "await-blocker",
+    "test-submission-queued",
+    "submit",
+    "test-callback",
+  ]);
+});
+
+add_task(async function test_testSubmission_error() {
+  Assert.ok("onePingOnly" in GleanPings);
+
+  await Assert.rejects(
+    GleanPings.onePingOnly.testSubmission(
+      () => {
+        throw new Error("uh oh");
+      },
+      () => GleanPings.onePingOnly.submit()
+    ),
+    /NS_ERROR_XPC_JAVASCRIPT_ERROR_WITH_DETAILS/,
+    "testSubmission callback threw"
+  );
+});
+
+add_task(async function test_testSubmission_unsubmitted() {
+  Assert.ok("onePingOnly" in GleanPings);
+
+  let submitted = false;
+  await Assert.rejects(
+    GleanPings.onePingOnly.testSubmission(
+      () => (submitted = true),
+      () => {}
+    ),
+    /Ping did not submit immediately/,
+    "Threw immediately because the ping did not submit"
+  );
+
+  Assert.ok(!submitted, "callback not called");
+});
+
+add_task(async function test_testSubmission_timeout() {
+  Assert.ok("onePingOnly" in GleanPings);
+
+  let submitted = false;
+  await Assert.rejects(
+    GleanPings.onePingOnly.testSubmission(
+      () => (submitted = true),
+      () => {},
+      1
+    ),
+    /Ping was not submitted after timeout/,
+    "Threw after a timeout"
+  );
+
+  Assert.ok(!submitted, "callback not called");
+});
+
 add_task(async function test_fog_timing_distribution_works() {
   let t1 = Glean.testOnly.whatTimeIsIt.start();
   let t2 = Glean.testOnly.whatTimeIsIt.start();
@@ -321,7 +434,7 @@ add_task(async function test_fog_labels_conform() {
     "wednesday",
     Glean.testOnly.mabelsLabelMaker.camelCase.testGetValue()
   );
-  const veryLong = "1".repeat(72);
+  const veryLong = "1".repeat(112);
   Glean.testOnly.mabelsLabelMaker[veryLong].set("seventy-two");
   Assert.throws(
     () => Glean.testOnly.mabelsLabelMaker[veryLong].testGetValue(),
@@ -358,7 +471,7 @@ add_task(async function test_fog_labeled_boolean_works() {
     undefined,
     Glean.testOnly.mabelsLikeBalloons.__other__.testGetValue()
   );
-  Glean.testOnly.mabelsLikeBalloons["1".repeat(72)].set(true);
+  Glean.testOnly.mabelsLikeBalloons["1".repeat(112)].set(true);
   Assert.throws(
     () => Glean.testOnly.mabelsLikeBalloons.__other__.testGetValue(),
     /DataError/,
@@ -387,7 +500,7 @@ add_task(async function test_fog_labeled_counter_works() {
     undefined,
     Glean.testOnly.mabelsKitchenCounters.__other__.testGetValue()
   );
-  Glean.testOnly.mabelsKitchenCounters["1".repeat(72)].add(1);
+  Glean.testOnly.mabelsKitchenCounters["1".repeat(112)].add(1);
   Assert.throws(
     () => Glean.testOnly.mabelsKitchenCounters.__other__.testGetValue(),
     /DataError/,
@@ -416,7 +529,7 @@ add_task(async function test_fog_labeled_string_works() {
     undefined,
     Glean.testOnly.mabelsBalloonStrings.__other__.testGetValue()
   );
-  Glean.testOnly.mabelsBalloonStrings["1".repeat(72)].set("valid");
+  Glean.testOnly.mabelsBalloonStrings["1".repeat(112)].set("valid");
   Assert.throws(
     () => Glean.testOnly.mabelsBalloonStrings.__other__.testGetValue(),
     /DataError/
@@ -715,7 +828,7 @@ add_task(async function test_fog_labeled_custom_distribution_works() {
     Glean.testOnly.mabelsCustomLabelLengths.__other__.testGetValue()
   );
   Glean.testOnly.mabelsCustomLabelLengths[
-    "1".repeat(72)
+    "1".repeat(112)
   ].accumulateSingleSample(3);
   Assert.throws(
     () => Glean.testOnly.mabelsCustomLabelLengths.__other__.testGetValue(),
@@ -786,7 +899,7 @@ add_task(async function test_fog_labeled_quantity_works() {
   Assert.equal(0, Glean.testOnly.buttonJars.curling.testGetValue());
   // What about invalid/__other__?
   Assert.equal(undefined, Glean.testOnly.buttonJars.__other__.testGetValue());
-  Glean.testOnly.buttonJars["1".repeat(72)].set(0);
+  Glean.testOnly.buttonJars["1".repeat(112)].set(0);
   Assert.throws(
     () => Glean.testOnly.buttonJars.__other__.testGetValue(),
     /DataError/,

@@ -203,7 +203,9 @@ impl super::Adapter {
             // emscripten doesn't enable "WEBGL_debug_renderer_info" extension by default. so, we do it manually.
             // See https://github.com/gfx-rs/wgpu/issues/3245 for context
             #[cfg(Emscripten)]
-            if unsafe { super::emscripten::enable_extension("WEBGL_debug_renderer_info\0") } {
+            if unsafe {
+                super::emscripten::enable_extension(c"WEBGL_debug_renderer_info".to_str().unwrap())
+            } {
                 (GL_UNMASKED_VENDOR_WEBGL, GL_UNMASKED_RENDERER_WEBGL)
             } else {
                 (glow::VENDOR, glow::RENDERER)
@@ -375,14 +377,14 @@ impl super::Adapter {
         } else {
             vertex_shader_storage_textures.min(fragment_shader_storage_textures)
         };
-        let indirect_execution =
-            supported((3, 1), (4, 3)) || extensions.contains("GL_ARB_multi_draw_indirect");
+        // NOTE: GL_ARB_compute_shader adds support for indirect dispatch
+        let indirect_execution = supported((3, 1), (4, 3))
+            || (extensions.contains("GL_ARB_draw_indirect") && supports_compute);
 
         let mut downlevel_flags = wgt::DownlevelFlags::empty()
             | wgt::DownlevelFlags::NON_POWER_OF_TWO_MIPMAPPED_TEXTURES
             | wgt::DownlevelFlags::CUBE_ARRAY_TEXTURES
-            | wgt::DownlevelFlags::COMPARISON_SAMPLERS
-            | wgt::DownlevelFlags::VERTEX_AND_INSTANCE_INDEX_RESPECTS_RESPECTIVE_FIRST_VALUE_IN_INDIRECT_DRAW;
+            | wgt::DownlevelFlags::COMPARISON_SAMPLERS;
         downlevel_flags.set(wgt::DownlevelFlags::COMPUTE_SHADERS, supports_compute);
         downlevel_flags.set(
             wgt::DownlevelFlags::FRAGMENT_WRITABLE_STORAGE,
@@ -529,6 +531,7 @@ impl super::Adapter {
                     .compressed_texture_astc_supports_ldr_profile()
                 {
                     features.insert(wgt::Features::TEXTURE_COMPRESSION_ASTC);
+                    features.insert(wgt::Features::TEXTURE_COMPRESSION_ASTC_SLICED_3D);
                 }
                 if context
                     .glow_context
@@ -541,12 +544,18 @@ impl super::Adapter {
             #[cfg(any(native, Emscripten))]
             {
                 features.insert(wgt::Features::TEXTURE_COMPRESSION_ASTC);
+                features.insert(wgt::Features::TEXTURE_COMPRESSION_ASTC_SLICED_3D);
                 features.insert(wgt::Features::TEXTURE_COMPRESSION_ASTC_HDR);
             }
         } else {
             features.set(
                 wgt::Features::TEXTURE_COMPRESSION_ASTC,
                 extensions.contains("GL_KHR_texture_compression_astc_ldr"),
+            );
+            features.set(
+                wgt::Features::TEXTURE_COMPRESSION_ASTC_SLICED_3D,
+                extensions.contains("GL_KHR_texture_compression_astc_ldr")
+                    && extensions.contains("GL_KHR_texture_compression_astc_sliced_3d"),
             );
             features.set(
                 wgt::Features::TEXTURE_COMPRESSION_ASTC_HDR,

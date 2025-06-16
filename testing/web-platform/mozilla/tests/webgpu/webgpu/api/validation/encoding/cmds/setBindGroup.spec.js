@@ -17,14 +17,18 @@ import {
   kMinDynamicBufferOffsetAlignment } from
 '../../../../capability_info.js';
 import { GPUConst } from '../../../../constants.js';
-import { kResourceStates, MaxLimitsTestMixin } from '../../../../gpu_test.js';
+import {
+  kResourceStates,
+
+  AllFeaturesMaxLimitsGPUTest } from
+'../../../../gpu_test.js';
 import {
   kProgrammableEncoderTypes } from
 
 '../../../../util/command_buffer_maker.js';
-import { ValidationTest } from '../../validation_test.js';
+import * as vtu from '../../validation_test_utils.js';
 
-class F extends ValidationTest {
+class F extends AllFeaturesMaxLimitsGPUTest {
   encoderTypeToStageFlag(encoderType) {
     switch (encoderType) {
       case 'compute pass':
@@ -43,7 +47,7 @@ class F extends ValidationTest {
   {
     switch (resourceType) {
       case 'texture':{
-          const texture = this.createTextureWithState('valid');
+          const texture = vtu.createTextureWithState(this, 'valid');
           const view = texture.createView();
           if (state === 'destroyed') {
             texture.destroy();
@@ -52,7 +56,7 @@ class F extends ValidationTest {
         }
       case 'buffer':
         return {
-          buffer: this.createBufferWithState(state, {
+          buffer: vtu.createBufferWithState(this, state, {
             size: 4,
             usage: GPUBufferUsage.UNIFORM
           })
@@ -102,7 +106,7 @@ class F extends ValidationTest {
   }
 }
 
-export const g = makeTestGroup(MaxLimitsTestMixin(F));
+export const g = makeTestGroup(F);
 
 g.test('state_and_binding_index').
 desc('Tests that setBindGroup correctly handles {valid, invalid, destroyed} bindGroups.').
@@ -144,9 +148,7 @@ beginSubcases().
 combine('useU32Array', [true, false]).
 combine('mismatched', [true, false])
 ).
-beforeAllSubcases((t) => {
-  t.selectMismatchedDeviceOrSkipTestCase(undefined);
-}).
+beforeAllSubcases((t) => t.usesMismatchedDevice()).
 fn((t) => {
   const { encoderType, useU32Array, mismatched } = t.params;
   const sourceDevice = mismatched ? t.mismatchedDevice : t.device;
@@ -360,7 +362,7 @@ fn((t) => {
     entries: range(dynamicOffsetsDataLength, (i) => ({
       binding: i,
       resource: {
-        buffer: t.createBufferWithState('valid', {
+        buffer: vtu.createBufferWithState(t, 'valid', {
           size: kBindingSize,
           usage: GPUBufferUsage.UNIFORM
         }),

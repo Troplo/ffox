@@ -34,6 +34,8 @@
 
 namespace mozilla::net {
 
+extern const nsCString& TRRProviderKey();
+
 const uint64_t HTTP3_APP_ERROR_NO_ERROR = 0x100;
 // const uint64_t HTTP3_APP_ERROR_GENERAL_PROTOCOL_ERROR = 0x101;
 // const uint64_t HTTP3_APP_ERROR_INTERNAL_ERROR = 0x102;
@@ -57,8 +59,8 @@ const uint32_t MAX_PTO_COUNTS = 16;
 
 const uint32_t TRANSPORT_ERROR_STATELESS_RESET = 20;
 
-NS_IMPL_ADDREF(Http3Session)
-NS_IMPL_RELEASE(Http3Session)
+NS_IMPL_ADDREF_INHERITED(Http3Session, nsAHttpConnection)
+NS_IMPL_RELEASE_INHERITED(Http3Session, nsAHttpConnection)
 NS_INTERFACE_MAP_BEGIN(Http3Session)
   NS_INTERFACE_MAP_ENTRY(nsAHttpConnection)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
@@ -153,8 +155,8 @@ nsresult Http3Session::Init(const nsHttpConnectionInfo* aConnInfo,
         StaticPrefs::network_http_http3_max_stream_data(),
         StaticPrefs::network_http_http3_version_negotiation_enabled(),
         mConnInfo->GetWebTransport(), gHttpHandler->Http3QlogDir(),
-        datagramSize, StaticPrefs::network_http_http3_max_accumlated_time_ms(),
-        aProviderFlags, idleTimeout, getter_AddRefs(mHttp3Connection));
+        datagramSize, aProviderFlags, idleTimeout,
+        getter_AddRefs(mHttp3Connection));
   } else {
     rv = NeqoHttp3Conn::Init(
         mConnInfo->GetOrigin(), mConnInfo->GetNPNToken(), selfAddr, peerAddr,
@@ -164,8 +166,7 @@ nsresult Http3Session::Init(const nsHttpConnectionInfo* aConnInfo,
         StaticPrefs::network_http_http3_max_stream_data(),
         StaticPrefs::network_http_http3_version_negotiation_enabled(),
         mConnInfo->GetWebTransport(), gHttpHandler->Http3QlogDir(),
-        datagramSize, StaticPrefs::network_http_http3_max_accumlated_time_ms(),
-        aProviderFlags, idleTimeout, socket->GetFileDescriptor(),
+        datagramSize, aProviderFlags, idleTimeout, socket->GetFileDescriptor(),
         getter_AddRefs(mHttp3Connection));
   }
   if (NS_FAILED(rv)) {
@@ -187,14 +188,37 @@ nsresult Http3Session::Init(const nsHttpConnectionInfo* aConnInfo,
     return servCertHashes && !servCertHashes->IsEmpty();
   };
 
+  // See https://github.com/mozilla/neqo/issues/2442.
+  // We need to set ECH first before set resumption token.
   auto config = mConnInfo->GetEchConfig();
+  if (config.IsEmpty()) {
+    if (StaticPrefs::security_tls_ech_grease_http3() && config.IsEmpty()) {
+      if ((RandomUint64().valueOr(0) % 100) >=
+          100 - StaticPrefs::security_tls_ech_grease_probability()) {
+        // Setting an empty config enables GREASE mode.
+        mSocketControl->SetEchConfig(config);
+        mEchExtensionStatus = EchExtensionStatus::kGREASE;
+      }
+    }
+  } else if (nsHttpHandler::EchConfigEnabled(true) && !config.IsEmpty()) {
+    mSocketControl->SetEchConfig(config);
+    mEchExtensionStatus = EchExtensionStatus::kReal;
+    HttpConnectionActivity activity(
+        mConnInfo->HashKey(), mConnInfo->GetOrigin(), mConnInfo->OriginPort(),
+        mConnInfo->EndToEndSSL(), !mConnInfo->GetEchConfig().IsEmpty(),
+        mConnInfo->IsHttp3());
+    gHttpHandler->ObserveHttpActivityWithArgs(
+        activity, NS_ACTIVITY_TYPE_HTTP_CONNECTION,
+        NS_HTTP_ACTIVITY_SUBTYPE_ECH_SET, PR_Now(), 0, ""_ns);
+  } else {
+    mEchExtensionStatus = EchExtensionStatus::kNotPresent;
+  }
 
   // In WebTransport, when servCertHashes is specified, it indicates that the
   // connection to the WebTransport server should authenticate using the
   // expected certificate hash. Therefore, 0RTT should be disabled in this
   // context to ensure the certificate hash is checked.
-  if (StaticPrefs::network_http_http3_enable_0rtt() && config.IsEmpty() &&
-      !hasServCertHashes() &&
+  if (StaticPrefs::network_http_http3_enable_0rtt() && !hasServCertHashes() &&
       NS_SUCCEEDED(SSLTokensCache::Get(peerId, token, info))) {
     LOG(("Found a resumption token in the cache."));
     mHttp3Connection->SetResumptionToken(token);
@@ -225,29 +249,6 @@ nsresult Http3Session::Init(const nsHttpConnectionInfo* aConnInfo,
     ZeroRttTelemetry(ZeroRttOutcome::NOT_USED);
   }
 #endif
-
-  if (config.IsEmpty()) {
-    if (StaticPrefs::security_tls_ech_grease_http3() && config.IsEmpty()) {
-      if ((RandomUint64().valueOr(0) % 100) >=
-          100 - StaticPrefs::security_tls_ech_grease_probability()) {
-        // Setting an empty config enables GREASE mode.
-        mSocketControl->SetEchConfig(config);
-        mEchExtensionStatus = EchExtensionStatus::kGREASE;
-      }
-    }
-  } else if (gHttpHandler->EchConfigEnabled(true) && !config.IsEmpty()) {
-    mSocketControl->SetEchConfig(config);
-    mEchExtensionStatus = EchExtensionStatus::kReal;
-    HttpConnectionActivity activity(
-        mConnInfo->HashKey(), mConnInfo->GetOrigin(), mConnInfo->OriginPort(),
-        mConnInfo->EndToEndSSL(), !mConnInfo->GetEchConfig().IsEmpty(),
-        mConnInfo->IsHttp3());
-    gHttpHandler->ObserveHttpActivityWithArgs(
-        activity, NS_ACTIVITY_TYPE_HTTP_CONNECTION,
-        NS_HTTP_ACTIVITY_SUBTYPE_ECH_SET, PR_Now(), 0, ""_ns);
-  } else {
-    mEchExtensionStatus = EchExtensionStatus::kNotPresent;
-  }
 
   // After this line, Http3Session and HttpConnectionUDP become a cycle. We put
   // this line in the end of Http3Session::Init to make sure Http3Session can be
@@ -990,8 +991,11 @@ nsresult Http3Session::ProcessOutput(nsIUDPSocket* socket) {
         Http3Session* self = (Http3Session*)aContext;
         self->SetupTimer(timeout);
       });
-  // Note: WOULD_BLOCK is handled in neqo_glue.
-  if (NS_FAILED(rv.result)) {
+  if (rv.result == NS_BASE_STREAM_WOULD_BLOCK) {
+    // The OS buffer was full. Tell the UDP socket to poll for
+    // write-availability.
+    socket->EnableWritePoll();
+  } else if (NS_FAILED(rv.result)) {
     mSocketError = rv.result;
     // If there was an error return from here. We do not need to set a timer,
     // because we will close the connection.
@@ -1897,6 +1901,12 @@ void Http3Session::CloseStream(Http3StreamBase* aStream, nsresult aResult) {
                                   HTTP3_APP_ERROR_REQUEST_CANCELLED);
   }
 
+  if ((NS_SUCCEEDED(aResult) || NS_BASE_STREAM_CLOSED == aResult) &&
+      mConnInfo->GetIsTrrServiceChannel()) {
+    // save time of last successful response
+    mLastTRRResponseTime = TimeStamp::Now();
+  }
+
   aStream->Close(aResult);
   CloseStreamInternal(aStream, aResult);
 }
@@ -1988,7 +1998,7 @@ nsresult Http3Session::TakeTransport(nsISocketTransport**,
   return NS_ERROR_UNEXPECTED;
 }
 
-Http3WebTransportSession* Http3Session::GetWebTransportSession(
+WebTransportSessionBase* Http3Session::GetWebTransportSession(
     nsAHttpTransaction* aTransaction) {
   RefPtr<Http3StreamBase> stream = mStreamTransactionHash.Get(aTransaction);
 
@@ -2511,6 +2521,20 @@ void Http3Session::CloseConnectionTelemetry(CloseError& aError, bool aClosing) {
   glean::http3::received_sent_dgrams
       .EnumGet(glean::http3::ReceivedSentDgramsLabel::eSent)
       .AccumulateSingleSample(stats.packets_tx);
+
+  if (aClosing) {
+    RefPtr<nsHttpConnectionInfo> ci;
+    GetConnectionInfo(getter_AddRefs(ci));
+    if (ci && ci->GetIsTrrServiceChannel() && !mLastTRRResponseTime.IsNull() &&
+        (mGoawayReceived ||
+         (aError.tag == CloseError::Tag::PeerAppError &&
+          aError.peer_app_error._0 == HTTP3_APP_ERROR_NO_ERROR))) {
+      // Record telemetry keyed by TRR provider.
+      glean::network::trr_idle_close_time_h3.Get(TRRProviderKey())
+          .AccumulateRawDuration(TimeStamp::Now() - mLastTRRResponseTime);
+      mLastTRRResponseTime = TimeStamp();
+    }
+  }
 }
 
 void Http3Session::Finish0Rtt(bool aRestart) {
@@ -2678,6 +2702,16 @@ void Http3Session::SetSendOrder(Http3StreamBase* aStream,
     MOZ_ASSERT(NS_SUCCEEDED(rv));
     Unused << rv;
   }
+}
+
+Http3Stats Http3Session::GetStats() {
+  if (!mHttp3Connection) {
+    return Http3Stats();
+  }
+
+  Http3Stats stats{};
+  mHttp3Connection->GetStats(&stats);
+  return stats;
 }
 
 }  // namespace mozilla::net

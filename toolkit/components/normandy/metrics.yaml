@@ -658,38 +658,47 @@ normandy:
       normandy.validationFailed#nimbus_experiment.
     bugs:
       - https://bugzil.la/1762652
+      - https://bugzil.la/1960370
     data_reviews:
       - https://bugzil.la/1762652
+      - https://bugzil.la/1960370
     notification_emails:
       - beth@mozilla.com
+      - project-nimbus@mozilla.com
     expires: never
     extra_keys:
       value:
         description: >
           The `value` of the event. Mirrors to the Legacy Telemetry
-          event's `value` parameter.
+          event's `value` parameter (i.e., the experiment slug).
         type: string
       reason:
         description: >
-          Why validation failed (one of "invalid-recipe", "invalid-branch", or "invalid-reason").
+          Why the validation failed.
+
+          This will be one of the following reasons:
+
+          - "invalid-recipe": the recipe failed schema validation;
+          - "invalid-branch": a branch value failed schema validation;
+          - "l10n-missing-locale": the recipe is missing localizations for a
+            specific locale;
+          - "l10n-missing-entry": the recipe is missing specific localization
+            entries for a specific locale;
         type: string
       branch:
         description: >
           If reason == invalid-branch, the branch that failed validation.
         type: string
-      feature:
-        description: >
-          If reason == invalid-feature, the invalid feature ID.
-        type: string
       locale:
         description: >
-          If reason == missing-locale, the locale that was missing from the localization table. If reason == missing-l10n-entry, the locale that was missing the localization entries.
-
+          If reason == missing-locale, the locale that was missing from the
+          localization table.
+          If reason == missing-l10n-entry, the locale that was missing the
+          localization entries.
         type: string
       l10n_ids:
         description: >
           If reason == missing-l10n-entry, a comma-separated list of missing localization entries.
-
         type: string
     telemetry_mirror: Normandy_Validationfailed_NimbusExperiment
 

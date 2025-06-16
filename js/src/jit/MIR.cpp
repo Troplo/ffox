@@ -34,6 +34,7 @@
 #include "util/Text.h"
 #include "util/Unicode.h"
 #include "vm/BigIntType.h"
+#include "vm/ConstantCompareOperand.h"
 #include "vm/Float16.h"
 #include "vm/Iteration.h"    // js::NativeIterator
 #include "vm/PlainObject.h"  // js::PlainObject
@@ -6350,7 +6351,7 @@ MDefinition* MArrayJoin::foldsTo(TempAllocator& alloc) {
   // be executed on the bailout path.
   MDefinition* string = arr->toStringSplit()->string();
   MDefinition* pattern = arr->toStringSplit()->separator();
-  MDefinition* replacement = sep();
+  MDefinition* replacement = separator();
 
   MStringReplace* substr =
       MStringReplace::New(alloc, string, pattern, replacement);
@@ -6708,6 +6709,20 @@ bool MGuardShape::congruentTo(const MDefinition* ins) const {
 }
 
 AliasSet MGuardShape::getAliasSet() const {
+  return AliasSet::Load(AliasSet::ObjectFields);
+}
+
+bool MHasShape::congruentTo(const MDefinition* ins) const {
+  if (!ins->isHasShape()) {
+    return false;
+  }
+  if (shape() != ins->toHasShape()->shape()) {
+    return false;
+  }
+  return congruentIfOperandsEqual(ins);
+}
+
+AliasSet MHasShape::getAliasSet() const {
   return AliasSet::Load(AliasSet::ObjectFields);
 }
 

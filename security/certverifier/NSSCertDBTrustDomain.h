@@ -66,7 +66,6 @@ SECStatus InitializeNSS(const nsACString& dir, NSSDBConfig nssDbConfig,
 
 void DisableMD5();
 
-#ifdef MOZ_SYSTEM_NSS
 /**
  * Loads root certificates from a module.
  *
@@ -78,7 +77,6 @@ void DisableMD5();
  */
 
 bool LoadLoadableRoots(const nsCString& dir);
-#endif  // MOZ_SYSTEM_NSS
 
 /**
  * Loads root certificates from libxul.
@@ -103,11 +101,6 @@ bool LoadOSClientCertsModule();
  * @return true if the module was successfully loaded, false otherwise.
  */
 bool LoadIPCClientCertsModule();
-
-/**
- * Unloads the loadable roots module and os client certs module, if loaded.
- */
-void UnloadUserModules();
 
 nsresult DefaultServerNicknameForCert(const CERTCertificate* cert,
                                       /*out*/ nsCString& nickname);

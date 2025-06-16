@@ -121,6 +121,7 @@ class GleanMetricsService(context: Context) : MetricsService {
                 httpClient = ConceptFetchHttpUploader(
                     client = lazy(LazyThreadSafetyMode.NONE) { components.client },
                     usePrivateRequest = true,
+                    supportsOhttp = true,
                 ),
             ),
             buildInfo = GleanBuildInfo.buildInfo,
@@ -131,7 +132,7 @@ class GleanMetricsService(context: Context) : MetricsService {
         if (telemetryEnabled) {
             CoroutineScope(Dispatchers.Main).launch {
                 val readJson = { context.assets.readJSONObject("search/search_telemetry_v2.json") }
-                val providerList = withContext(Dispatchers.IO) {
+                val providerList = withContext(IO) {
                     SerpTelemetryRepository(
                         rootStorageDirectory = context.filesDir,
                         readJson = readJson,

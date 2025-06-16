@@ -7,9 +7,6 @@
  * "Couldn't get the user appdata directory. Crash events may not be produced."
  * in nsExceptionHandler.cpp (possibly bug 619104)
  *
- * Test log warnings that happen after the test has finished
- * "OOPDeinit() without successful OOPInit()" in nsExceptionHandler.cpp
- * (bug 619104)
  * "XPCOM objects created/destroyed from static ctor/dtor" in nsTraceRefcnt.cpp
  * (possibly bug 457479)
  *
@@ -456,6 +453,7 @@ var gTestFilesCompleteSuccess = [
     compareFile: FILE_COMPLETE_EXE,
     originalPerms: 0o777,
     comparePerms: 0o755,
+    skipFileVerification: "macosx",
   },
   {
     description: "Added by update.manifest (add)",
@@ -478,6 +476,7 @@ var gTestFilesCompleteSuccess = [
     compareFile: FILE_COMPLETE_EXE,
     originalPerms: 0o777,
     comparePerms: 0o755,
+    skipFileVerification: "macosx",
   },
   {
     description: "Added by update.manifest (add)",
@@ -668,6 +667,7 @@ var gTestFilesPartialSuccess = [
     compareFile: FILE_PARTIAL_EXE,
     originalPerms: 0o755,
     comparePerms: 0o755,
+    skipFileVerification: "macosx",
   },
   {
     description: "Patched by update.manifest (patch)",
@@ -679,6 +679,7 @@ var gTestFilesPartialSuccess = [
     compareFile: FILE_PARTIAL_EXE,
     originalPerms: 0o755,
     comparePerms: 0o755,
+    skipFileVerification: "macosx",
   },
   {
     description: "Added by update.manifest (add)",
@@ -978,6 +979,7 @@ function setupTestCommon(aAppUpdateAutoEnabled = false, aAllowBits = false) {
       gFOS.init(logFile, MODE_WRONLY | MODE_APPEND, PERMS_FILE, 0);
 
       gRealDump = dump;
+      // eslint-disable-next-line no-global-assign
       dump = dumpOverride;
     }
   }
@@ -1099,9 +1101,18 @@ function setupTestCommon(aAppUpdateAutoEnabled = false, aAllowBits = false) {
 }
 
 /**
- * Cleans up all the files we may have created by simulating an update.
+ * Nulls out the most commonly used global vars used by tests to prevent leaks
+ * as needed and attempts to restore the system to its original state.
  */
-function cleanupUpdateFiles() {
+function cleanupTestCommon() {
+  debugDump("start - general test cleanup");
+
+  if (gChannel) {
+    gPrefRoot.removeObserver(PREF_APP_UPDATE_CHANNEL, observer);
+  }
+
+  gTestserver = null;
+
   if (AppConstants.platform == "macosx" || AppConstants.platform == "linux") {
     // This will delete the launch script if it exists.
     getLaunchScript();
@@ -1117,6 +1128,36 @@ function cleanupUpdateFiles() {
         } catch (e) {}
       }
     }
+  }
+
+  if (AppConstants.platform == "win" && MOZ_APP_BASENAME) {
+    let appDir = getApplyDirFile();
+    let vendor = MOZ_APP_VENDOR ? MOZ_APP_VENDOR : "Mozilla";
+    const REG_PATH =
+      "SOFTWARE\\" + vendor + "\\" + MOZ_APP_BASENAME + "\\TaskBarIDs";
+    let key = Cc["@mozilla.org/windows-registry-key;1"].createInstance(
+      Ci.nsIWindowsRegKey
+    );
+    try {
+      key.open(
+        Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
+        REG_PATH,
+        Ci.nsIWindowsRegKey.ACCESS_ALL
+      );
+      if (key.hasValue(appDir.path)) {
+        key.removeValue(appDir.path);
+      }
+    } catch (e) {}
+    try {
+      key.open(
+        Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
+        REG_PATH,
+        Ci.nsIWindowsRegKey.ACCESS_ALL
+      );
+      if (key.hasValue(appDir.path)) {
+        key.removeValue(appDir.path);
+      }
+    } catch (e) {}
   }
 
   // The updates directory is located outside of the application directory and
@@ -1187,52 +1228,6 @@ function cleanupUpdateFiles() {
   }
   // We just deleted this.
   gUpdateBin = null;
-}
-
-/**
- * Nulls out the most commonly used global vars used by tests to prevent leaks
- * as needed and attempts to restore the system to its original state.
- */
-function cleanupTestCommon() {
-  debugDump("start - general test cleanup");
-
-  if (gChannel) {
-    gPrefRoot.removeObserver(PREF_APP_UPDATE_CHANNEL, observer);
-  }
-
-  gTestserver = null;
-
-  if (AppConstants.platform == "win" && MOZ_APP_BASENAME) {
-    let appDir = getApplyDirFile();
-    let vendor = MOZ_APP_VENDOR ? MOZ_APP_VENDOR : "Mozilla";
-    const REG_PATH =
-      "SOFTWARE\\" + vendor + "\\" + MOZ_APP_BASENAME + "\\TaskBarIDs";
-    let key = Cc["@mozilla.org/windows-registry-key;1"].createInstance(
-      Ci.nsIWindowsRegKey
-    );
-    try {
-      key.open(
-        Ci.nsIWindowsRegKey.ROOT_KEY_LOCAL_MACHINE,
-        REG_PATH,
-        Ci.nsIWindowsRegKey.ACCESS_ALL
-      );
-      if (key.hasValue(appDir.path)) {
-        key.removeValue(appDir.path);
-      }
-    } catch (e) {}
-    try {
-      key.open(
-        Ci.nsIWindowsRegKey.ROOT_KEY_CURRENT_USER,
-        REG_PATH,
-        Ci.nsIWindowsRegKey.ACCESS_ALL
-      );
-      if (key.hasValue(appDir.path)) {
-        key.removeValue(appDir.path);
-      }
-    } catch (e) {}
-  }
-
-  cleanupUpdateFiles();
 
   resetEnvironment();
   Services.prefs.clearUserPref(PREF_APP_UPDATE_BITS_ENABLED);
@@ -1240,6 +1235,7 @@ function cleanupTestCommon() {
   debugDump("finish - general test cleanup");
 
   if (gRealDump) {
+    // eslint-disable-next-line no-global-assign
     dump = gRealDump;
     gRealDump = null;
   }
@@ -2005,6 +2001,21 @@ function stripQuarantineBitFromPath(aPath) {
   stripQuarantineBitProcess.run(true, args, args.length);
 }
 
+function selfSignAppBundle(aPath) {
+  if (AppConstants.platform != "macosx") {
+    do_throw("macOS-only function called by a different platform!");
+  }
+
+  let args = ["--deep", "-fs", "-", aPath];
+  let codesignProcess = Cc["@mozilla.org/process/util;1"].createInstance(
+    Ci.nsIProcess
+  );
+  let codesignBin = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
+  codesignBin.initWithPath("/usr/bin/codesign");
+  codesignProcess.init(codesignBin);
+  codesignProcess.run(true, args, args.length);
+}
+
 /**
  * Copies the test updater to the GRE binary directory and returns the nsIFile
  * for the copied test updater.
@@ -2183,14 +2194,16 @@ function runUpdate(
 
   setAppBundleModTime();
 
-  let args = [updatesDirPath, installDirPath];
-  if (aSwitchApp) {
-    args[2] = stageDirPath;
-    args[3] = pid + "/replace";
-  } else {
-    args[2] = applyToDirPath;
-    args[3] = pid;
-  }
+  // The version 3 argument format looks like
+  // updater 3 patch-dir install-dir apply-to-dir which-invocation [wait-pid [callback-working-dir callback-path args...]]
+  let args = [
+    "3",
+    updatesDirPath,
+    installDirPath,
+    aSwitchApp ? stageDirPath : applyToDirPath,
+    "first",
+    aSwitchApp ? pid + "/replace" : pid,
+  ];
 
   let launchBin = gIsServiceTest && isInvalidArgTest ? callbackApp : gUpdateBin;
 
@@ -2198,6 +2211,8 @@ function runUpdate(
     args = args.concat([callbackApp.parent.path, callbackApp.path]);
     args = args.concat(gCallbackArgs);
   } else if (gIsServiceTest) {
+    // We are jumping straight to the second invocation in this case
+    args[4] = "second";
     args = ["launch-service", gUpdateBin.path].concat(args);
   } else if (aCallbackPath) {
     args = args.concat([callbackApp.parent.path, aCallbackPath]);
@@ -3331,10 +3346,7 @@ async function setupUpdaterTest(
     gUpdateBin = copyTestUpdaterToBinDir();
   }
 
-  if (AppConstants.platform == "macosx") {
-    stripQuarantineBitFromPath(afterApplyBinDir.parent.parent.path);
-  }
-
+  let filesWithCompareContents = [];
   gTestFiles.forEach(function SUT_TF_FE(aTestFile) {
     debugDump("start - setup test file: " + aTestFile.fileName);
     if (aTestFile.originalFile || aTestFile.originalContents) {
@@ -3361,6 +3373,18 @@ async function setupUpdaterTest(
       } else {
         testFile = getApplyDirFile(aTestFile.relPathDir + aTestFile.fileName);
         writeFile(testFile, aTestFile.originalContents);
+        if (
+          AppConstants.platform == "macosx" &&
+          aTestFile.originalContents == aTestFile.compareContents
+        ) {
+          // Self-signing the app bundle later during setupUpdaterTest can
+          // modify files, hence we need to wait to set the compareContents
+          // property until we know what to expect.
+          filesWithCompareContents.push({
+            memFile: aTestFile,
+            diskFile: testFile,
+          });
+        }
       }
 
       // Skip these tests on Windows since chmod doesn't really set permissions
@@ -3385,7 +3409,17 @@ async function setupUpdaterTest(
           aTestFile.originalContents = fileContents;
         }
         if (!aTestFile.compareContents && !aTestFile.compareFile) {
-          aTestFile.compareContents = fileContents;
+          if (AppConstants.platform == "macosx") {
+            // Self-signing the app bundle later during setupUpdaterTest can
+            // modify files, hence we need to wait to set the compareContents
+            // property until we know what to expect.
+            filesWithCompareContents.push({
+              memFile: aTestFile,
+              diskFile: testFile,
+            });
+          } else {
+            aTestFile.compareContents = fileContents;
+          }
         }
         if (!aTestFile.comparePerms) {
           aTestFile.comparePerms = testFile.permissions;
@@ -3395,15 +3429,6 @@ async function setupUpdaterTest(
     debugDump("finish - setup test file: " + aTestFile.fileName);
   });
 
-  // Set a similar extended attribute on the `.app` directory as we see in
-  // the wild. We will verify that it is preserved at the end of tests.
-  if (AppConstants.platform == "macosx") {
-    await IOUtils.setMacXAttr(
-      getApplyDirFile().path,
-      MAC_APP_XATTR_KEY,
-      new TextEncoder().encode(MAC_APP_XATTR_VALUE)
-    );
-  }
   // Add the test directory that will be updated for a successful update or left
   // in the initial state for a failed update.
   gTestDirs.forEach(function SUT_TD_FE(aTestDir) {
@@ -3469,6 +3494,23 @@ async function setupUpdaterTest(
     }
     return false;
   }, "Waiting to setup app files");
+
+  if (AppConstants.platform == "macosx") {
+    let bundlePath = afterApplyBinDir.parent.parent.path;
+    stripQuarantineBitFromPath(bundlePath);
+    selfSignAppBundle(bundlePath);
+    filesWithCompareContents.forEach(elem => {
+      elem.memFile.originalContents = readFileBytes(elem.diskFile);
+      elem.memFile.compareContents = elem.memFile.originalContents;
+    });
+    // Set a similar extended attribute on the `.app` directory as we see in
+    // the wild. We will verify that it is preserved at the end of tests.
+    await IOUtils.setMacXAttr(
+      getApplyDirFile().path,
+      MAC_APP_XATTR_KEY,
+      new TextEncoder().encode(MAC_APP_XATTR_VALUE)
+    );
+  }
 
   debugDump("finish - updater test setup");
 }
@@ -3880,32 +3922,37 @@ function checkFilesAfterUpdateSuccess(
         testFile.exists(),
         MSG_SHOULD_EXIST + getMsgPath(testFile.path)
       );
+      if (
+        !aTestFile.skipFileVerification ||
+        !aTestFile.skipFileVerification.includes(AppConstants.platform)
+      ) {
+        // Skip these tests on Windows since chmod doesn't really set permissions
+        // on Windows.
+        if (AppConstants.platform != "win" && aTestFile.comparePerms) {
+          // Check if the permssions as set in the complete mar file are correct.
+          Assert.equal(
+            "0o" + (testFile.permissions & 0xfff).toString(8),
+            "0o" + (aTestFile.comparePerms & 0xfff).toString(8),
+            "the file permissions" + MSG_SHOULD_EQUAL
+          );
+        }
 
-      // Skip these tests on Windows since chmod doesn't really set permissions
-      // on Windows.
-      if (AppConstants.platform != "win" && aTestFile.comparePerms) {
-        // Check if the permssions as set in the complete mar file are correct.
-        Assert.equal(
-          "0o" + (testFile.permissions & 0xfff).toString(8),
-          "0o" + (aTestFile.comparePerms & 0xfff).toString(8),
-          "the file permissions" + MSG_SHOULD_EQUAL
-        );
-      }
+        let fileContents1 = readFileBytes(testFile);
+        let fileContents2 = aTestFile.compareFile
+          ? readFileBytes(getTestDirFile(aTestFile.compareFile))
+          : aTestFile.compareContents;
 
-      let fileContents1 = readFileBytes(testFile);
-      let fileContents2 = aTestFile.compareFile
-        ? readFileBytes(getTestDirFile(aTestFile.compareFile))
-        : aTestFile.compareContents;
-      // Don't write the contents of the file to the log to reduce log spam
-      // unless there is a failure.
-      if (fileContents1 == fileContents2) {
-        Assert.ok(true, "the file contents" + MSG_SHOULD_EQUAL);
-      } else {
-        Assert.equal(
-          fileContents1,
-          fileContents2,
-          "the file contents" + MSG_SHOULD_EQUAL
-        );
+        // Don't write the contents of the file to the log to reduce log spam
+        // unless there is a failure.
+        if (fileContents1 == fileContents2) {
+          Assert.ok(true, "the file contents" + MSG_SHOULD_EQUAL);
+        } else {
+          Assert.equal(
+            fileContents1,
+            fileContents2,
+            "the file contents" + MSG_SHOULD_EQUAL
+          );
+        }
       }
     } else {
       Assert.ok(
@@ -4022,32 +4069,37 @@ function checkFilesAfterUpdateFailure(
         testFile.exists(),
         MSG_SHOULD_EXIST + getMsgPath(testFile.path)
       );
+      if (
+        !aTestFile.skipFileVerification ||
+        !aTestFile.skipFileVerification.includes(AppConstants.platform)
+      ) {
+        // Skip these tests on Windows since chmod doesn't really set permissions
+        // on Windows.
+        if (AppConstants.platform != "win" && aTestFile.comparePerms) {
+          // Check the original permssions are retained on the file.
+          Assert.equal(
+            testFile.permissions & 0xfff,
+            aTestFile.comparePerms & 0xfff,
+            "the file permissions" + MSG_SHOULD_EQUAL
+          );
+        }
 
-      // Skip these tests on Windows since chmod doesn't really set permissions
-      // on Windows.
-      if (AppConstants.platform != "win" && aTestFile.comparePerms) {
-        // Check the original permssions are retained on the file.
-        Assert.equal(
-          testFile.permissions & 0xfff,
-          aTestFile.comparePerms & 0xfff,
-          "the file permissions" + MSG_SHOULD_EQUAL
-        );
-      }
+        let fileContents1 = readFileBytes(testFile);
+        let fileContents2 = aTestFile.compareFile
+          ? readFileBytes(getTestDirFile(aTestFile.compareFile))
+          : aTestFile.compareContents;
 
-      let fileContents1 = readFileBytes(testFile);
-      let fileContents2 = aTestFile.compareFile
-        ? readFileBytes(getTestDirFile(aTestFile.compareFile))
-        : aTestFile.compareContents;
-      // Don't write the contents of the file to the log to reduce log spam
-      // unless there is a failure.
-      if (fileContents1 == fileContents2) {
-        Assert.ok(true, "the file contents" + MSG_SHOULD_EQUAL);
-      } else {
-        Assert.equal(
-          fileContents1,
-          fileContents2,
-          "the file contents" + MSG_SHOULD_EQUAL
-        );
+        // Don't write the contents of the file to the log to reduce log spam
+        // unless there is a failure.
+        if (fileContents1 == fileContents2) {
+          Assert.ok(true, "the file contents" + MSG_SHOULD_EQUAL);
+        } else {
+          Assert.equal(
+            fileContents1,
+            fileContents2,
+            "the file contents" + MSG_SHOULD_EQUAL
+          );
+        }
       }
     } else {
       Assert.ok(

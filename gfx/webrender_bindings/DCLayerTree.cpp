@@ -23,7 +23,7 @@
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/GPUParent.h"
 #include "mozilla/gfx/Matrix.h"
-#include "mozilla/layers/HelpersD3D11.h"
+#include "mozilla/layers/CompositeProcessD3D11FencesHolderMap.h"
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/webrender/RenderD3D11TextureHost.h"
@@ -31,7 +31,7 @@
 #include "mozilla/webrender/RenderTextureHost.h"
 #include "mozilla/webrender/RenderThread.h"
 #include "mozilla/WindowsVersion.h"
-#include "mozilla/Telemetry.h"
+#include "mozilla/glean/GfxMetrics.h"
 #include "nsPrintfCString.h"
 #include "WinUtils.h"
 
@@ -540,13 +540,39 @@ void DCLayerTree::WaitForCommitCompletion() {
   mCompositionDevice->WaitForCommitCompletion();
 }
 
+bool DCLayerTree::UseNativeCompositor() const {
+  return mUseNativeCompositor && gfx::gfxVars::UseWebRenderCompositor();
+}
+
+bool DCLayerTree::UseLayerCompositor() const {
+// Only allow the layer compositor in nightly builds, for now.
+#ifdef NIGHTLY_BUILD
+  return UseNativeCompositor() &&
+         StaticPrefs::gfx_webrender_layer_compositor_AtStartup();
+#else
+  return false;
+#endif
+}
+
 void DCLayerTree::DisableNativeCompositor() {
+  MOZ_ASSERT(!UseLayerCompositor());
   MOZ_ASSERT(mCurrentSurface.isNothing());
   MOZ_ASSERT(mCurrentLayers.empty());
 
+  mUseNativeCompositor = false;
   ReleaseNativeCompositorResources();
   mPrevLayers.clear();
   mRootVisual->RemoveAllVisuals();
+}
+
+void DCLayerTree::EnableAsyncScreenshot() {
+  MOZ_ASSERT(UseLayerCompositor());
+  if (!UseLayerCompositor()) {
+    MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+    return;
+  }
+  mEnableAsyncScreenshot = true;
+  mAsyncScreenshotLastFrameUsed = mCurrentFrame;
 }
 
 bool DCLayerTree::MaybeUpdateDebugCounter() {
@@ -621,7 +647,7 @@ void DCLayerTree::CompositorEndFrame() {
     surface->UpdateAllocatedRect();
     if (!same) {
       // Add surfaces in z-order they were added to the scene.
-      const auto visual = surface->GetVisual();
+      const auto visual = surface->GetRootVisual();
       mRootVisual->AddVisual(visual, false, nullptr);
     }
   }
@@ -632,8 +658,8 @@ void DCLayerTree::CompositorEndFrame() {
   mCompositionDevice->Commit();
 
   auto end = TimeStamp::Now();
-  mozilla::Telemetry::Accumulate(mozilla::Telemetry::COMPOSITE_SWAP_TIME,
-                                 (end - start).ToMilliseconds() * 10.);
+  mozilla::glean::gfx::composite_swap_time.AccumulateSingleSample(
+      (end - start).ToMilliseconds() * 10.);
 
   // Remove any framebuffers that haven't been
   // used in the last 60 frames.
@@ -651,6 +677,11 @@ void DCLayerTree::CompositorEndFrame() {
       --i;  // Examine the element again, if necessary.
       --len;
     }
+  }
+
+  if (mEnableAsyncScreenshot &&
+      (mCurrentFrame - mAsyncScreenshotLastFrameUsed) > 5) {
+    mEnableAsyncScreenshot = false;
   }
 
   if (!StaticPrefs::gfx_webrender_dcomp_video_check_slow_present()) {
@@ -677,12 +708,12 @@ void DCLayerTree::CompositorEndFrame() {
 
 void DCLayerTree::BindSwapChain(wr::NativeSurfaceId aId) {
   auto surface = GetSurface(aId);
-  surface->AsDCSwapChain()->Bind();
+  surface->AsDCLayerSurface()->Bind();
 }
 
 void DCLayerTree::PresentSwapChain(wr::NativeSurfaceId aId) {
   auto surface = GetSurface(aId);
-  surface->AsDCSwapChain()->Present();
+  surface->AsDCLayerSurface()->Present();
 }
 
 void DCLayerTree::Bind(wr::NativeTileId aId, wr::DeviceIntPoint* aOffset,
@@ -774,12 +805,26 @@ void DCLayerTree::CreateSwapChainSurface(wr::NativeSurfaceId aId,
   auto it = mDCSurfaces.find(aId);
   MOZ_RELEASE_ASSERT(it == mDCSurfaces.end());
 
-  auto surface = MakeUnique<DCSwapChain>(aSize, aIsOpaque, this);
-  if (!surface->Initialize()) {
-    gfxCriticalNote << "Failed to initialize DCSwapChain: "
-                    << wr::AsUint64(aId);
-    return;
+  UniquePtr<DCSurface> surface;
+  if (!mEnableAsyncScreenshot &&
+      StaticPrefs::
+          gfx_webrender_layer_compositor_use_composition_surface_AtStartup()) {
+    surface = MakeUnique<DCLayerCompositionSurface>(aSize, aIsOpaque, this);
+    if (!surface->Initialize()) {
+      gfxCriticalNote << "Failed to initialize DCLayerSurface: "
+                      << wr::AsUint64(aId);
+      return;
+    }
+  } else {
+    surface = MakeUnique<DCSwapChain>(aSize, aIsOpaque, this);
+    if (!surface->Initialize()) {
+      gfxCriticalNote << "Failed to initialize DCSwapChain: "
+                      << wr::AsUint64(aId);
+      return;
+    }
   }
+
+  MOZ_ASSERT_IF(mEnableAsyncScreenshot, mDCSurfaces.empty());
 
   mDCSurfaces[aId] = std::move(surface);
 }
@@ -790,7 +835,7 @@ void DCLayerTree::ResizeSwapChainSurface(wr::NativeSurfaceId aId,
   MOZ_RELEASE_ASSERT(it != mDCSurfaces.end());
   auto surface = it->second.get();
 
-  surface->AsDCSwapChain()->Resize(aSize);
+  surface->AsDCLayerSurface()->Resize(aSize);
 }
 
 void DCLayerTree::CreateExternalSurface(wr::NativeSurfaceId aId,
@@ -813,7 +858,7 @@ void DCLayerTree::DestroySurface(NativeSurfaceId aId) {
   MOZ_RELEASE_ASSERT(surface_it != mDCSurfaces.end());
   auto surface = surface_it->second.get();
 
-  mRootVisual->RemoveVisual(surface->GetVisual());
+  mRootVisual->RemoveVisual(surface->GetRootVisual());
   mDCSurfaces.erase(surface_it);
 }
 
@@ -882,8 +927,8 @@ DCSurface* DCExternalSurfaceWrapper::EnsureSurfaceForExternalImage(
   }
 
   // Add surface's visual which will contain video data to our root visual.
-  const auto surfaceVisual = mSurface->GetVisual();
-  mVisual->AddVisual(surfaceVisual, true, nullptr);
+  const auto surfaceVisual = mSurface->GetRootVisual();
+  mContentVisual->AddVisual(surfaceVisual, true, nullptr);
 
   // -
   // Apply color management.
@@ -1013,11 +1058,13 @@ static inline D2D1_MATRIX_3X2_F D2DMatrix(const gfx::Matrix& aTransform) {
 void DCLayerTree::AddSurface(wr::NativeSurfaceId aId,
                              const wr::CompositorSurfaceTransform& aTransform,
                              wr::DeviceIntRect aClipRect,
-                             wr::ImageRendering aImageRendering) {
+                             wr::ImageRendering aImageRendering,
+                             wr::DeviceIntRect aRoundedClipRect,
+                             wr::ClipRadius aClipRadius) {
   auto it = mDCSurfaces.find(aId);
   MOZ_RELEASE_ASSERT(it != mDCSurfaces.end());
   const auto surface = it->second.get();
-  const auto visual = surface->GetVisual();
+  const auto visual = surface->GetContentVisual();
 
   wr::DeviceIntPoint virtualOffset = surface->GetVirtualOffset();
 
@@ -1059,6 +1106,8 @@ void DCLayerTree::AddSurface(wr::NativeSurfaceId aId,
     visual->SetBitmapInterpolationMode(
         DCOMPOSITION_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
   }
+
+  surface->SetClip(aRoundedClipRect, aClipRadius);
 
   mCurrentLayers.push_back(aId);
 }
@@ -1264,9 +1313,20 @@ bool DCSurface::Initialize() {
   // Create a visual for tiles to attach to, whether virtual or not.
   HRESULT hr;
   const auto dCompDevice = mDCLayerTree->GetCompositionDevice();
-  hr = dCompDevice->CreateVisual(getter_AddRefs(mVisual));
+  hr = dCompDevice->CreateVisual(getter_AddRefs(mRootVisual));
   if (FAILED(hr)) {
     gfxCriticalNote << "Failed to create DCompositionVisual: " << gfx::hexa(hr);
+    return false;
+  }
+  hr = dCompDevice->CreateVisual(getter_AddRefs(mContentVisual));
+  if (FAILED(hr)) {
+    gfxCriticalNote << "Failed to create DCompositionVisual: " << gfx::hexa(hr);
+    return false;
+  }
+  mRootVisual->AddVisual(mContentVisual, false, nullptr);
+  hr = dCompDevice->CreateRectangleClip(getter_AddRefs(mClip));
+  if (FAILED(hr)) {
+    gfxCriticalNote << "Failed to create RectangleClip: " << gfx::hexa(hr);
     return false;
   }
 
@@ -1282,11 +1342,41 @@ bool DCSurface::Initialize() {
     MOZ_ASSERT(SUCCEEDED(hr));
 
     // Bind the surface memory to this visual
-    hr = mVisual->SetContent(mVirtualSurface);
+    hr = mContentVisual->SetContent(mVirtualSurface);
     MOZ_ASSERT(SUCCEEDED(hr));
   }
 
   return true;
+}
+
+void DCSurface::SetClip(wr::DeviceIntRect aClipRect,
+                        wr::ClipRadius aClipRadius) {
+  bool needsClip =
+      aClipRadius.top_left > 0.0f || aClipRadius.top_right > 0.0f ||
+      aClipRadius.bottom_left > 0.0f || aClipRadius.bottom_right > 0.0f;
+
+  if (needsClip) {
+    mClip->SetLeft(aClipRect.min.x);
+    mClip->SetRight(aClipRect.max.x);
+    mClip->SetTop(aClipRect.min.y);
+    mClip->SetBottom(aClipRect.max.y);
+
+    mClip->SetTopLeftRadiusX(aClipRadius.top_left);
+    mClip->SetTopLeftRadiusY(aClipRadius.top_left);
+
+    mClip->SetTopRightRadiusX(aClipRadius.top_right);
+    mClip->SetTopRightRadiusY(aClipRadius.top_right);
+
+    mClip->SetBottomLeftRadiusX(aClipRadius.bottom_left);
+    mClip->SetBottomLeftRadiusY(aClipRadius.bottom_left);
+
+    mClip->SetBottomRightRadiusX(aClipRadius.bottom_right);
+    mClip->SetBottomRightRadiusY(aClipRadius.bottom_right);
+
+    mRootVisual->SetClip(mClip);
+  } else {
+    mRootVisual->SetClip(nullptr);
+  }
 }
 
 void DCSurface::CreateTile(int32_t aX, int32_t aY) {
@@ -1295,7 +1385,7 @@ void DCSurface::CreateTile(int32_t aX, int32_t aY) {
 
   auto tile = MakeUnique<DCTile>(mDCLayerTree);
   if (!tile->Initialize(aX, aY, mTileSize, mIsVirtualSurface, mIsOpaque,
-                        mVisual)) {
+                        mContentVisual)) {
     gfxCriticalNote << "Failed to initialize DCTile: " << aX << aY;
     return;
   }
@@ -1303,7 +1393,7 @@ void DCSurface::CreateTile(int32_t aX, int32_t aY) {
   if (mIsVirtualSurface) {
     mAllocatedRectDirty = true;
   } else {
-    mVisual->AddVisual(tile->GetVisual(), false, nullptr);
+    mContentVisual->AddVisual(tile->GetVisual(), false, nullptr);
   }
 
   mDCTiles[key] = std::move(tile);
@@ -1315,7 +1405,7 @@ void DCSurface::DestroyTile(int32_t aX, int32_t aY) {
     mAllocatedRectDirty = true;
   } else {
     auto tile = GetTile(aX, aY);
-    mVisual->RemoveVisual(tile->GetVisual());
+    mContentVisual->RemoveVisual(tile->GetVisual());
   }
   mDCTiles.erase(key);
 }
@@ -1364,6 +1454,10 @@ DCSwapChain::~DCSwapChain() {
 
     const auto& gle = gl::GLContextEGL::Cast(gl);
     const auto& egl = gle->mEgl;
+
+    if (gle->GetEGLSurfaceOverride() == mEGLSurface) {
+      gle->SetEGLSurfaceOverride(EGL_NO_SURFACE);
+    }
     egl->fDestroySurface(mEGLSurface);
     mEGLSurface = EGL_NO_SURFACE;
   }
@@ -1408,7 +1502,7 @@ bool DCSwapChain::Initialize() {
   hr = dxgiFactory->CreateSwapChainForComposition(device, &desc, nullptr,
                                                   getter_AddRefs(mSwapChain));
   MOZ_RELEASE_ASSERT(SUCCEEDED(hr));
-  mVisual->SetContent(mSwapChain);
+  mContentVisual->SetContent(mSwapChain);
 
   ID3D11Texture2D* backBuffer;
   hr = mSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&backBuffer);
@@ -1437,7 +1531,7 @@ void DCSwapChain::Bind() {
   MOZ_RELEASE_ASSERT(ok);
 }
 
-void DCSwapChain::Resize(wr::DeviceIntSize aSize) {
+bool DCSwapChain::Resize(wr::DeviceIntSize aSize) {
   const auto gl = mDCLayerTree->GetGLContext();
 
   const auto& gle = gl::GLContextEGL::Cast(gl);
@@ -1474,16 +1568,160 @@ void DCSwapChain::Resize(wr::DeviceIntSize aSize) {
   backBuffer->Release();
 
   mSize = aSize;
+  return true;
 }
 
 void DCSwapChain::Present() {
-  const auto gl = mDCLayerTree->GetGLContext();
-  const auto& gle = gl::GLContextEGL::Cast(gl);
-
   HRESULT hr = mSwapChain->Present(0, 0);
   MOZ_RELEASE_ASSERT(SUCCEEDED(hr));
 
-  gle->SetEGLSurfaceOverride(EGL_NO_SURFACE);
+  if (mFirstPresent) {
+    mFirstPresent = false;
+
+    // Wait for the GPU to finish executing its commands before
+    // committing the DirectComposition tree, or else the swapchain
+    // may flicker black when it's first presented.
+    auto* device = mDCLayerTree->GetDevice();
+    RefPtr<IDXGIDevice2> dxgiDevice2;
+    device->QueryInterface((IDXGIDevice2**)getter_AddRefs(dxgiDevice2));
+    MOZ_ASSERT(dxgiDevice2);
+
+    HANDLE event = ::CreateEvent(nullptr, false, false, nullptr);
+    hr = dxgiDevice2->EnqueueSetEvent(event);
+    if (SUCCEEDED(hr)) {
+      DebugOnly<DWORD> result = ::WaitForSingleObject(event, INFINITE);
+      MOZ_ASSERT(result == WAIT_OBJECT_0);
+    } else {
+      gfxCriticalNoteOnce << "EnqueueSetEvent failed: " << gfx::hexa(hr);
+    }
+    ::CloseHandle(event);
+  }
+}
+
+DCLayerCompositionSurface::DCLayerCompositionSurface(wr::DeviceIntSize aSize,
+                                                     bool aIsOpaque,
+                                                     DCLayerTree* aDCLayerTree)
+    : DCLayerSurface(aIsOpaque, aDCLayerTree), mSize(aSize) {}
+
+DCLayerCompositionSurface::~DCLayerCompositionSurface() {
+  if (mEGLSurface) {
+    const auto gl = mDCLayerTree->GetGLContext();
+    const auto& gle = gl::GLContextEGL::Cast(gl);
+    const auto& egl = gle->mEgl;
+
+    egl->fDestroySurface(mEGLSurface);
+    mEGLSurface = EGL_NO_SURFACE;
+  }
+}
+
+bool DCLayerCompositionSurface::Initialize() {
+  DCSurface::Initialize();
+
+  if (!Resize(mSize)) {
+    return false;
+  }
+  return true;
+}
+
+void DCLayerCompositionSurface::Bind() {
+  MOZ_ASSERT(mCompositionSurface);
+
+  if (!mCompositionSurface) {
+    return;
+  }
+
+  RefPtr<ID3D11Texture2D> backBuffer;
+  POINT offset;
+  HRESULT hr;
+
+  hr = mCompositionSurface->BeginDraw(NULL, __uuidof(ID3D11Texture2D),
+                                      (void**)getter_AddRefs(backBuffer),
+                                      &offset);
+
+  if (FAILED(hr)) {
+    RenderThread::Get()->HandleWebRenderError(WebRenderError::BEGIN_DRAW);
+    return;
+  }
+
+  D3D11_TEXTURE2D_DESC desc;
+  backBuffer->GetDesc(&desc);
+
+  const auto gl = mDCLayerTree->GetGLContext();
+  const auto& gle = gl::GLContextEGL::Cast(gl);
+  const auto& egl = gle->mEgl;
+
+  const EGLint pbuffer_attribs[]{LOCAL_EGL_WIDTH,
+                                 mSize.width,
+                                 LOCAL_EGL_HEIGHT,
+                                 mSize.height,
+                                 LOCAL_EGL_TEXTURE_OFFSET_X_ANGLE,
+                                 offset.x,
+                                 LOCAL_EGL_TEXTURE_OFFSET_Y_ANGLE,
+                                 offset.y,
+                                 LOCAL_EGL_NONE};
+  const auto buffer = reinterpret_cast<EGLClientBuffer>(backBuffer.get());
+  EGLConfig eglConfig = mDCLayerTree->GetEGLConfig();
+
+  mEGLSurface = egl->fCreatePbufferFromClientBuffer(
+      LOCAL_EGL_D3D_TEXTURE_ANGLE, buffer, eglConfig, pbuffer_attribs);
+  MOZ_RELEASE_ASSERT(mEGLSurface);
+
+  gle->SetEGLSurfaceOverride(mEGLSurface);
+  bool ok = gl->MakeCurrent();
+
+  MOZ_RELEASE_ASSERT(ok);
+}
+
+bool DCLayerCompositionSurface::Resize(wr::DeviceIntSize aSize) {
+  MOZ_ASSERT(mEGLSurface == EGL_NO_SURFACE);
+
+  if (mSize.width == 0 || mSize.height == 0) {
+    MOZ_ASSERT_UNREACHABLE("unexpected to be called");
+    return false;
+  }
+
+  HRESULT hr;
+  auto* dcompDevice = mDCLayerTree->GetCompositionDevice();
+  const auto alphaMode =
+      mIsOpaque ? DXGI_ALPHA_MODE_IGNORE : DXGI_ALPHA_MODE_PREMULTIPLIED;
+
+  RefPtr<IDCompositionSurface> surface;
+  hr = dcompDevice->CreateSurface(aSize.width, aSize.height,
+                                  DXGI_FORMAT_R8G8B8A8_UNORM, alphaMode,
+                                  getter_AddRefs(surface));
+  if (FAILED(hr)) {
+    gfxCriticalNote << "Failed to create DCompositionSurface: "
+                    << gfx::hexa(hr);
+    return false;
+  }
+
+  hr = mContentVisual->SetContent(surface);
+  if (FAILED(hr)) {
+    gfxCriticalNote << "Failed to SetContent: " << gfx::hexa(hr);
+    return false;
+  }
+
+  mCompositionSurface = surface;
+  mSize = aSize;
+  return true;
+}
+
+void DCLayerCompositionSurface::Present() {
+  MOZ_ASSERT(mEGLSurface);
+  MOZ_ASSERT(mCompositionSurface);
+
+  mCompositionSurface->EndDraw();
+
+  if (!mEGLSurface) {
+    return;
+  }
+
+  const auto gl = mDCLayerTree->GetGLContext();
+  const auto& gle = gl::GLContextEGL::Cast(gl);
+  const auto& egl = gle->mEgl;
+
+  egl->fDestroySurface(mEGLSurface);
+  mEGLSurface = EGL_NO_SURFACE;
 }
 
 DCSurfaceVideo::DCSurfaceVideo(bool aIsOpaque, DCLayerTree* aDCLayerTree)
@@ -1661,7 +1899,7 @@ void DCSurfaceVideo::PresentVideo() {
     return;
   }
 
-  mVisual->SetContent(mVideoSwapChain);
+  mContentVisual->SetContent(mVideoSwapChain);
 
   if (!CallVideoProcessorBlt()) {
     bool useYUVSwapChain = IsYUVSwapChainFormat(mSwapChainFormat);
@@ -1883,6 +2121,7 @@ bool DCSurfaceVideo::CallVideoProcessorBlt() {
   MOZ_ASSERT(mRenderTextureHost);
 
   HRESULT hr;
+  const auto device = mDCLayerTree->GetDevice();
   const auto videoDevice = mDCLayerTree->GetVideoDevice();
   const auto videoContext = mDCLayerTree->GetVideoContext();
   const auto texture = mRenderTextureHost->AsRenderDXGITextureHost();
@@ -1904,17 +2143,10 @@ bool DCSurfaceVideo::CallVideoProcessorBlt() {
     return false;
   }
 
-  auto query = texture->GetQuery();
-  if (query) {
-    // Wait ID3D11Query of D3D11Texture2D copy complete just before blitting for
-    // video overlay with non Intel GPUs. See Bug 1817617.
-    BOOL result;
-    bool ret = layers::WaitForFrameGPUQuery(mDCLayerTree->GetDevice(),
-                                            mDCLayerTree->GetDeviceContext(),
-                                            query, &result);
-    if (!ret) {
-      gfxCriticalNoteOnce << "WaitForFrameGPUQuery() failed";
-    }
+  if (texture->mFencesHolderId.isSome()) {
+    auto* fencesHolderMap = layers::CompositeProcessD3D11FencesHolderMap::Get();
+    MOZ_ASSERT(fencesHolderMap);
+    fencesHolderMap->WaitWriteFence(texture->mFencesHolderId.ref(), device);
   }
 
   RefPtr<IDXGISwapChain3> swapChain3;
@@ -2143,9 +2375,9 @@ void DCSurfaceHandle::PresentSurfaceHandle() {
   LOG_H("PresentSurfaceHandle");
   if (IDCompositionSurface* surface = EnsureSurface()) {
     LOG_H("Set surface %p to visual", surface);
-    mVisual->SetContent(surface);
+    mContentVisual->SetContent(surface);
   } else {
-    mVisual->SetContent(nullptr);
+    mContentVisual->SetContent(nullptr);
   }
 }
 

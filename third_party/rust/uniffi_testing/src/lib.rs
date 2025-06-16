@@ -4,7 +4,7 @@ License, v. 2.0. If a copy of the MPL was not distributed with this
 
 use anyhow::{bail, Result};
 use camino::{Utf8Path, Utf8PathBuf};
-use cargo_metadata::{Message, Metadata, MetadataCommand, Package, Target};
+use cargo_metadata::{CrateType, Message, Metadata, MetadataCommand, Package, Target};
 use fs_err as fs;
 use once_cell::sync::Lazy;
 use std::{
@@ -64,7 +64,7 @@ impl UniFFITestHelper {
         let cdylib_targets: Vec<&Target> = package
             .targets
             .iter()
-            .filter(|t| t.crate_types.iter().any(|t| t == "cdylib"))
+            .filter(|t| t.crate_types.iter().any(|t| *t == CrateType::CDyLib))
             .collect();
         let target = match cdylib_targets.len() {
             1 => cdylib_targets[0],
@@ -162,17 +162,26 @@ fn get_cargo_metadata() -> Metadata {
 }
 
 fn get_cargo_build_messages() -> Vec<Message> {
+    #[cfg(feature = "ffi-trace")]
+    let features_arg = "--features=ffi-trace";
+
+    #[cfg(not(feature = "ffi-trace"))]
+    let features_arg = "--features=";
+
     let mut child = Command::new(env!("CARGO"))
         .arg("test")
+        .arg(features_arg)
         .arg("--no-run")
         .arg("--message-format=json")
         .stdout(Stdio::piped())
         .spawn()
         .expect("Error running cargo build");
     let output = std::io::BufReader::new(child.stdout.take().unwrap());
-    Message::parse_stream(output)
+    let result = Message::parse_stream(output)
         .map(|m| m.expect("Error parsing cargo build messages"))
-        .collect()
+        .collect();
+    child.wait().expect("failed to wait for child");
+    result
 }
 
 fn hash_path(path: &Utf8Path) -> String {

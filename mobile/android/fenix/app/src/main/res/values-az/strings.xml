@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:tools="http://schemas.android.com/tools" xmlns:moz="http://mozac.org/tools">
+<resources xmlns:tools="http://schemas.android.com/tools">
   <!--
     Home Fragment
 
@@ -15,8 +15,6 @@
   <!-- No Open Tabs Message Description -->
   <string name="no_open_tabs_description">Açıq vərəqləriniz burada göstəriləcək.</string>
   <string name="private_browsing_common_myths">Məxfi səyahət haqqında olan əfsanələr</string>
-  <!-- Text for the negative button to decline adding a Private Browsing shortcut to the Home screen -->
-  <string name="cfr_neg_button_text" moz:removedIn="138" tools:ignore="UnusedResources">Xeyr, təşəkkürlər</string>
   <!--
     Home screen icons - Long press shortcuts
 
@@ -257,12 +255,6 @@
   <string name="settings_title">Tənzimləmələr</string>
   <!-- Content description (not visible, for screen readers etc.): "Close button for library settings" -->
   <string name="content_description_close_button">Qapat</string>
-  <!--
-    Sessions
-
-    Title for the list of tabs in the current private session
-  -->
-  <string name="tabs_header_private_tabs_title" moz:removedIn="136" tools:ignore="UnusedResources">Məxfi vərəqlər</string>
   <!-- Content description (not visible, for screen readers etc.): Add tab button. Adds a news tab when pressed -->
   <string name="add_tab">Vərəq əlavə et</string>
   <!-- Content description (not visible, for screen readers etc.): Close tab button. Closes the current session when pressed -->

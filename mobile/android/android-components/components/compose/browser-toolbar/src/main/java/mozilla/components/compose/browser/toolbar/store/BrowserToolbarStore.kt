@@ -4,6 +4,13 @@
 
 package mozilla.components.compose.browser.toolbar.store
 
+import mozilla.components.compose.browser.toolbar.store.BrowserDisplayToolbarAction.BrowserActionsEndUpdated
+import mozilla.components.compose.browser.toolbar.store.BrowserDisplayToolbarAction.BrowserActionsStartUpdated
+import mozilla.components.compose.browser.toolbar.store.BrowserDisplayToolbarAction.PageActionsEndUpdated
+import mozilla.components.compose.browser.toolbar.store.BrowserDisplayToolbarAction.PageActionsStartUpdated
+import mozilla.components.compose.browser.toolbar.store.BrowserDisplayToolbarAction.PageOriginUpdated
+import mozilla.components.compose.browser.toolbar.store.BrowserToolbarInteraction.BrowserToolbarEvent
+import mozilla.components.lib.state.Middleware
 import mozilla.components.lib.state.UiStore
 
 /**
@@ -11,13 +18,32 @@ import mozilla.components.lib.state.UiStore
  */
 class BrowserToolbarStore(
     initialState: BrowserToolbarState = BrowserToolbarState(),
+    middleware: List<Middleware<BrowserToolbarState, BrowserToolbarAction>> = emptyList(),
 ) : UiStore<BrowserToolbarState, BrowserToolbarAction>(
     initialState = initialState,
     reducer = ::reduce,
-)
+    middleware = middleware,
+) {
+    init {
+        // Allow integrators intercept and update the initial state.
+        dispatch(
+            BrowserToolbarAction.Init(
+                mode = initialState.mode,
+                displayState = initialState.displayState,
+                editState = initialState.editState,
+            ),
+        )
+    }
+}
 
 private fun reduce(state: BrowserToolbarState, action: BrowserToolbarAction): BrowserToolbarState {
     return when (action) {
+        is BrowserToolbarAction.Init -> BrowserToolbarState(
+            mode = action.mode,
+            displayState = action.displayState,
+            editState = action.editState,
+        )
+
         is BrowserToolbarAction.ToggleEditMode -> state.copy(
             mode = if (action.editMode) Mode.EDIT else Mode.DISPLAY,
             editState = state.editState.copy(
@@ -25,21 +51,33 @@ private fun reduce(state: BrowserToolbarState, action: BrowserToolbarAction): Br
             ),
         )
 
-        is BrowserDisplayToolbarAction.AddNavigationAction -> state.copy(
+        is BrowserActionsStartUpdated -> state.copy(
             displayState = state.displayState.copy(
-                navigationActions = state.displayState.navigationActions + action.action,
+                browserActionsStart = action.actions,
             ),
         )
 
-        is BrowserDisplayToolbarAction.AddPageAction -> state.copy(
+        is PageActionsStartUpdated -> state.copy(
             displayState = state.displayState.copy(
-                pageActions = state.displayState.pageActions + action.action,
+                pageActionsStart = action.actions,
             ),
         )
 
-        is BrowserDisplayToolbarAction.AddBrowserAction -> state.copy(
+        is PageOriginUpdated -> state.copy(
             displayState = state.displayState.copy(
-                browserActions = state.displayState.browserActions + action.action,
+                pageOrigin = action.pageOrigin,
+            ),
+        )
+
+        is PageActionsEndUpdated -> state.copy(
+            displayState = state.displayState.copy(
+                pageActionsEnd = action.actions,
+            ),
+        )
+
+        is BrowserActionsEndUpdated -> state.copy(
+            displayState = state.displayState.copy(
+                browserActionsEnd = action.actions,
             ),
         )
 
@@ -60,5 +98,17 @@ private fun reduce(state: BrowserToolbarState, action: BrowserToolbarAction): Br
                 editActionsEnd = state.editState.editActionsEnd + action.action,
             ),
         )
+
+        is BrowserDisplayToolbarAction.UpdateProgressBarConfig -> state.copy(
+            displayState = state.displayState.copy(
+                progressBarConfig = action.config,
+            ),
+        )
+
+        is BrowserToolbarEvent -> {
+            // no-op
+            // Expected to be handled in middlewares set by integrators.
+            state
+        }
     }
 }

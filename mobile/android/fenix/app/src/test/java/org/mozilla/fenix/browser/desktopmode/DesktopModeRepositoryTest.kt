@@ -6,6 +6,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.mockk.every
+import io.mockk.spyk
 import kotlinx.coroutines.test.runTest
 import mozilla.components.support.test.robolectric.testContext
 import org.junit.After
@@ -45,6 +47,24 @@ class DesktopModeRepositoryTest {
         }
 
     @Test
+    fun `GIVEN desktop mode defaults unset and device is not large screen WHEN the repository is read for the first time THEN desktop mode should be false`() =
+        runTest {
+            val repository = spyk(createRepository())
+            every { repository.defaultDesktopMode } returns false
+
+            assertFalse(repository.getDesktopBrowsingEnabled())
+        }
+
+    @Test
+    fun `GIVEN desktop mode defaults unset and device is large screen WHEN the repository is read for the first time THEN desktop mode should be true`() =
+        runTest {
+            val repository = spyk(createRepository())
+            every { repository.defaultDesktopMode } returns true
+
+            assertTrue(repository.getDesktopBrowsingEnabled())
+        }
+
+    @Test
     fun `WHEN the repository is written to THEN the preference is updated`() =
         runTest {
             val repository = createRepository()
@@ -57,11 +77,13 @@ class DesktopModeRepositoryTest {
         }
 
     private suspend fun createRepository(
-        initialDesktopMode: Boolean = false,
+        initialDesktopMode: Boolean? = null,
     ) = DefaultDesktopModeRepository(
         context = testContext,
         dataStore = testContext.testDataStore,
     ).apply {
-        setDesktopBrowsingEnabled(enabled = initialDesktopMode)
+        initialDesktopMode?.let {
+            setDesktopBrowsingEnabled(enabled = it)
+        }
     }
 }

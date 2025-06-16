@@ -7,6 +7,7 @@
 #include <mfmediaengine.h>
 #include <unknwnbase.h>
 #include <wtypes.h>
+#include "mozilla/Likely.h"
 #define INITGUID          // Enable DEFINE_PROPERTYKEY()
 #include <propkeydef.h>   // For DEFINE_PROPERTYKEY() definition
 #include <propvarutil.h>  // For InitPropVariantFrom*()
@@ -16,7 +17,9 @@
 #include "RemoteDecodeUtils.h"       // For GetCurrentSandboxingKind()
 #include "SpecialSystemDirectory.h"  // For temp dir
 #include "WMFUtils.h"
+#include "mozilla/DataMutex.h"
 #include "mozilla/EMEUtils.h"
+#include "mozilla/ProfilerMarkers.h"
 #include "mozilla/KeySystemConfig.h"
 #include "mozilla/StaticMutex.h"
 #include "mozilla/StaticPrefs_media.h"
@@ -89,13 +92,13 @@ DEFINE_PROPERTYKEY(EME_CONTENTDECRYPTIONMODULE_ORIGIN_ID, 0x1218a3e2, 0xcfb0,
     }                                                                        \
   } while (false)
 
-StaticMutex sFactoryMutex;
-MOZ_RUNINIT static nsTHashMap<nsStringHashKey,
-                              ComPtr<IMFContentDecryptionModuleFactory>>
-    sFactoryMap;
-MOZ_RUNINIT static CopyableTArray<MFCDMCapabilitiesIPDL> sCapabilities;
-StaticMutex sCapabilitesMutex;
-MOZ_RUNINIT static ComPtr<IUnknown> sMediaEngineClassFactory;
+MOZ_RUNINIT static StaticDataMutex<
+    nsTHashMap<nsStringHashKey, ComPtr<IMFContentDecryptionModuleFactory>>>
+    sFactoryMap("sFactoryMap");
+MOZ_RUNINIT static StaticDataMutex<CopyableTArray<MFCDMCapabilitiesIPDL>>
+    sCapabilities("sCapabilities");
+MOZ_RUNINIT static StaticDataMutex<ComPtr<IUnknown>> sMediaEngineClassFactory(
+    "sMediaEngineClassFactory");
 
 // RAIIized PROPVARIANT. See
 // third_party/libwebrtc/modules/audio_device/win/core_audio_utility_win.h
@@ -361,6 +364,11 @@ static nsString MapKeySystem(const nsString& aKeySystem) {
   return aKeySystem;
 }
 
+static bool IsBeingProfiledOrLogEnabled() {
+  return MOZ_LOG_TEST(GetEMELog(), LogLevel::Info) ||
+         profiler_thread_is_being_profiled_for_markers();
+}
+
 /* static */
 void MFCDMParent::SetWidevineL1Path(const char* aPath) {
   nsAutoCString path(aPath);
@@ -400,7 +408,13 @@ MFCDMParent::MFCDMParent(const nsAString& aKeySystem,
   MOZ_ASSERT(XRE_IsUtilityProcess());
   MOZ_ASSERT(GetCurrentSandboxingKind() ==
              ipc::SandboxingKind::MF_MEDIA_ENGINE_CDM);
-  MFCDM_PARENT_LOG("MFCDMParent created");
+
+  if (IsBeingProfiledOrLogEnabled()) {
+    nsPrintfCString msg("MFCDMParent created for %s",
+                        NS_ConvertUTF16toUTF8(aKeySystem).get());
+    MFCDM_PARENT_LOG("%s", msg.get());
+    PROFILER_MARKER_TEXT("MFCDMParent::Ctor", MEDIA_PLAYBACK, {}, msg);
+  }
   mIPDLSelfRef = this;
   Register();
 
@@ -423,6 +437,10 @@ void MFCDMParent::ShutdownCDM() {
   if (FAILED(rv)) {
     MFCDM_PARENT_LOG("Failed to clear PMP Host App, rv=%lx", rv);
   }
+  if (mCDMProxy) {
+    mCDMProxy->Shutdown();
+    mCDMProxy = nullptr;
+  }
   SHUTDOWN_IF_POSSIBLE(mCDM);
   mCDM = nullptr;
   MFCDM_PARENT_LOG("Shutdown CDM completed");
@@ -430,6 +448,7 @@ void MFCDMParent::ShutdownCDM() {
 
 void MFCDMParent::Destroy() {
   AssertOnManagerThread();
+  PROFILER_MARKER_UNTYPED("MFCDMParent::Destroy", MEDIA_PLAYBACK);
   mKeyMessageEvents.DisconnectAll();
   mKeyChangeEvents.DisconnectAll();
   mExpirationEvents.DisconnectAll();
@@ -473,24 +492,32 @@ LPCWSTR MFCDMParent::GetCDMLibraryName(const nsString& aKeySystem) {
 
 /* static */
 void MFCDMParent::Shutdown() {
-  StaticMutexAutoLock lock(sCapabilitesMutex);
-  sFactoryMap.Clear();
-  sCapabilities.Clear();
-  sMediaEngineClassFactory.Reset();
+  {
+    auto factoryMap = sFactoryMap.Lock();
+    factoryMap->Clear();
+  }
+  {
+    auto capabilities = sCapabilities.Lock();
+    capabilities->Clear();
+  }
+  {
+    auto mediaEngineClassFactory = sMediaEngineClassFactory.Lock();
+    mediaEngineClassFactory->Reset();
+  }
 }
 
 /* static */
 HRESULT MFCDMParent::GetOrCreateFactory(
     const nsString& aKeySystem,
     ComPtr<IMFContentDecryptionModuleFactory>& aFactoryOut) {
-  StaticMutexAutoLock lock(sFactoryMutex);
-  auto rv = sFactoryMap.MaybeGet(aKeySystem);
+  auto factoryMap = sFactoryMap.Lock();
+  auto rv = factoryMap->MaybeGet(aKeySystem);
   if (!rv) {
     MFCDM_PARENT_SLOG("No factory %s, creating...",
                       NS_ConvertUTF16toUTF8(aKeySystem).get());
     ComPtr<IMFContentDecryptionModuleFactory> factory;
     MFCDM_RETURN_IF_FAILED(LoadFactory(aKeySystem, factory));
-    sFactoryMap.InsertOrUpdate(aKeySystem, factory);
+    factoryMap->InsertOrUpdate(aKeySystem, factory);
     aFactoryOut.Swap(factory);
   } else {
     aFactoryOut = *rv;
@@ -511,15 +538,29 @@ HRESULT MFCDMParent::LoadFactory(
                     NS_ConvertUTF16toUTF8(aKeySystem).get());
   ComPtr<IMFContentDecryptionModuleFactory> cdmFactory;
   if (loadFromPlatform) {
-    if (!sMediaEngineClassFactory) {
-      MFCDM_RETURN_IF_FAILED(CoCreateInstance(
-          CLSID_MFMediaEngineClassFactory, nullptr, CLSCTX_INPROC_SERVER,
-          IID_PPV_ARGS(&sMediaEngineClassFactory)));
-    }
     ComPtr<IMFMediaEngineClassFactory4> clsFactory;
-    MFCDM_RETURN_IF_FAILED(sMediaEngineClassFactory.As(&clsFactory));
+    {
+      auto mediaEngineClassFactory = sMediaEngineClassFactory.Lock();
+      if (!*mediaEngineClassFactory) {
+        MFCDM_RETURN_IF_FAILED(CoCreateInstance(
+            CLSID_MFMediaEngineClassFactory, nullptr, CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&*mediaEngineClassFactory)));
+      }
+      MFCDM_RETURN_IF_FAILED((*mediaEngineClassFactory).As(&clsFactory));
+    }
     MFCDM_RETURN_IF_FAILED(clsFactory->CreateContentDecryptionModuleFactory(
         MapKeySystem(aKeySystem).get(), IID_PPV_ARGS(&cdmFactory)));
+    if (MOZ_UNLIKELY(!cdmFactory)) {
+      if (IsBeingProfiledOrLogEnabled()) {
+        nsPrintfCString msg(
+            "CreateContentDecryptionModuleFactory succeeded, but still no "
+            "factory?!");
+        MFCDM_PARENT_SLOG("%s", msg.get());
+        PROFILER_MARKER_TEXT("MFCDMParent::LoadFactoryFailed", MEDIA_PLAYBACK,
+                             {}, msg);
+      }
+      return E_UNEXPECTED;
+    }
     aFactoryOut.Swap(cdmFactory);
     MFCDM_PARENT_SLOG("Created factory for %s from platform!",
                       NS_ConvertUTF16toUTF8(aKeySystem).get());
@@ -632,19 +673,65 @@ static bool FactorySupports(ComPtr<IMFContentDecryptionModuleFactory>& aFactory,
   if (IsPlayReadyKeySystemAndSupported(aKeySystem) &&
       StaticPrefs::media_eme_playready_istypesupportedex()) {
     ComPtr<IMFExtendedDRMTypeSupport> spDrmTypeSupport;
-    MFCDM_RETURN_BOOL_IF_FAILED(sMediaEngineClassFactory.As(&spDrmTypeSupport));
+    {
+      auto mediaEngineClassFactory = sMediaEngineClassFactory.Lock();
+      MFCDM_RETURN_BOOL_IF_FAILED(
+          (*mediaEngineClassFactory).As(&spDrmTypeSupport));
+    }
     BSTR keySystem = aIsHWSecure
                          ? CreateBSTRFromConstChar(kPlayReadyKeySystemHardware)
                          : CreateBSTRFromConstChar(kPlayReadyKeySystemName);
     MF_MEDIA_ENGINE_CANPLAY canPlay;
     spDrmTypeSupport->IsTypeSupportedEx(SysAllocString(contentType.get()),
                                         keySystem, &canPlay);
-    const bool support =
+    bool support =
         canPlay !=
         MF_MEDIA_ENGINE_CANPLAY::MF_MEDIA_ENGINE_CANPLAY_NOT_SUPPORTED;
     MFCDM_PARENT_SLOG("IsTypeSupportedEx=%d (key-system=%ls, content-type=%s)",
                       support, keySystem,
                       NS_ConvertUTF16toUTF8(contentType).get());
+    if (aIsHWSecure && support) {
+      // For HWDRM, `IsTypeSupportedEx` might still return the wrong answer on
+      // certain devices, so we need to create a dummy CDM to see if the HWDRM
+      // is really usable or not.
+      nsTArray<nsString> dummyInitDataType{nsString(u"cenc"),
+                                           nsString(u"keyids")};
+      nsString mimeType(u"video/mp4;codecs=\"");
+      mimeType.AppendASCII(aVideoCodec);
+      MFCDMMediaCapability dummyVideoCapability{
+          mimeType,
+          {CryptoScheme::None},  // No specific scheme
+          nsString(u"3000")};
+      MFCDMInitParamsIPDL dummyParam{
+          nsString(u"dummy"),
+          dummyInitDataType,
+          KeySystemConfig::Requirement::Required /* distinctiveID */,
+          KeySystemConfig::Requirement::Required /* persistent */,
+          {} /* audio capabilities */,
+          {dummyVideoCapability} /* video capabilities */,
+      };
+      ComPtr<IMFContentDecryptionModule> dummyCDM = nullptr;
+      if (FAILED(CreateContentDecryptionModule(
+              aFactory, MapKeySystem(aKeySystem), dummyParam, dummyCDM)) ||
+          !dummyCDM) {
+        if (IsBeingProfiledOrLogEnabled()) {
+          nsPrintfCString msg(
+              "HWDRM actually not supported (key-system=%ls, content-type=%s)",
+              keySystem, NS_ConvertUTF16toUTF8(contentType).get());
+          PROFILER_MARKER_TEXT("MFCDMParent::FailedToUseHWDRM", MEDIA_PLAYBACK,
+                               {}, msg);
+          MFCDM_PARENT_SLOG("%s", msg.get());
+        }
+        support = false;
+      }
+      MFCDM_PARENT_SLOG(
+          "After HWDRM creation check, support=%d (key-system=%ls, "
+          "content-type=%s)",
+          support, keySystem, NS_ConvertUTF16toUTF8(contentType).get());
+      if (dummyCDM) {
+        SHUTDOWN_IF_POSSIBLE(dummyCDM);
+      }
+    }
     return support;
   }
 
@@ -786,8 +873,8 @@ void MFCDMParent::GetCapabilities(const nsString& aKeySystem,
     RETURN_VOID_IF_FAILED(GetOrCreateFactory(aKeySystem, factory));
   }
 
-  StaticMutexAutoLock lock(sCapabilitesMutex);
-  for (auto& capabilities : sCapabilities) {
+  auto capabilitiesUnlocked = sCapabilities.Lock();
+  for (auto& capabilities : *capabilitiesUnlocked) {
     if (capabilities.keySystem().Equals(aKeySystem) &&
         capabilities.isHardwareDecryption() == isHardwareDecryption) {
       MFCDM_PARENT_SLOG(
@@ -1005,7 +1092,7 @@ void MFCDMParent::GetCapabilities(const nsString& aKeySystem,
       KeySystemConfig::SessionType::PersistentLicense);
 
   // Cache capabilities for reuse.
-  sCapabilities.AppendElement(aCapabilitiesOut);
+  capabilitiesUnlocked->AppendElement(aCapabilitiesOut);
 }
 
 mozilla::ipc::IPCResult MFCDMParent::RecvGetCapabilities(
@@ -1041,24 +1128,29 @@ mozilla::ipc::IPCResult MFCDMParent::RecvInit(
     }
   };
 
-  MFCDM_PARENT_LOG(
-      "Creating a CDM (key-system=%s, origin=%s, distinctiveID=%s, "
-      "persistentState=%s, "
-      "hwSecure=%d)",
-      NS_ConvertUTF16toUTF8(mKeySystem).get(),
-      NS_ConvertUTF16toUTF8(aParams.origin()).get(),
-      RequirementToStr(aParams.distinctiveID()),
-      RequirementToStr(aParams.persistentState()),
-      IsKeySystemHWSecure(mKeySystem, aParams.videoCapabilities()));
-
+  if (IsBeingProfiledOrLogEnabled()) {
+    nsPrintfCString msg(
+        "(key-system=%s, origin=%s, distinctiveID=%s, "
+        "persistentState=%s, "
+        "hwSecure=%d)",
+        NS_ConvertUTF16toUTF8(mKeySystem).get(),
+        NS_ConvertUTF16toUTF8(aParams.origin()).get(),
+        RequirementToStr(aParams.distinctiveID()),
+        RequirementToStr(aParams.persistentState()),
+        IsKeySystemHWSecure(mKeySystem, aParams.videoCapabilities()));
+    MFCDM_PARENT_LOG("Creating a CDM %s", msg.get());
+    PROFILER_MARKER_TEXT("MFCDMParent::RecvInit(creating CDM)", MEDIA_PLAYBACK,
+                         {}, msg);
+  }
   MFCDM_REJECT_IF(!mFactory, NS_ERROR_DOM_NOT_SUPPORTED_ERR);
 
   MOZ_ASSERT(IsTypeSupported(mFactory, mKeySystem));
   MFCDM_REJECT_IF_FAILED(CreateContentDecryptionModule(
                              mFactory, MapKeySystem(mKeySystem), aParams, mCDM),
                          NS_ERROR_FAILURE);
-  MOZ_ASSERT(mCDM);
+  MFCDM_REJECT_IF(!mCDM, NS_ERROR_FAILURE);
   MFCDM_PARENT_LOG("Created a CDM!");
+  PROFILER_MARKER_UNTYPED("MFCDMParent::RecvInit(created CDM)", MEDIA_PLAYBACK);
 
   // This is only required by PlayReady.
   if (IsPlayReadyKeySystemAndSupported(mKeySystem)) {
@@ -1077,6 +1169,7 @@ mozilla::ipc::IPCResult MFCDMParent::RecvInit(
     MFCDM_PARENT_LOG("Set PMPHostWrapper on CDM!");
   }
 
+  mIsInited = true;
   aResolver(MFCDMInitIPDL{mId});
   return IPC_OK();
 }
@@ -1084,7 +1177,7 @@ mozilla::ipc::IPCResult MFCDMParent::RecvInit(
 mozilla::ipc::IPCResult MFCDMParent::RecvCreateSessionAndGenerateRequest(
     const MFCDMCreateSessionParamsIPDL& aParams,
     CreateSessionAndGenerateRequestResolver&& aResolver) {
-  MOZ_ASSERT(mCDM, "RecvInit() must be called and waited on before this call");
+  MOZ_ASSERT(mIsInited, "Must finish initialization first");
 
   static auto SessionTypeToStr = [](KeySystemConfig::SessionType aSessionType) {
     switch (aSessionType) {
@@ -1098,8 +1191,19 @@ mozilla::ipc::IPCResult MFCDMParent::RecvCreateSessionAndGenerateRequest(
       }
     }
   };
-  MFCDM_PARENT_LOG("Creating session for type '%s'",
-                   SessionTypeToStr(aParams.sessionType()));
+  if (IsBeingProfiledOrLogEnabled()) {
+    nsPrintfCString msg("session for type '%s'",
+                        SessionTypeToStr(aParams.sessionType()));
+    MFCDM_PARENT_LOG("Creating CDM %s", msg.get());
+    PROFILER_MARKER_TEXT(
+        "MFCDMParent::RecvCreateSessionAndGenerateRequest(creating)",
+        MEDIA_PLAYBACK, {}, msg);
+  }
+  if (!mCDM) {
+    MFCDM_PARENT_LOG("Cannot create CDM session, already shutdown");
+    aResolver(NS_ERROR_DOM_MEDIA_CDM_NO_SESSION_ERR);
+    return IPC_OK();
+  }
   UniquePtr<MFCDMSession> session{
       MFCDMSession::Create(aParams.sessionType(), mCDM.Get(), mManagerThread)};
   if (!session) {
@@ -1120,7 +1224,15 @@ mozilla::ipc::IPCResult MFCDMParent::RecvCreateSessionAndGenerateRequest(
   const auto& sessionId = session->SessionID();
   MOZ_ASSERT(sessionId);
   mSessions.emplace(*sessionId, std::move(session));
-  MFCDM_PARENT_LOG("Created a CDM session!");
+  if (IsBeingProfiledOrLogEnabled()) {
+    nsPrintfCString msg("session for type '%s', sessionId=%s",
+                        SessionTypeToStr(aParams.sessionType()),
+                        NS_ConvertUTF16toUTF8(*sessionId).get());
+    MFCDM_PARENT_LOG("Created CDM %s", msg.get());
+    PROFILER_MARKER_TEXT(
+        "MFCDMParent::RecvCreateSessionAndGenerateRequest(created)",
+        MEDIA_PLAYBACK, {}, msg);
+  }
   aResolver(*sessionId);
   return IPC_OK();
 }
@@ -1128,13 +1240,21 @@ mozilla::ipc::IPCResult MFCDMParent::RecvCreateSessionAndGenerateRequest(
 mozilla::ipc::IPCResult MFCDMParent::RecvLoadSession(
     const KeySystemConfig::SessionType& aSessionType,
     const nsString& aSessionId, LoadSessionResolver&& aResolver) {
-  MOZ_ASSERT(mCDM, "RecvInit() must be called and waited on before this call");
+  MOZ_ASSERT(mIsInited, "Must finish initialization first");
 
   nsresult rv = NS_OK;
   auto* session = GetSession(aSessionId);
   if (!session) {
     aResolver(NS_ERROR_DOM_MEDIA_CDM_NO_SESSION_ERR);
     return IPC_OK();
+  }
+
+  if (IsBeingProfiledOrLogEnabled()) {
+    nsPrintfCString msg("Load Session %s",
+                        NS_ConvertUTF16toUTF8(aSessionId).get());
+    MFCDM_PARENT_LOG("%s", msg.get());
+    PROFILER_MARKER_TEXT("MFCDMParent::RecvLoadSession", MEDIA_PLAYBACK, {},
+                         msg);
   }
   MFCDM_REJECT_IF_FAILED(session->Load(aSessionId),
                          NS_ERROR_DOM_MEDIA_CDM_SESSION_OPERATION_ERR);
@@ -1145,12 +1265,19 @@ mozilla::ipc::IPCResult MFCDMParent::RecvLoadSession(
 mozilla::ipc::IPCResult MFCDMParent::RecvUpdateSession(
     const nsString& aSessionId, const CopyableTArray<uint8_t>& aResponse,
     UpdateSessionResolver&& aResolver) {
-  MOZ_ASSERT(mCDM, "RecvInit() must be called and waited on before this call");
+  MOZ_ASSERT(mIsInited, "Must finish initialization first");
   nsresult rv = NS_OK;
   auto* session = GetSession(aSessionId);
   if (!session) {
     aResolver(NS_ERROR_DOM_MEDIA_CDM_NO_SESSION_ERR);
     return IPC_OK();
+  }
+  if (IsBeingProfiledOrLogEnabled()) {
+    nsPrintfCString msg("Update Session %s",
+                        NS_ConvertUTF16toUTF8(aSessionId).get());
+    MFCDM_PARENT_LOG("%s", msg.get());
+    PROFILER_MARKER_TEXT("MFCDMParent::RecvUpdateSession", MEDIA_PLAYBACK, {},
+                         msg);
   }
   MFCDM_REJECT_IF_FAILED(session->Update(aResponse),
                          NS_ERROR_DOM_MEDIA_CDM_SESSION_OPERATION_ERR);
@@ -1160,12 +1287,19 @@ mozilla::ipc::IPCResult MFCDMParent::RecvUpdateSession(
 
 mozilla::ipc::IPCResult MFCDMParent::RecvCloseSession(
     const nsString& aSessionId, UpdateSessionResolver&& aResolver) {
-  MOZ_ASSERT(mCDM, "RecvInit() must be called and waited on before this call");
+  MOZ_ASSERT(mIsInited, "Must finish initialization first");
   nsresult rv = NS_OK;
   auto* session = GetSession(aSessionId);
   if (!session) {
     aResolver(NS_ERROR_DOM_MEDIA_CDM_NO_SESSION_ERR);
     return IPC_OK();
+  }
+  if (IsBeingProfiledOrLogEnabled()) {
+    nsPrintfCString msg("Close Session %s",
+                        NS_ConvertUTF16toUTF8(aSessionId).get());
+    MFCDM_PARENT_LOG("%s", msg.get());
+    PROFILER_MARKER_TEXT("MFCDMParent::RecvCloseSession", MEDIA_PLAYBACK, {},
+                         msg);
   }
   MFCDM_REJECT_IF_FAILED(session->Close(),
                          NS_ERROR_DOM_MEDIA_CDM_SESSION_OPERATION_ERR);
@@ -1175,12 +1309,19 @@ mozilla::ipc::IPCResult MFCDMParent::RecvCloseSession(
 
 mozilla::ipc::IPCResult MFCDMParent::RecvRemoveSession(
     const nsString& aSessionId, UpdateSessionResolver&& aResolver) {
-  MOZ_ASSERT(mCDM, "RecvInit() must be called and waited on before this call");
+  MOZ_ASSERT(mIsInited, "Must finish initialization first");
   nsresult rv = NS_OK;
   auto* session = GetSession(aSessionId);
   if (!session) {
     aResolver(NS_ERROR_DOM_MEDIA_CDM_NO_SESSION_ERR);
     return IPC_OK();
+  }
+  if (IsBeingProfiledOrLogEnabled()) {
+    nsPrintfCString msg("Remove Session %s",
+                        NS_ConvertUTF16toUTF8(aSessionId).get());
+    MFCDM_PARENT_LOG("%s", msg.get());
+    PROFILER_MARKER_TEXT("MFCDMParent::RecvRemoveSession", MEDIA_PLAYBACK, {},
+                         msg);
   }
   MFCDM_REJECT_IF_FAILED(session->Remove(),
                          NS_ERROR_DOM_MEDIA_CDM_SESSION_OPERATION_ERR);
@@ -1191,9 +1332,12 @@ mozilla::ipc::IPCResult MFCDMParent::RecvRemoveSession(
 mozilla::ipc::IPCResult MFCDMParent::RecvSetServerCertificate(
     const CopyableTArray<uint8_t>& aCertificate,
     UpdateSessionResolver&& aResolver) {
-  MOZ_ASSERT(mCDM, "RecvInit() must be called and waited on before this call");
+  MOZ_ASSERT(mIsInited, "Must finish initialization first");
   nsresult rv = NS_OK;
   MFCDM_PARENT_LOG("Set server certificate");
+  PROFILER_MARKER_UNTYPED("MFCDMParent::RecvSetServerCertificate",
+                          MEDIA_PLAYBACK);
+  MFCDM_REJECT_IF(!mCDM, NS_ERROR_DOM_MEDIA_CDM_ERR);
   MFCDM_REJECT_IF_FAILED(mCDM->SetServerCertificate(
                              static_cast<const BYTE*>(aCertificate.Elements()),
                              aCertificate.Length()),
@@ -1205,8 +1349,16 @@ mozilla::ipc::IPCResult MFCDMParent::RecvSetServerCertificate(
 mozilla::ipc::IPCResult MFCDMParent::RecvGetStatusForPolicy(
     const dom::HDCPVersion& aMinHdcpVersion,
     GetStatusForPolicyResolver&& aResolver) {
-  MOZ_ASSERT(mCDM, "RecvInit() must be called and waited on before this call");
-  aResolver(IsHDCPVersionSupported(mFactory, mKeySystem, aMinHdcpVersion));
+  auto rv = IsHDCPVersionSupported(mFactory, mKeySystem, aMinHdcpVersion);
+  if (IsBeingProfiledOrLogEnabled()) {
+    nsPrintfCString msg("HDCP version=%u, support=%s",
+                        static_cast<uint8_t>(aMinHdcpVersion),
+                        rv == NS_OK ? "true" : "false");
+    MFCDM_PARENT_LOG("%s", msg.get());
+    PROFILER_MARKER_TEXT("MFCDMParent::RecvGetStatusForPolicy", MEDIA_PLAYBACK,
+                         {}, msg);
+  }
+  aResolver(rv);
   return IPC_OK();
 }
 
@@ -1226,12 +1378,14 @@ MFCDMSession* MFCDMParent::GetSession(const nsString& aSessionId) {
   return iter->second.get();
 }
 
-already_AddRefed<MFCDMProxy> MFCDMParent::GetMFCDMProxy() {
+MFCDMProxy* MFCDMParent::GetMFCDMProxy() {
   if (!mCDM) {
     return nullptr;
   }
-  RefPtr<MFCDMProxy> proxy = new MFCDMProxy(mCDM.Get(), mId);
-  return proxy.forget();
+  if (!mCDMProxy) {
+    mCDMProxy = new MFCDMProxy(mCDM.Get(), mId);
+  }
+  return mCDMProxy;
 }
 
 /* static */

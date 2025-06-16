@@ -91,6 +91,12 @@ class ScriptLoaderInterface : public nsISupports {
       ScriptLoadRequest* aRequest, const char* aMessageName,
       const nsTArray<nsString>& aParams = nsTArray<nsString>()) const = 0;
 
+  // Similar to Report*ToConsole(), only non-null in dom/script/ScriptLoader
+  // as we currently only load importmaps there.
+  virtual nsIConsoleReportCollector* GetConsoleReportCollector() const {
+    return nullptr;
+  }
+
   // Fill in CompileOptions, as well as produce the introducer script for
   // subsequent calls to UpdateDebuggerMetadata
   virtual nsresult FillCompileOptionsForRequest(
@@ -230,10 +236,10 @@ class ModuleLoaderBase : public nsISupports {
    * These are tracked in the mFetchingModules map.
    */
   class LoadingRequest final : public nsISupports {
-    virtual ~LoadingRequest() = default;
+    ~LoadingRequest() = default;
 
    public:
-    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+    NS_DECL_CYCLE_COLLECTING_ISUPPORTS_FINAL
     NS_DECL_CYCLE_COLLECTION_CLASS(LoadingRequest)
 
     // The request that initiated the load and which is currently fetching or
@@ -298,7 +304,8 @@ class ModuleLoaderBase : public nsISupports {
  private:
   // Create a module load request for a static module import.
   virtual already_AddRefed<ModuleLoadRequest> CreateStaticImport(
-      nsIURI* aURI, JS::ModuleType aModuleType, ModuleLoadRequest* aParent) = 0;
+      nsIURI* aURI, JS::ModuleType aModuleType, ModuleLoadRequest* aParent,
+      const mozilla::dom::SRIMetadata& aSriMetadata) = 0;
 
   // Called by HostImportModuleDynamically hook.
   virtual already_AddRefed<ModuleLoadRequest> CreateDynamicImport(
@@ -395,6 +402,12 @@ class ModuleLoaderBase : public nsISupports {
   // https://html.spec.whatwg.org/multipage/webappapis.html#disallow-further-import-maps
   void DisallowImportMaps() { mImportMapsAllowed = false; }
 
+  // Returns whether there has been an entry in the import map
+  // for the given aURI.
+  bool GetImportMapSRI(nsIURI* aURI, nsIURI* aSourceURI,
+                       nsIConsoleReportCollector* aReporter,
+                       mozilla::dom::SRIMetadata* aMetadataOut);
+
   // Returns true if the module for given module key is already fetched.
   bool IsModuleFetched(const ModuleMapKey& key) const;
 
@@ -472,11 +485,14 @@ class ModuleLoaderBase : public nsISupports {
   bool ModuleMapContainsURL(const ModuleMapKey& key) const;
   bool IsModuleFetching(const ModuleMapKey& key) const;
   void WaitForModuleFetch(ModuleLoadRequest* aRequest);
+
+ protected:
   void SetModuleFetchStarted(ModuleLoadRequest* aRequest);
 
+ private:
   ModuleScript* GetFetchedModule(const ModuleMapKey& moduleMapKey) const;
 
-  JS::Value FindFirstParseError(ModuleLoadRequest* aRequest);
+  JS::Value FindFirstParseError(JSContext* aCx, ModuleLoadRequest* aRequest);
   static nsresult InitDebuggerDataForModuleGraph(JSContext* aCx,
                                                  ModuleLoadRequest* aRequest);
   nsresult ResolveRequestedModules(

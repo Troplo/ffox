@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?><!-- This Source Code Form is subject to the terms of the Mozilla Public
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
-<resources>
+<resources xmlns:moz="http://schemas.android.com/apk/res-auto" xmlns:tools="http://schemas.android.com/tools">
     <string name="pref_key_make_default_browser" translatable="false">pref_key_make_default_browser</string>
     <string name="pref_key_search_settings" translatable="false">pref_key_search_settings</string>
     <string name="pref_key_search_engine" translatable="false">pref_key_search_engine</string>
@@ -47,7 +47,6 @@
     <string name="pref_key_account" translatable="false">pref_key_account</string>
     <string name="pref_key_sign_in" translatable="false">pref_key_sign_in</string>
     <string name="pref_key_account_auth_error" translatable="false">pref_key_account_auth_error</string>
-    <string name="pref_key_allow_domestic_china_fxa_server" translatable="false">pref_key_allow_domestic_china_fxa_server</string>
     <string name="pref_key_sync_debug" translatable="false">pref_key_sync_debug</string>
     <string name="pref_key_override_fxa_server" translatable="false">pref_key_override_fxa_server</string>
     <string name="pref_key_use_react_fxa" translatable="false">pref_key_use_react_fxa</string>
@@ -124,15 +123,19 @@
     <string name="pref_key_show_clipboard_suggestions" translatable="false">pref_key_show_clipboard_suggestions</string>
     <string name="pref_key_search_browsing_history" translatable="false">pref_key_search_browsing_history</string>
     <string name="pref_key_search_bookmarks" translatable="false">pref_key_search_bookmarks</string>
+    <string name="pref_key_show_shortcuts_suggestions" translatable="false">pref_key_show_shortcuts_suggestions</string>
     <string name="pref_key_search_synced_tabs" translatable="false">pref_key_search_synced_tabs</string>
     <string name="pref_key_show_search_suggestions_in_private" translatable="false">pref_key_show_search_suggestions_in_private</string>
     <string name="pref_key_show_search_suggestions_in_private_onboarding" translatable="false">pref_key_show_search_suggestions_in_privateonboarding</string>
     <string name="pref_key_show_trending_search_suggestions" translatable="false">pref_key_show_trending_search_suggestions</string>
+    <string name="pref_key_show_recent_search_suggestions" translatable="false">pref_key_show_recent_search_suggestions</string>
     <string name="pref_key_show_voice_search" translatable="false">pref_key_show_voice_search</string>
     <string name="pref_key_enable_autocomplete_urls" translatable="false">pref_key_enable_domain_autocomplete</string>
     <string name="pref_key_show_sponsored_suggestions" translatable="false">pref_key_show_sponsored_suggestions</string>
     <string name="pref_key_show_nonsponsored_suggestions" translatable="false">pref_key_show_nonsponsored_suggestions</string>
     <string name="pref_key_learn_about_fx_suggest" translatable="false">pref_key_learn_about_fx_suggest</string>
+    <string name="pref_key_use_remote_search_configuration" translatable="false">pref_key_use_remote_search_configuration</string>
+
 
     <!-- Searchbar Settings -->
     <string name="pref_key_should_searchbar_cfr">pref_key_should_show_searchbar_cfr</string>
@@ -155,13 +158,8 @@
     <!-- Toolbar Settings -->
     <string name="pref_key_toolbar_top" translatable="false">pref_key_toolbar_top</string>
     <string name="pref_key_toolbar_bottom" translatable="false">pref_key_toolbar_bottom</string>
-    <string name="pref_key_should_navbar_cfr">pref_key_should_show_navbar_cfr</string>
     <string name="pref_key_toolbar_tab_swipe_cfr">pref_key_should_show_tab_swipe_cfr</string>
     <string name="pref_key_toolbar_has_shown_tab_swipe_cfr">pref_key_has_shown_tab_swipe_cfr</string>
-
-    <!-- Navigation Toolbar -->
-    <string name="pref_key_toolbar_show_navigation_toolbar" translatable="false">pref_key_toolbar_use_redesign_incomplete</string>
-    <string name="pref_key_toolbar_navigation_cfr" translatable="false">pref_key_toolbar_navigation_cfr</string>
 
     <!-- Menu -->
     <string name="pref_key_menu_cfr" translatable="false">pref_key_menu_cfr</string>
@@ -197,8 +195,12 @@
     <!-- Cookie Banner Reduction Settings-->
     <string name="pref_key_cookie_banner_private_mode" translatable="false">pref_key_cookie_banner_private_mode</string>
 
-    <!-- DNS Over HTTPS Settings -->
+    <!-- DNS over HTTPS Settings -->
     <string name="pref_key_doh_settings" translatable="false">pref_key_doh_settings</string>
+    <string name="pref_key_doh_settings_mode" translatable="false">pref_key_doh_settings_mode</string>
+    <string name="pref_key_doh_provider_uri" translatable="false">pref_key_doh_provider_uri</string>
+    <string name="pref_key_doh_default_provider_uri" translatable="false">pref_key_doh_default_provider_uri</string>
+    <string name="pref_key_doh_exceptions_list_string" translatable="false">pref_key_doh_exceptions_list_string</string>
 
     <!-- Tracking Protection Settings -->
     <string name="pref_key_etp_learn_more" translatable="false">pref_key_etp_learn_more</string>
@@ -254,8 +256,10 @@
     <string name="pref_key_open_links_in_apps_never" translatable="false">pref_key_open_links_in_apps_never</string>
     <string name="pref_key_external_download_manager" translatable="false">pref_key_external_download_manager</string>
     <string name="pref_key_allow_screenshots_in_private_mode" translatable="false">pref_key_allow_screenshots_in_private_mode</string>
-    <string name="pref_key_private_browsing_biometrics_enabled" translatable="false">pref_key_private_browsing_biometrics_enabled</string>
+    <string name="pref_key_private_browsing_locked_enabled" translatable="false">pref_key_private_browsing_locked_enabled</string>
+    <string name="pref_key_private_browsing_lock_device_feature_enabled" translatable="false">pref_key_private_browsing_lock_device_feature_enabled</string>
     <string name="pref_key_privacy_enable_global_privacy_control" translatable="false">pref_key_privacy_enable_global_privacy_control</string>
+    <string name="pref_key_pbm_lock_category_divider" translatable="false">pref_key_pbm_lock_category_divider</string>
 
     <string name="pref_key_adjust_campaign" translatable="false">pref_key_adjust_campaign</string>
     <string name="pref_key_adjust_network" translatable="false">pref_key_adjust_network</string>
@@ -305,6 +309,9 @@
     <!-- A value  of `true` means the Auto Close Tabs Banner has not been shown yet -->
     <string name="pref_key_should_show_auto_close_tabs_banner" translatable="false">pref_key_should_show_auto_close_tabs_banner</string>
 
+    <!-- A value  of `true` means the Lock Private Browsing Mode Banner has not been shown yet -->
+    <string name="pref_key_should_show_lock_pbm_banner" translatable="false">pref_key_should_show_lock_pbm_banner</string>
+
     <!-- A value  of `true` means the Inactive tabs onboarding popup has not been shown yet -->
     <string name="pref_key_should_show_inactive_tabs_popup" translatable="false">pref_key_should_show_inactive_tabs_popup</string>
     <!-- A value  of `true` means the Inactive tabs auto close dialog has been dismissed by the user -->
@@ -327,6 +334,8 @@
 
     <string name="pref_key_open_tabs_count" translatable="false">pref_key_open_tabs_count</string>
     <string name="pref_key_open_private_tabs_count" translatable="false">pref_key_open_private_tabs_count</string>
+
+    <string name="pref_key_tab_strip" translatable="false" moz:removedIn="139" tools:ignore="UnusedResources">pref_key_tab_strip</string>
 
     <!-- Add-on Metrics Values -->
     <string name="pref_key_installed_addons_count" translatable="false">pref_key_installed_addons_count</string>
@@ -396,12 +405,19 @@
     <string name="pref_key_custom_sponsored_stories_site_id" translatable="false">pref_key_custom_sponsored_stories_site_id</string>
     <string name="pref_key_custom_sponsored_stories_country" translatable="false">pref_key_custom_sponsored_stories_country</string>
     <string name="pref_key_custom_sponsored_stories_city" translatable="false">pref_key_custom_sponsored_stories_city</string>
-    <string name="pref_key_enable_compose_top_sites" translatable="false">pref_key_enable_compose_top_sites</string>
     <string name="pref_key_enable_compose_homepage" translatable="false">pref_key_enable_compose_homepage</string>
+    <string name="pref_key_enable_homepage_searchbar" translatable="false">pref_key_enable_homepage_searchbar</string>
     <string name="pref_key_enable_menu_redesign" translatable="false">pref_key_enable_menu_redesign</string>
     <string name="pref_key_enable_homepage_as_new_tab" translatable="false">pref_key_enable_homepage_as_new_tab</string>
     <string name="pref_key_enable_unified_trust_panel" translatable="false">pref_key_enable_unified_trust_panel</string>
     <string name="pref_key_enable_trending_searches" translatable="false">pref_key_enable_trending_searches</string>
+    <string name="pref_key_enable_recent_searches" translatable="false">pref_key_enable_recent_searches</string>
+    <string name="pref_key_enable_shortcuts_suggestions" translatable="false">pref_key_enable_shortcuts_suggestions</string>
+    <string name="pref_key_enable_composable_toolbar" translatable="false">pref_key_enable_composable_toolbar</string>"
+
+    <!-- Logins -->
+    <string name="pref_key_enable_compose_logins" translatable="false">pref_key_enable_compose_logins</string>
+    <string name="pref_key_logins_list_sort_order" translatable="false">pref_key_logins_list_sort_order</string>
 
     <!-- Growth Data -->
     <string name="pref_key_growth_set_as_default" translatable="false">pref_key_growth_set_as_default</string>
@@ -424,7 +440,6 @@
     <string name="pref_key_application_exit_info_last_handled_time" translatable="false">pref_key_application_exit_info_last_handled_time</string>
 
     <!-- Set as default browser prompt for existing users -->
-    <string name="pref_key_set_as_default_browser_prompt_enabled" translatable="false">pref_key_set_as_default_browser_prompt_enabled</string>
     <string name="pref_key_last_set_as_default_prompt_shown_time" translatable="false">pref_key_last_set_as_default_prompt_shown_time</string>
     <string name="pref_key_number_of_set_as_default_prompt_shown_times" translatable="false">pref_key_number_of_set_as_default_prompt_shown_times</string>
     <string name="pref_key_app_cold_start_count" translatable="false">pref_key_app_cold_start_count</string>
@@ -441,10 +456,17 @@
     <!-- Bookmarks -->
     <string name="pref_key_use_new_bookmarks_ui" translatable="false">pref_key_use_new_bookmarks_ui</string>
     <string name="pref_last_folder_saved_in" translatable="false">pref_last_folder_saved_in</string>
+    <string name="pref_key_bookmark_list_sort_order" translatable="false">pref_key_bookmark_list_sort_order</string>
 
     <!-- DNS over HTTPS Secret settings -->
     <string name="pref_key_doh_settings_enabled" translatable="false">pref_key_doh_settings_enabled</string>
 
     <!-- Glean usage profile id -->
     <string name="pref_key_glean_usage_profile_id" translatable="false">pref_key_glean_usage_profile_id</string>
+
+    <!-- Setup steps completed -->
+    <string name="pref_key_setup_checklist_complete" translatable="false">pref_key_setup_checklist_complete</string>
+    <string name="pref_key_setup_step_toolbar" translatable="false">pref_key_setup_step_toolbar</string>
+    <string name="pref_key_setup_step_theme" translatable="false">pref_key_setup_step_theme</string>
+    <string name="pref_key_setup_step_extensions" translatable="false">pref_key_setup_step_extensions</string>
 </resources>

@@ -691,6 +691,8 @@ class MOZ_RAII InlinableNativeIRGenerator {
   AttachDecision tryAttachIsCallable();
   AttachDecision tryAttachIsConstructor();
   AttachDecision tryAttachIsCrossRealmArrayConstructor();
+  AttachDecision tryAttachCanOptimizeArraySpecies();
+  AttachDecision tryAttachCanOptimizeStringProtoSymbolLookup();
   AttachDecision tryAttachGuardToClass(InlinableNative native);
   AttachDecision tryAttachGuardToClass(GuardClassKind kind);
   AttachDecision tryAttachGuardToEitherClass(GuardClassKind kind1,
@@ -702,13 +704,12 @@ class MOZ_RAII InlinableNativeIRGenerator {
   AttachDecision tryAttachRegExpMatcherSearcher(InlinableNative native);
   AttachDecision tryAttachRegExpSearcherLastLimit();
   AttachDecision tryAttachRegExpHasCaptureGroups();
-  AttachDecision tryAttachRegExpPrototypeOptimizable();
-  AttachDecision tryAttachRegExpInstanceOptimizable();
+  AttachDecision tryAttachIsRegExpPrototypeOptimizable();
+  AttachDecision tryAttachIsOptimizableRegExpObject();
   AttachDecision tryAttachIntrinsicRegExpBuiltinExec(InlinableNative native);
   AttachDecision tryAttachIntrinsicRegExpExec(InlinableNative native);
   AttachDecision tryAttachGetFirstDollarIndex();
   AttachDecision tryAttachSubstringKernel();
-  AttachDecision tryAttachObjectHasPrototype();
   AttachDecision tryAttachString();
   AttachDecision tryAttachStringConstructor();
   AttachDecision tryAttachStringToStringValueOf();
@@ -755,7 +756,6 @@ class MOZ_RAII InlinableNativeIRGenerator {
   AttachDecision tryAttachTypedArrayElementSize();
   AttachDecision tryAttachTypedArrayLength(bool isPossiblyWrapped,
                                            bool allowOutOfBounds);
-  AttachDecision tryAttachArrayBufferByteLength(bool isPossiblyWrapped);
   AttachDecision tryAttachIsConstructing();
   AttachDecision tryAttachGetNextMapSetEntryForIterator(bool isMap);
   AttachDecision tryAttachNewArrayIterator();
@@ -1021,7 +1021,7 @@ inline bool BytecodeCallOpCanHaveInlinableNative(JSOp op) {
 inline bool BytecodeOpCanHaveAllocSite(JSOp op) {
   return BytecodeCallOpCanHaveInlinableNative(op) || op == JSOp::NewArray ||
          op == JSOp::NewObject || op == JSOp::NewInit || op == JSOp::CallIter ||
-         op == JSOp::CallContentIter;
+         op == JSOp::CallContentIter || op == JSOp::Lambda;
 }
 
 class MOZ_RAII CloseIterIRGenerator : public IRGenerator {

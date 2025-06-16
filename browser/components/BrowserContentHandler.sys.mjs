@@ -16,7 +16,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   LaterRun: "resource:///modules/LaterRun.sys.mjs",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
-  SearchUIUtils: "resource:///modules/SearchUIUtils.sys.mjs",
+  SearchUIUtils: "moz-src:///browser/components/search/SearchUIUtils.sys.mjs",
   SessionStartup: "resource:///modules/sessionstore/SessionStartup.sys.mjs",
   ShellService: "resource:///modules/ShellService.sys.mjs",
   SpecialMessageActions:
@@ -324,43 +324,8 @@ function openBrowserWindow(
   }
 
   if (isStartup) {
-    let win = Services.wm.getMostRecentWindow("navigator:blank");
+    let win = gBrowserContentHandler.replaceStartupWindow(args, forcePrivate);
     if (win) {
-      // Remove the windowtype of our blank window so that we don't close it
-      // later on when seeing cmdLine.preventDefault is true.
-      win.document.documentElement.removeAttribute("windowtype");
-
-      if (forcePrivate) {
-        win.docShell.QueryInterface(Ci.nsILoadContext).usePrivateBrowsing =
-          true;
-
-        if (
-          AppConstants.platform == "win" &&
-          Services.prefs.getBoolPref(
-            "browser.privateWindowSeparation.enabled",
-            true
-          )
-        ) {
-          lazy.WinTaskbar.setGroupIdForWindow(
-            win,
-            lazy.WinTaskbar.defaultPrivateGroupId
-          );
-          lazy.WindowsUIUtils.setWindowIconFromExe(
-            win,
-            Services.dirsvc.get("XREExeF", Ci.nsIFile).path,
-            // This corresponds to the definitions in
-            // nsNativeAppSupportWin.h
-            PRIVATE_BROWSING_ICON_INDEX
-          );
-        }
-      }
-
-      let openTime = win.openTime;
-      win.location = AppConstants.BROWSER_CHROME_URL;
-      win.arguments = args; // <-- needs to be a plain JS array here.
-
-      ChromeUtils.addProfilerMarker("earlyBlankWindowVisible", openTime);
-      lazy.BrowserWindowTracker.registerOpeningWindow(win, forcePrivate);
       return win;
     }
   }
@@ -490,6 +455,7 @@ nsBrowserContentHandler.prototype = {
       cmdLine.handleFlagWithParam("kiosk-monitor", false)
     ) {
       gKiosk = true;
+      Glean.browserStartup.kioskMode.set(true);
     }
     if (cmdLine.handleFlag("disable-pinch", false)) {
       let defaults = Services.prefs.getDefaultBranch(null);
@@ -1178,6 +1144,52 @@ nsBrowserContentHandler.prototype = {
     request.cancel(Cr.NS_BINDING_ABORTED);
   },
 
+  /**
+   * Replace the startup UI window created in BrowserGlue with an actual window
+   */
+  replaceStartupWindow(args, forcePrivate) {
+    let win = Services.wm.getMostRecentWindow("navigator:blank");
+    if (win) {
+      // Remove the windowtype of our blank window so that we don't close it
+      // later on when seeing cmdLine.preventDefault is true.
+      win.document.documentElement.removeAttribute("windowtype");
+
+      if (forcePrivate) {
+        win.docShell.QueryInterface(Ci.nsILoadContext).usePrivateBrowsing =
+          true;
+
+        if (
+          AppConstants.platform == "win" &&
+          Services.prefs.getBoolPref(
+            "browser.privateWindowSeparation.enabled",
+            true
+          )
+        ) {
+          lazy.WinTaskbar.setGroupIdForWindow(
+            win,
+            lazy.WinTaskbar.defaultPrivateGroupId
+          );
+          lazy.WindowsUIUtils.setWindowIconFromExe(
+            win,
+            Services.dirsvc.get("XREExeF", Ci.nsIFile).path,
+            // This corresponds to the definitions in
+            // nsNativeAppSupportWin.h
+            PRIVATE_BROWSING_ICON_INDEX
+          );
+        }
+      }
+
+      let openTime = win.openTime;
+      win.location = AppConstants.BROWSER_CHROME_URL;
+      win.arguments = args; // <-- needs to be a plain JS array here.
+
+      ChromeUtils.addProfilerMarker("earlyBlankWindowVisible", openTime);
+      lazy.BrowserWindowTracker.registerOpeningWindow(win, forcePrivate);
+      return win;
+    }
+    return null;
+  },
+
   /* nsICommandLineValidator */
   validate: function bch_validate(cmdLine) {
     var urlFlagIdx = cmdLine.findFlag("url", false);
@@ -1383,11 +1395,16 @@ nsDefaultCommandLineHandler.prototype = {
           // window to perform the action in.
           let winForAction;
 
-          if (
-            !tagWasHandled &&
-            notificationData?.launchUrl &&
-            !opaqueRelaunchData
-          ) {
+          // Fall back to launchUrl to not break notifications opened from
+          // previous builds after browser updates, as such notification would
+          // still have the old field.
+          let origin = notificationData?.origin ?? notificationData?.launchUrl;
+
+          if (!tagWasHandled && origin && !opaqueRelaunchData) {
+            let originPrincipal =
+              Services.scriptSecurityManager.createContentPrincipalFromOrigin(
+                origin
+              );
             // Unprivileged Web Notifications contain a launch URL and are
             // handled slightly differently than privileged notifications with
             // actions. If the tag was not handled, then the notification was
@@ -1395,7 +1412,9 @@ nsDefaultCommandLineHandler.prototype = {
             // fallback behavior.
             let { uri, principal } = resolveURIInternal(
               cmdLine,
-              notificationData.launchUrl
+              // TODO(krosylight): We should handle origin suffix to open the
+              // relevant container. See bug 1945501.
+              originPrincipal.originNoSuffix
             );
             if (cmdLine.state != Ci.nsICommandLine.STATE_INITIAL_LAUNCH) {
               // Try to find an existing window and load our URI into the current

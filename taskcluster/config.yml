@@ -120,6 +120,7 @@ treeherder:
         'Ub22': 'Packages for Ubuntu 22.04'
         'Ub22a64': 'AArch64 packages for Ubuntu 22.04'
         'Ub24': 'Packages for Ubuntu 24.04'
+        'Ub24a64': 'AArch64 packages for Ubuntu 24.04'
         'I': 'Docker Image Builds'
         'TA': 'Toolchain builds for Android'
         'TL': 'Toolchain builds for Linux 64-bits'
@@ -142,6 +143,20 @@ treeherder:
         'ms-stage': 'Autograph-stage MAR signing test'
         'Rel': 'Release promotion'
         'Snap': 'Snap image generation'
+        'B-local': 'Snap builds local gecko checkout'
+        'B-nightly': 'Snap builds Nightly'
+        'B-beta': 'Snap builds Beta'
+        'B-beta24': 'Snap builds Beta Core24'
+        'B-stable': 'Snap builds Stable'
+        'B-stable24': 'Snap builds Stable Core24'
+        'B-esr': 'Snap builds ESR'
+        'Sel-nightly': 'Snap selenium Nightly'
+        'Sel-local': 'Snap selenium local gecko checkout'
+        'Sel-beta': 'Snap selenium Beta'
+        'Sel-beta24': 'Snap selenium Beta Core24'
+        'Sel-stable': 'Snap selenium Stable'
+        'Sel-stable24': 'Snap selenium Stable Core24'
+        'Sel-esr': 'Snap selenium ESR'
         'Flatpak': 'Flatpak image generation'
         'langpack': 'Langpack sigatures and uploads'
         'TPS': 'Sync tests'
@@ -160,7 +175,6 @@ treeherder:
         'rust': 'Rust checks'
         'Static-Analysis': 'Full tree static-analysis'
         'SS': 'Shadow scheduler'
-        'Sel': 'Selenium Snap tests'
         'Sentry': 'Sentry synchronization'
         'test-info': 'Test manifest skip/fail information'
         'condprof': 'Conditioned Profile Builder'
@@ -177,6 +191,7 @@ treeherder:
         'Boot': 'Bootstrap'
         'Attr-L10n': 'Build Attribution'
         'android-l10n': 'Import strings from android-l10n repo'
+        'update-test': 'Test updates to release from older firefox versions'
 
         # The below symbols are from firefox-android (fenix/focus/android-components)
         'buildconfig': 'Make sure the content of .buildconfig.yml matches what gradle knows about its projects'
@@ -450,7 +465,7 @@ release-promotion:
 
 merge-automation:
     behaviors:
-        central-to-beta:
+        main-to-beta:
             fetch-version-from: "browser/config/version.txt"
             version-files:
                 - filename: "config/milestone.txt"
@@ -481,14 +496,12 @@ merge-automation:
                   - ac_add_options --with-branding=browser/branding/nightly
                   - ac_add_options --enable-official-branding
                 - - .arcconfig
-                  - MOZILLACENTRAL
-                  - BETA
+                  - FIREFOXAUTOLAND
+                  - FIREFOXBETA
             merge-old-head: true
             base-tag: 'FIREFOX_BETA_{major_version}_BASE'
             end-tag: 'FIREFOX_BETA_{major_version}_END'
-            from-repo: 'https://hg.mozilla.org/mozilla-central'
-            from-branch: 'central'
-            to-repo: 'https://hg.mozilla.org/releases/mozilla-beta'
+            from-branch: 'main'
             to-branch: 'beta'
         early-to-late-beta:
             fetch-version-from: "browser/config/version.txt"
@@ -498,7 +511,6 @@ merge-automation:
                   - EARLY_BETA_OR_EARLIER=1
                   - EARLY_BETA_OR_EARLIER=
             merge-old-head: false
-            to-repo: 'https://hg.mozilla.org/releases/mozilla-beta'
             to-branch: 'beta'
         beta-to-release:
             fetch-version-from: "browser/config/version.txt"
@@ -509,14 +521,12 @@ merge-automation:
                   new-suffix: ''
             replacements:
                 - - .arcconfig
-                  - BETA
-                  - RELEASE
+                  - FIREFOXBETA
+                  - FIREFOXRELEASE
             merge-old-head: true
             base-tag: 'FIREFOX_RELEASE_{major_version}_BASE'
             end-tag: 'FIREFOX_RELEASE_{major_version}_END'
-            from-repo: 'https://hg.mozilla.org/releases/mozilla-beta'
             from-branch: 'beta'
-            to-repo: 'https://hg.mozilla.org/releases/mozilla-release'
             to-branch: 'release'
         release-to-esr:
             fetch-version-from: "browser/config/version.txt"
@@ -525,13 +535,12 @@ merge-automation:
                   new-suffix: 'esr'
             replacements:
                 - - .arcconfig
-                  - RELEASE
-                  - ESRONETWOEIGHT
+                  - FIREFOXRELEASE
+                  - FIREFOXESRONEFOURZERO
             merge-old-head: false
             end-tag: "FIREFOX_ESR_{major_version}_BASE"
-            to-repo: 'https://hg.mozilla.org/releases/mozilla-esr128'
-            to-branch: 'esr128'
-        bump-central:
+            to-branch: 'esr140'
+        bump-main:
             fetch-version-from: "browser/config/version.txt"
             version-files:
                 - filename: "config/milestone.txt"
@@ -550,11 +559,17 @@ merge-automation:
                 - - "services/sync/modules/constants.sys.mjs"
                   - 'WEAVE_VERSION = "1.{current_weave_version}.0"'
                   - 'WEAVE_VERSION = "1.{next_weave_version}.0"'
+            regex-replacements:
+                - - "browser/extensions/webcompat/manifest.json"
+                  - '"version": "[0-9]+.[0-9]+.0"'
+                  - '"version": "{next_major_version}.0.0"'
+                - - "browser/extensions/newtab/manifest.json"
+                  - '"version": "[0-9]+.[0-9]+.0"'
+                  - '"version": "{next_major_version}.0.0"'
             merge-old-head: false
             end-tag: 'FIREFOX_NIGHTLY_{major_version}_END'
-            to-repo: 'https://hg.mozilla.org/mozilla-central'
-            to-branch: 'central'
-        bump-esr128:
+            to-branch: 'main'
+        bump-esr140:
             fetch-version-from: "browser/config/version.txt"
             version-files:
                 - filename: "config/milestone.txt"
@@ -563,10 +578,10 @@ merge-automation:
                   version-bump: "minor"
                 - filename: "browser/config/version_display.txt"
                   version-bump: "minor"
+                  new-suffix: "esr"
             replacements: []
             merge-old-head: false
-            to-repo: 'https://hg.mozilla.org/releases/mozilla-esr128'
-            to-branch: 'esr128'
+            to-branch: 'esr140'
 
 scriptworker:
     # See additional configuration in taskcluster/gecko_taskgraph/util/scriptworker.py
@@ -671,7 +686,7 @@ workers:
         addon:
             provisioner: scriptworker-k8s
             implementation: push-addons
-            os: scriptworker
+            os: linux
             worker-type:
                 by-release-level:
                     production: '{trust-domain}-3-addon'
@@ -679,7 +694,7 @@ workers:
         balrog:
             provisioner: scriptworker-k8s
             implementation: balrog
-            os: scriptworker
+            os: linux
             worker-type:
                 by-release-level:
                     production: '{trust-domain}-3-balrog'
@@ -689,7 +704,7 @@ workers:
             # Note that this implementation doesn't correspond with an
             # payload_builder, there are several `bouncer-*` implemenations.
             implementation: bouncer
-            os: scriptworker
+            os: linux
             worker-type:
                 by-release-level:
                     production: '{trust-domain}-3-bouncer'
@@ -697,7 +712,7 @@ workers:
         beetmover:
             provisioner: scriptworker-k8s
             implementation: beetmover
-            os: scriptworker
+            os: linux
             worker-type:
                 by-release-level:
                     production: '{trust-domain}-3-beetmover'
@@ -705,7 +720,7 @@ workers:
         beetmover-android:
             provisioner: scriptworker-k8s
             implementation: scriptworker-beetmover
-            os: scriptworker
+            os: linux
             worker-type:
                 by-release-level:
                     production: '{trust-domain}-3-beetmover'
@@ -713,7 +728,7 @@ workers:
         shipit:
             provisioner: scriptworker-k8s
             implementation: shipit
-            os: scriptworker
+            os: linux
             worker-type:
                 by-release-level:
                     production: '{trust-domain}-3-shipit'
@@ -747,12 +762,12 @@ workers:
         push-apk:
             provisioner: scriptworker-k8s
             implementation: scriptworker-pushapk
-            os: scriptworker
+            os: linux
             worker-type: '{trust-domain}-{level}-pushapk'
         pushflatpak:
             provisioner: scriptworker-k8s
             implementation: push-flatpak
-            os: scriptworker
+            os: linux
             worker-type:
                 by-release-level:
                     staging: '{trust-domain}-1-pushflatpak'
@@ -760,7 +775,7 @@ workers:
         pushmsix:
             provisioner: scriptworker-k8s
             implementation: push-msix
-            os: scriptworker
+            os: linux
             worker-type:
                 by-release-level:
                     staging: '{trust-domain}-1-pushmsix'
@@ -768,19 +783,46 @@ workers:
         tree:
             provisioner: scriptworker-k8s
             implementation: treescript
-            os: scriptworker
+            os: linux
             worker-type:
-                by-release-level:
-                    production: '{trust-domain}-3-tree'
-                    staging:
-                        by-project:
-                            autoland: '{trust-domain}-3-tree'
-                            default: '{trust-domain}-1-tree'
+                by-project:
+                    # Autoland is treated specially here because any treescript
+                    # tasks that run on it must be done on level 3 workers
+                    # (so they can actually push changes). On other projects
+                    # `release-level` would handle this just fine, but
+                    # `autoland` is considered a "staging" release level for
+                    # historical reasons.
+                    # https://bugzilla.mozilla.org/show_bug.cgi?id=1960918
+                    # seeks to improve this situation.
+                    autoland: '{trust-domain}-3-tree'
+                    default:
+                        by-release-level:
+                            production: '{trust-domain}-3-tree'
+                            staging: '{trust-domain}-1-tree'
         tree-dev:
             provisioner: scriptworker-k8s
             implementation: treescript
-            os: scriptworker
+            os: linux
             worker-type: '{trust-domain}-1-tree-dev'
+        lando:
+            provisioner: scriptworker-k8s
+            implementation: landoscript
+            os: linux
+            worker-type:
+                by-project:
+                    # Autoland is treated specially here because any landoscript
+                    # tasks that run on it must be done on level 3 workers
+                    # (so they can actually push changes). On other projects
+                    # `release-level` would handle this just fine, but
+                    # `autoland` is considered a "staging" release level for
+                    # historical reasons.
+                    # https://bugzilla.mozilla.org/show_bug.cgi?id=1960918
+                    # seeks to improve this situation.
+                    autoland: '{trust-domain}-3-lando'
+                    default:
+                        by-release-level:
+                            production: '{trust-domain}-3-lando'
+                            staging: '{trust-domain}-1-lando'
         t-bitbar-gw.*:
             provisioner: proj-autophone
             implementation: generic-worker
@@ -791,6 +833,11 @@ workers:
             implementation: generic-worker
             os: linux-lambda
             worker-type: 'gecko-{alias}'
+        t-linux-docker(|-noscratch):
+            provisioner: '{trust-domain}-t'
+            implementation: docker-worker
+            os: linux
+            worker-type: '{alias}'
         t-linux(-large|-xlarge|-xlarge-source):
             provisioner: '{trust-domain}-t'
             implementation: docker-worker
@@ -805,7 +852,7 @@ workers:
             provisioner: '{trust-domain}-t'
             implementation: docker-worker
             os: linux
-            worker-type: 't-linux-kvm-noscratch-gcp'
+            worker-type: 't-linux-docker-kvm'
         t-linux-talos:
             provisioner: releng-hardware
             implementation: generic-worker
@@ -846,6 +893,11 @@ workers:
             implementation: generic-worker
             os: linux
             worker-type: 't-linux-2404-wayland-snap'
+        t-linux-arm64-docker:
+            provisioner: '{trust-domain}-t'
+            implementation: docker-worker
+            os: linux
+            worker-type: '{alias}'
         t-osx-1015-r8:
             provisioner: releng-hardware
             implementation: generic-worker
@@ -856,12 +908,7 @@ workers:
             implementation: generic-worker
             os: macosx
             worker-type: 'gecko-{alias}'
-        t-osx-1100-m1:
-            provisioner: releng-hardware
-            implementation: generic-worker
-            os: macosx
-            worker-type: 'gecko-{alias}'
-        t-osx-1400-m2:
+        t-osx-1500-m4:
             provisioner: releng-hardware
             implementation: generic-worker
             os: macosx
@@ -887,42 +934,17 @@ workers:
                 by-level:
                     '3': 'gecko-3-b-osx-arm64'
                     default: 'gecko-1-b-osx-arm64'
-        t-win10-64(|-gpu-s|-source):
-            provisioner: '{trust-domain}-t'
-            implementation: generic-worker
-            os: windows
-            worker-type: '{alias}'
-        t-win10-64(-hw|-1803-hw):
-            provisioner: releng-hardware
-            implementation: generic-worker
-            os: windows
-            worker-type: 'gecko-{alias}'
-        win11-64-2009(-hw-ref):
-            provisioner: releng-hardware
-            implementation: generic-worker
-            os: windows
-            worker-type: '{alias}'
         win10-64-2009-hw:
             provisioner: releng-hardware
             implementation: generic-worker
             os: windows
             worker-type: '{alias}'
-        win11-64-2009-hw:
-            provisioner: releng-hardware
-            implementation: generic-worker
-            os: windows
-            worker-type: '{alias}'
-        win10-64-2009(|-gpu|-ssd|-source|-ssd-gpu):
+        win10-64-2009:
             provisioner: 'gecko-t'
             implementation: generic-worker
             os: windows
             worker-type: '{alias}'
-        t-win11-64(|-gpu-s|-source):
-            provisioner: '{trust-domain}-t'
-            implementation: generic-worker
-            os: windows
-            worker-type: '{alias}'
-        win11-64-2009(|-gpu|-ssd|-source|-ssd-gpu):
+        win10-64-2009(-gpu):
             provisioner: 'gecko-t'
             implementation: generic-worker
             os: windows
@@ -952,11 +974,6 @@ workers:
             implementation: generic-worker
             os: windows
             worker-type: 'gecko-{alias}-hw'
-        t-win64-aarch64-laptop:
-            provisioner: bitbar
-            implementation: generic-worker
-            os: windows
-            worker-type: 'gecko-{alias}'
         succeed:
             provisioner: built-in
             implementation: succeed
@@ -980,14 +997,14 @@ mac-signing:
                 - deep: false
                   runtime: true
                   force: true
-                  entitlements: security/mac/hardenedruntime/v2/production/plugin-container.xml
+                  entitlements: security/mac/hardenedruntime/production/plugin-container.xml
                   globs:
                       - "/Contents/MacOS/plugin-container.app"
 
                 - deep: false
                   runtime: true
                   force: true
-                  entitlements: security/mac/hardenedruntime/v2/production/media-plugin-helper.xml
+                  entitlements: security/mac/hardenedruntime/production/media-plugin-helper.xml
                   globs:
                       - "/Contents/MacOS/media-plugin-helper.app"
 
@@ -996,6 +1013,7 @@ mac-signing:
                   force: true
                   # These files are signed without entitlements
                   globs:
+                      - "/Contents/MacOS/crashhelper"
                       - "/Contents/MacOS/crashreporter.app"
                       - "/Contents/MacOS/updater.app/Contents/Frameworks/UpdateSettings.framework"
                       - "/Contents/MacOS/updater.app"
@@ -1012,11 +1030,11 @@ mac-signing:
                   force: true
                   entitlements:
                       by-build-platform:
-                          .*devedition.*: security/mac/hardenedruntime/v2/production/firefoxdeveloperedition.browser.xml
+                          .*devedition.*: security/mac/hardenedruntime/production/firefoxdeveloperedition.browser.xml
                           default:
                               by-project:
-                                  mozilla-central: security/mac/hardenedruntime/v2/production/nightly.browser.xml
-                                  default: security/mac/hardenedruntime/v2/production/firefox.browser.xml
+                                  mozilla-central: security/mac/hardenedruntime/production/nightly.browser.xml
+                                  default: security/mac/hardenedruntime/production/firefox.browser.xml
                   globs:
                       - "/"  # The .app
 
@@ -1024,22 +1042,23 @@ mac-signing:
                 - deep: false
                   runtime: true
                   force: true
-                  entitlements: security/mac/hardenedruntime/v2/developer/plugin-container.xml
+                  entitlements: security/mac/hardenedruntime/developer/plugin-container.xml
                   globs:
                       - "/Contents/MacOS/plugin-container.app"
 
                 - deep: false
                   runtime: true
                   force: true
-                  entitlements: security/mac/hardenedruntime/v2/developer/media-plugin-helper.xml
+                  entitlements: security/mac/hardenedruntime/developer/media-plugin-helper.xml
                   globs:
                       - "/Contents/MacOS/media-plugin-helper.app"
 
                 - deep: false
                   runtime: true
                   force: true
-                  entitlements: security/mac/hardenedruntime/v2/developer/utility.xml
+                  entitlements: security/mac/hardenedruntime/developer/utility.xml
                   globs:
+                      - "/Contents/MacOS/crashhelper"
                       - "/Contents/MacOS/crashreporter.app"
                       - "/Contents/MacOS/updater.app/Contents/Frameworks/UpdateSettings.framework"
                       - "/Contents/MacOS/updater.app"
@@ -1060,7 +1079,7 @@ mac-signing:
                 - deep: false
                   runtime: true
                   force: true
-                  entitlements: security/mac/hardenedruntime/v2/developer/browser.xml
+                  entitlements: security/mac/hardenedruntime/developer/browser.xml
                   globs:
                       - "/"  # The .app
 

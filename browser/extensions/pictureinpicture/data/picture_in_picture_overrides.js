@@ -212,6 +212,30 @@ let AVAILABLE_PIP_OVERRIDES;
       },
     },
 
+    iq: {
+      "https://*.iq.com/play/*": {
+        videoWrapperScriptPath: "video-wrappers/iq.js",
+      },
+    },
+
+    kick: {
+      "https://*.kick.com/*": {
+        visibilityThreshold: 0.7,
+      },
+    },
+
+    joyn: {
+      "https://www.joyn.de/play/*": {
+        videoWrapperScriptPath: "video-wrappers/joyn.js",
+      },
+      "https://www.joyn.at/play/*": {
+        videoWrapperScriptPath: "video-wrappers/joyn.js",
+      },
+      "https://www.joyn.ch/play/*": {
+        videoWrapperScriptPath: "video-wrappers/joyn.js",
+      },
+    },
+
     laracasts: {
       "https://*.laracasts.com/*": { policy: TOGGLE_POLICIES.ONE_QUARTER },
     },
@@ -312,6 +336,12 @@ let AVAILABLE_PIP_OVERRIDES;
     reuters: {
       "https://*.reuters.com/*": {
         videoWrapperScriptPath: "video-wrappers/jwplayerWrapper.js",
+      },
+    },
+
+    rte: {
+      "https://www.rte.ie/player/*": {
+        videoWrapperScriptPath: "video-wrappers/hotstar.js",
       },
     },
 
@@ -441,6 +471,18 @@ let AVAILABLE_PIP_OVERRIDES;
     washingtonpost: {
       "https://*.washingtonpost.com/*": {
         videoWrapperScriptPath: "video-wrappers/washingtonpost.js",
+      },
+    },
+
+    zdf: {
+      "https://*.zdf.de/*": {
+        videoWrapperScriptPath: "video-wrappers/zdf.js",
+      },
+      "https://*.3sat.de/*": {
+        videoWrapperScriptPath: "video-wrappers/zdf.js",
+      },
+      "https://*.phoenix.de/*": {
+        videoWrapperScriptPath: "video-wrappers/zdf.js",
       },
     },
   };

@@ -4,11 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::module_name_repetitions)]
-
 use std::{
     cell::RefCell,
     collections::VecDeque,
+    fmt::{self, Display, Formatter},
     ops::{Deref, DerefMut},
     rc::Rc,
 };
@@ -22,7 +21,7 @@ use crate::{
     connection::{Http3State, WebTransportSessionAcceptAction},
     connection_server::Http3ServerHandler,
     features::extended_connect::SessionCloseReason,
-    Http3StreamInfo, Http3StreamType, Priority, Res,
+    Error, Http3StreamInfo, Http3StreamType, Priority, Res,
 };
 
 #[derive(Debug, Clone)]
@@ -32,8 +31,8 @@ pub struct StreamHandler {
     pub stream_info: Http3StreamInfo,
 }
 
-impl ::std::fmt::Display for StreamHandler {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for StreamHandler {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let conn: &Connection = &self.conn.borrow();
         write!(f, "conn={conn} stream_info={:?}", self.stream_info)
     }
@@ -52,8 +51,6 @@ impl PartialEq for StreamHandler {
         self.conn == other.conn && self.stream_info.stream_id() == other.stream_info.stream_id()
     }
 }
-
-impl Eq for StreamHandler {}
 
 impl StreamHandler {
     pub const fn stream_id(&self) -> StreamId {
@@ -162,8 +159,8 @@ pub struct Http3OrWebTransportStream {
     stream_handler: StreamHandler,
 }
 
-impl ::std::fmt::Display for Http3OrWebTransportStream {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Http3OrWebTransportStream {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Stream server {:?}", self.stream_handler)
     }
 }
@@ -215,7 +212,6 @@ impl Http3OrWebTransportStream {
 
 impl Deref for Http3OrWebTransportStream {
     type Target = StreamHandler;
-    #[must_use]
     fn deref(&self) -> &Self::Target {
         &self.stream_handler
     }
@@ -247,8 +243,8 @@ pub struct WebTransportRequest {
     stream_handler: StreamHandler,
 }
 
-impl ::std::fmt::Display for WebTransportRequest {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for WebTransportRequest {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "WebTransport session {}", self.stream_handler)
     }
 }
@@ -378,13 +374,12 @@ impl WebTransportRequest {
             - u64::try_from(Encoder::varint_len(
                 self.stream_handler.stream_id().as_u64(),
             ))
-            .unwrap())
+            .map_err(|_| Error::Internal)?)
     }
 }
 
 impl Deref for WebTransportRequest {
     type Target = StreamHandler;
-    #[must_use]
     fn deref(&self) -> &Self::Target {
         &self.stream_handler
     }
@@ -408,8 +403,6 @@ impl PartialEq for WebTransportRequest {
         self.stream_handler == other.stream_handler
     }
 }
-
-impl Eq for WebTransportRequest {}
 
 #[derive(Debug, Clone)]
 pub enum WebTransportServerEvent {

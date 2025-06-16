@@ -13,6 +13,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "mozilla/StaticPrefs_media.h"
+#include "mozilla/dom/BufferSourceBinding.h"
 #include "mozilla/dom/ImageBitmapBinding.h"
 #include "mozilla/dom/VideoColorSpaceBinding.h"
 #include "mozilla/dom/VideoFrameBinding.h"
@@ -101,19 +102,12 @@ Maybe<nsString> ParseCodecString(const nsAString& aCodec) {
   return Some(codecs[0]);
 }
 
-bool IsSameColorSpace(const VideoColorSpaceInit& aLhs,
-                      const VideoColorSpaceInit& aRhs) {
-  return aLhs.mFullRange == aRhs.mFullRange && aLhs.mMatrix == aRhs.mMatrix &&
-         aLhs.mPrimaries == aRhs.mPrimaries && aLhs.mTransfer == aRhs.mTransfer;
-}
-
 /*
  * The below are helpers to operate ArrayBuffer or ArrayBufferView.
  */
 
 static std::tuple<JS::ArrayBufferOrView, size_t, size_t> GetArrayBufferInfo(
-    JSContext* aCx,
-    const OwningMaybeSharedArrayBufferViewOrMaybeSharedArrayBuffer& aBuffer) {
+    JSContext* aCx, const OwningAllowSharedBufferSource& aBuffer) {
   if (aBuffer.IsArrayBuffer()) {
     const ArrayBuffer& buffer = aBuffer.GetAsArrayBuffer();
     size_t length;
@@ -138,11 +132,10 @@ static std::tuple<JS::ArrayBufferOrView, size_t, size_t> GetArrayBufferInfo(
       JS_GetArrayBufferViewByteLength(obj));
 }
 
-Result<Ok, nsresult> CloneBuffer(
-    JSContext* aCx,
-    OwningMaybeSharedArrayBufferViewOrMaybeSharedArrayBuffer& aDest,
-    const OwningMaybeSharedArrayBufferViewOrMaybeSharedArrayBuffer& aSrc,
-    ErrorResult& aRv) {
+Result<Ok, nsresult> CloneBuffer(JSContext* aCx,
+                                 OwningAllowSharedBufferSource& aDest,
+                                 const OwningAllowSharedBufferSource& aSrc,
+                                 ErrorResult& aRv) {
   std::tuple<JS::ArrayBufferOrView, size_t, size_t> info =
       GetArrayBufferInfo(aCx, aSrc);
   JS::Rooted<JS::ArrayBufferOrView> abov(aCx);
@@ -170,7 +163,7 @@ Result<Ok, nsresult> CloneBuffer(
 }
 
 Result<RefPtr<MediaByteBuffer>, nsresult> GetExtraDataFromArrayBuffer(
-    const OwningMaybeSharedArrayBufferViewOrMaybeSharedArrayBuffer& aBuffer) {
+    const OwningAllowSharedBufferSource& aBuffer) {
   RefPtr<MediaByteBuffer> data = MakeRefPtr<MediaByteBuffer>();
   if (!AppendTypedArrayDataTo(aBuffer, *data)) {
     return Err(NS_ERROR_OUT_OF_MEMORY);
@@ -178,15 +171,20 @@ Result<RefPtr<MediaByteBuffer>, nsresult> GetExtraDataFromArrayBuffer(
   return data->Length() > 0 ? data : nullptr;
 }
 
-bool CopyExtradataToDescription(
-    JSContext* aCx, Span<const uint8_t>& aSrc,
-    OwningMaybeSharedArrayBufferViewOrMaybeSharedArrayBuffer& aDest) {
+bool CopyExtradataToDescription(JSContext* aCx, Span<const uint8_t>& aSrc,
+                                OwningAllowSharedBufferSource& aDest) {
   MOZ_ASSERT(!aSrc.IsEmpty());
 
   MOZ_ASSERT(aCx);
 
   size_t lengthBytes = aSrc.Length();
-  UniquePtr<uint8_t[], JS::FreePolicy> extradata(new uint8_t[lengthBytes]);
+
+  UniquePtr<uint8_t[], JS::FreePolicy> extradata(
+      js_pod_arena_malloc<uint8_t>(js::ArrayBufferContentsArena, lengthBytes));
+
+  if (!extradata)  {
+    return false;
+  }
 
   PodCopy(extradata.get(), aSrc.Elements(), lengthBytes);
 
@@ -200,6 +198,37 @@ bool CopyExtradataToDescription(
  * The following are utilities to convert between VideoColorSpace values to
  * gfx's values.
  */
+
+VideoColorSpaceInternal::VideoColorSpaceInternal(
+    const VideoColorSpaceInit& aColorSpaceInit)
+    : mFullRange(NullableToMaybe(aColorSpaceInit.mFullRange)),
+      mMatrix(NullableToMaybe(aColorSpaceInit.mMatrix)),
+      mPrimaries(NullableToMaybe(aColorSpaceInit.mPrimaries)),
+      mTransfer(NullableToMaybe(aColorSpaceInit.mTransfer)) {}
+
+VideoColorSpaceInit VideoColorSpaceInternal::ToColorSpaceInit() const {
+  VideoColorSpaceInit init;
+  init.mFullRange = MaybeToNullable(mFullRange);
+  init.mMatrix = MaybeToNullable(mMatrix);
+  init.mPrimaries = MaybeToNullable(mPrimaries);
+  init.mTransfer = MaybeToNullable(mTransfer);
+  return init;
+}
+
+nsCString VideoColorSpaceInternal::ToString() const {
+  nsCString rv("VideoColorSpace");
+  rv.AppendPrintf(" range: %s",
+                  mFullRange ? mFullRange.value() ? "true" : "false" : "none");
+  rv.AppendPrintf(" matrix: %s",
+                  mMatrix ? GetEnumString(mMatrix.value()).get() : "none");
+  rv.AppendPrintf(
+      " primaries: %s",
+      mPrimaries ? GetEnumString(mPrimaries.value()).get() : "none");
+  rv.AppendPrintf(" transfer: %s",
+                  mTransfer ? GetEnumString(mTransfer.value()).get() : "none");
+
+  return rv;
+}
 
 gfx::ColorRange ToColorRange(bool aIsFullRange) {
   return aIsFullRange ? gfx::ColorRange::FULL : gfx::ColorRange::LIMITED;
@@ -461,30 +490,6 @@ nsCString WebCodecsConfigurationChangeList::ToString() const {
   return rv;
 }
 
-using CodecChange = StrongTypedef<nsString, struct CodecChangeTypeWebCodecs>;
-using DimensionsChange =
-    StrongTypedef<gfx::IntSize, struct DimensionsChangeTypeWebCodecs>;
-using DisplayDimensionsChange =
-    StrongTypedef<Maybe<gfx::IntSize>,
-                  struct DisplayDimensionsChangeTypeWebCodecs>;
-using BitrateChange =
-    StrongTypedef<Maybe<uint32_t>, struct BitrateChangeTypeWebCodecs>;
-using FramerateChange =
-    StrongTypedef<Maybe<double>, struct FramerateChangeTypeWebCodecs>;
-using HardwareAccelerationChange =
-    StrongTypedef<dom::HardwareAcceleration,
-                  struct HardwareAccelerationChangeTypeWebCodecs>;
-using AlphaChange =
-    StrongTypedef<dom::AlphaOption, struct AlphaChangeTypeWebCodecs>;
-using ScalabilityModeChange =
-    StrongTypedef<Maybe<nsString>, struct ScalabilityModeChangeTypeWebCodecs>;
-using BitrateModeChange = StrongTypedef<dom::VideoEncoderBitrateMode,
-                                        struct BitrateModeChangeTypeWebCodecs>;
-using LatencyModeChange =
-    StrongTypedef<dom::LatencyMode, struct LatencyModeTypeChangeTypeWebCodecs>;
-using ContentHintChange =
-    StrongTypedef<Maybe<nsString>, struct ContentHintTypeTypeWebCodecs>;
-
 bool WebCodecsConfigurationChangeList::CanAttemptReconfigure() const {
   for (const auto& change : mChanges) {
     if (change.is<CodecChange>() || change.is<HardwareAccelerationChange>() ||
@@ -538,60 +543,30 @@ WebCodecsConfigurationChangeList::ToPEMChangeList() const {
   return rv.forget();
 }
 
-nsCString ColorSpaceInitToString(
-    const dom::VideoColorSpaceInit& aColorSpaceInit) {
-  nsCString rv("VideoColorSpace");
-
-  if (!aColorSpaceInit.mFullRange.IsNull()) {
-    rv.AppendPrintf(" range: %s",
-                    aColorSpaceInit.mFullRange.Value() ? "true" : "false");
-  }
-  if (!aColorSpaceInit.mMatrix.IsNull()) {
-    rv.AppendPrintf(" matrix: %s",
-                    GetEnumString(aColorSpaceInit.mMatrix.Value()).get());
-  }
-  if (!aColorSpaceInit.mTransfer.IsNull()) {
-    rv.AppendPrintf(" transfer: %s",
-                    GetEnumString(aColorSpaceInit.mTransfer.Value()).get());
-  }
-  if (!aColorSpaceInit.mPrimaries.IsNull()) {
-    rv.AppendPrintf(" primaries: %s",
-                    GetEnumString(aColorSpaceInit.mPrimaries.Value()).get());
-  }
-
-  return rv;
-}
-
 RefPtr<TaskQueue> GetWebCodecsEncoderTaskQueue() {
   return TaskQueue::Create(
       GetMediaThreadPool(MediaThreadType::PLATFORM_ENCODER),
       "WebCodecs encoding", false);
 }
 
-VideoColorSpaceInit FallbackColorSpaceForVideoContent() {
+VideoColorSpaceInternal FallbackColorSpaceForVideoContent() {
   // If we're unable to determine the color space, but we think this is video
   // content (e.g. because it's in YUV or NV12 or something like that,
   // consider it's in BT709).
   // This is step 3 of
   // https://w3c.github.io/webcodecs/#videoframe-pick-color-space
-  VideoColorSpaceInit colorSpace;
-  colorSpace.mFullRange = false;
-  colorSpace.mMatrix = VideoMatrixCoefficients::Bt709;
-  colorSpace.mTransfer = VideoTransferCharacteristics::Bt709;
-  colorSpace.mPrimaries = VideoColorPrimaries::Bt709;
-  return colorSpace;
+  return VideoColorSpaceInternal(false, VideoMatrixCoefficients::Bt709,
+                                 VideoColorPrimaries::Bt709,
+                                 VideoTransferCharacteristics::Bt709);
 }
-VideoColorSpaceInit FallbackColorSpaceForWebContent() {
+VideoColorSpaceInternal FallbackColorSpaceForWebContent() {
   // If we're unable to determine the color space, but we think this is from
   // Web content (canvas, image, svg, etc.), consider it's in sRGB.
   // This is step 2 of
   // https://w3c.github.io/webcodecs/#videoframe-pick-color-space
-  VideoColorSpaceInit colorSpace;
-  colorSpace.mFullRange = true;
-  colorSpace.mMatrix = VideoMatrixCoefficients::Rgb;
-  colorSpace.mTransfer = VideoTransferCharacteristics::Iec61966_2_1;
-  colorSpace.mPrimaries = VideoColorPrimaries::Bt709;
-  return colorSpace;
+  return VideoColorSpaceInternal(true, VideoMatrixCoefficients::Rgb,
+                                 VideoColorPrimaries::Bt709,
+                                 VideoTransferCharacteristics::Iec61966_2_1);
 }
 
 Maybe<CodecType> CodecStringToCodecType(const nsAString& aCodecString) {
@@ -631,7 +606,7 @@ bool IsSupportedVideoCodec(const nsAString& aCodec) {
     if (IsH265CodecString(aCodec)) {
       // H265 is supported only on MacOS in Nightly for now.
       return StaticPrefs::dom_media_webcodecs_h265_enabled() &&
-             StaticPrefs::media_hevc_enabled() && IsOnMacOS();
+             StaticPrefs::media_hevc_enabled() && (IsOnMacOS() || IsOnLinux());
     }
     return false;
   }

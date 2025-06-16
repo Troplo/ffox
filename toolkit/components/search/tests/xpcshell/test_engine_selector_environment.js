@@ -9,7 +9,8 @@
 "use strict";
 
 ChromeUtils.defineESModuleGetters(this, {
-  SearchEngineSelector: "resource://gre/modules/SearchEngineSelector.sys.mjs",
+  SearchEngineSelector:
+    "moz-src:///toolkit/components/search/SearchEngineSelector.sys.mjs",
 });
 
 const CONFIG_EVERYWHERE = [
@@ -65,6 +66,9 @@ const CONFIG_EVERYWHERE = [
       },
     ],
   },
+  // We use en-CA as a locale in the test, so we need to add that as an
+  // available locale to avoid falling back to en-US.
+  { recordType: "availableLocales", locales: ["en-CA", "en-GB", "en-US"] },
 ];
 
 const CONFIG_EXPERIMENT = [
@@ -451,12 +455,19 @@ add_task(async function test_everywhere_and_excluded_locale() {
       locale: "en-GB",
       region: "GB",
     },
-    [
-      "engine-everywhere",
-      "engine-everywhere-except-en-US",
-      "engine-everywhere-except-FI",
-      "engine-everywhere-except-en-CA-and-CA",
-    ],
+    SearchUtils.rustSelectorFeatureGate
+      ? [
+          "engine-everywhere",
+          "engine-everywhere-except-FI",
+          "engine-everywhere-except-en-CA-and-CA",
+          "engine-everywhere-except-en-US",
+        ]
+      : [
+          "engine-everywhere",
+          "engine-everywhere-except-en-CA-and-CA",
+          "engine-everywhere-except-en-US",
+          "engine-everywhere-except-FI",
+        ],
     "Should match the engines for all locales and regions."
   );
 
@@ -466,11 +477,17 @@ add_task(async function test_everywhere_and_excluded_locale() {
       locale: "en-US",
       region: "US",
     },
-    [
-      "engine-everywhere",
-      "engine-everywhere-except-FI",
-      "engine-everywhere-except-en-CA-and-CA",
-    ],
+    SearchUtils.rustSelectorFeatureGate
+      ? [
+          "engine-everywhere",
+          "engine-everywhere-except-FI",
+          "engine-everywhere-except-en-CA-and-CA",
+        ]
+      : [
+          "engine-everywhere",
+          "engine-everywhere-except-en-CA-and-CA",
+          "engine-everywhere-except-FI",
+        ],
     "Should match engines that do not exclude user's locale."
   );
 
@@ -482,8 +499,8 @@ add_task(async function test_everywhere_and_excluded_locale() {
     },
     [
       "engine-everywhere",
-      "engine-everywhere-except-en-US",
       "engine-everywhere-except-en-CA-and-CA",
+      "engine-everywhere-except-en-US",
     ],
     "Should match engines that do not exclude user's region."
   );
@@ -494,11 +511,17 @@ add_task(async function test_everywhere_and_excluded_locale() {
       locale: "en-CA",
       region: "CA",
     },
-    [
-      "engine-everywhere",
-      "engine-everywhere-except-en-US",
-      "engine-everywhere-except-FI",
-    ],
+    SearchUtils.rustSelectorFeatureGate
+      ? [
+          "engine-everywhere",
+          "engine-everywhere-except-FI",
+          "engine-everywhere-except-en-US",
+        ]
+      : [
+          "engine-everywhere",
+          "engine-everywhere-except-en-US",
+          "engine-everywhere-except-FI",
+        ],
     "Should match engine that do not exclude user's region and locale."
   );
 });

@@ -11,6 +11,7 @@
 #include "PerformanceStorage.h"
 #include "LargestContentfulPaint.h"
 #include "nsTextFrame.h"
+#include "PerformanceInteractionMetrics.h"
 
 namespace mozilla::dom {
 
@@ -54,6 +55,11 @@ class PerformanceMainThread final : public Performance,
   void InsertEventTimingEntry(PerformanceEventTiming*) override;
   void BufferEventTimingEntryIfNeeded(PerformanceEventTiming*) override;
   void DispatchPendingEventTimingEntries() override;
+
+  PerformanceInteractionMetrics& GetPerformanceInteractionMetrics() override;
+
+  void SetInteractionId(PerformanceEventTiming* aEventTiming,
+                        const WidgetEvent* aEvent) override;
 
   void BufferLargestContentfulPaintEntryIfNeeded(LargestContentfulPaint*);
 
@@ -105,6 +111,8 @@ class PerformanceMainThread final : public Performance,
   static constexpr uint32_t kMaxLargestContentfulPaintBufferSize = 150;
 
   class EventCounts* EventCounts() override;
+
+  uint64_t InteractionCount() override;
 
   bool IsGlobalObjectWindow() const override { return true; };
 
@@ -165,6 +173,8 @@ class PerformanceMainThread final : public Performance,
 
   RefPtr<PerformanceEventTiming> mFirstInputEvent;
   RefPtr<PerformanceEventTiming> mPendingPointerDown;
+
+  PerformanceInteractionMetrics mInteractionMetrics;
 
  private:
   void SetHasDispatchedInputEvent();

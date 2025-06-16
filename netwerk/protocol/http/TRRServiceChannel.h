@@ -45,7 +45,7 @@ class TRRServiceChannel : public HttpBaseChannel,
   NS_DECL_NSITRANSPORTEVENTSINK
   NS_DECL_NSIPROXIEDCHANNEL
   NS_DECL_NSIPROTOCOLPROXYCALLBACK
-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_TRRSERVICECHANNEL_IID)
+  NS_INLINE_DECL_STATIC_IID(NS_TRRSERVICECHANNEL_IID)
 
   // nsIRequest
   NS_IMETHOD SetCanceledReason(const nsACString& aReason) override;
@@ -104,13 +104,6 @@ class TRRServiceChannel : public HttpBaseChannel,
     return NS_OK;
   }
 
-  [[nodiscard]] nsresult OnPush(uint32_t aPushedStreamId,
-                                const nsACString& aUrl,
-                                const nsACString& aRequestString,
-                                HttpTransactionShell* aTransaction);
-  void SetPushedStreamTransactionAndId(
-      HttpTransactionShell* aTransWithPushedStream, uint32_t aPushedStreamId);
-
   // nsITimedChannel
   NS_IMETHOD GetDomainLookupStart(
       mozilla::TimeStamp* aDomainLookupStart) override;
@@ -167,16 +160,12 @@ class TRRServiceChannel : public HttpBaseChannel,
 
   nsCOMPtr<nsIRequest> mTransactionPump;
   RefPtr<HttpTransactionShell> mTransaction;
-  uint32_t mPushedStreamId{0};
-  RefPtr<HttpTransactionShell> mTransWithPushedStream;
   DataMutex<nsCOMPtr<nsICancelable>> mProxyRequest;
   nsCOMPtr<nsIEventTarget> mCurrentEventTarget;
 
   friend class HttpAsyncAborter<TRRServiceChannel>;
   friend class nsHttpHandler;
 };
-
-NS_DEFINE_STATIC_IID_ACCESSOR(TRRServiceChannel, NS_TRRSERVICECHANNEL_IID)
 
 }  // namespace mozilla::net
 

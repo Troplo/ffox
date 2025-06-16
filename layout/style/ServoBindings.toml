@@ -28,6 +28,7 @@ headers = [
     "mozilla/PresShell.h",
     "mozilla/ServoTraversalStatistics.h",
     "mozilla/SizeOfState.h",
+    "nsDeviceContext.h",
     "nsCSSProps.h",
     "nsNameSpaceManager.h",
 ]
@@ -294,6 +295,7 @@ opaque-types = [
     "std::pair__PCCP",
     "std::namespace::atomic___base", "std::atomic__My_base",
     "std::atomic",
+    "std::.*::atomic",
     "std::atomic___base",
     "std::tuple.*", # Causes "Cannot find type _Pred in this scope" error on mac, like rust-skia#571
     "std::.*::tuple.*",
@@ -301,6 +303,7 @@ opaque-types = [
     "mozilla::dom::Touch",
     "mozilla::dom::Sequence",
     "mozilla::SmallPointerArray",
+    "mozilla::SmallPointerArray_Element",
     "mozilla::dom::Optional",
     "mozilla::dom::OwningNodeOrString_Value",
     "mozilla::dom::Nullable",
@@ -309,6 +312,7 @@ opaque-types = [
     "RefPtr_Proxy_member_function",
     "nsAutoPtr_Proxy",
     "nsAutoPtr_Proxy_member_function",
+    "nsRegion_.*",
     "mozilla::detail::HashTable", # <- We should be able to remove this and
                                   # HashSet below once
                                   # https://github.com/rust-lang/rust-bindgen/pull/1515
@@ -369,7 +373,7 @@ cbindgen-types = [
     { gecko = "StyleDisplayMode", servo = "crate::gecko::media_features::DisplayMode" },
     { gecko = "StylePlatform", servo = "crate::gecko::media_features::Platform" },
     { gecko = "StyleGtkThemeFamily", servo = "crate::gecko::media_features::GtkThemeFamily" },
-    { gecko = "StylePrefersColorScheme", servo = "crate::gecko::media_features::PrefersColorScheme" },
+    { gecko = "StylePrefersColorScheme", servo = "crate::queries::values::PrefersColorScheme" },
     { gecko = "StyleScripting", servo = "crate::gecko::media_features::Scripting" },
     { gecko = "StyleDynamicRange", servo = "crate::gecko::media_features::DynamicRange" },
     { gecko = "StyleFillRule", servo = "crate::values::generics::basic_shape::FillRule" },
@@ -416,6 +420,7 @@ cbindgen-types = [
     { gecko = "StyleTimelineName", servo = "crate::values::computed::TimelineName" },
     { gecko = "StyleScrollAxis", servo = "crate::values::computed::ScrollAxis" },
     { gecko = "StyleViewTimelineInset", servo = "crate::values::computed::ViewTimelineInset" },
+    { gecko = "StyleViewTransitionClass", servo = "crate::values::computed::ViewTransitionClass" },
     { gecko = "StyleViewTransitionName", servo = "crate::values::computed::ViewTransitionName" },
     { gecko = "StyleResize", servo = "crate::values::computed::Resize" },
     { gecko = "StyleOverflowClipBox", servo = "crate::values::computed::OverflowClipBox" },
@@ -632,7 +637,9 @@ cbindgen-types = [
     { gecko = "StyleInert", servo = "crate::values::computed::ui::Inert" },
     { gecko = "StyleMargin", servo = "crate::values::computed::length::Margin" },
     { gecko = "StyleGenericAnchorFunction", servo = "crate::values::generics::position::GenericAnchorFunction" },
-    { gecko = "StylePositionProperty", servo = "crate::values::computed::PositionProperty"},
+    { gecko = "StylePositionProperty", servo = "crate::values::computed::PositionProperty" },
+    { gecko = "StyleQueryFontMetricsFlags", servo = "crate::values::specified::font::QueryFontMetricsFlags" },
+    { gecko = "StyleWritingModeProperty", servo = "crate::values::computed::box_::WritingModeProperty" },
 ]
 
 mapped-generic-types = [

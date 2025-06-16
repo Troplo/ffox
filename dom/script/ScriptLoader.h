@@ -13,6 +13,7 @@
 #include "js/loader/ScriptKind.h"
 #include "js/loader/ScriptLoadRequest.h"
 #include "mozilla/dom/ScriptLoadContext.h"
+#include "mozilla/dom/ScriptLoadRequestType.h"
 #include "nsCOMPtr.h"
 #include "nsRefPtrHashtable.h"
 #include "nsIScriptElement.h"
@@ -138,7 +139,7 @@ class ScriptLoader final : public JS::loader::ScriptLoaderInterface {
 
   explicit ScriptLoader(Document* aDocument);
 
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
+  NS_DECL_CYCLE_COLLECTING_ISUPPORTS_FINAL
   NS_DECL_CYCLE_COLLECTION_CLASS(ScriptLoader)
 
   /**
@@ -223,6 +224,11 @@ class ScriptLoader final : public JS::loader::ScriptLoaderInterface {
    * generate a unique key based on the currently executing script.
    */
   nsIScriptElement* GetCurrentScript() { return mCurrentScript; }
+
+  void ContinueParsingDocumentAfterCurrentScript() {
+    MOZ_ASSERT(mCurrentScript);
+    mContinueParsingDocumentAfterCurrentScript = true;
+  }
 
   nsIScriptElement* GetCurrentParserInsertedScript() {
     return mCurrentParserInsertedScript;
@@ -411,14 +417,13 @@ class ScriptLoader final : public JS::loader::ScriptLoaderInterface {
 
    * @param aScriptFromHead Whether or not the script was a child of head
    */
-  virtual void PreloadURI(nsIURI* aURI, const nsAString& aCharset,
-                          const nsAString& aType, const nsAString& aCrossOrigin,
-                          const nsAString& aNonce,
-                          const nsAString& aFetchPriority,
-                          const nsAString& aIntegrity, bool aScriptFromHead,
-                          bool aAsync, bool aDefer, bool aLinkPreload,
-                          const ReferrerPolicy aReferrerPolicy,
-                          uint64_t aEarlyHintPreloaderId);
+  void PreloadURI(nsIURI* aURI, const nsAString& aCharset,
+                  const nsAString& aType, const nsAString& aCrossOrigin,
+                  const nsAString& aNonce, const nsAString& aFetchPriority,
+                  const nsAString& aIntegrity, bool aScriptFromHead,
+                  bool aAsync, bool aDefer, bool aLinkPreload,
+                  const ReferrerPolicy aReferrerPolicy,
+                  uint64_t aEarlyHintPreloaderId);
 
   /**
    * Process a request that was deferred so that the script could be compiled
@@ -462,14 +467,27 @@ class ScriptLoader final : public JS::loader::ScriptLoaderInterface {
  private:
   ~ScriptLoader();
 
-  enum class RequestType { Inline, External, Preload };
-
   already_AddRefed<ScriptLoadRequest> CreateLoadRequest(
       ScriptKind aKind, nsIURI* aURI, nsIScriptElement* aElement,
       nsIPrincipal* aTriggeringPrincipal, mozilla::CORSMode aCORSMode,
       const nsAString& aNonce, RequestPriority aRequestPriority,
       const SRIMetadata& aIntegrity, ReferrerPolicy aReferrerPolicy,
-      JS::loader::ParserMetadata aParserMetadata, RequestType requestType);
+      JS::loader::ParserMetadata aParserMetadata,
+      ScriptLoadRequestType aRequestType);
+
+  /**
+   * Helper function to lookup the cache entry and associate it to the
+   * request if any.
+   */
+  void TryUseCache(
+      ScriptLoadRequest* aRequest, nsIScriptElement* aElement = nullptr,
+      const nsAString& aNonce = u""_ns,
+      ScriptLoadRequestType aRequestType = ScriptLoadRequestType::External);
+
+  /**
+   * Helper function to notify network observers for cached request.
+   */
+  void EmulateNetworkEvents(ScriptLoadRequest* aRequest);
 
   void NotifyObserversForCachedScript(
       nsIURI* aURI, nsINode* aContext, nsIPrincipal* aTriggeringPrincipal,
@@ -491,6 +509,17 @@ class ScriptLoader final : public JS::loader::ScriptLoaderInterface {
 
   bool ProcessInlineScript(nsIScriptElement* aElement, ScriptKind aScriptKind);
 
+  enum class CacheBehavior : uint8_t {
+    DoNothing,
+    Insert,
+    Evict,
+  };
+
+  CacheBehavior GetCacheBehavior(ScriptLoadRequest* aRequest);
+
+  void TryCacheRequest(ScriptLoadRequest* aRequest,
+                       RefPtr<JS::Stencil>& aStencil);
+
   JS::loader::ScriptLoadRequest* LookupPreloadRequest(
       nsIScriptElement* aElement, ScriptKind aScriptKind,
       const SRIMetadata& aSRIMetadata);
@@ -507,10 +536,9 @@ class ScriptLoader final : public JS::loader::ScriptLoaderInterface {
   /**
    * Helper function to check the content policy for a given request.
    */
-  static nsresult CheckContentPolicy(Document* aDocument,
-                                     nsIScriptElement* aElement,
-                                     const nsAString& aNonce,
-                                     ScriptLoadRequest* aRequest);
+  nsresult CheckContentPolicy(nsIScriptElement* aElement,
+                              const nsAString& aNonce,
+                              ScriptLoadRequest* aRequest);
 
   /**
    * Helper function to determine whether an about: page loads a chrome: URI.
@@ -575,7 +603,7 @@ class ScriptLoader final : public JS::loader::ScriptLoaderInterface {
    *
    * This function is virtual to allow cross-library calls to SetEnabled()
    */
-  virtual void ProcessPendingRequestsAsync();
+  void ProcessPendingRequestsAsync();
 
   void ProcessPendingRequestsAsyncBypassParserBlocking();
 
@@ -615,6 +643,10 @@ class ScriptLoader final : public JS::loader::ScriptLoaderInterface {
       const nsTArray<nsString>& aParams = nsTArray<nsString>()) const override;
 
   void ReportPreloadErrorsToConsole(ScriptLoadRequest* aRequest);
+
+  nsIConsoleReportCollector* GetConsoleReportCollector() const override {
+    return mReporter;
+  }
 
   nsresult AttemptOffThreadScriptCompile(ScriptLoadRequest* aRequest,
                                          bool* aCouldCompileOut);
@@ -817,6 +849,7 @@ class ScriptLoader final : public JS::loader::ScriptLoaderInterface {
   bool mBlockingDOMContentLoaded;
   bool mLoadEventFired;
   bool mGiveUpEncoding;
+  bool mContinueParsingDocumentAfterCurrentScript;
 
   TimeDuration mMainThreadParseTime;
 

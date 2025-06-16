@@ -12,10 +12,10 @@ import {
 } from '../../../../common/util/util.js';
 import { Float16Array } from '../../../../external/petamoriken/float16/float16.js';
 import { GPUConst } from '../../../constants.js';
-import { kResourceStates } from '../../../gpu_test.js';
-import { ValidationTest } from '../validation_test.js';
+import { kResourceStates, AllFeaturesMaxLimitsGPUTest } from '../../../gpu_test.js';
+import * as vtu from '../validation_test_utils.js';
 
-export const g = makeTestGroup(ValidationTest);
+export const g = makeTestGroup(AllFeaturesMaxLimitsGPUTest);
 
 g.test('buffer_state')
   .desc(
@@ -27,7 +27,7 @@ g.test('buffer_state')
   .params(u => u.combine('bufferState', kResourceStates))
   .fn(t => {
     const { bufferState } = t.params;
-    const buffer = t.createBufferWithState(bufferState, {
+    const buffer = vtu.createBufferWithState(t, bufferState, {
       size: 16,
       usage: GPUBufferUsage.COPY_DST,
     });
@@ -179,9 +179,7 @@ g.test('usages')
 g.test('buffer,device_mismatch')
   .desc('Tests writeBuffer cannot be called with a buffer created from another device.')
   .paramsSubcasesOnly(u => u.combine('mismatched', [true, false]))
-  .beforeAllSubcases(t => {
-    t.selectMismatchedDeviceOrSkipTestCase(undefined);
-  })
+  .beforeAllSubcases(t => t.usesMismatchedDevice())
   .fn(t => {
     const { mismatched } = t.params;
     const sourceDevice = mismatched ? t.mismatchedDevice : t.device;

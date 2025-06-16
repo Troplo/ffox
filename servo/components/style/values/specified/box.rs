@@ -5,7 +5,6 @@
 //! Specified types for box properties.
 
 use crate::parser::{Parse, ParserContext};
-#[cfg(feature = "gecko")]
 use crate::properties::{LonghandId, PropertyDeclarationId, PropertyId};
 use crate::values::generics::box_::{
     GenericContainIntrinsicSize, GenericLineClamp, GenericPerspective, GenericVerticalAlign,
@@ -14,6 +13,7 @@ use crate::values::generics::box_::{
 use crate::values::specified::length::{LengthPercentage, NonNegativeLength};
 use crate::values::specified::{AllowQuirks, Integer, NonNegativeNumberOrPercentage};
 use crate::values::CustomIdent;
+pub use crate::logical_geometry::WritingModeProperty;
 use cssparser::Parser;
 use num_traits::FromPrimitive;
 use std::fmt::{self, Write};
@@ -21,21 +21,10 @@ use style_traits::{CssWriter, KeywordsCollectFn, ParseError};
 use style_traits::{SpecifiedValueInfo, StyleParseErrorKind, ToCss};
 
 #[cfg(not(feature = "servo"))]
-fn flexbox_enabled() -> bool {
-    true
-}
-#[cfg(not(feature = "servo"))]
 fn grid_enabled() -> bool {
     true
 }
 
-#[cfg(feature = "servo")]
-fn flexbox_enabled() -> bool {
-    servo_config::prefs::pref_map()
-        .get("layout.flexbox.enabled")
-        .as_bool()
-        .unwrap_or(false)
-}
 #[cfg(feature = "servo")]
 fn grid_enabled() -> bool {
     style_config::get_bool("layout.grid.enabled")
@@ -314,17 +303,6 @@ impl Display {
         Display::Inline
     }
 
-    /// <https://drafts.csswg.org/css2/visuren.html#x13>
-    #[cfg(feature = "servo")]
-    #[inline]
-    pub fn is_atomic_inline_level(&self) -> bool {
-        match *self {
-            Display::InlineBlock | Display::InlineFlex => true,
-            Display::InlineTable => true,
-            _ => false,
-        }
-    }
-
     /// Returns whether this `display` value is the display of a flex or
     /// grid container.
     ///
@@ -426,8 +404,8 @@ impl DisplayKeyword {
             "contents" => Full(Display::Contents),
             "inline-block" => Full(Display::InlineBlock),
             "inline-table" => Full(Display::InlineTable),
-            "-webkit-flex" if flexbox_enabled() => Full(Display::Flex),
-            "inline-flex" | "-webkit-inline-flex" if flexbox_enabled() => Full(Display::InlineFlex),
+            "-webkit-flex" => Full(Display::Flex),
+            "inline-flex" | "-webkit-inline-flex" => Full(Display::InlineFlex),
             "inline-grid" if grid_enabled() => Full(Display::InlineGrid),
             "table-caption" => Full(Display::TableCaption),
             "table-row-group" => Full(Display::TableRowGroup),
@@ -460,7 +438,7 @@ impl DisplayKeyword {
             /// <display-inside> = flow | flow-root | table | flex | grid | ruby
             /// https://drafts.csswg.org/css-display/#typedef-display-inside
             "flow" => Inside(DisplayInside::Flow),
-            "flex" if flexbox_enabled() => Inside(DisplayInside::Flex),
+            "flex" => Inside(DisplayInside::Flex),
             "flow-root" => Inside(DisplayInside::FlowRoot),
             "table" => Inside(DisplayInside::Table),
             "grid" if grid_enabled() => Inside(DisplayInside::Grid),
@@ -972,7 +950,7 @@ pub struct WillChange {
     /// A bitfield with the kind of change that the value will create, based
     /// on the above field.
     #[css(skip)]
-    bits: WillChangeBits,
+    pub bits: WillChangeBits,
 }
 
 impl WillChange {
@@ -1026,10 +1004,6 @@ bitflags! {
     }
 }
 
-#[cfg(feature="servo")]
-fn change_bits_for_longhand(longhand: LonghandId) -> WillChangeBits { WillChangeBits::empty() }
-
-#[cfg(feature = "gecko")]
 fn change_bits_for_longhand(longhand: LonghandId) -> WillChangeBits {
     match longhand {
         LonghandId::Opacity => WillChangeBits::OPACITY,
@@ -1249,6 +1223,7 @@ impl Parse for LineClamp {
     Copy,
     Debug,
     Eq,
+    FromPrimitive,
     MallocSizeOf,
     Parse,
     PartialEq,
@@ -1516,18 +1491,6 @@ pub enum Appearance {
     Textfield,
     /// The dropdown button(s) that open up a dropdown list.
     MenulistButton,
-    /// Various arrows that go in buttons
-    #[parse(condition = "ParserContext::chrome_rules_enabled")]
-    ButtonArrowDown,
-    #[parse(condition = "ParserContext::chrome_rules_enabled")]
-    ButtonArrowNext,
-    #[parse(condition = "ParserContext::chrome_rules_enabled")]
-    ButtonArrowPrevious,
-    #[parse(condition = "ParserContext::chrome_rules_enabled")]
-    ButtonArrowUp,
-    /// A dual toolbar button (e.g., a Back button with a dropdown)
-    #[parse(condition = "ParserContext::chrome_rules_enabled")]
-    Dualbutton,
     /// Menu Popup background.
     #[parse(condition = "ParserContext::chrome_rules_enabled")]
     Menupopup,
@@ -1584,27 +1547,12 @@ pub enum Appearance {
     /// The down button of a spin control.
     #[parse(condition = "ParserContext::chrome_rules_enabled")]
     SpinnerDownbutton,
-    /// A splitter.  Can be horizontal or vertical.
-    #[parse(condition = "ParserContext::chrome_rules_enabled")]
-    Splitter,
     /// A status bar in a main application window.
     #[parse(condition = "ParserContext::chrome_rules_enabled")]
     Statusbar,
-    /// A single tab in a tab widget.
-    #[parse(condition = "ParserContext::chrome_rules_enabled")]
-    Tab,
-    /// A single pane (inside the tabpanels container).
-    #[parse(condition = "ParserContext::chrome_rules_enabled")]
-    Tabpanel,
-    /// The tab panels container.
-    #[parse(condition = "ParserContext::chrome_rules_enabled")]
-    Tabpanels,
     /// A single toolbar button (with no associated dropdown).
     #[parse(condition = "ParserContext::chrome_rules_enabled")]
     Toolbarbutton,
-    /// The dropdown portion of a toolbar button
-    #[parse(condition = "ParserContext::chrome_rules_enabled")]
-    ToolbarbuttonDropdown,
     /// A tooltip.
     #[parse(condition = "ParserContext::chrome_rules_enabled")]
     Tooltip,
@@ -1809,7 +1757,6 @@ pub enum Overflow {
     Hidden,
     Scroll,
     Auto,
-    #[cfg(feature = "gecko")]
     Clip,
 }
 
@@ -1825,7 +1772,6 @@ impl Parse for Overflow {
             "hidden" => Self::Hidden,
             "scroll" => Self::Scroll,
             "auto" | "overlay" => Self::Auto,
-            #[cfg(feature = "gecko")]
             "clip" => Self::Clip,
             #[cfg(feature = "gecko")]
             "-moz-hidden-unscrollable" if static_prefs::pref!("layout.css.overflow-moz-hidden-unscrollable.enabled") => {
@@ -1848,7 +1794,6 @@ impl Overflow {
         match *self {
             Self::Hidden | Self::Scroll | Self::Auto => *self,
             Self::Visible => Self::Auto,
-            #[cfg(feature = "gecko")]
             Self::Clip => Self::Hidden,
         }
     }

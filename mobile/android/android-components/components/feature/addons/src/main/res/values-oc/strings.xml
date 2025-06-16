@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:tools="http://schemas.android.com/tools" xmlns:moz="http://schemas.android.com/apk/res-auto">
+<resources xmlns:tools="http://schemas.android.com/tools">
   <!-- Description for privacy add-on permission. -->
   <string name="mozac_feature_addons_permissions_privacy_description">Legir e modificar los paramètres de vida privada</string>
   <!-- Description for all_urls add-on permission. -->
@@ -36,8 +36,6 @@
   <string name="mozac_feature_addons_permissions_content_description_item">%1$s, %2$d de %3$d</string>
   <!-- Description for tabs add-on permission. -->
   <string name="mozac_feature_addons_permissions_tabs_description">Accedir als onglets del navegador</string>
-  <!-- Description for unlimited_storage permission. -->
-  <string name="mozac_feature_addons_permissions_unlimited_storage_description" moz:removedIn="137" tools:ignore="UnusedResources">Servar una quantitat illimitada de donadas del costat del client</string>
   <!-- Description for navigation permission. -->
   <string name="mozac_feature_addons_permissions_web_navigation_description">Accedir a l’activitat del navegador pendent la navegacion</string>
   <!-- Description for bookmarks permission. -->
@@ -84,6 +82,8 @@
   <string name="mozac_feature_addons_permissions_trial_ml_description">Telecargar e executar de modèls d’IA sus vòstre aparelh</string>
   <!-- Description for userScripts permission. -->
   <string name="mozac_feature_addons_permissions_user_scripts_description">Autorizar d’escripts tèrces non verificats a accedir a vòstras donadas</string>
+  <!-- The text shown when an extension requests the userScripts permission, near the usual description of the userScripts permission -->
+  <string name="mozac_feature_addons_permissions_user_scripts_extra_warning">Los escripts non verificats pòdon comportar de risques de seguretat e de vida privada. Executatz solament los escripts que possedisson d’extensions o de fonts de fisança.</string>
   <!-- Description for devtools permission. -->
   <string name="mozac_feature_addons_permissions_devtools_description">Dobrir las aisinas de desvolopaments per dire d’accedir a vòstras donadas dins d’onglets dobèrts</string>
   <!-- Description for text button that expands the list of domain permissions -->

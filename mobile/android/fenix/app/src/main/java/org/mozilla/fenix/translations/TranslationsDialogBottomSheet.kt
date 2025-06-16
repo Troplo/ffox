@@ -31,22 +31,22 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import mozilla.components.compose.base.annotation.LightDarkPreview
+import mozilla.components.compose.base.Dropdown
+import mozilla.components.compose.base.button.PrimaryButton
 import mozilla.components.compose.base.button.TextButton
+import mozilla.components.compose.base.menu.MenuItem.CheckableItem
+import mozilla.components.compose.base.text.Text
 import mozilla.components.concept.engine.translate.Language
 import mozilla.components.concept.engine.translate.TranslationError
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.BetaLabel
-import org.mozilla.fenix.compose.Dropdown
 import org.mozilla.fenix.compose.InfoCard
 import org.mozilla.fenix.compose.InfoType
 import org.mozilla.fenix.compose.LinkText
 import org.mozilla.fenix.compose.LinkTextState
-import org.mozilla.fenix.compose.button.PrimaryButton
-import org.mozilla.fenix.compose.menu.MenuItem.CheckableItem
-import org.mozilla.fenix.compose.text.Text
 import org.mozilla.fenix.theme.FirefoxTheme
 import java.util.Locale
 
@@ -668,7 +668,7 @@ private fun getLongestLanguageWidth(languages: List<Language>, style: TextStyle)
 }
 
 @Composable
-@LightDarkPreview
+@PreviewLightDark
 private fun TranslationsDialogBottomSheetPreview() {
     FirefoxTheme {
         TranslationsDialogBottomSheet(

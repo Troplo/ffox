@@ -12,10 +12,10 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   BookmarkHTMLUtils: "resource://gre/modules/BookmarkHTMLUtils.sys.mjs",
+  BrowserUtils: "resource://gre/modules/BrowserUtils.sys.mjs",
   FirefoxProfileMigrator: "resource:///modules/FirefoxProfileMigrator.sys.mjs",
   MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
-  ResponsivenessMonitor: "resource://gre/modules/ResponsivenessMonitor.sys.mjs",
 });
 
 /**
@@ -240,6 +240,16 @@ export class MigratorBase {
   }
 
   /**
+   * Subclasses should override this and return true if the source browser
+   * cannot have its passwords imported directly, and if there is a specialized
+   * flow through the wizard to walk the user through importing from a CSV
+   * file manually.
+   */
+  get showsManualPasswordImport() {
+    return false;
+  }
+
+  /**
    * This method returns a number that is the bitwise OR of all resource
    * types that are available in aProfile. See MigrationUtils.resourceTypes
    * for each resource type.
@@ -295,61 +305,7 @@ export class MigratorBase {
       });
     };
 
-    let getHistogramIdForResourceType = (resourceType, template) => {
-      if (resourceType == lazy.MigrationUtils.resourceTypes.HISTORY) {
-        return template.replace("*", "HISTORY");
-      }
-      if (resourceType == lazy.MigrationUtils.resourceTypes.BOOKMARKS) {
-        return template.replace("*", "BOOKMARKS");
-      }
-      if (resourceType == lazy.MigrationUtils.resourceTypes.PASSWORDS) {
-        return template.replace("*", "LOGINS");
-      }
-      return null;
-    };
-
     let browserKey = this.constructor.key;
-
-    let maybeStartTelemetryStopwatch = resourceType => {
-      let histogramId = getHistogramIdForResourceType(
-        resourceType,
-        "FX_MIGRATION_*_IMPORT_MS"
-      );
-      if (histogramId) {
-        TelemetryStopwatch.startKeyed(histogramId, browserKey);
-      }
-      return histogramId;
-    };
-
-    let maybeStartResponsivenessMonitor = resourceType => {
-      let responsivenessMonitor;
-      let responsivenessHistogramId = getHistogramIdForResourceType(
-        resourceType,
-        "FX_MIGRATION_*_JANK_MS"
-      );
-      if (responsivenessHistogramId) {
-        responsivenessMonitor = new lazy.ResponsivenessMonitor();
-      }
-      return { responsivenessMonitor, responsivenessHistogramId };
-    };
-
-    let maybeFinishResponsivenessMonitor = (
-      responsivenessMonitor,
-      histogramId
-    ) => {
-      if (responsivenessMonitor) {
-        let accumulatedDelay = responsivenessMonitor.finish();
-        if (histogramId) {
-          try {
-            Services.telemetry
-              .getKeyedHistogramById(histogramId)
-              .add(browserKey, accumulatedDelay);
-          } catch (ex) {
-            console.error(histogramId, ": ", ex);
-          }
-        }
-      }
-    };
 
     let collectQuantityTelemetry = () => {
       for (let resourceType of Object.keys(
@@ -424,11 +380,6 @@ export class MigratorBase {
       for (let [migrationType, itemResources] of resourcesGroupedByItems) {
         notify("Migration:ItemBeforeMigrate", migrationType);
 
-        let stopwatchHistogramId = maybeStartTelemetryStopwatch(migrationType);
-
-        let { responsivenessMonitor, responsivenessHistogramId } =
-          maybeStartResponsivenessMonitor(migrationType);
-
         let itemSuccess = false;
         for (let res of itemResources) {
           let completeDeferred = Promise.withResolvers();
@@ -447,18 +398,6 @@ export class MigratorBase {
               aProgressCallback(migrationType, itemSuccess, details);
 
               resourcesGroupedByItems.delete(migrationType);
-
-              if (stopwatchHistogramId) {
-                TelemetryStopwatch.finishKeyed(
-                  stopwatchHistogramId,
-                  browserKey
-                );
-              }
-
-              maybeFinishResponsivenessMonitor(
-                responsivenessMonitor,
-                responsivenessHistogramId
-              );
 
               if (resourcesGroupedByItems.size == 0) {
                 collectQuantityTelemetry();
@@ -495,11 +434,10 @@ export class MigratorBase {
       // (=startupOnlyMigrator), as it just copies over the places database
       // from another profile.
       await (async function () {
-        // Tell nsBrowserGlue we're importing default bookmarks.
-        let browserGlue = Cc["@mozilla.org/browser/browserglue;1"].getService(
-          Ci.nsIObserver
-        );
-        browserGlue.observe(null, TOPIC_WILL_IMPORT_BOOKMARKS, "");
+        // Tell whoever cares we're importing default bookmarks.
+        lazy.BrowserUtils.callModulesFromCategory({
+          categoryName: TOPIC_WILL_IMPORT_BOOKMARKS,
+        });
 
         // Import the default bookmarks. We ignore whether or not we succeed.
         await lazy.BookmarkHTMLUtils.importFromURL(
@@ -510,23 +448,16 @@ export class MigratorBase {
           }
         ).catch(console.error);
 
-        // We'll tell nsBrowserGlue we've imported bookmarks, but before that
+        // We'll tell places we've imported bookmarks, but before that
         // we need to make sure we're going to know when it's finished
-        // initializing places:
-        let placesInitedPromise = new Promise(resolve => {
-          let onPlacesInited = function () {
-            Services.obs.removeObserver(
-              onPlacesInited,
-              TOPIC_PLACES_DEFAULTS_FINISHED
-            );
-            resolve();
-          };
-          Services.obs.addObserver(
-            onPlacesInited,
-            TOPIC_PLACES_DEFAULTS_FINISHED
-          );
+        // initializing:
+        let placesInitedPromise = lazy.BrowserUtils.promiseObserved(
+          TOPIC_PLACES_DEFAULTS_FINISHED
+        );
+
+        lazy.BrowserUtils.callModulesFromCategory({
+          categoryName: TOPIC_DID_IMPORT_BOOKMARKS,
         });
-        browserGlue.observe(null, TOPIC_DID_IMPORT_BOOKMARKS, "");
         await placesInitedPromise;
         await doMigrate();
       })();

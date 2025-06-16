@@ -70,7 +70,7 @@ impl PeriodSet {
     fn min(&self) -> Option<Period> {
         for (i, v) in self.counts.iter().enumerate() {
             if *v > 0 {
-                return Some(Period(u8::try_from(i).unwrap() + Period::MIN.0));
+                return Some(Period(u8::try_from(i).ok()? + Period::MIN.0));
             }
         }
         None
@@ -78,7 +78,7 @@ impl PeriodSet {
 }
 
 #[cfg(target_os = "macos")]
-#[allow(non_camel_case_types)]
+#[expect(non_camel_case_types, reason = "These are C types.")]
 mod mac {
     use std::ptr::addr_of_mut;
 
@@ -124,9 +124,9 @@ mod mac {
     }
 
     const THREAD_TIME_CONSTRAINT_POLICY: thread_policy_flavor_t = 2;
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation, reason = "These are C types.")]
     const THREAD_TIME_CONSTRAINT_POLICY_COUNT: mach_msg_type_number_t =
-        (std::mem::size_of::<thread_time_constraint_policy>() / std::mem::size_of::<integer_t>())
+        (size_of::<thread_time_constraint_policy>() / size_of::<integer_t>())
             as mach_msg_type_number_t;
 
     // These function definitions are taken from a comment in <thread_policy.h>.
@@ -179,7 +179,11 @@ mod mac {
 
     /// Create a realtime policy and set it.
     pub fn set_realtime(base: f64) {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "These are C types."
+        )]
         let policy = thread_time_constraint_policy {
             period: base as u32, // Base interval
             computation: (base * 0.5) as u32,
@@ -302,7 +306,10 @@ impl Time {
     }
 
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    #[allow(clippy::unused_self)]
+    #[expect(
+        clippy::unused_self,
+        reason = "Not used on platforms other than macOS and Windows."
+    )]
     const fn start(&self) {}
 
     #[cfg(windows)]
@@ -313,7 +320,10 @@ impl Time {
     }
 
     #[cfg(not(target_os = "windows"))]
-    #[allow(clippy::unused_self)]
+    #[expect(
+        clippy::unused_self,
+        reason = "Not used on platforms other than Windows."
+    )]
     const fn stop(&self) {}
 
     fn update(&mut self) {
@@ -372,7 +382,8 @@ impl Drop for Time {
 
 // Only run these tests in CI on Linux, where the timer accuracies are OK enough to pass the tests,
 // but only when not running sanitizers.
-#[cfg(all(test, target_os = "linux", not(neqo_sanitize)))]
+#[cfg(all(target_os = "linux", not(neqo_sanitize)))]
+#[cfg(test)]
 mod test {
     use std::{
         thread::{sleep, spawn},
@@ -381,8 +392,9 @@ mod test {
 
     use super::Time;
 
-    const ONE: Duration = Duration::from_millis(1);
-    const ONE_AND_A_BIT: Duration = Duration::from_micros(1500);
+    const ONE_MS: Duration = Duration::from_millis(1);
+    const FIVE_MS: Duration = Duration::from_millis(5);
+    const ONE_MS_AND_A_BIT: Duration = Duration::from_micros(1500);
     /// A limit for when high resolution timers are disabled.
     const GENEROUS: Duration = Duration::from_millis(30);
 
@@ -394,9 +406,9 @@ mod test {
         for d in durations {
             sleep(d);
             let e = Instant::now();
-            let actual = e - s;
-            let lag = actual - d;
-            println!("sleep({d:?}) \u{2192} {actual:?} \u{394}{lag:?}");
+            let actual = e.saturating_duration_since(s);
+            let lag = actual.saturating_sub(d);
+            println!("sleep({d:>4?}) \u{2192} {actual:>11.6?} \u{394}{lag:>10?}");
             if lag > max_lag {
                 return Err(());
             }
@@ -405,13 +417,33 @@ mod test {
         Ok(())
     }
 
-    /// Validate the delays twice.  Sometimes the first run can stall.
+    /// Validate the delays multiple times.  Sometimes a run can stall.
     /// Reliability in CI is more important than reliable timers.
+    /// Any failure results in enqueing two additional checks,
+    /// up to a limit that is determined based on how small `max_lag` is.
+    /// If the count exceeds that limit, fail the test.
     fn check_delays(max_lag: Duration) {
-        if validate_delays(max_lag).is_err() {
+        let max_loops = if max_lag < FIVE_MS {
+            5
+        } else if max_lag < GENEROUS {
+            3
+        } else {
+            1
+        };
+
+        let mut count = 1;
+        while count <= max_loops {
+            if validate_delays(max_lag).is_ok() {
+                count -= 1;
+            } else {
+                count += 1;
+            }
+            if count == 0 {
+                return;
+            }
             sleep(Duration::from_millis(50));
-            validate_delays(max_lag).unwrap();
         }
+        panic!("timers slipped too often");
     }
 
     /// Note that you have to run this test alone or other tests will
@@ -423,8 +455,8 @@ mod test {
 
     #[test]
     fn one_ms() {
-        let _hrt = Time::get(ONE);
-        check_delays(ONE_AND_A_BIT);
+        let _hrt = Time::get(ONE_MS);
+        check_delays(ONE_MS_AND_A_BIT);
     }
 
     #[test]
@@ -451,18 +483,19 @@ mod test {
             one_ms();
         });
         let _hrt = Time::get(Duration::from_millis(4));
-        check_delays(Duration::from_millis(5));
+        check_delays(FIVE_MS);
         thr.join().unwrap();
     }
 
     #[test]
     fn update() {
         let mut hrt = Time::get(Duration::from_millis(4));
-        check_delays(Duration::from_millis(5));
-        hrt.update(ONE);
-        check_delays(ONE_AND_A_BIT);
+        check_delays(FIVE_MS);
+        hrt.update(ONE_MS);
+        check_delays(ONE_MS_AND_A_BIT);
     }
 
+    #[cfg(not(target_arch = "arm"))] // This test is flaky on linux/arm.
     #[test]
     fn update_multi() {
         let thr = spawn(move || {
@@ -476,5 +509,12 @@ mod test {
     fn max() {
         let _hrt = Time::get(Duration::from_secs(1));
         check_delays(GENEROUS);
+    }
+
+    #[test]
+    #[should_panic(expected = "timers slipped too often")]
+    fn slip() {
+        // This amount of timer resolution should be unachievable.
+        check_delays(Duration::from_nanos(1));
     }
 }

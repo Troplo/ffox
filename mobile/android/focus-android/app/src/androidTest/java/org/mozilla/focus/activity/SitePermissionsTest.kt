@@ -38,12 +38,12 @@ class SitePermissionsTest : TestSetup() {
     private lateinit var webServer: MockWebServer
     private val featureSettingsHelper = FeatureSettingsHelper()
 
-    /* Test page created and handled by the Mozilla mobile test-eng team */
+    // Test page created and handled by the Mozilla mobile test-eng team
     private val permissionsPage = "https://mozilla-mobile.github.io/testapp/permissions"
-    private val testPageSubstring = "https://mozilla-mobile.github.io:443"
+    private val permissionsPageHost = "mozilla-mobile.github.io"
     private val cameraManager = getTargetContext.getSystemService(Context.CAMERA_SERVICE) as CameraManager
 
-    @get: Rule
+    @get:Rule
     val mActivityTestRule = MainActivityFirstrunTestRule(showFirstRun = false)
 
     @get:Rule
@@ -51,7 +51,7 @@ class SitePermissionsTest : TestSetup() {
         Manifest.permission.ACCESS_COARSE_LOCATION,
     )
 
-    @get: Rule
+    @get:Rule
     val mockLocationUpdatesRule = MockLocationUpdatesRule()
 
     @Before
@@ -229,7 +229,7 @@ class SitePermissionsTest : TestSetup() {
         searchScreen {
         }.loadPage(permissionsPage) {
             clickGetLocationButton()
-            verifyLocationPermissionPrompt(testPageSubstring)
+            verifyLocationPermissionPrompt(permissionsPageHost)
             denySitePermissionRequest()
             verifyPageContent("User denied geolocation prompt")
         }
@@ -247,7 +247,7 @@ class SitePermissionsTest : TestSetup() {
         searchScreen {
         }.loadPage(permissionsPage) {
             clickGetLocationButton()
-            verifyLocationPermissionPrompt(testPageSubstring)
+            verifyLocationPermissionPrompt(permissionsPageHost)
             allowSitePermissionRequest()
             verifyPageContent("${mockLocationUpdatesRule.latitude}")
             verifyPageContent("${mockLocationUpdatesRule.longitude}")
@@ -262,7 +262,7 @@ class SitePermissionsTest : TestSetup() {
         }.loadPage(permissionsPage) {
             clickGetCameraButton()
             grantAppPermission()
-            verifyCameraPermissionPrompt(testPageSubstring)
+            verifyCameraPermissionPrompt(permissionsPageHost)
             allowSitePermissionRequest()
             verifyPageContent("Camera allowed")
         }
@@ -276,7 +276,7 @@ class SitePermissionsTest : TestSetup() {
         }.loadPage(permissionsPage) {
             clickGetCameraButton()
             grantAppPermission()
-            verifyCameraPermissionPrompt(testPageSubstring)
+            verifyCameraPermissionPrompt(permissionsPageHost)
             denySitePermissionRequest()
             verifyPageContent("Camera not allowed")
         }

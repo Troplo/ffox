@@ -10,6 +10,7 @@ use std::{
     cell::RefCell,
     cmp::min,
     collections::HashSet,
+    fmt::{self, Display, Formatter},
     ops::{Deref, DerefMut},
     path::PathBuf,
     rc::Rc,
@@ -70,7 +71,7 @@ impl InitialDetails {
             src_cid: ConnectionId::from(packet.scid()),
             dst_cid: ConnectionId::from(packet.dcid()),
             token: packet.token().to_vec(),
-            version: packet.version().unwrap(),
+            version: packet.version().expect("packet has version"),
         }
     }
 }
@@ -196,7 +197,7 @@ impl Server {
     fn handle_initial(
         &mut self,
         initial: InitialDetails,
-        dgram: Datagram<impl AsRef<[u8]>>,
+        dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
     ) -> Output {
         qdebug!("[{self}] Handle initial");
@@ -307,7 +308,7 @@ impl Server {
     fn accept_connection(
         &mut self,
         initial: InitialDetails,
-        dgram: Datagram<impl AsRef<[u8]>>,
+        dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
     ) -> Output {
@@ -349,12 +350,19 @@ impl Server {
         }
     }
 
-    fn process_input(&mut self, dgram: Datagram<impl AsRef<[u8]>>, now: Instant) -> Output {
+    fn process_input(
+        &mut self,
+        mut dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
+        now: Instant,
+    ) -> Output {
         qtrace!("Process datagram: {}", hex(&dgram[..]));
 
         // This is only looking at the first packet header in the datagram.
         // All packets in the datagram are routed to the same connection.
-        let res = PublicPacket::decode(&dgram[..], self.cid_generator.borrow().as_decoder());
+        let len = dgram.len();
+        let destination = dgram.destination();
+        let source = dgram.source();
+        let res = PublicPacket::decode(&mut dgram[..], self.cid_generator.borrow().as_decoder());
         let Ok((packet, _remainder)) = res else {
             qtrace!("[{self}] Discarding {dgram:?}");
             return Output::None;
@@ -381,9 +389,9 @@ impl Server {
                     .conn_params
                     .get_versions()
                     .all()
-                    .contains(&packet.version().unwrap()))
+                    .contains(&packet.version().expect("packet has version")))
         {
-            if dgram.len() < MIN_INITIAL_PACKET_SIZE {
+            if len < MIN_INITIAL_PACKET_SIZE {
                 qdebug!("[{self}] Unsupported version: too short");
                 return Output::None;
             }
@@ -399,8 +407,8 @@ impl Server {
                 "[{self}] type={:?} path:{} {}->{} {:?} len {}",
                 PacketType::VersionNegotiation,
                 packet.dcid(),
-                dgram.destination(),
-                dgram.source(),
+                destination,
+                source,
                 IpTos::default(),
                 vn.len(),
             );
@@ -412,17 +420,12 @@ impl Server {
                 now,
             );
 
-            return Output::Datagram(Datagram::new(
-                dgram.destination(),
-                dgram.source(),
-                IpTos::default(),
-                vn,
-            ));
+            return Output::Datagram(Datagram::new(destination, source, IpTos::default(), vn));
         }
 
         match packet.packet_type() {
             PacketType::Initial => {
-                if dgram.len() < MIN_INITIAL_PACKET_SIZE {
+                if len < MIN_INITIAL_PACKET_SIZE {
                     qdebug!("[{self}] Drop initial: too short");
                     return Output::None;
                 }
@@ -432,8 +435,10 @@ impl Server {
                 self.handle_initial(initial, dgram, now)
             }
             PacketType::ZeroRtt => {
-                let dcid = ConnectionId::from(packet.dcid());
-                qdebug!("[{self}] Dropping 0-RTT for unknown connection {dcid}");
+                qdebug!(
+                    "[{self}] Dropping 0-RTT for unknown connection {}",
+                    ConnectionId::from(packet.dcid())
+                );
                 Output::None
             }
             PacketType::OtherVersion => unreachable!(),
@@ -470,7 +475,11 @@ impl Server {
     }
 
     #[must_use]
-    pub fn process(&mut self, dgram: Option<Datagram<impl AsRef<[u8]>>>, now: Instant) -> Output {
+    pub fn process(
+        &mut self,
+        dgram: Option<Datagram<impl AsRef<[u8]> + AsMut<[u8]>>>,
+        now: Instant,
+    ) -> Output {
         let out = dgram
             .map_or(Output::None, |d| self.process_input(d, now))
             .or_else(|| self.process_next_output(now));
@@ -484,8 +493,10 @@ impl Server {
 
     /// This lists the connections that have received new events
     /// as a result of calling `process()`.
-    // `ActiveConnectionRef` `Hash` implementation doesn’t access any of the interior mutable types.
-    #[allow(clippy::mutable_key_type)]
+    #[expect(
+        clippy::mutable_key_type,
+        reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."
+    )]
     #[must_use]
     pub fn active_connections(&self) -> HashSet<ConnectionRef> {
         self.connections
@@ -540,8 +551,8 @@ impl PartialEq for ConnectionRef {
 
 impl Eq for ConnectionRef {}
 
-impl ::std::fmt::Display for Server {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+impl Display for Server {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "Server")
     }
 }

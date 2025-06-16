@@ -23,7 +23,6 @@ import mozilla.components.support.utils.ext.isContentUrl
 import mozilla.components.ui.tabcounter.TabCounterMenu
 import mozilla.telemetry.glean.private.NoExtras
 import org.mozilla.fenix.GleanMetrics.Events
-import org.mozilla.fenix.GleanMetrics.NavigationBar
 import org.mozilla.fenix.GleanMetrics.ReaderMode
 import org.mozilla.fenix.GleanMetrics.Translations
 import org.mozilla.fenix.HomeActivity
@@ -38,13 +37,13 @@ import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.appstate.AppAction.SnackbarAction
 import org.mozilla.fenix.components.menu.MenuAccessPoint
 import org.mozilla.fenix.components.toolbar.interactor.BrowserToolbarInteractor
-import org.mozilla.fenix.components.toolbar.navbar.shouldAddNavigationBar
+import org.mozilla.fenix.components.usecases.FenixBrowserUseCases
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.nav
 import org.mozilla.fenix.ext.navigateSafe
 import org.mozilla.fenix.ext.settings
-import org.mozilla.fenix.home.HomeFragment
 import org.mozilla.fenix.home.HomeScreenViewModel
+import org.mozilla.fenix.home.HomeScreenViewModel.Companion.ALL_PRIVATE_TABS
 import org.mozilla.fenix.utils.Settings
 
 /**
@@ -104,6 +103,7 @@ class DefaultBrowserToolbarController(
     private val store: BrowserStore,
     private val appStore: AppStore,
     private val tabsUseCases: TabsUseCases,
+    private val fenixBrowserUseCases: FenixBrowserUseCases,
     private val activity: HomeActivity,
     private val settings: Settings,
     private val navController: NavController,
@@ -234,7 +234,7 @@ class DefaultBrowserToolbarController(
 
     override fun handleEraseButtonClick() {
         Events.browserToolbarEraseTapped.record(NoExtras())
-        homeViewModel.sessionToDelete = HomeFragment.ALL_PRIVATE_TABS
+        homeViewModel.sessionToDelete = ALL_PRIVATE_TABS
         val directions = BrowserFragmentDirections.actionGlobalHome()
         navController.navigate(directions)
     }
@@ -281,18 +281,12 @@ class DefaultBrowserToolbarController(
 
     override fun handleNewTabButtonClick() {
         if (settings.enableHomepageAsNewTab) {
-            tabsUseCases.addTab.invoke(
-                url = "about:home",
-                startLoading = false,
+            fenixBrowserUseCases.addNewHomepageTab(
                 private = currentSession?.content?.private ?: false,
             )
         }
 
-        if (activity.shouldAddNavigationBar()) {
-            NavigationBar.browserNewTabTapped.record(NoExtras())
-        } else {
-            Events.browserToolbarAction.record(Events.BrowserToolbarActionExtra("new_tab"))
-        }
+        Events.browserToolbarAction.record(Events.BrowserToolbarActionExtra("new_tab"))
 
         browserAnimator.captureEngineViewAndDrawStatically {
             navController.navigate(
@@ -302,11 +296,7 @@ class DefaultBrowserToolbarController(
     }
 
     override fun handleNewTabButtonLongClick() {
-        if (activity.shouldAddNavigationBar()) {
-            NavigationBar.browserNewTabLongTapped.record(NoExtras())
-        } else {
-            Events.browserToolbarAction.record(Events.BrowserToolbarActionExtra("new_tab_long_press"))
-        }
+        Events.browserToolbarAction.record(Events.BrowserToolbarActionExtra("new_tab_long_press"))
     }
 
     override fun handleMenuButtonClicked(

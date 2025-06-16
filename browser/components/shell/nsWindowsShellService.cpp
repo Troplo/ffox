@@ -378,6 +378,27 @@ nsWindowsShellService::CheckBrowserUserChoiceHashes(bool* aResult) {
 }
 
 NS_IMETHODIMP
+nsWindowsShellService::CheckCurrentProcessAUMIDForTesting(
+    nsAString& aRetAumid) {
+  PWSTR id;
+  HRESULT hr = GetCurrentProcessExplicitAppUserModelID(&id);
+
+  if (FAILED(hr)) {
+    // Process AUMID may not be set on MSIX builds,
+    // if so we should return a dummy value
+    if (widget::WinUtils::HasPackageIdentity()) {
+      aRetAumid.Assign(u"MSIXAumidTestValue"_ns);
+      return NS_OK;
+    }
+    return NS_ERROR_FAILURE;
+  }
+  aRetAumid.Assign(id);
+  CoTaskMemFree(id);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsWindowsShellService::CanSetDefaultBrowserUserChoice(bool* aResult) {
   *aResult = false;
 // If the WDBA is not available, this could never succeed.
@@ -435,7 +456,7 @@ nsWindowsShellService::SetDefaultBrowser(bool aForAllUsers) {
 }
 
 /*
- * Asynchronious function to Write an ico file to the disk / in a nsIFile.
+ * Asynchronous function to Write an ico file to the disk / in a nsIFile.
  * Limitation: Only square images are supported as of now.
  */
 NS_IMETHODIMP
@@ -595,39 +616,55 @@ static nsresult WriteBitmap(nsIFile* aFile, imgIContainer* aImage) {
   rv = NS_NewLocalFileOutputStream(getter_AddRefs(stream), aFile);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  gfx::DataSourceSurface::MappedSurface map;
-  if (!dataSurface->Map(gfx::DataSourceSurface::MapType::READ, &map)) {
+  // (redundant) guard clause to assert stream is initialized
+  if (NS_WARN_IF(!stream)) {
+    MOZ_ASSERT(stream, "rv should have failed when stream is not initialized.");
     return NS_ERROR_FAILURE;
   }
 
-  // write the bitmap headers and rgb pixel data to the file
-  rv = NS_ERROR_FAILURE;
-  if (stream) {
+  gfx::DataSourceSurface::MappedSurface map;
+  if (!dataSurface->Map(gfx::DataSourceSurface::MapType::READ, &map)) {
+    // removal of file created handled later
+    rv = NS_ERROR_FAILURE;
+  }
+
+  // enter only if datasurface mapping succeeded
+  if (NS_SUCCEEDED(rv)) {
+    // write the bitmap headers and rgb pixel data to the file
     uint32_t written;
-    stream->Write((const char*)&bf, sizeof(BITMAPFILEHEADER), &written);
-    if (written == sizeof(BITMAPFILEHEADER)) {
-      stream->Write((const char*)&bmi, sizeof(BITMAPINFOHEADER), &written);
-      if (written == sizeof(BITMAPINFOHEADER)) {
+    rv = stream->Write((const char*)&bf, sizeof(BITMAPFILEHEADER), &written);
+    if (NS_SUCCEEDED(rv)) {
+      rv = stream->Write((const char*)&bmi, sizeof(BITMAPINFOHEADER), &written);
+      if (NS_SUCCEEDED(rv)) {
         // write out the image data backwards because the desktop won't
         // show bitmaps with negative heights for top-to-bottom
         uint32_t i = map.mStride * height;
         do {
           i -= map.mStride;
-          stream->Write(((const char*)map.mData) + i, bytesPerRow, &written);
-          if (written == bytesPerRow) {
-            rv = NS_OK;
-          } else {
-            rv = NS_ERROR_FAILURE;
+          rv = stream->Write(((const char*)map.mData) + i, bytesPerRow,
+                             &written);
+          if (NS_FAILED(rv)) {
             break;
           }
         } while (i != 0);
       }
     }
 
-    stream->Close();
+    dataSurface->Unmap();
   }
 
-  dataSurface->Unmap();
+  stream->Close();
+
+  // Obtaining the file output stream results in a newly created file or
+  // truncates the file if it already exists. As such, it is necessary to
+  // remove the file if the write fails for some reason.
+  if (NS_FAILED(rv)) {
+    if (NS_WARN_IF(NS_FAILED(aFile->Remove(PR_FALSE)))) {
+      MOZ_LOG(sLog, LogLevel::Warning,
+              ("Failed to remove empty bitmap file : %s",
+               aFile->HumanReadablePath().get()));
+    }
+  }
 
   return rv;
 }
@@ -656,21 +693,18 @@ nsWindowsShellService::SetDesktopBackground(dom::Element* aElement,
   rv = request->GetImage(getter_AddRefs(container));
   if (!container) return NS_ERROR_FAILURE;
 
-  // get the file name from localized strings
-  nsCOMPtr<nsIStringBundleService> bundleService(
-      do_GetService(NS_STRINGBUNDLE_CONTRACTID, &rv));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsCOMPtr<nsIStringBundle> shellBundle;
-  rv = bundleService->CreateBundle(SHELLSERVICE_PROPERTIES,
-                                   getter_AddRefs(shellBundle));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  // e.g. "Desktop Background.bmp"
-  nsAutoString fileLeafName;
-  rv = shellBundle->GetStringFromName("desktopBackgroundLeafNameWin",
-                                      fileLeafName);
-  NS_ENSURE_SUCCESS(rv, rv);
+  // get the file name from localized strings, e.g. "Desktop Background", then
+  // append the extension (".bmp").
+  nsTArray<nsCString> resIds = {
+      "browser/setDesktopBackground.ftl"_ns,
+  };
+  RefPtr<Localization> l10n = Localization::Create(resIds, true);
+  nsAutoCString fileLeafNameUtf8;
+  IgnoredErrorResult locRv;
+  l10n->FormatValueSync("set-desktop-background-filename"_ns, {},
+                        fileLeafNameUtf8, locRv);
+  nsAutoString fileLeafName = NS_ConvertUTF8toUTF16(fileLeafNameUtf8);
+  fileLeafName.AppendLiteral(".bmp");
 
   // get the profile root directory
   nsCOMPtr<nsIFile> file;
@@ -687,7 +721,7 @@ nsWindowsShellService::SetDesktopBackground(dom::Element* aElement,
   NS_ENSURE_SUCCESS(rv, rv);
 
   // write the bitmap to a file in the profile directory.
-  // We have to write old bitmap format for Windows 7 wallpapar support.
+  // We have to write old bitmap format for Windows 7 wallpaper support.
   rv = WriteBitmap(file, container);
 
   // if the file was written successfully, set it as the system wallpaper
@@ -1629,9 +1663,10 @@ static nsresult PinShortcutToTaskbarImpl(bool aCheckOnly,
   // during install or runtime - causes a race between it propagating to the
   // virtual `shell:appsfolder` and attempts to pin via `ITaskbarManager`,
   // resulting in pin failures when the latter occurs before the former. We can
-  // skip this when we're only checking whether we're pinned.
-  if (!aCheckOnly && !PollAppsFolderForShortcut(
-                         aAppUserModelId, TimeDuration::FromSeconds(15))) {
+  // skip this when we're in a MSIX build or only checking whether we're pinned.
+  if (!widget::WinUtils::HasPackageIdentity() && !aCheckOnly &&
+      !PollAppsFolderForShortcut(aAppUserModelId,
+                                 TimeDuration::FromSeconds(15))) {
     return NS_ERROR_FILE_NOT_FOUND;
   }
 

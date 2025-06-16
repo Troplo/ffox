@@ -4,12 +4,14 @@
 package org.mozilla.fenix.ui.robots
 
 import android.util.Log
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasAnyChild
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -17,7 +19,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
-import androidx.test.espresso.action.ViewActions.swipeUp
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.menu.MenuDialogTestTag.EXTENSIONS
 import org.mozilla.fenix.helpers.Constants.TAG
@@ -382,6 +383,7 @@ class ThreeDotMenuMainRobotCompose(private val composeTestRule: ComposeTestRule)
         }
 
         fun openBookmarks(
+            composeTestRule: ComposeTestRule,
             interact: BookmarksRobot.() -> Unit,
         ): BookmarksRobot.Transition {
             Log.i(
@@ -391,8 +393,8 @@ class ThreeDotMenuMainRobotCompose(private val composeTestRule: ComposeTestRule)
             composeTestRule.bookmarksButton().performClick()
             Log.i(TAG, "openSettings: Clicked the Bookmarks button from the new main menu design.")
 
-            BookmarksRobot().interact()
-            return BookmarksRobot.Transition()
+            BookmarksRobot(composeTestRule).interact()
+            return BookmarksRobot.Transition(composeTestRule)
         }
 
         fun openHistory(
@@ -437,8 +439,10 @@ class ThreeDotMenuMainRobotCompose(private val composeTestRule: ComposeTestRule)
             return SettingsSubMenuLoginsAndPasswordsSavedLoginsRobot.Transition()
         }
 
+        @OptIn(ExperimentalTestApi::class)
         fun openExtensionsFromMainMenu(interact: SettingsSubMenuAddonsManagerRobot.() -> Unit): SettingsSubMenuAddonsManagerRobot.Transition {
             Log.i(TAG, "openExtensionsFromMainMenu: Trying to click the \"Extensions\" button")
+            composeTestRule.waitUntilAtLeastOneExists(hasTestTag(EXTENSIONS))
             composeTestRule.extensionsButton().performClick()
             Log.i(TAG, "openExtensionsFromMainMenu: Clicked the \"Extensions\" button")
             composeTestRule.waitForIdle()
@@ -474,13 +478,13 @@ class ThreeDotMenuMainRobotCompose(private val composeTestRule: ComposeTestRule)
             return BrowserRobot.Transition()
         }
 
-        fun clickEditBookmarkButton(interact: BookmarksRobot.() -> Unit): BookmarksRobot.Transition {
+        fun clickEditBookmarkButton(composeTestRule: ComposeTestRule, interact: BookmarksRobot.() -> Unit): BookmarksRobot.Transition {
             Log.i(TAG, "clickEditBookmarkButton: Trying to click the \"Edit bookmark\" button from the new main menu design.")
             composeTestRule.editBookmarkButton().performClick()
             Log.i(TAG, "clickEditBookmarkButton: Clicked the \"Edit bookmark\" button from the new main menu design.")
 
-            BookmarksRobot().interact()
-            return BookmarksRobot.Transition()
+            BookmarksRobot(composeTestRule).interact()
+            return BookmarksRobot.Transition(composeTestRule)
         }
 
         fun clickAddToHomeScreenButton(interact: AddToHomeScreenRobot.() -> Unit): AddToHomeScreenRobot.Transition {
@@ -630,6 +634,15 @@ class ThreeDotMenuMainRobotCompose(private val composeTestRule: ComposeTestRule)
             Log.i(TAG, "openReportSiteIssue: Trying to click the \"Report Site Issue\" button")
             composeTestRule.reportBrokenSiteButton().performClick()
             Log.i(TAG, "openReportSiteIssue: Clicked the \"Report Site Issue\" button")
+
+            BrowserRobot().interact()
+            return BrowserRobot.Transition()
+        }
+
+        fun openReportBrokenSite(interact: BrowserRobot.() -> Unit): BrowserRobot.Transition {
+            Log.i(TAG, "openReportBrokenSite: Trying to click the \"Report broken site\" button")
+            composeTestRule.reportBrokenSiteButton().performClick()
+            Log.i(TAG, "openReportBrokenSite: Clicked the \"Report broken site\" button")
 
             BrowserRobot().interact()
             return BrowserRobot.Transition()

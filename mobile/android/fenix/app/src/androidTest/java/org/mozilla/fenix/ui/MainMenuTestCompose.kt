@@ -10,6 +10,7 @@ import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.core.net.toUri
 import androidx.test.rule.ActivityTestRule
 import mozilla.components.concept.engine.utils.EngineReleaseChannel
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.IntentReceiverActivity
@@ -36,13 +37,16 @@ import org.mozilla.fenix.helpers.TestAssetHelper
 import org.mozilla.fenix.helpers.TestAssetHelper.getGenericAsset
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTime
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeLong
+import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeVeryShort
 import org.mozilla.fenix.helpers.TestHelper
+import org.mozilla.fenix.helpers.TestHelper.closeApp
 import org.mozilla.fenix.helpers.TestHelper.exitMenu
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.restartApp
 import org.mozilla.fenix.helpers.TestHelper.verifySnackBarText
 import org.mozilla.fenix.helpers.TestHelper.waitUntilSnackbarGone
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.browserScreen
 import org.mozilla.fenix.ui.robots.clickPageObject
 import org.mozilla.fenix.ui.robots.customTabScreen
@@ -50,27 +54,28 @@ import org.mozilla.fenix.ui.robots.homeScreen
 import org.mozilla.fenix.ui.robots.mainMenuScreen
 import org.mozilla.fenix.ui.robots.navigationToolbar
 
+@Ignore("Bugzilla issue: https://bugzilla.mozilla.org/show_bug.cgi?id=1963618")
 class MainMenuTestCompose : TestSetup() {
     @get:Rule
     val composeTestRule =
         AndroidComposeTestRule(
             HomeActivityIntentTestRule(
                 skipOnboarding = true,
-                isNavigationToolbarEnabled = true,
-                isNavigationBarCFREnabled = false,
-                isSetAsDefaultBrowserPromptEnabled = false,
                 isMenuRedesignEnabled = true,
                 isMenuRedesignCFREnabled = false,
                 isPageLoadTranslationsPromptEnabled = false,
             ),
         ) { it.activity }
 
-    @get: Rule
+    @get:Rule
     val intentReceiverActivityTestRule = ActivityTestRule(
         IntentReceiverActivity::class.java,
         true,
         false,
     )
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2860735
     @SmokeTest
@@ -188,8 +193,8 @@ class MainMenuTestCompose : TestSetup() {
         }.enterURLAndEnterToBrowser(testPage.url) {
         }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
             expandMainMenu()
-        }.openBookmarks {
-            verifyBookmarksMenuView()
+        }.openBookmarks(composeTestRule) {
+            verifyEmptyBookmarksMenuView()
         }.goBackToBrowserScreen {
             verifyPageContent(testPage.content)
         }
@@ -224,9 +229,8 @@ class MainMenuTestCompose : TestSetup() {
             expandMainMenu()
         }.openDownloads {
             verifyEmptyDownloadsList(composeTestRule)
-            TestHelper.exitMenu()
-        }
-        browserScreen {
+            exitMenu()
+        }.exitDownloadsManagerToBrowser(composeTestRule) {
             verifyPageContent(testPage.content)
         }
     }
@@ -357,7 +361,7 @@ class MainMenuTestCompose : TestSetup() {
         }.enterURLAndEnterToBrowser(genericURL.url) {
         }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
             expandMainMenu()
-        }.openExtensionsFromMainMenu() {
+        }.openExtensionsFromMainMenu {
             clickManageExtensionsButtonFromRedesignedMainMenu(composeTestRule)
         }.openDetailedMenuForAddon(addonName) {
         }.removeAddon(composeTestRule.activityRule) {
@@ -432,10 +436,9 @@ class MainMenuTestCompose : TestSetup() {
         }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
             expandMainMenu()
             clickSaveButton()
-        }.clickEditBookmarkButton {
+        }.clickEditBookmarkButton(composeTestRule) {
             verifyEditBookmarksView()
-            clickDeleteInEditModeButton()
-            confirmDeletion()
+            clickDeleteBookmarkButtonInEditMode()
         }
         browserScreen {
         }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
@@ -457,18 +460,18 @@ class MainMenuTestCompose : TestSetup() {
         }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
             expandMainMenu()
             clickSaveButton()
-        }.clickAddToShortcutsButton() {
+        }.clickAddToShortcutsButton {
             verifySnackBarText(getStringResource(R.string.snackbar_added_to_shortcuts))
         }.goToHomescreenWithRedesignedToolbar {
-            verifyExistingTopSitesTabs(testPage.title)
-        }.openTopSiteTabWithTitle(testPage.title) {
+            verifyExistingTopSitesTabs(composeTestRule, testPage.title)
+        }.openTopSiteTabWithTitle(composeTestRule, testPage.title) {
         }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
             expandMainMenu()
             clickSaveButton()
         }.clickRemoveFromShortcutsButton {
             verifySnackBarText(getStringResource(R.string.snackbar_top_site_removed))
         }.goToHomescreenWithRedesignedToolbar {
-            verifyNotExistingTopSitesList(testPage.title)
+            verifyNotExistingTopSiteItem(composeTestRule, testPage.title)
         }
     }
 
@@ -527,9 +530,9 @@ class MainMenuTestCompose : TestSetup() {
         }.selectExistingCollection(collectionTitle) {
             verifySnackBarText("Tab saved!")
         }.goToHomescreenWithRedesignedToolbar {
-        }.expandCollection(collectionTitle) {
-            verifyTabSavedInCollection(firstTestPage.title)
-            verifyTabSavedInCollection(secondTestPage.title)
+        }.expandCollection(composeTestRule, collectionTitle) {
+            verifyTabSavedInCollection(composeTestRule, firstTestPage.title)
+            verifyTabSavedInCollection(composeTestRule, secondTestPage.title)
         }
     }
 
@@ -766,7 +769,7 @@ class MainMenuTestCompose : TestSetup() {
         }.enterURLAndEnterToBrowser(genericURL.url) {
         }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
             expandMainMenu()
-        }.openExtensionsFromMainMenu() {
+        }.openExtensionsFromMainMenu {
             clickManageExtensionsButtonFromRedesignedMainMenu(composeTestRule)
         }.openDetailedMenuForAddon(addonName) {
             disableExtension()
@@ -1027,7 +1030,7 @@ class MainMenuTestCompose : TestSetup() {
         }.clickOutsideTheMainMenu {
         }
         customTabScreen {
-            verifyRedesignedCustomTabsMainMenuItemsExist(customMenuItem, false)
+            verifyRedesignedCustomTabsMainMenuItemsExist(customMenuItem, false, waitingTimeVeryShort)
         }
     }
 
@@ -1043,7 +1046,7 @@ class MainMenuTestCompose : TestSetup() {
         }.openExtensionsFromMainMenu {
             verifyNoInstalledExtensionsPromotionBanner(composeTestRule)
         }.clickExtensionsPromotionBannerLearnMoreLink(composeTestRule) {
-            verifyUrl("support.mozilla.org/en-US/kb/find-and-install-add-ons-firefox-android?as=u&utm_source=inproduct")
+            verifyExtensionsPromotionBannerLearnMoreLinkURL()
         }
     }
 
@@ -1153,7 +1156,7 @@ class MainMenuTestCompose : TestSetup() {
             }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
                 openToolsMenu()
             }.clickReportBrokenSiteButton {
-                verifyWebCompatReporterViewItems(websiteURL = defaultWebPage.url.toString())
+                verifyWebCompatReporterViewItems(composeTestRule, websiteURL = defaultWebPage.url.toString())
             }.closeWebCompatReporter {
             }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
             }.openSettings {
@@ -1168,6 +1171,208 @@ class MainMenuTestCompose : TestSetup() {
             }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
                 openToolsMenu()
             }.clickReportBrokenSiteButton {
+                verifyUrl("webcompat.com/issues/new")
+            }
+        }
+    }
+
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2939173
+    @Test
+    fun verifyTheWhatIsBrokenErrorMessageTest() {
+        runWithCondition(
+            // This test will not run on RC builds because the "Report site issue button" is not available.
+            composeTestRule.activity.components.core.engine.version.releaseChannel !== EngineReleaseChannel.RELEASE,
+        ) {
+            val defaultWebPage = getGenericAsset(mockWebServer, 1)
+
+            navigationToolbar {
+            }.enterURLAndEnterToBrowser(defaultWebPage.url) {
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
+                verifyWebCompatReporterViewItems(composeTestRule, defaultWebPage.url.toString())
+                verifyWhatIsBrokenField(composeTestRule)
+                verifySendButtonIsEnabled(composeTestRule, isEnabled = false)
+                clickChooseReasonField(composeTestRule)
+                clickSiteSlowOrNotWorkingReason(composeTestRule)
+                verifyChooseReasonErrorMessageIsNotDisplayed(composeTestRule)
+                verifySendButtonIsEnabled(composeTestRule, isEnabled = true)
+            }
+        }
+    }
+
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2939175
+    @Test
+    fun verifyThatTheBrokenSiteFormCanBeCanceledTest() {
+        runWithCondition(
+            // This test will not run on RC builds because the "Report site issue button" is not available.
+            composeTestRule.activity.components.core.engine.version.releaseChannel !== EngineReleaseChannel.RELEASE,
+        ) {
+            val defaultWebPage = getGenericAsset(mockWebServer, 1)
+
+            navigationToolbar {
+            }.enterURLAndEnterToBrowser(defaultWebPage.url) {
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
+                verifyWebCompatReporterViewItems(composeTestRule, defaultWebPage.url.toString())
+                clickChooseReasonField(composeTestRule)
+                clickSiteSlowOrNotWorkingReason(composeTestRule)
+                clickBrokenSiteFormCancelButton(composeTestRule)
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
+                verifyWhatIsBrokenField(composeTestRule)
+            }
+        }
+    }
+
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2939176
+    @Test
+    fun verifyTheBrokenSiteFormSubmissionTest() {
+        runWithCondition(
+            // This test will not run on RC builds because the "Report site issue button" is not available.
+            composeTestRule.activity.components.core.engine.version.releaseChannel !== EngineReleaseChannel.RELEASE,
+        ) {
+            val defaultWebPage = getGenericAsset(mockWebServer, 1)
+
+            navigationToolbar {
+            }.enterURLAndEnterToBrowser(defaultWebPage.url) {
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
+                verifyWebCompatReporterViewItems(composeTestRule, defaultWebPage.url.toString())
+                clickChooseReasonField(composeTestRule)
+                clickSiteSlowOrNotWorkingReason(composeTestRule)
+                describeBrokenSiteProblem(composeTestRule, problemDescription = "Prolonged page loading time")
+                clickBrokenSiteFormSendButton(composeTestRule)
+            }
+            browserScreen {
+                verifySnackBarText("Your report was sent")
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
+                verifyWhatIsBrokenField(composeTestRule)
+                verifyBrokenSiteProblem(composeTestRule, problemDescription = "Prolonged page loading time", isDisplayed = false)
+            }
+        }
+    }
+
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2939179
+    @Test
+    fun verifyThatTheBrokenSiteFormInfoPersistsTest() {
+        runWithCondition(
+            // This test will not run on RC builds because the "Report site issue button" is not available.
+            composeTestRule.activity.components.core.engine.version.releaseChannel !== EngineReleaseChannel.RELEASE,
+        ) {
+            val defaultWebPage = getGenericAsset(mockWebServer, 1)
+
+            navigationToolbar {
+            }.enterURLAndEnterToBrowser(defaultWebPage.url) {
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
+                verifyWebCompatReporterViewItems(composeTestRule, defaultWebPage.url.toString())
+                clickChooseReasonField(composeTestRule)
+                clickSiteSlowOrNotWorkingReason(composeTestRule)
+                describeBrokenSiteProblem(composeTestRule, problemDescription = "Prolonged page loading time")
+            }.closeWebCompatReporter {
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
+                verifyBrokenSiteProblem(composeTestRule, problemDescription = "Prolonged page loading time", isDisplayed = true)
+            }
+        }
+    }
+
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2939180
+    @Test
+    fun verifyTheBrokenSiteFormIsEmptyWithoutSubmittingThePreviousOneTest() {
+        runWithCondition(
+            // This test will not run on RC builds because the "Report site issue button" is not available.
+            composeTestRule.activity.components.core.engine.version.releaseChannel !== EngineReleaseChannel.RELEASE,
+        ) {
+            val firstWebPage = getGenericAsset(mockWebServer, 1)
+            val secondWebPage = getGenericAsset(mockWebServer, 2)
+
+            navigationToolbar {
+            }.enterURLAndEnterToBrowser(firstWebPage.url) {
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
+                verifyWebCompatReporterViewItems(composeTestRule, firstWebPage.url.toString())
+                clickChooseReasonField(composeTestRule)
+                clickSiteSlowOrNotWorkingReason(composeTestRule)
+                describeBrokenSiteProblem(composeTestRule, problemDescription = "Prolonged page loading time")
+            }.closeWebCompatReporter {
+            }.openTabDrawer(composeTestRule) {
+            }.openNewTab {
+            }.submitQuery(secondWebPage.url.toString()) {
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
+                verifyWhatIsBrokenField(composeTestRule)
+                verifyBrokenSiteProblem(composeTestRule, problemDescription = "Prolonged page loading time", isDisplayed = false)
+            }
+        }
+    }
+
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2939181
+    @Test
+    fun verifyThatTheBrokenSiteFormInfoIsErasedWhenKillingTheAppTest() {
+        runWithCondition(
+            // This test will not run on RC builds because the "Report site issue button" is not available.
+            composeTestRule.activity.components.core.engine.version.releaseChannel !== EngineReleaseChannel.RELEASE,
+        ) {
+            val defaultWebPage = getGenericAsset(mockWebServer, 1)
+
+            navigationToolbar {
+            }.enterURLAndEnterToBrowser(defaultWebPage.url) {
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
+                verifyWebCompatReporterViewItems(composeTestRule, defaultWebPage.url.toString())
+                clickChooseReasonField(composeTestRule)
+                clickSiteSlowOrNotWorkingReason(composeTestRule)
+                describeBrokenSiteProblem(composeTestRule, problemDescription = "Prolonged page loading time")
+            }
+            closeApp(composeTestRule.activityRule)
+            restartApp(composeTestRule.activityRule)
+
+            browserScreen {
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
+                verifyWhatIsBrokenField(composeTestRule)
+                verifyBrokenSiteProblem(composeTestRule, problemDescription = "Prolonged page loading time", isDisplayed = false)
+            }
+        }
+    }
+
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2939182
+    @Test
+    fun verifyReportBrokenSiteFormNotDisplayedWhenTelemetryIsDisabledTest() {
+        runWithCondition(
+            // This test will not run on RC builds because the "Report site issue button" is not available.
+            composeTestRule.activity.components.core.engine.version.releaseChannel !== EngineReleaseChannel.RELEASE,
+        ) {
+            val defaultWebPage = getGenericAsset(mockWebServer, 1)
+
+            homeScreen {
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+            }.openSettings {
+            }.openSettingsSubMenuDataCollection {
+                clickUsageAndTechnicalDataToggle()
+                verifyUsageAndTechnicalDataToggle(enabled = false)
+            }
+
+            exitMenu()
+
+            navigationToolbar {
+            }.enterURLAndEnterToBrowser(defaultWebPage.url) {
+            }.openThreeDotMenuFromRedesignedToolbar(composeTestRule) {
+                openToolsMenu()
+            }.openReportBrokenSite {
                 verifyUrl("webcompat.com/issues/new")
             }
         }

@@ -2838,11 +2838,11 @@ class IDLUnresolvedType(IDLType):
         assert not obj.isType()
         if obj.isTypedef():
             assert self.name.name == obj.identifier.name
-            typedefType = IDLTypedefType(self.location, obj.innerType, obj.identifier)
+            typedefType = IDLTypedefType(
+                self.location, obj.innerType, obj.identifier
+            ).withExtendedAttributes(self.extraTypeAttributes)
             assert not typedefType.isComplete()
-            return typedefType.complete(scope).withExtendedAttributes(
-                self.extraTypeAttributes
-            )
+            return typedefType.complete(scope)
         elif obj.isCallback() and not obj.isInterface():
             assert self.name.name == obj.identifier.name
             return IDLCallbackType(self.location, obj)
@@ -3421,6 +3421,12 @@ class IDLUnionType(IDLType):
     def _getDependentObjects(self):
         return set(self.memberTypes)
 
+    def withExtendedAttributes(self, attrs):
+        memberTypes = list(self.memberTypes)
+        for idx, memberType in enumerate(self.memberTypes):
+            memberTypes[idx] = memberType.withExtendedAttributes(attrs)
+        return IDLUnionType(self.location, memberTypes)
+
 
 class IDLTypedefType(IDLType):
     __slots__ = "inner", "builtin"
@@ -3534,7 +3540,9 @@ class IDLTypedefType(IDLType):
 class IDLTypedef(IDLObjectWithIdentifier):
     __slots__ = ("innerType",)
 
-    def __init__(self, location, parentScope, innerType, identifier):
+    innerType: IDLType
+
+    def __init__(self, location, parentScope, innerType: IDLType, identifier):
         # Set self.innerType first, because IDLObjectWithIdentifier.__init__
         # will call our __str__, which wants to use it.
         self.innerType = innerType
@@ -9307,12 +9315,6 @@ class Parser(Tokenizer):
         self._installBuiltins(self._globalScope)
         self._productions = []
 
-        self._filename = "<builtin>"
-        self.lexer.input(Parser._builtins)
-        self._filename = None
-
-        self.parser.parse(lexer=self.lexer, tracking=True)
-
     def _installBuiltins(self, scope):
         assert isinstance(scope, IDLScope)
 
@@ -9473,11 +9475,6 @@ class Parser(Tokenizer):
 
     def reset(self):
         return Parser(lexer=self.lexer)
-
-    # Builtin IDL defined by WebIDL
-    _builtins = """
-        typedef (ArrayBufferView or ArrayBuffer) BufferSource;
-    """
 
 
 def main():

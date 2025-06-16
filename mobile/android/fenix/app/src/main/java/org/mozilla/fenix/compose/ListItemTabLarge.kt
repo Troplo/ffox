@@ -24,10 +24,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import mozilla.components.compose.base.annotation.LightDarkPreview
-import org.mozilla.fenix.compose.ext.thenConditional
+import mozilla.components.compose.base.modifier.thenConditional
 import org.mozilla.fenix.theme.FirefoxTheme
 
 const val ITEM_WIDTH = 328
@@ -189,7 +189,7 @@ fun ListItemTabSurface(
 }
 
 @Composable
-@LightDarkPreview
+@PreviewLightDark
 private fun ListItemTabLargePreview() {
     FirefoxTheme {
         ListItemTabLarge(
@@ -201,7 +201,7 @@ private fun ListItemTabLargePreview() {
 }
 
 @Composable
-@LightDarkPreview
+@PreviewLightDark
 private fun ListItemTabSurfacePreview() {
     FirefoxTheme {
         ListItemTabSurface(
@@ -217,7 +217,7 @@ private fun ListItemTabSurfacePreview() {
 }
 
 @Composable
-@LightDarkPreview
+@PreviewLightDark
 private fun ListItemTabSurfaceWithCustomBackgroundPreview() {
     FirefoxTheme {
         ListItemTabSurface(

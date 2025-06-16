@@ -15,6 +15,7 @@ import org.mozilla.fenix.helpers.TestAssetHelper
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.restartApp
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.addToHomeScreen
 import org.mozilla.fenix.ui.robots.browserScreen
 import org.mozilla.fenix.ui.robots.homeScreen
@@ -30,6 +31,9 @@ class SettingsPrivateBrowsingTest : TestSetup() {
                 skipOnboarding = true,
             ),
         ) { it.activity }
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/555822
     @Test
@@ -54,6 +58,10 @@ class SettingsPrivateBrowsingTest : TestSetup() {
 
         setOpenLinksInPrivateOn()
 
+        homeScreen {
+            verifyHomeComponent(activityTestRule)
+        }
+
         AppAndSystemHelper.openAppFromExternalLink(firstWebPage.url.toString())
 
         browserScreen {
@@ -61,9 +69,13 @@ class SettingsPrivateBrowsingTest : TestSetup() {
         }.openTabDrawer(activityTestRule) {
             verifyPrivateBrowsingButtonIsSelected()
         }.closeTabDrawer {
-        }.goToHomescreen { }
+        }.goToHomescreen(activityTestRule) { }
 
         setOpenLinksInPrivateOff()
+
+        homeScreen {
+            verifyHomeComponent(activityTestRule)
+        }
 
         // We need to open a different link, otherwise it will open the same session
         AppAndSystemHelper.openAppFromExternalLink(secondWebPage.url.toString())
@@ -81,6 +93,10 @@ class SettingsPrivateBrowsingTest : TestSetup() {
         val defaultWebPage = TestAssetHelper.getGenericAsset(mockWebServer, 1)
 
         setOpenLinksInPrivateOn()
+
+        homeScreen {
+            verifyHomeComponent(activityTestRule)
+        }
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(defaultWebPage.url) {
@@ -110,6 +126,10 @@ class SettingsPrivateBrowsingTest : TestSetup() {
         }
 
         setOpenLinksInPrivateOff()
+
+        homeScreen {
+            verifyHomeComponent(activityTestRule)
+        }
 
         addToHomeScreen {
         }.searchAndOpenHomeScreenShortcut(pageShortcutName) {
@@ -146,7 +166,6 @@ private fun setOpenLinksInPrivateOn() {
         clickOpenLinksInPrivateTabSwitch()
     }.goBack {
     }.goBack {
-        verifyHomeComponent()
     }
 }
 
@@ -159,6 +178,5 @@ private fun setOpenLinksInPrivateOff() {
         verifyOpenLinksInPrivateTabOff()
     }.goBack {
     }.goBack {
-        verifyHomeComponent()
     }
 }

@@ -27,6 +27,7 @@
 #include "nsIHttpAuthenticableChannel.h"
 #include "nsIProtocolProxyCallback.h"
 #include "nsIRaceCacheWithNetwork.h"
+#include "nsIRequestContext.h"
 #include "nsIStreamListener.h"
 #include "nsIThreadRetargetableRequest.h"
 #include "nsIThreadRetargetableStreamListener.h"
@@ -88,7 +89,7 @@ class nsHttpChannel final : public HttpBaseChannel,
   NS_DECL_NSIASYNCVERIFYREDIRECTCALLBACK
   NS_DECL_NSITHREADRETARGETABLEREQUEST
   NS_DECL_NSIDNSLISTENER
-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_HTTPCHANNEL_IID)
+  NS_INLINE_DECL_STATIC_IID(NS_HTTPCHANNEL_IID)
   NS_DECL_NSIRACECACHEWITHNETWORK
   NS_DECL_NSIREQUESTTAILUNBLOCKCALLBACK
   NS_DECL_NSIEARLYHINTOBSERVER
@@ -126,11 +127,6 @@ class nsHttpChannel final : public HttpBaseChannel,
                                       nsIURI* aProxyURI, uint64_t aChannelId,
                                       ExtContentPolicyType aContentPolicyType,
                                       nsILoadInfo* aLoadInfo) override;
-
-  [[nodiscard]] nsresult OnPush(uint32_t aPushedStreamId,
-                                const nsACString& aUrl,
-                                const nsACString& aRequestString,
-                                HttpTransactionShell* aTransaction);
 
   static bool IsRedirectStatus(uint32_t status);
   static bool WillRedirect(const nsHttpResponseHead& response);
@@ -331,9 +327,10 @@ class nsHttpChannel final : public HttpBaseChannel,
   [[nodiscard]] nsresult DispatchTransaction(
       HttpTransactionShell* aTransWithStickyConn);
   [[nodiscard]] nsresult CallOnStartRequest();
-  [[nodiscard]] nsresult ProcessResponse();
-  void AsyncContinueProcessResponse();
-  [[nodiscard]] nsresult ContinueProcessResponse1();
+  [[nodiscard]] nsresult ProcessResponse(nsHttpConnectionInfo* aConnInfo);
+  void AsyncContinueProcessResponse(nsHttpConnectionInfo* aConnInfo);
+  [[nodiscard]] nsresult ContinueProcessResponse1(
+      nsHttpConnectionInfo* aConnInfo);
   [[nodiscard]] nsresult ContinueProcessResponse2(nsresult);
   nsresult HandleOverrideResponse();
 
@@ -505,9 +502,6 @@ class nsHttpChannel final : public HttpBaseChannel,
   void UntieValidationRequest();
   [[nodiscard]] nsresult OpenCacheInputStream(nsICacheEntry* cacheEntry,
                                               bool startBuffering);
-
-  void SetPushedStreamTransactionAndId(
-      HttpTransactionShell* aTransWithPushedStream, uint32_t aPushedStreamId);
 
   void SetOriginHeader();
   void SetDoNotTrack();
@@ -718,9 +712,6 @@ class nsHttpChannel final : public HttpBaseChannel,
   // Needed for accurate DNS timing
   RefPtr<nsDNSPrefetch> mDNSPrefetch;
 
-  uint32_t mPushedStreamId{0};
-  RefPtr<HttpTransactionShell> mTransWithPushedStream;
-
   // True if the channel's principal was found on a phishing, malware, or
   // tracking (if tracking protection is enabled) blocklist
   bool mLocalBlocklist{false};
@@ -866,7 +857,6 @@ class nsHttpChannel final : public HttpBaseChannel,
   nsMainThreadPtrHandle<nsIReplacedHttpResponse> mOverrideResponse;
 };
 
-NS_DEFINE_STATIC_IID_ACCESSOR(nsHttpChannel, NS_HTTPCHANNEL_IID)
 }  // namespace net
 }  // namespace mozilla
 

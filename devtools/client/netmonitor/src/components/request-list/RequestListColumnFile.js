@@ -6,16 +6,17 @@
 
 const {
   Component,
-} = require("resource://devtools/client/shared/vendor/react.js");
+} = require("resource://devtools/client/shared/vendor/react.mjs");
 const dom = require("resource://devtools/client/shared/vendor/react-dom-factories.js");
 const {
   L10N,
 } = require("resource://devtools/client/netmonitor/src/utils/l10n.js");
-const PropTypes = require("resource://devtools/client/shared/vendor/react-prop-types.js");
+const PropTypes = require("resource://devtools/client/shared/vendor/react-prop-types.mjs");
 const {
   connect,
 } = require("resource://devtools/client/shared/vendor/react-redux.js");
 const {
+  getUrlToolTip,
   propertiesEqual,
 } = require("resource://devtools/client/netmonitor/src/utils/request-utils.js");
 const {
@@ -58,21 +59,8 @@ class RequestListColumnFile extends Component {
       overriddenUrl,
     } = this.props;
 
-    const originalFileURL = urlDetails.url;
-    const decodedFileURL = urlDetails.unicodeUrl;
-    const ORIGINAL_FILE_URL = L10N.getFormatStr(
-      "netRequest.originalFileURL.tooltip",
-      originalFileURL
-    );
-    const DECODED_FILE_URL = L10N.getFormatStr(
-      "netRequest.decodedFileURL.tooltip",
-      decodedFileURL
-    );
     const requestedFile = urlDetails.baseNameWithQuery;
-    const fileToolTip =
-      originalFileURL === decodedFileURL
-        ? originalFileURL
-        : ORIGINAL_FILE_URL + "\n\n" + DECODED_FILE_URL;
+    const fileToolTip = getUrlToolTip(urlDetails);
 
     const isSlow = slowLimit > 0 && !!waitingTime && waitingTime > slowLimit;
 

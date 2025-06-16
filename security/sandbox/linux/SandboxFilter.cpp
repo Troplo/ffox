@@ -106,6 +106,15 @@ static_assert(F_ADD_SEALS == (F_LINUX_SPECIFIC_BASE + 9));
 static_assert(F_GET_SEALS == (F_LINUX_SPECIFIC_BASE + 10));
 #endif
 
+// Added in 6.13
+#ifndef MADV_GUARD_INSTALL
+#  define MADV_GUARD_INSTALL 102
+#  define MADV_GUARD_REMOVE 103
+#else
+static_assert(MADV_GUARD_INSTALL == 102);
+static_assert(MADV_GUARD_REMOVE == 103);
+#endif
+
 // To avoid visual confusion between "ifdef ANDROID" and "ifndef ANDROID":
 #ifndef ANDROID
 #  define DESKTOP
@@ -943,6 +952,9 @@ class SandboxPolicyCommon : public SandboxPolicyBase {
             // Used by SandboxReporter, among other things.
             .ElseIf(clk_id == CLOCK_MONOTONIC_COARSE, Allow())
 #endif
+#ifdef CLOCK_MONOTONIC_RAW
+            .ElseIf(clk_id == CLOCK_MONOTONIC_RAW, Allow())
+#endif
             .ElseIf(clk_id == CLOCK_PROCESS_CPUTIME_ID, Allow())
             .ElseIf(clk_id == CLOCK_REALTIME, Allow())
 #ifdef CLOCK_REALTIME_COARSE
@@ -1066,6 +1078,10 @@ class SandboxPolicyCommon : public SandboxPolicyBase {
         // allowed values here also add them to the GMP sandbox rules.
         return If(advice == MADV_DONTNEED, Allow())
             .ElseIf(advice == MADV_FREE, Allow())
+            // Used by glibc (and maybe someday mozjemalloc).
+            .ElseIf(advice == MADV_GUARD_INSTALL, Allow())
+            .ElseIf(advice == MADV_GUARD_REMOVE, Allow())
+            // Formerly used by mozjemalloc; unclear if current use:
             .ElseIf(advice == MADV_HUGEPAGE, Allow())
             .ElseIf(advice == MADV_NOHUGEPAGE, Allow())
 #ifdef MOZ_ASAN
@@ -1469,9 +1485,10 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
         return If(request == FIOCLEX, Allow())
             // Rust's stdlib also uses FIONBIO instead of equivalent fcntls.
             .ElseIf(request == FIONBIO, Allow())
-            // Allow anything that isn't a tty ioctl, for now; bug 1302711
-            // will cover changing this to a default-deny policy.
-            .ElseIf(shifted_type != kTtyIoctls, Allow())
+            // Allow anything that isn't a tty ioctl, if level < 6
+            .ElseIf(
+                BelowLevel(6) ? shifted_type != kTtyIoctls : BoolConst(false),
+                Allow())
             .Else(SandboxPolicyCommon::EvaluateSyscall(sysno));
       }
 
@@ -2039,8 +2056,15 @@ UniquePtr<sandbox::bpf_dsl::Policy> GetDecoderSandboxPolicy(
 // Basically a clone of RDDSandboxPolicy until we know exactly what
 // the SocketProcess sandbox looks like.
 class SocketProcessSandboxPolicy final : public SandboxPolicyCommon {
+ private:
+  SocketProcessSandboxParams mParams;
+
+  bool BelowLevel(int aLevel) const { return mParams.mLevel < aLevel; }
+
  public:
-  explicit SocketProcessSandboxPolicy(SandboxBrokerClient* aBroker) {
+  explicit SocketProcessSandboxPolicy(SandboxBrokerClient* aBroker,
+                                      SocketProcessSandboxParams&& aParams)
+      : mParams(std::move(aParams)) {
     mBroker = aBroker;
     mMayCreateShmem = true;
   }
@@ -2122,9 +2146,10 @@ class SocketProcessSandboxPolicy final : public SandboxPolicyCommon {
             .ElseIf(request == FIONBIO, Allow())
             // This is used by PR_Available in nsSocketInputStream::Available.
             .ElseIf(request == FIONREAD, Allow())
-            // Allow anything that isn't a tty ioctl, for now; bug 1302711
-            // will cover changing this to a default-deny policy.
-            .ElseIf(shifted_type != kTtyIoctls, Allow())
+            // Allow anything that isn't a tty ioctl (if level < 2)
+            .ElseIf(
+                BelowLevel(2) ? shifted_type != kTtyIoctls : BoolConst(false),
+                Allow())
             .Else(SandboxPolicyCommon::EvaluateSyscall(sysno));
       }
 
@@ -2176,9 +2201,9 @@ class SocketProcessSandboxPolicy final : public SandboxPolicyCommon {
 };
 
 UniquePtr<sandbox::bpf_dsl::Policy> GetSocketProcessSandboxPolicy(
-    SandboxBrokerClient* aMaybeBroker) {
+    SandboxBrokerClient* aMaybeBroker, SocketProcessSandboxParams&& aParams) {
   return UniquePtr<sandbox::bpf_dsl::Policy>(
-      new SocketProcessSandboxPolicy(aMaybeBroker));
+      new SocketProcessSandboxPolicy(aMaybeBroker, std::move(aParams)));
 }
 
 class UtilitySandboxPolicy : public SandboxPolicyCommon {

@@ -1,14 +1,15 @@
 /**
 * AUTO-GENERATED - DO NOT EDIT. Source: https://github.com/gpuweb/cts
-**/import { assert, iterRange, unreachable } from '../../../../../../common/util/util.js';import { Float16Array } from '../../../../../../external/petamoriken/float16/float16.js';import { kTextureFormatInfo } from '../../../../../format_info.js';
-import { GPUTest, TextureTestMixin } from '../../../../../gpu_test.js';
+**/import { assert, iterRange, unreachable } from '../../../../../../common/util/util.js';import { Float16Array } from '../../../../../../external/petamoriken/float16/float16.js';import { getBlockInfoForTextureFormat } from '../../../../../format_info.js';
+import { AllFeaturesMaxLimitsGPUTest } from '../../../../../gpu_test.js';
+import * as ttu from '../../../../../texture_test_utils.js';
 import { kBit } from '../../../../../util/constants.js';
 import { Type, VectorType, scalarTypeOf } from '../../../../../util/conversion.js';
 
 import { sparseScalarF16Range, sparseScalarF32Range, align } from '../../../../../util/math.js';
 import { PRNG } from '../../../../../util/prng.js';
 
-export class SubgroupTest extends TextureTestMixin(GPUTest) {}
+export class SubgroupTest extends AllFeaturesMaxLimitsGPUTest {}
 
 export const kNumCases = 1000;
 export const kStride = 128;
@@ -267,7 +268,7 @@ fn main(
 
   });
 
-  const encoder = t.device.createCommandEncoder();
+  const encoder = t.device.createCommandEncoder({ label: 'runAccuracyTest' });
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bg);
@@ -397,7 +398,7 @@ checkFunction)
 
   });
 
-  const encoder = t.device.createCommandEncoder();
+  const encoder = t.device.createCommandEncoder({ label: 'runComputeTest' });
   const pass = encoder.beginComputePass();
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bg);
@@ -448,7 +449,7 @@ export const kFramebufferSizes = [
  * @param height The height
  */
 export function getUintsPerFramebuffer(format, width, height) {
-  const { blockWidth, blockHeight, bytesPerBlock } = kTextureFormatInfo[format];
+  const { blockWidth, blockHeight, bytesPerBlock } = getBlockInfoForTextureFormat(format);
   assert(bytesPerBlock !== undefined);
 
   const blocksPerRow = width / blockWidth;
@@ -511,7 +512,7 @@ fn vsMain(@builtin(vertex_index) index : u32) -> @builtin(position) vec4f {
     }
   });
 
-  const { blockWidth, blockHeight, bytesPerBlock } = kTextureFormatInfo[format];
+  const { blockWidth, blockHeight, bytesPerBlock } = getBlockInfoForTextureFormat(format);
   assert(bytesPerBlock !== undefined);
 
   const blocksPerRow = width / blockWidth;
@@ -558,7 +559,7 @@ fn vsMain(@builtin(vertex_index) index : u32) -> @builtin(position) vec4f {
     format
   });
 
-  const encoder = t.device.createCommandEncoder();
+  const encoder = t.device.createCommandEncoder({ label: 'runFragmentTest' });
   const pass = encoder.beginRenderPass({
     colorAttachments: [
     {
@@ -574,7 +575,7 @@ fn vsMain(@builtin(vertex_index) index : u32) -> @builtin(position) vec4f {
   pass.end();
   t.queue.submit([encoder.finish()]);
 
-  const copyBuffer = t.copyWholeTextureToNewBufferSimple(framebuffer, 0);
+  const copyBuffer = ttu.copyWholeTextureToNewBufferSimple(t, framebuffer, 0);
   const readback = await t.readGPUBufferRangeTyped(copyBuffer, {
     srcByteOffset: 0,
     type: Uint32Array,

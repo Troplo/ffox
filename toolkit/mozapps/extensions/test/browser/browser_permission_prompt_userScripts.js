@@ -65,15 +65,10 @@ async function triggerPermRequest(extension, perm) {
 }
 
 function getUserScriptsCheckbox(panel) {
-  // popupnotifications has one checkbox (.popup-notification-checkbox) by
-  // default, but there should not be anything else, other than potentially
-  // the userscript checkbox.
-  let checkbox = panel.querySelector(
-    "checkbox:not(.popup-notification-checkbox)"
-  );
+  let checkbox = panel.querySelector("moz-checkbox");
   if (checkbox) {
     is(
-      checkbox.textContent,
+      checkbox.label,
       PERMISSION_L10N.formatValueSync("webext-perms-description-userScripts"),
       "userScripts permission warning is the label of a checkbox"
     );
@@ -183,7 +178,7 @@ add_task(async function test_userScripts_not_allowed_by_default() {
     let panel = await panelPromise;
     assertIsNotUserScriptPermissionPrompt(panel);
     is(
-      panel.permsSingleEl.textContent,
+      panel.permsListEl.textContent,
       PERMISSION_L10N.formatValueSync("webext-perms-description-webNavigation"),
       "Regular permission string can be displayed"
     );
@@ -268,11 +263,10 @@ add_task(async function test_userScripts_cannot_be_install_time_permission() {
     let panel = await panelPromise;
     assertIsNotUserScriptPermissionPrompt(panel);
     is(
-      panel.permsSingleEl.textContent,
+      panel.permsListEl.textContent,
       PERMISSION_L10N.formatValueSync("webext-perms-description-webNavigation"),
       "Install prompt displays the (only) recognized required permission"
     );
-    ok(BrowserTestUtils.isHidden(panel.permsListEl), "Perm list is hidden");
 
     let { messages } = await AddonTestUtils.promiseConsoleOutput(async () => {
       // Click button to "Add" extension.

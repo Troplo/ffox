@@ -487,6 +487,32 @@ static void set_bitstream_level_tier(AV1_PRIMARY *const ppi, int width,
   }
 }
 
+void av1_set_svc_seq_params(AV1_PRIMARY *const ppi) {
+  SequenceHeader *const seq = &ppi->seq_params;
+  if (seq->operating_points_cnt_minus_1 == 0) {
+    seq->operating_point_idc[0] = 0;
+    seq->has_nonzero_operating_point_idc = false;
+  } else {
+    // Set operating_point_idc[] such that the i=0 point corresponds to the
+    // highest quality operating point (all layers), and subsequent
+    // operarting points (i > 0) are lower quality corresponding to
+    // skip decoding enhancement  layers (temporal first).
+    int i = 0;
+    assert(seq->operating_points_cnt_minus_1 ==
+           (int)(ppi->number_spatial_layers * ppi->number_temporal_layers - 1));
+    for (unsigned int sl = 0; sl < ppi->number_spatial_layers; sl++) {
+      for (unsigned int tl = 0; tl < ppi->number_temporal_layers; tl++) {
+        seq->operating_point_idc[i] =
+            (~(~0u << (ppi->number_spatial_layers - sl)) << 8) |
+            ~(~0u << (ppi->number_temporal_layers - tl));
+        assert(seq->operating_point_idc[i] != 0);
+        i++;
+      }
+    }
+    seq->has_nonzero_operating_point_idc = true;
+  }
+}
+
 static void init_seq_coding_tools(AV1_PRIMARY *const ppi,
                                   const AV1EncoderConfig *oxcf,
                                   int disable_frame_id_numbers) {
@@ -517,10 +543,11 @@ static void init_seq_coding_tools(AV1_PRIMARY *const ppi,
 
   seq->max_frame_width = frm_dim_cfg->forced_max_frame_width
                              ? frm_dim_cfg->forced_max_frame_width
-                             : frm_dim_cfg->width;
-  seq->max_frame_height = frm_dim_cfg->forced_max_frame_height
-                              ? frm_dim_cfg->forced_max_frame_height
-                              : frm_dim_cfg->height;
+                             : AOMMAX(seq->max_frame_width, frm_dim_cfg->width);
+  seq->max_frame_height =
+      frm_dim_cfg->forced_max_frame_height
+          ? frm_dim_cfg->forced_max_frame_height
+          : AOMMAX(seq->max_frame_height, frm_dim_cfg->height);
   seq->num_bits_width =
       (seq->max_frame_width > 1) ? get_msb(seq->max_frame_width - 1) + 1 : 1;
   seq->num_bits_height =
@@ -550,29 +577,7 @@ static void init_seq_coding_tools(AV1_PRIMARY *const ppi,
 
   set_bitstream_level_tier(ppi, frm_dim_cfg->width, frm_dim_cfg->height,
                            oxcf->input_cfg.init_framerate);
-
-  if (seq->operating_points_cnt_minus_1 == 0) {
-    seq->operating_point_idc[0] = 0;
-    seq->has_nonzero_operating_point_idc = false;
-  } else {
-    // Set operating_point_idc[] such that the i=0 point corresponds to the
-    // highest quality operating point (all layers), and subsequent
-    // operarting points (i > 0) are lower quality corresponding to
-    // skip decoding enhancement  layers (temporal first).
-    int i = 0;
-    assert(seq->operating_points_cnt_minus_1 ==
-           (int)(ppi->number_spatial_layers * ppi->number_temporal_layers - 1));
-    for (unsigned int sl = 0; sl < ppi->number_spatial_layers; sl++) {
-      for (unsigned int tl = 0; tl < ppi->number_temporal_layers; tl++) {
-        seq->operating_point_idc[i] =
-            (~(~0u << (ppi->number_spatial_layers - sl)) << 8) |
-            ~(~0u << (ppi->number_temporal_layers - tl));
-        assert(seq->operating_point_idc[i] != 0);
-        i++;
-      }
-    }
-    seq->has_nonzero_operating_point_idc = true;
-  }
+  av1_set_svc_seq_params(ppi);
 }
 
 static void init_config_sequence(struct AV1_PRIMARY *ppi,
@@ -769,6 +774,11 @@ void av1_change_config_seq(struct AV1_PRIMARY *ppi,
 
   // Init sequence level coding tools
   // This should not be called after the first key frame.
+  // Note that for SVC encoding the sequence parameters
+  // (operating_points_cnt_minus_1, operating_point_idc[],
+  // has_nonzero_operating_point_idc) should be updated whenever the
+  // number of layers is changed. This is done in the
+  // ctrl_set_svc_params().
   if (!ppi->seq_params_locked) {
     seq_params->operating_points_cnt_minus_1 =
         (ppi->number_spatial_layers > 1 || ppi->number_temporal_layers > 1)
@@ -932,6 +942,9 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
     cm->render_width = frm_dim_cfg->width;
     cm->render_height = frm_dim_cfg->height;
   }
+
+  int last_width = cm->width;
+  int last_height = cm->height;
   cm->width = frm_dim_cfg->width;
   cm->height = frm_dim_cfg->height;
 
@@ -949,6 +962,31 @@ void av1_change_config(struct AV1_COMP *cpi, const AV1EncoderConfig *oxcf,
     cpi->frame_size_related_setup_done = false;
   }
   av1_update_frame_size(cpi);
+
+  if (cm->width != last_width || cm->height != last_height) {
+    if (cpi->oxcf.q_cfg.aq_mode == CYCLIC_REFRESH_AQ) {
+      int mi_rows = cpi->common.mi_params.mi_rows;
+      int mi_cols = cpi->common.mi_params.mi_cols;
+      aom_free(cpi->cyclic_refresh->map);
+      CHECK_MEM_ERROR(
+          cm, cpi->cyclic_refresh->map,
+          aom_calloc(mi_rows * mi_cols, sizeof(*cpi->cyclic_refresh->map)));
+      if (cpi->svc.number_spatial_layers > 1) {
+        for (int sl = 0; sl < cpi->svc.number_spatial_layers; ++sl) {
+          const int layer =
+              LAYER_IDS_TO_IDX(sl, 0, cpi->svc.number_temporal_layers);
+          LAYER_CONTEXT *const lc = &cpi->svc.layer_context[layer];
+          lc->sb_index = 0;
+          lc->actual_num_seg1_blocks = 0;
+          lc->actual_num_seg2_blocks = 0;
+          lc->counter_encode_maxq_scene_change = 0;
+          aom_free(lc->map);
+          CHECK_MEM_ERROR(cm, lc->map,
+                          aom_calloc(mi_rows * mi_cols, sizeof(*lc->map)));
+        }
+      }
+    }
+  }
 
   rc->is_src_frame_alt_ref = 0;
 
@@ -1589,7 +1627,7 @@ AV1_COMP *av1_create_compressor(AV1_PRIMARY *ppi, const AV1EncoderConfig *oxcf,
   prev_deltaq_params->v_ac_delta_q = INT_MAX;
 
   av1_init_quantizer(&cpi->enc_quant_dequant_params, &cm->quant_params,
-                     cm->seq_params->bit_depth);
+                     cm->seq_params->bit_depth, cpi->oxcf.algo_cfg.sharpness);
   av1_qm_init(&cm->quant_params, av1_num_planes(cm));
 
   av1_loop_filter_init(cm);
@@ -2247,7 +2285,12 @@ void av1_set_frame_size(AV1_COMP *cpi, int width, int height) {
       if (av1_is_scaled(sf)) aom_extend_frame_borders(&buf->buf, num_planes);
     }
   }
-  if (!frame_is_intra_only(cm) && !has_valid_ref_frame) {
+  // For 1 pass CBR mode: we can skip this check for spatial enhancement
+  // layer if the target_bandwidth is zero, since it will be dropped.
+  const bool dropped_frame =
+      has_no_stats_stage(cpi) && cpi->oxcf.rc_cfg.mode == AOM_CBR &&
+      cpi->svc.spatial_layer_id > 0 && cpi->oxcf.rc_cfg.target_bandwidth == 0;
+  if (!frame_is_intra_only(cm) && !has_valid_ref_frame && !dropped_frame) {
     aom_internal_error(
         cm->error, AOM_CODEC_CORRUPT_FRAME,
         "Can't find at least one reference frame with valid size");
@@ -2636,7 +2679,7 @@ static int encode_without_recode(AV1_COMP *cpi) {
                     cpi->oxcf.mode == ALLINTRA, cpi->oxcf.tune_cfg.tuning);
   av1_set_speed_features_qindex_dependent(cpi, cpi->oxcf.speed);
   av1_init_quantizer(&cpi->enc_quant_dequant_params, &cm->quant_params,
-                     cm->seq_params->bit_depth);
+                     cm->seq_params->bit_depth, cpi->oxcf.algo_cfg.sharpness);
   av1_set_variance_partition_thresholds(cpi, q, 0);
   av1_setup_frame(cpi);
 
@@ -2651,7 +2694,8 @@ static int encode_without_recode(AV1_COMP *cpi) {
                         cpi->oxcf.mode == ALLINTRA, cpi->oxcf.tune_cfg.tuning);
       av1_set_speed_features_qindex_dependent(cpi, cpi->oxcf.speed);
       av1_init_quantizer(&cpi->enc_quant_dequant_params, &cm->quant_params,
-                         cm->seq_params->bit_depth);
+                         cm->seq_params->bit_depth,
+                         cpi->oxcf.algo_cfg.sharpness);
       av1_set_variance_partition_thresholds(cpi, q, 0);
       if (frame_is_intra_only(cm) || cm->features.error_resilient_mode ||
           cm->features.primary_ref_frame == PRIMARY_REF_NONE)
@@ -2956,13 +3000,9 @@ static int encode_with_recode_loop(AV1_COMP *cpi, size_t *size, uint8_t *dest,
                       oxcf->mode == ALLINTRA, oxcf->tune_cfg.tuning);
     av1_set_speed_features_qindex_dependent(cpi, oxcf->speed);
     av1_init_quantizer(&cpi->enc_quant_dequant_params, &cm->quant_params,
-                       cm->seq_params->bit_depth);
+                       cm->seq_params->bit_depth, cpi->oxcf.algo_cfg.sharpness);
 
     av1_set_variance_partition_thresholds(cpi, q, 0);
-
-    // printf("Frame %d/%d: q = %d, frame_type = %d superres_denom = %d\n",
-    //        cm->current_frame.frame_number, cm->show_frame, q,
-    //        cm->current_frame.frame_type, cm->superres_scale_denominator);
 
     if (loop_count == 0) {
       av1_setup_frame(cpi);
@@ -3372,6 +3412,7 @@ static int encode_with_and_without_superres(AV1_COMP *cpi, size_t *size,
         const int this_index = denom - (SCALE_NUMERATOR + 1);
         superres_sses[this_index] = INT64_MAX;
         superres_rates[this_index] = INT64_MAX;
+        superres_largest_tile_ids[this_index] = 0;
       }
     }
     // Encode without superres.
@@ -3774,7 +3815,8 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size, uint8_t *dest,
   }
 
   if (oxcf->tune_cfg.tuning == AOM_TUNE_SSIM ||
-      oxcf->tune_cfg.tuning == AOM_TUNE_IQ) {
+      oxcf->tune_cfg.tuning == AOM_TUNE_IQ ||
+      oxcf->tune_cfg.tuning == AOM_TUNE_SSIMULACRA2) {
     av1_set_mb_ssim_rdmult_scaling(cpi);
   }
 #if CONFIG_SALIENCY_MAP
@@ -3978,8 +4020,10 @@ static int encode_frame_to_data_rate(AV1_COMP *cpi, size_t *size, uint8_t *dest,
     cpi->frames_since_last_update = 1;
   }
 
-  if (cpi->svc.spatial_layer_id == cpi->svc.number_spatial_layers - 1)
+  if (cpi->svc.spatial_layer_id == cpi->svc.number_spatial_layers - 1) {
     cpi->svc.prev_number_spatial_layers = cpi->svc.number_spatial_layers;
+  }
+  cpi->svc.prev_number_temporal_layers = cpi->svc.number_temporal_layers;
 
   // Clear the one shot update flags for segmentation map and mode/ref loop
   // filter deltas.
@@ -4542,10 +4586,10 @@ static void update_end_of_frame_stats(AV1_COMP *cpi) {
     if (!cpi->common.show_existing_frame) {
       AV1_COMMON *const cm = &cpi->common;
       struct loopfilter *const lf = &cm->lf;
-      cpi->ppi->filter_level[0] = lf->filter_level[0];
-      cpi->ppi->filter_level[1] = lf->filter_level[1];
-      cpi->ppi->filter_level_u = lf->filter_level_u;
-      cpi->ppi->filter_level_v = lf->filter_level_v;
+      cpi->ppi->filter_level[0] = lf->backup_filter_level[0];
+      cpi->ppi->filter_level[1] = lf->backup_filter_level[1];
+      cpi->ppi->filter_level_u = lf->backup_filter_level_u;
+      cpi->ppi->filter_level_v = lf->backup_filter_level_v;
     }
   }
   // Store frame level mv_stats from cpi to ppi.

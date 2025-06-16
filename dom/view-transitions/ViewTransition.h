@@ -5,6 +5,8 @@
 #ifndef mozilla_dom_ViewTransition_h
 #define mozilla_dom_ViewTransition_h
 
+#include "mozilla/Attributes.h"
+#include "mozilla/layers/IpcResourceUpdateQueue.h"
 #include "nsRect.h"
 #include "nsWrapperCache.h"
 #include "nsAtomHashKeys.h"
@@ -25,7 +27,28 @@ namespace gfx {
 class DataSourceSurface;
 }
 
+namespace layers {
+class RenderRootStateManager;
+}
+
+namespace wr {
+struct ImageKey;
+class IpcResourceUpdateQueue;
+}  // namespace wr
+
 namespace dom {
+
+extern LazyLogModule gViewTransitionsLog;
+
+#define VT_LOG(...)                                                    \
+  MOZ_LOG(mozilla::dom::gViewTransitionsLog, mozilla::LogLevel::Debug, \
+          (__VA_ARGS__))
+
+#ifdef DEBUG
+#  define VT_LOG_DEBUG(...) VT_LOG(__VA_ARGS__)
+#else
+#  define VT_LOG_DEBUG(...)
+#endif
 
 class Document;
 class Element;
@@ -35,6 +58,7 @@ class ViewTransitionUpdateCallback;
 enum class SkipTransitionReason : uint8_t {
   JS,
   DocumentHidden,
+  RootRemoved,
   ClobberedActiveTransition,
   Timeout,
   UpdateCallbackRejected,
@@ -66,10 +90,26 @@ class ViewTransition final : public nsISupports, public nsWrapperCache {
   Promise* GetFinished(ErrorResult&);
 
   void SkipTransition(SkipTransitionReason = SkipTransitionReason::JS);
-  void PerformPendingOperations();
+  MOZ_CAN_RUN_SCRIPT void PerformPendingOperations();
 
-  Element* GetRoot() const { return mViewTransitionRoot; }
-  gfx::DataSourceSurface* GetOldSurface(nsAtom* aName) const;
+  // Get the snapshot containing block, which is the top-layer for rendering the
+  // view transition tree.
+  Element* GetSnapshotContainingBlock() const {
+    return mSnapshotContainingBlock;
+  }
+  // Get ::view-transition pseudo element, which is the view transition tree
+  // root. We find the pseudo element of this tree from this node.
+  Element* GetViewTransitionTreeRoot() const;
+
+  Maybe<nsSize> GetOldSize(nsAtom* aName) const;
+  Maybe<nsSize> GetNewSize(nsAtom* aName) const;
+  const wr::ImageKey* GetOldImageKey(nsAtom* aName,
+                                     layers::RenderRootStateManager*,
+                                     wr::IpcResourceUpdateQueue&) const;
+  const wr::ImageKey* GetNewImageKey(nsAtom* aName) const;
+  const wr::ImageKey* GetImageKeyForCapturedFrame(
+      nsIFrame* aFrame, layers::RenderRootStateManager*,
+      wr::IpcResourceUpdateQueue&) const;
 
   Element* FindPseudo(const PseudoStyleRequest&) const;
 
@@ -79,23 +119,26 @@ class ViewTransition final : public nsISupports, public nsWrapperCache {
       u"-ua-view-transition-group-anim-"_ns;
 
   [[nodiscard]] bool GetGroupKeyframes(nsAtom* aAnimationName,
-                                       nsTArray<Keyframe>&) const;
+                                       const StyleComputedTimingFunction&,
+                                       nsTArray<Keyframe>&);
 
   nsIGlobalObject* GetParentObject() const;
   JSObject* WrapObject(JSContext*, JS::Handle<JSObject*> aGivenProto) override;
 
   struct CapturedElement;
 
- private:
-  enum class CallIfDone : bool { No, Yes };
-  MOZ_CAN_RUN_SCRIPT void CallUpdateCallbackIgnoringErrors(CallIfDone);
+  static nsRect SnapshotContainingBlockRect(nsPresContext*);
   MOZ_CAN_RUN_SCRIPT void CallUpdateCallback(ErrorResult&);
+
+ private:
+  MOZ_CAN_RUN_SCRIPT void MaybeScheduleUpdateCallback();
   void Activate();
 
   void ClearActiveTransition(bool aIsDocumentHidden);
   void Timeout();
-  void Setup();
-  [[nodiscard]] Maybe<SkipTransitionReason> CaptureOldState();
+  MOZ_CAN_RUN_SCRIPT void Setup();
+  [[nodiscard]] MOZ_CAN_RUN_SCRIPT Maybe<SkipTransitionReason>
+  CaptureOldState();
   [[nodiscard]] Maybe<SkipTransitionReason> CaptureNewState();
   void SetupTransitionPseudoElements();
   [[nodiscard]] bool UpdatePseudoElementStyles(bool aNeedsInvalidation);
@@ -116,6 +159,8 @@ class ViewTransition final : public nsISupports, public nsWrapperCache {
   // https://drafts.csswg.org/css-view-transitions/#viewtransition-named-elements
   using NamedElements = nsClassHashtable<nsAtomHashKey, CapturedElement>;
   NamedElements mNamedElements;
+  // mNamedElements is an unordered map, we need to keep the tree order.
+  AutoTArray<RefPtr<nsAtom>, 8> mNames;
 
   // https://drafts.csswg.org/css-view-transitions/#viewtransition-initial-snapshot-containing-block-size
   nsSize mInitialSnapshotContainingBlockSize;
@@ -129,7 +174,11 @@ class ViewTransition final : public nsISupports, public nsWrapperCache {
   RefPtr<nsITimer> mTimeoutTimer;
 
   Phase mPhase = Phase::PendingCapture;
-  RefPtr<Element> mViewTransitionRoot;
+  // The wrapper of the pseudo-elements tree, to make sure it is always
+  // out-of-flow. This is the top-layer for rendering the view transition tree.
+  // So in general, its child (and only one) is the transition root
+  // pseudo-element.
+  RefPtr<Element> mSnapshotContainingBlock;
 };
 
 }  // namespace dom

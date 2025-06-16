@@ -82,11 +82,10 @@ def attributeReturnType(a, getter, macro):
         if macro == "NS_IMETHOD":
             # This is the declaration.
             ret = "virtual %s" % ret
+    elif ret == "nsresult":
+        ret = macro
     else:
-        if ret == "nsresult":
-            ret = macro
-        else:
-            ret = "%s_(%s)" % (macro, ret)
+        ret = "%s_(%s)" % (macro, ret)
 
     return attributeAttributes(a, getter) + ret
 
@@ -146,11 +145,10 @@ def methodReturnType(m, macro):
         if macro == "NS_IMETHOD":
             # This is the declaration
             ret = "virtual %s" % ret
+    elif ret == "nsresult":
+        ret = macro
     else:
-        if ret == "nsresult":
-            ret = macro
-        else:
-            ret = "%s_(%s)" % (macro, ret)
+        ret = "%s_(%s)" % (macro, ret)
 
     return methodAttributes(m) + ret
 
@@ -377,7 +375,7 @@ uuid_decoder = re.compile(
 iface_prolog = """ {
  public:
 
-  NS_DECLARE_STATIC_IID_ACCESSOR(%(defname)s_IID)
+  NS_INLINE_DECL_STATIC_IID(%(defname)s_IID)
 
 """
 
@@ -388,8 +386,7 @@ iface_scriptable = """\
 """
 
 iface_epilog = """};
-
-  NS_DEFINE_STATIC_IID_ACCESSOR(%(name)s, %(defname)s_IID)"""
+"""
 
 iface_decl = """
 

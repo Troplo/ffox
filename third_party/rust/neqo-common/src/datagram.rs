@@ -4,7 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{net::SocketAddr, ops::Deref};
+use std::{
+    fmt::{self, Debug, Formatter},
+    net::SocketAddr,
+    ops::{Deref, DerefMut},
+};
 
 use crate::{hex_with_len, IpTos};
 
@@ -47,7 +51,6 @@ impl<D: AsRef<[u8]>> Datagram<D> {
     }
 }
 
-#[cfg(test)]
 impl<D: AsMut<[u8]> + AsRef<[u8]>> AsMut<[u8]> for Datagram<D> {
     fn as_mut(&mut self) -> &mut [u8] {
         self.d.as_mut()
@@ -65,16 +68,21 @@ impl Datagram<Vec<u8>> {
     }
 }
 
+impl<D: AsRef<[u8]> + AsMut<[u8]>> DerefMut for Datagram<D> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        AsMut::<[u8]>::as_mut(self)
+    }
+}
+
 impl<D: AsRef<[u8]>> Deref for Datagram<D> {
     type Target = [u8];
-    #[must_use]
     fn deref(&self) -> &Self::Target {
         AsRef::<[u8]>::as_ref(self)
     }
 }
 
-impl<D: AsRef<[u8]>> std::fmt::Debug for Datagram<D> {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl<D: AsRef<[u8]>> Debug for Datagram<D> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
             "Datagram {:?} {:?}->{:?}: {}",
@@ -86,9 +94,9 @@ impl<D: AsRef<[u8]>> std::fmt::Debug for Datagram<D> {
     }
 }
 
-impl<'a> Datagram<&'a [u8]> {
+impl<'a> Datagram<&'a mut [u8]> {
     #[must_use]
-    pub const fn from_slice(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: &'a [u8]) -> Self {
+    pub fn from_slice(src: SocketAddr, dst: SocketAddr, tos: IpTos, d: &'a mut [u8]) -> Self {
         Self { src, dst, tos, d }
     }
 

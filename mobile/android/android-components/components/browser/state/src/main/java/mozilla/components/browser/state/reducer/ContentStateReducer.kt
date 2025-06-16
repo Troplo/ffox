@@ -4,10 +4,11 @@
 
 package mozilla.components.browser.state.reducer
 
-import android.net.Uri
+import androidx.core.net.toUri
 import mozilla.components.browser.state.action.ContentAction
 import mozilla.components.browser.state.action.ContentAction.UpdatePermissionHighlightsStateAction
 import mozilla.components.browser.state.ext.containsPermission
+import mozilla.components.browser.state.ext.mergePermissions
 import mozilla.components.browser.state.state.BrowserState
 import mozilla.components.browser.state.state.ContentState
 import mozilla.components.browser.state.state.SessionState
@@ -181,6 +182,7 @@ internal object ContentStateReducer {
                         permissionRequestsList = it.permissionRequestsList + action.permissionRequest,
                     )
                 } else {
+                    it.permissionRequestsList.mergePermissions(action.permissionRequest)
                     it
                 }
             }
@@ -366,15 +368,15 @@ internal inline fun updateContentState(
 }
 
 private fun isHostEquals(sessionUrl: String, newUrl: String): Boolean {
-    val sessionUri = Uri.parse(sessionUrl)
-    val newUri = Uri.parse(newUrl)
+    val sessionUri = sessionUrl.toUri()
+    val newUri = newUrl.toUri()
 
     return sessionUri.sameSchemeAndHostAs(newUri)
 }
 
 private fun isUrlSame(originalUrl: String, newUrl: String): Boolean {
-    val originalUri = Uri.parse(originalUrl)
-    val uri = Uri.parse(newUrl)
+    val originalUri = originalUrl.toUri()
+    val uri = newUrl.toUri()
 
     return uri.port == originalUri.port &&
         uri.host == originalUri.host &&
@@ -389,8 +391,8 @@ private fun isUrlSame(originalUrl: String, newUrl: String): Boolean {
  */
 private fun isInScope(manifest: WebAppManifest?, newUrl: String): Boolean {
     val scope = manifest?.scope ?: manifest?.startUrl ?: return false
-    val scopeUri = Uri.parse(scope)
-    val newUri = Uri.parse(newUrl)
+    val scopeUri = scope.toUri()
+    val newUri = newUrl.toUri()
 
     return newUri.isInScope(listOf(scopeUri))
 }

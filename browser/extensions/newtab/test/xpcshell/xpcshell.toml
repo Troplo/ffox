@@ -1,6 +1,6 @@
 [DEFAULT]
 firefox-appdir = "browser"
-skip-if = ["os == 'android'"] # bug 1730213
+head = "head.js"
 prefs = [
   "browser.startup.homepage.abouthome_cache.enabled=true",
   "browser.startup.homepage.abouthome_cache.testing=true",
@@ -10,11 +10,18 @@ prefs = [
 
 ["test_AboutHomeStartupCacheWorker.js"]
 support-files = ["topstories.json"]
-skip-if = ["socketprocess_networking"] # Bug 1759035
 
 ["test_AdsFeed.js"]
 
 ["test_HighlightsFeed.js"]
+
+["test_InferredFeatureModel.js"]
+
+["test_NewTabContentPing.js"]
+
+["test_NewTabGleanUtils.js"]
+
+["test_NewTabMessaging.js"]
 
 ["test_PlacesFeed.js"]
 

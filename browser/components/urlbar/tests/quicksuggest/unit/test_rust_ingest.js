@@ -8,9 +8,13 @@
 
 ChromeUtils.defineESModuleGetters(this, {
   AsyncShutdown: "resource://gre/modules/AsyncShutdown.sys.mjs",
-  InterruptKind: "resource://gre/modules/RustSuggest.sys.mjs",
+  InterruptKind:
+    "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
-  SuggestionProvider: "resource://gre/modules/RustSuggest.sys.mjs",
+  SuggestIngestionMetrics:
+    "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
+  SuggestionProvider:
+    "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSuggest.sys.mjs",
 });
 
 // These consts are copied from the update timer manager test. See
@@ -80,48 +84,48 @@ add_task(async function disableEnable() {
 // For a feature whose suggestion type provider has constraints, ingest should
 // happen when the constraints change.
 add_task(async function providerConstraintsChanged() {
-  // We'll use the Exposure feature since it has provider constraints. Make sure
+  // We'll use the Dynamic feature since it has provider constraints. Make sure
   // it exists.
-  let feature = QuickSuggest.getFeature("ExposureSuggestions");
+  let feature = QuickSuggest.getFeature("DynamicSuggestions");
   Assert.ok(
     !!feature,
-    "This test expects the ExposureSuggestions feature to exist"
+    "This test expects the DynamicSuggestions feature to exist"
   );
   Assert.equal(
     feature.rustSuggestionType,
-    "Exposure",
-    "This test expects Exposure suggestions to exist"
+    "Dynamic",
+    "This test expects Dynamic suggestions to exist"
   );
 
-  let providersFilter = [SuggestionProvider.EXPOSURE];
+  let providersFilter = [SuggestionProvider.DYNAMIC];
   await withIngestStub(async ({ stub, rustBackend }) => {
-    // Set the pref to a few non-empty string values. Each time, an exposure
+    // Set the pref to a few non-empty string values. Each time, a dynamic
     // ingest should be triggered.
     for (let type of ["aaa", "bbb", "aaa,bbb"]) {
-      UrlbarPrefs.set("quicksuggest.exposureSuggestionTypes", type);
-      info("Awaiting ingest promise after setting exposureSuggestionTypes");
+      UrlbarPrefs.set("quicksuggest.dynamicSuggestionTypes", type);
+      info("Awaiting ingest promise after setting dynamicSuggestionTypes");
       await rustBackend.ingestPromise;
 
       checkIngestCounts({
         stub,
         providersFilter,
         expected: {
-          [SuggestionProvider.EXPOSURE]: 1,
+          [SuggestionProvider.DYNAMIC]: 1,
         },
       });
     }
 
     // Set the pref to an empty string. The feature should become disabled and
-    // it shouldn't trigger ingest since no exposure suggestions are enabled.
-    UrlbarPrefs.set("quicksuggest.exposureSuggestionTypes", "");
+    // it shouldn't trigger ingest since no dynamic suggestions are enabled.
+    UrlbarPrefs.set("quicksuggest.dynamicSuggestionTypes", "");
     info(
-      "Awaiting ingest promise after setting exposureSuggestionTypes to empty string"
+      "Awaiting ingest promise after setting dynamicSuggestionTypes to empty string"
     );
     await rustBackend.ingestPromise;
 
     Assert.ok(
       !feature.isEnabled,
-      "Exposure feature should be disabled after setting exposureSuggestionTypes to empty string"
+      "Dynamic feature should be disabled after setting dynamicSuggestionTypes to empty string"
     );
     checkIngestCounts({
       stub,
@@ -130,7 +134,7 @@ add_task(async function providerConstraintsChanged() {
     });
   });
 
-  UrlbarPrefs.clear("quicksuggest.exposureSuggestionTypes");
+  UrlbarPrefs.clear("quicksuggest.dynamicSuggestionTypes");
   await QuickSuggest.rustBackend.ingestPromise;
 });
 
@@ -232,7 +236,7 @@ add_task(async function shutdown() {
   let spy = sandbox.spy(QuickSuggest.rustBackend._test_store, "interrupt");
 
   Services.prefs.setBoolPref("toolkit.asyncshutdown.testing", true);
-  AsyncShutdown.profileBeforeChange._trigger();
+  AsyncShutdown.profileChangeTeardown._trigger();
 
   let calls = spy.getCalls();
   Assert.equal(
@@ -264,6 +268,12 @@ async function withIngestStub(callback) {
   let sandbox = sinon.createSandbox();
   let { rustBackend } = QuickSuggest;
   let stub = sandbox.stub(rustBackend._test_store, "ingest");
+
+  // `ingest()` returns a `SuggestIngestionMetrics` object.
+  stub.returns(
+    new SuggestIngestionMetrics({ ingestionTimes: [], downloadTimes: [] })
+  );
+
   await callback({ stub, rustBackend });
   sandbox.restore();
 }

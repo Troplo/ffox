@@ -8,15 +8,17 @@ export const HeuristicsRegExp = {
   RULES: {
     email: undefined,
     tel: undefined,
+    "tel-country-code" : undefined,
     "address-housenumber": undefined,
     "street-address": undefined,
     "address-line1": undefined,
     "address-line2": undefined,
     "address-line3": undefined,
+    "postal-code": undefined,
+    "address-level3": undefined,
     "address-level2": undefined,
     "address-level1": undefined,
-    "postal-code": undefined,
-    // Note: We place the `organization` field after the `address` fields, to 
+    // Note: We place the `organization` field after the `address` fields, to
     // ensure that all address-related fields that might contain organization 
     // info are matched as address fields first.
     organization: undefined,
@@ -47,15 +49,28 @@ export const HeuristicsRegExp = {
     //=========================================================================
     // Firefox-specific rules
     {
+      "street-address": "ulica(.*(numer|nr))?", // pl-PL
       "address-line1": "addrline1|address_1|addl1",
       "address-line2":
         "addrline2|address_2|addl2" +
         "|landmark", // common in IN
       "address-line3": "addrline3|address_3|addl3",
+      "address-level2": 
+        "città" + // it-IT
+        "|miasto|miejscowosc|miejscowość", //pl-PL
       "address-housenumber":
-        "house\\s*number|hausnummer|haus|house[a-z\-]*n(r|o)",
-      "postal-code": "^PLZ(\\b|\\*)", // de-DE
+        "(house|building)\\s*number|hausnummer|haus|house[a-z\-]*n(r|o)" +
+        "|n[úu]mero" +
+        "|domu", // pl-PL
+      "address-level3":
+        "(^address-?level-?3$)" +
+        "|neighbou*rhood|barrio|bairro|colonia|suburb", // en/es/pt/mx/au/nz
+      "postal-code": 
+        "^PLZ(\\b|\\*)" + // de-DE
+        "|kod.?pocztowy", // pl-PL
+      "given-name": "imię", // pl-PL
       "additional-name": "apellido.?materno|lastlastname",
+      "family-name": "nazwisko",
       "cc-name":
         "accountholdername" +
         "|titulaire", // fr-FR
@@ -86,6 +101,10 @@ export const HeuristicsRegExp = {
         "|typ.*karty",       // pl-PL
       "cc-csc":
         "(\\bcvn\\b|\\bcvv\\b|\\bcvc\\b|\\bcsc\\b|\\bcvd\\b|\\bcid\\b|\\bccv\\b)",
+      "tel-country-code":
+        "phone.*country|country.*phone" +
+        "tel.*country|country.*tel",
+      "tel": "(numer|nr)?\\.?telefonu", //pl-PL
     },
 
     //=========================================================================
@@ -644,12 +663,19 @@ export const HeuristicsRegExp = {
       "address-line2":
         "address|line" +
         "|house|building|apartment|floor" +    // de-DE
+        "|apartamento|" +    // pt
         "|adresse" +      // fr-FR
         "|indirizzo" +    // it-IT
         "|地址" +         // zh-CN
-        "|주소",          // ko-KR
+        "|주소" +         // ko-KR
+        "|mieszkan(ie|ia)",         // pl-PL
     },
   ],
+
+  EXTRA_RULES: {
+    "lookup":
+      "lookup|search|suchen",
+  },
 
   _getRules(rules, rulesets) {
     function computeRule(name) {
@@ -690,6 +716,10 @@ export const HeuristicsRegExp = {
   getRules() {
     return this._getRules(this.RULES, this.RULE_SETS);
   },
+
+  getExtraRules(fieldName) {
+    return new RegExp(this.EXTRA_RULES[fieldName], "iug");
+  }
 };
 
 export default HeuristicsRegExp;

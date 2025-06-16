@@ -472,11 +472,9 @@ struct GeckoFontMetrics {
   float mScriptScriptPercentScaleDown;  // zero is invalid or means not found.
 };
 
-GeckoFontMetrics Gecko_GetFontMetrics(const nsPresContext*, bool is_vertical,
-                                      const nsStyleFont* font,
-                                      mozilla::Length font_size,
-                                      bool use_user_font_set,
-                                      bool retrieve_math_scales);
+GeckoFontMetrics Gecko_GetFontMetrics(
+    const nsPresContext*, bool is_vertical, const nsStyleFont* font,
+    mozilla::Length font_size, mozilla::StyleQueryFontMetricsFlags flags);
 
 mozilla::StyleSheet* Gecko_StyleSheet_Clone(const mozilla::StyleSheet* aSheet);
 
@@ -618,6 +616,7 @@ mozilla::PointerCapabilities Gecko_MediaFeatures_AllPointerCapabilities(
 float Gecko_MediaFeatures_GetDevicePixelRatio(const mozilla::dom::Document*);
 
 bool Gecko_MediaFeatures_IsResourceDocument(const mozilla::dom::Document*);
+bool Gecko_MediaFeatures_InAndroidPipMode(const mozilla::dom::Document*);
 bool Gecko_MediaFeatures_MatchesPlatform(mozilla::StylePlatform);
 mozilla::StyleGtkThemeFamily Gecko_MediaFeatures_GtkThemeFamily();
 

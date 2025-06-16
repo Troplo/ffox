@@ -337,16 +337,15 @@ IProtocol::~IProtocol() {
 
 // The following methods either directly forward to the toplevel protocol, or
 // almost directly do.
-IProtocol* IProtocol::Lookup(int32_t aId) { return mToplevel->Lookup(aId); }
+IProtocol* IProtocol::Lookup(ActorId aId) { return mToplevel->Lookup(aId); }
 
-Shmem::SharedMemory* IProtocol::CreateSharedMemory(size_t aSize, bool aUnsafe,
-                                                   int32_t* aId) {
-  return mToplevel->CreateSharedMemory(aSize, aUnsafe, aId);
+Shmem IProtocol::CreateSharedMemory(size_t aSize, bool aUnsafe) {
+  return mToplevel->CreateSharedMemory(aSize, aUnsafe);
 }
-Shmem::SharedMemory* IProtocol::LookupSharedMemory(int32_t aId) {
+Shmem::Segment* IProtocol::LookupSharedMemory(Shmem::id_t aId) {
   return mToplevel->LookupSharedMemory(aId);
 }
-bool IProtocol::IsTrackingSharedMemory(Shmem::SharedMemory* aSegment) {
+bool IProtocol::IsTrackingSharedMemory(const Shmem::Segment* aSegment) {
   return mToplevel->IsTrackingSharedMemory(aSegment);
 }
 bool IProtocol::DestroySharedMemory(Shmem& aShmem) {
@@ -362,39 +361,6 @@ const MessageChannel* IProtocol::GetIPCChannel() const {
 
 nsISerialEventTarget* IProtocol::GetActorEventTarget() {
   return GetIPCChannel()->GetWorkerEventTarget();
-}
-
-Maybe<IProtocol*> IProtocol::ReadActor(IPC::MessageReader* aReader,
-                                       bool aNullable,
-                                       const char* aActorDescription,
-                                       int32_t aProtocolTypeId) {
-  int32_t id;
-  if (!IPC::ReadParam(aReader, &id)) {
-    ActorIdReadError(aActorDescription);
-    return Nothing();
-  }
-
-  if (id == 1 || (id == 0 && !aNullable)) {
-    BadActorIdError(aActorDescription);
-    return Nothing();
-  }
-
-  if (id == 0) {
-    return Some(static_cast<IProtocol*>(nullptr));
-  }
-
-  IProtocol* listener = this->Lookup(id);
-  if (!listener) {
-    ActorLookupError(aActorDescription);
-    return Nothing();
-  }
-
-  if (listener->GetProtocolId() != aProtocolTypeId) {
-    MismatchedActorTypeError(aActorDescription);
-    return Nothing();
-  }
-
-  return Some(listener);
 }
 
 void IProtocol::FatalError(const char* const aErrorMsg) {
@@ -420,14 +386,8 @@ bool IProtocol::AllocShmem(size_t aSize, Shmem* aOutMem) {
     return false;
   }
 
-  Shmem::id_t id;
-  Shmem::SharedMemory* rawmem(CreateSharedMemory(aSize, false, &id));
-  if (!rawmem) {
-    return false;
-  }
-
-  *aOutMem = Shmem(rawmem, id, aSize, false);
-  return true;
+  *aOutMem = CreateSharedMemory(aSize, false);
+  return aOutMem->IsReadable();
 }
 
 bool IProtocol::AllocUnsafeShmem(size_t aSize, Shmem* aOutMem) {
@@ -437,14 +397,8 @@ bool IProtocol::AllocUnsafeShmem(size_t aSize, Shmem* aOutMem) {
     return false;
   }
 
-  Shmem::id_t id;
-  Shmem::SharedMemory* rawmem(CreateSharedMemory(aSize, true, &id));
-  if (!rawmem) {
-    return false;
-  }
-
-  *aOutMem = Shmem(rawmem, id, aSize, true);
-  return true;
+  *aOutMem = CreateSharedMemory(aSize, true);
+  return aOutMem->IsReadable();
 }
 
 bool IProtocol::DeallocShmem(Shmem& aMem) {
@@ -470,7 +424,7 @@ void IProtocol::SetManager(IRefCountedProtocol* aManager) {
 }
 
 bool IProtocol::SetManagerAndRegister(IRefCountedProtocol* aManager,
-                                      int32_t aId) {
+                                      ActorId aId) {
   MOZ_RELEASE_ASSERT(mLinkStatus == LinkStatus::Inactive,
                      "Actor must be inactive to SetManagerAndRegister");
 
@@ -528,7 +482,8 @@ void IProtocol::UnlinkManager() {
   mManager = nullptr;
 }
 
-bool IProtocol::ChannelSend(UniquePtr<IPC::Message> aMsg, int32_t* aSeqno) {
+bool IProtocol::ChannelSend(UniquePtr<IPC::Message> aMsg,
+                            IPC::Message::seqno_t* aSeqno) {
   if (CanSend()) {
     // NOTE: This send call failing can only occur during toplevel channel
     // teardown. As this is an async call, this isn't reasonable to predict or
@@ -614,9 +569,8 @@ void IProtocol::ActorDisconnected(ActorDestroyReason aWhy) {
     fuzzing::IPCFuzzController::instance().OnActorDestroyed(actor);
 #endif
 
-    int32_t id = actor->mId;
+    ActorId id = actor->mId;
     if (IProtocol* manager = actor->Manager()) {
-      actor->mId = kFreedActorId;
       auto entry = toplevel->mActorMap.Lookup(id);
       MOZ_DIAGNOSTIC_ASSERT(entry && *entry == actor->GetLifecycleProxy(),
                             "ID must be present and reference this actor");
@@ -686,7 +640,7 @@ IToplevelProtocol::IToplevelProtocol(const char* aName, ProtocolId aProtoId,
                                      Side aSide)
     : IRefCountedProtocol(aProtoId, aSide),
       mOtherPid(base::kInvalidProcessId),
-      mLastLocalId(0),
+      mLastLocalId(kNullActorId),
       mChannel(aName, this) {
   mToplevel = this;
 }
@@ -736,58 +690,45 @@ bool IToplevelProtocol::IsOnCxxStack() const {
   return GetIPCChannel()->IsOnCxxStack();
 }
 
-int32_t IToplevelProtocol::NextId() {
+int64_t IToplevelProtocol::NextId() {
   // Generate the next ID to use for a shared memory or protocol. Parent and
   // Child sides of the protocol use different pools.
-  int32_t tag = 0;
-  if (GetSide() == ParentSide) {
-    tag |= 1 << 1;
-  }
-
-  // Check any overflow
-  MOZ_RELEASE_ASSERT(mLastLocalId < (1 << 29));
-
-  // Compute the ID to use with the low two bits as our tag, and the remaining
-  // bits as a monotonic.
-  return (++mLastLocalId << 2) | tag;
+  MOZ_RELEASE_ASSERT(mozilla::Abs(mLastLocalId) < MSG_ROUTING_CONTROL - 1,
+                     "actor id overflow");
+  return (GetSide() == ChildSide) ? --mLastLocalId : ++mLastLocalId;
 }
 
-IProtocol* IToplevelProtocol::Lookup(int32_t aId) {
+IProtocol* IToplevelProtocol::Lookup(ActorId aId) {
   if (auto entry = mActorMap.Lookup(aId)) {
     return entry.Data()->Get();
   }
   return nullptr;
 }
 
-Shmem::SharedMemory* IToplevelProtocol::CreateSharedMemory(size_t aSize,
-                                                           bool aUnsafe,
-                                                           Shmem::id_t* aId) {
-  RefPtr<Shmem::SharedMemory> segment(Shmem::Alloc(aSize));
-  if (!segment) {
-    return nullptr;
+Shmem IToplevelProtocol::CreateSharedMemory(size_t aSize, bool aUnsafe) {
+  auto shmemBuilder = Shmem::Builder(aSize);
+  if (!shmemBuilder) {
+    return {};
   }
-  int32_t id = NextId();
-  Shmem shmem(segment.get(), id, aSize, aUnsafe);
-
-  UniquePtr<Message> descriptor = shmem.MkCreatedMessage(MSG_ROUTING_CONTROL);
-  if (!descriptor) {
-    return nullptr;
+  auto [createdMessage, shmem] =
+      shmemBuilder.Build(NextId(), aUnsafe, MSG_ROUTING_CONTROL);
+  if (!createdMessage) {
+    return {};
   }
-  Unused << GetIPCChannel()->Send(std::move(descriptor));
+  Unused << GetIPCChannel()->Send(std::move(createdMessage));
 
-  *aId = shmem.Id();
-  Shmem::SharedMemory* rawSegment = segment.get();
-  MOZ_ASSERT(!mShmemMap.Contains(*aId), "Don't insert with an existing ID");
-  mShmemMap.InsertOrUpdate(*aId, std::move(segment));
-  return rawSegment;
+  MOZ_ASSERT(!mShmemMap.Contains(shmem.Id()),
+             "Don't insert with an existing ID");
+  mShmemMap.InsertOrUpdate(shmem.Id(), shmem.GetSegment());
+  return shmem;
 }
 
-Shmem::SharedMemory* IToplevelProtocol::LookupSharedMemory(Shmem::id_t aId) {
+Shmem::Segment* IToplevelProtocol::LookupSharedMemory(Shmem::id_t aId) {
   auto entry = mShmemMap.Lookup(aId);
   return entry ? entry.Data().get() : nullptr;
 }
 
-bool IToplevelProtocol::IsTrackingSharedMemory(Shmem::SharedMemory* segment) {
+bool IToplevelProtocol::IsTrackingSharedMemory(const Shmem::Segment* segment) {
   for (const auto& shmem : mShmemMap.Values()) {
     if (segment == shmem) {
       return true;
@@ -798,8 +739,7 @@ bool IToplevelProtocol::IsTrackingSharedMemory(Shmem::SharedMemory* segment) {
 
 bool IToplevelProtocol::DestroySharedMemory(Shmem& shmem) {
   Shmem::id_t aId = shmem.Id();
-  Shmem::SharedMemory* segment = LookupSharedMemory(aId);
-  if (!segment) {
+  if (!LookupSharedMemory(aId)) {
     return false;
   }
 
@@ -821,12 +761,12 @@ void IToplevelProtocol::DeallocShmems() { mShmemMap.Clear(); }
 
 bool IToplevelProtocol::ShmemCreated(const Message& aMsg) {
   Shmem::id_t id;
-  RefPtr<Shmem::SharedMemory> rawmem(Shmem::OpenExisting(aMsg, &id, true));
-  if (!rawmem) {
+  RefPtr<Shmem::Segment> segment(Shmem::OpenExisting(aMsg, &id, true));
+  if (!segment) {
     return false;
   }
   MOZ_ASSERT(!mShmemMap.Contains(id), "Don't insert with an existing ID");
-  mShmemMap.InsertOrUpdate(id, std::move(rawmem));
+  mShmemMap.InsertOrUpdate(id, std::move(segment));
   return true;
 }
 
@@ -907,8 +847,8 @@ bool IPDLAsyncReturnsCallbacks::EntryKey::operator<(
          (mSeqno == aOther.mSeqno && mType < aOther.mType);
 }
 
-void IPDLAsyncReturnsCallbacks::AddCallback(int32_t aSeqno, msgid_t aType,
-                                            Callback aResolve,
+void IPDLAsyncReturnsCallbacks::AddCallback(IPC::Message::seqno_t aSeqno,
+                                            msgid_t aType, Callback aResolve,
                                             RejectCallback aReject) {
   Entry entry{{aSeqno, aType}, std::move(aResolve), std::move(aReject)};
   MOZ_ASSERT(!mMap.ContainsSorted(entry));
@@ -969,3 +909,46 @@ void IPDLAsyncReturnsCallbacks::RejectPendingResponses(
 
 }  // namespace ipc
 }  // namespace mozilla
+
+namespace IPC {
+
+void ParamTraits<mozilla::ipc::IProtocol*>::Write(MessageWriter* aWriter,
+                                                  const paramType& aParam) {
+  MOZ_RELEASE_ASSERT(aWriter->GetActor(),
+                     "Cannot serialize managed actors without an actor");
+
+  mozilla::ipc::ActorId id = mozilla::ipc::IProtocol::kNullActorId;
+  if (aParam) {
+    id = aParam->Id();
+    MOZ_RELEASE_ASSERT(id != mozilla::ipc::IProtocol::kNullActorId,
+                       "Actor has ID of 0?");
+    MOZ_RELEASE_ASSERT(aParam->CanSend(),
+                       "Actor must still be open when sending");
+    MOZ_RELEASE_ASSERT(
+        aWriter->GetActor()->GetIPCChannel() == aParam->GetIPCChannel(),
+        "Actor must be from the same tree as the actor it is being sent over");
+  }
+
+  IPC::WriteParam(aWriter, id);
+}
+
+bool ParamTraits<mozilla::ipc::IProtocol*>::Read(MessageReader* aReader,
+                                                 paramType* aResult) {
+  MOZ_RELEASE_ASSERT(aReader->GetActor(),
+                     "Cannot serialize managed actors without an actor");
+
+  mozilla::ipc::ActorId id;
+  if (!IPC::ReadParam(aReader, &id)) {
+    return false;
+  }
+
+  if (id == mozilla::ipc::IProtocol::kNullActorId) {
+    *aResult = nullptr;
+    return true;
+  }
+
+  *aResult = aReader->GetActor()->Lookup(id);
+  return *aResult != nullptr;
+}
+
+}  // namespace IPC

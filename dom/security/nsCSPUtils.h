@@ -13,6 +13,7 @@
 #include "nsString.h"
 #include "nsTArray.h"
 #include "nsUnicharUtils.h"
+#include "mozilla/ErrorResult.h"
 
 class nsIChannel;
 
@@ -193,6 +194,10 @@ nsresult CSP_AppendCSPFromHeader(nsIContentSecurityPolicy* aCsp,
 
 /* =============== Helpers ================== */
 
+already_AddRefed<nsIContentSecurityPolicy> CSP_CreateFromHeader(
+    const nsAString& aHeaderValue, nsIURI* aSelfURI,
+    nsIPrincipal* aLoadingPrincipal, mozilla::ErrorResult& aRv);
+
 class nsCSPHostSrc;
 
 nsCSPHostSrc* CSP_CreateHostSrcFromSelfURI(nsIURI* aSelfURI);
@@ -206,9 +211,13 @@ class nsCSPSrcVisitor;
 
 void CSP_PercentDecodeStr(const nsAString& aEncStr, nsAString& outDecStr);
 bool CSP_ShouldResponseInheritCSP(nsIChannel* aChannel);
+bool CSP_ShouldURIInheritCSP(nsIURI* aURI);
 
 void CSP_ApplyMetaCSPToDoc(mozilla::dom::Document& aDoc,
                            const nsAString& aPolicyStr);
+
+// Checks if the URI is "chrome://browser/content/browser.xhtml"
+bool CSP_IsBrowserXHTML(nsIURI* aURI);
 
 /* =============== nsCSPSrc ================== */
 
@@ -435,6 +444,19 @@ class nsCSPTrustedTypesDirectivePolicyName : public nsCSPBaseSrc {
 
  private:
   const nsString mName;
+};
+
+class nsCSPTrustedTypesDirectiveInvalidToken : public nsCSPBaseSrc {
+ public:
+  explicit nsCSPTrustedTypesDirectiveInvalidToken(
+      const nsAString& aInvalidToken);
+  virtual ~nsCSPTrustedTypesDirectiveInvalidToken() = default;
+
+  bool visit(nsCSPSrcVisitor* aVisitor) const override;
+  void toString(nsAString& aOutStr) const override;
+
+ private:
+  const nsString mInvalidToken;
 };
 
 /* =============== nsCSPSrcVisitor ================== */

@@ -6,14 +6,14 @@ Note: buffer map state is tested in ./buffer_mapped.spec.ts.
 `;
 
 import { makeTestGroup } from '../../../../common/framework/test_group.js';
-import { ValidationTest } from '../validation_test.js';
+import { AllFeaturesMaxLimitsGPUTest } from '../../../gpu_test.js';
 
 interface CommandBufferOptions {
   device?: GPUDevice;
   valid?: boolean;
 }
 
-class F extends ValidationTest {
+class F extends AllFeaturesMaxLimitsGPUTest {
   createCommandBuffer(options: CommandBufferOptions = {}): GPUCommandBuffer {
     const device = options.device ?? this.device;
 
@@ -48,9 +48,7 @@ g.test('command_buffer,device_mismatch')
     { cb0Mismatched: true, cb1Mismatched: false },
     { cb0Mismatched: false, cb1Mismatched: true },
   ])
-  .beforeAllSubcases(t => {
-    t.selectMismatchedDeviceOrSkipTestCase(undefined);
-  })
+  .beforeAllSubcases(t => t.usesMismatchedDevice())
   .fn(t => {
     const { cb0Mismatched, cb1Mismatched } = t.params;
     const mismatched = cb0Mismatched || cb1Mismatched;

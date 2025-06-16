@@ -107,16 +107,12 @@ static const uint8_t NS_INPUTMODE_NUMERIC = 6;
 static const uint8_t NS_INPUTMODE_DECIMAL = 7;
 static const uint8_t NS_INPUTMODE_SEARCH = 8;
 
-static constexpr nsAttrValue::EnumTable kInputmodeTable[] = {
-    {"none", NS_INPUTMODE_NONE},
-    {"text", NS_INPUTMODE_TEXT},
-    {"tel", NS_INPUTMODE_TEL},
-    {"url", NS_INPUTMODE_URL},
-    {"email", NS_INPUTMODE_EMAIL},
-    {"numeric", NS_INPUTMODE_NUMERIC},
-    {"decimal", NS_INPUTMODE_DECIMAL},
-    {"search", NS_INPUTMODE_SEARCH},
-    {nullptr, 0}};
+static constexpr nsAttrValue::EnumTableEntry kInputmodeTable[] = {
+    {"none", NS_INPUTMODE_NONE},       {"text", NS_INPUTMODE_TEXT},
+    {"tel", NS_INPUTMODE_TEL},         {"url", NS_INPUTMODE_URL},
+    {"email", NS_INPUTMODE_EMAIL},     {"numeric", NS_INPUTMODE_NUMERIC},
+    {"decimal", NS_INPUTMODE_DECIMAL}, {"search", NS_INPUTMODE_SEARCH},
+};
 
 static const uint8_t NS_ENTERKEYHINT_ENTER = 1;
 static const uint8_t NS_ENTERKEYHINT_DONE = 2;
@@ -126,7 +122,7 @@ static const uint8_t NS_ENTERKEYHINT_PREVIOUS = 5;
 static const uint8_t NS_ENTERKEYHINT_SEARCH = 6;
 static const uint8_t NS_ENTERKEYHINT_SEND = 7;
 
-static constexpr nsAttrValue::EnumTable kEnterKeyHintTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kEnterKeyHintTable[] = {
     {"enter", NS_ENTERKEYHINT_ENTER},
     {"done", NS_ENTERKEYHINT_DONE},
     {"go", NS_ENTERKEYHINT_GO},
@@ -134,14 +130,14 @@ static constexpr nsAttrValue::EnumTable kEnterKeyHintTable[] = {
     {"previous", NS_ENTERKEYHINT_PREVIOUS},
     {"search", NS_ENTERKEYHINT_SEARCH},
     {"send", NS_ENTERKEYHINT_SEND},
-    {nullptr, 0}};
+};
 
 static const uint8_t NS_AUTOCAPITALIZE_NONE = 1;
 static const uint8_t NS_AUTOCAPITALIZE_SENTENCES = 2;
 static const uint8_t NS_AUTOCAPITALIZE_WORDS = 3;
 static const uint8_t NS_AUTOCAPITALIZE_CHARACTERS = 4;
 
-static constexpr nsAttrValue::EnumTable kAutocapitalizeTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kAutocapitalizeTable[] = {
     {"none", NS_AUTOCAPITALIZE_NONE},
     {"sentences", NS_AUTOCAPITALIZE_SENTENCES},
     {"words", NS_AUTOCAPITALIZE_WORDS},
@@ -149,9 +145,9 @@ static constexpr nsAttrValue::EnumTable kAutocapitalizeTable[] = {
     {"off", NS_AUTOCAPITALIZE_NONE},
     {"on", NS_AUTOCAPITALIZE_SENTENCES},
     {"", 0},
-    {nullptr, 0}};
+};
 
-static const nsAttrValue::EnumTable* kDefaultAutocapitalize =
+static constexpr const nsAttrValue::EnumTableEntry* kDefaultAutocapitalize =
     &kAutocapitalizeTable[1];
 
 nsresult nsGenericHTMLElement::CopyInnerTo(Element* aDst) {
@@ -171,11 +167,10 @@ nsresult nsGenericHTMLElement::CopyInnerTo(Element* aDst) {
   return NS_OK;
 }
 
-static constexpr nsAttrValue::EnumTable kDirTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kDirTable[] = {
     {"ltr", Directionality::Ltr},
     {"rtl", Directionality::Rtl},
     {"auto", Directionality::Auto},
-    {nullptr, 0},
 };
 
 namespace {
@@ -186,14 +181,14 @@ static constexpr const char kPopoverAttributeValueAuto[] = "auto";
 static constexpr const char kPopoverAttributeValueEmptyString[] = "";
 static constexpr const char kPopoverAttributeValueManual[] = "manual";
 
-static constexpr nsAttrValue::EnumTable kPopoverTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kPopoverTable[] = {
     {kPopoverAttributeValueAuto, PopoverAttributeKeyword::Auto},
     {kPopoverAttributeValueEmptyString, PopoverAttributeKeyword::EmptyString},
     {kPopoverAttributeValueManual, PopoverAttributeKeyword::Manual},
-    {nullptr, 0}};
+};
 
 // See <https://html.spec.whatwg.org/#the-popover-attribute>.
-static const nsAttrValue::EnumTable* kPopoverTableInvalidValueDefault =
+static const nsAttrValue::EnumTableEntry* kPopoverTableInvalidValueDefault =
     &kPopoverTable[2];
 }  // namespace
 
@@ -209,38 +204,6 @@ FetchPriority nsGenericHTMLElement::ToFetchPriority(const nsAString& aValue) {
   ParseFetchPriority(aValue, attrValue);
   MOZ_ASSERT(attrValue.Type() == nsAttrValue::eEnum);
   return FetchPriority(attrValue.GetEnumValue());
-}
-
-namespace {
-// <https://html.spec.whatwg.org/multipage/urls-and-fetching.html#fetch-priority-attributes>.
-static constexpr nsAttrValue::EnumTable kFetchPriorityEnumTable[] = {
-    {kFetchPriorityAttributeValueHigh, FetchPriority::High},
-    {kFetchPriorityAttributeValueLow, FetchPriority::Low},
-    {kFetchPriorityAttributeValueAuto, FetchPriority::Auto},
-    {nullptr, 0}};
-
-// <https://html.spec.whatwg.org/multipage/urls-and-fetching.html#fetch-priority-attributes>.
-static const nsAttrValue::EnumTable*
-    kFetchPriorityEnumTableInvalidValueDefault = &kFetchPriorityEnumTable[2];
-}  // namespace
-
-FetchPriority nsGenericHTMLElement::GetFetchPriority() const {
-  const nsAttrValue* fetchpriorityAttribute =
-      GetParsedAttr(nsGkAtoms::fetchpriority);
-  if (fetchpriorityAttribute) {
-    MOZ_ASSERT(fetchpriorityAttribute->Type() == nsAttrValue::eEnum);
-    return FetchPriority(fetchpriorityAttribute->GetEnumValue());
-  }
-
-  return FetchPriority::Auto;
-}
-
-/* static */
-void nsGenericHTMLElement::ParseFetchPriority(const nsAString& aValue,
-                                              nsAttrValue& aResult) {
-  aResult.ParseEnumValue(aValue, kFetchPriorityEnumTable,
-                         false /* aCaseSensitive */,
-                         kFetchPriorityEnumTableInvalidValueDefault);
 }
 
 void nsGenericHTMLElement::AddToNameTable(nsAtom* aName) {
@@ -266,6 +229,76 @@ void nsGenericHTMLElement::GetAccessKeyLabel(nsString& aLabel) {
   if (!suffix.IsEmpty()) {
     EventStateManager::GetAccessKeyLabelPrefix(this, aLabel);
     aLabel.Append(suffix);
+  }
+}
+
+// https://html.spec.whatwg.org/#dom-hidden
+void nsGenericHTMLElement::GetHidden(
+    Nullable<OwningBooleanOrUnrestrictedDoubleOrString>& aHidden) const {
+  OwningBooleanOrUnrestrictedDoubleOrString value;
+  // 1. If the hidden attribute is in the hidden until found state, then
+  //    return "until-found".
+  nsAutoString result;
+  if (GetAttr(kNameSpaceID_None, nsGkAtoms::hidden, result)) {
+    if (StaticPrefs::dom_hidden_until_found_enabled() &&
+        result.LowerCaseEqualsLiteral("until-found")) {
+      value.SetStringLiteral(u"until-found");
+    } else {
+      // 2. If the hidden attribute is set, then return true.
+      value.SetAsBoolean() = true;
+    }
+  } else {
+    // 3. Return false.
+    value.SetAsBoolean() = false;
+  }
+
+  aHidden.SetValue(value);
+}
+
+// https://html.spec.whatwg.org/#dom-hidden
+void nsGenericHTMLElement::SetHidden(
+    const Nullable<BooleanOrUnrestrictedDoubleOrString>& aHidden,
+    ErrorResult& aRv) {
+  // 4. Otherwise, if the given value is null, then remove the hidden attribute.
+  if (aHidden.IsNull()) {
+    return UnsetAttr(nsGkAtoms::hidden, aRv);
+  }
+  bool isHidden = true;
+  const auto& value = aHidden.Value();
+  // 1. If the given value is a string that is an ASCII case-insensitive match
+  //    for "until-found", then set the hidden attribute to "until-found".
+  if (value.IsString()) {
+    const nsAString& stringValue = value.GetAsString();
+    // 3. Otherwise, if the given value is the empty string, then remove the
+    //    hidden attribute.
+    if (stringValue.IsEmpty()) {
+      isHidden = false;
+    } else if (StaticPrefs::dom_hidden_until_found_enabled() &&
+               stringValue.LowerCaseEqualsLiteral("until-found")) {
+      return SetAttr(nsGkAtoms::hidden, u"until-found"_ns, aRv);
+    }
+  }
+  // 2. Otherwise, if the given value is false, then remove the hidden
+  //    attribute.
+  else if (value.IsBoolean()) {
+    if (!value.GetAsBoolean()) {
+      isHidden = false;
+    }
+  }
+  // 5. Otherwise, if the given value is 0, then remove the hidden attribute.
+  // 6. Otherwise, if the given value is NaN, then remove the hidden attribute.
+  else if (value.IsUnrestrictedDouble()) {
+    double d = value.GetAsUnrestrictedDouble();
+    if (d == 0.0 || std::isnan(d)) {
+      isHidden = false;
+    }
+  }
+
+  // 7. Otherwise, set the hidden attribute to the empty string.
+  if (isHidden) {
+    aRv = SetAttr(kNameSpaceID_None, nsGkAtoms::hidden, u""_ns, true);
+  } else {
+    aRv = UnsetAttr(kNameSpaceID_None, nsGkAtoms::hidden, true);
   }
 }
 
@@ -504,9 +537,24 @@ nsresult nsGenericHTMLElement::BindToTree(BindContext& aContext,
   }
 
   if (IsInUncomposedDoc()) {
+    Document& doc = aContext.OwnerDoc();
     if (HasName() && CanHaveName(NodeInfo()->NameAtom())) {
-      aContext.OwnerDoc().AddToNameTable(
-          this, GetParsedAttr(nsGkAtoms::name)->GetAtomValue());
+      doc.AddToNameTable(this, GetParsedAttr(nsGkAtoms::name)->GetAtomValue());
+    }
+
+    nsAtom* id = nullptr;
+    if (ShouldExposeIdAsHTMLDocumentProperty(this)) {
+      id = DoGetID();
+      MOZ_ASSERT(id && id != nsGkAtoms::_empty);
+      doc.AddToDocumentNameTable(this, id);
+    }
+    if (ShouldExposeNameAsHTMLDocumentProperty(this)) {
+      nsAtom* name = GetParsedAttr(nsGkAtoms::name)->GetAtomValue();
+      MOZ_ASSERT(name && name != nsGkAtoms::_empty);
+      // Make sure not to double-add if id and name are the same.
+      if (id != name) {
+        doc.AddToDocumentNameTable(this, name);
+      }
     }
   }
 
@@ -553,6 +601,23 @@ void nsGenericHTMLElement::UnbindFromTree(UnbindContext& aContext) {
   }
 
   RemoveFromNameTable();
+
+  if (Document* doc = GetUncomposedDoc()) {
+    nsAtom* id = nullptr;
+    if (ShouldExposeIdAsHTMLDocumentProperty(this)) {
+      id = DoGetID();
+      MOZ_ASSERT(id && id != nsGkAtoms::_empty);
+      doc->RemoveFromDocumentNameTable(this, id);
+    }
+    if (ShouldExposeNameAsHTMLDocumentProperty(this)) {
+      nsAtom* name = GetParsedAttr(nsGkAtoms::name)->GetAtomValue();
+      MOZ_ASSERT(name && name != nsGkAtoms::_empty);
+      // Make sure not to double-remove if id and name are the same.
+      if (id != name) {
+        doc->RemoveFromDocumentNameTable(this, name);
+      }
+    }
+  }
 
   if (HasContentEditableAttrTrueOrPlainTextOnly()) {
     if (Document* doc = GetComposedDoc()) {
@@ -678,8 +743,43 @@ void nsGenericHTMLElement::BeforeSetAttr(int32_t aNamespaceID, nsAtom* aName,
     } else if (aName == nsGkAtoms::name) {
       // Have to do this before clearing flag. See RemoveFromNameTable
       RemoveFromNameTable();
+
+      nsAtom* exposedIdOnDocument = nullptr;
+      Document* doc = GetUncomposedDoc();
+      if (doc) {
+        nsAtom* exposedNameOnDocument =
+            ShouldExposeNameAsHTMLDocumentProperty(this)
+                ? GetParsedAttr(nsGkAtoms::name)->GetAtomValue()
+                : nullptr;
+        exposedIdOnDocument =
+            ShouldExposeIdAsHTMLDocumentProperty(this) ? DoGetID() : nullptr;
+        if (exposedNameOnDocument &&
+            exposedNameOnDocument != exposedIdOnDocument) {
+          MOZ_ASSERT(exposedNameOnDocument != nsGkAtoms::_empty);
+          doc->RemoveFromDocumentNameTable(this, exposedNameOnDocument);
+        }
+      }
       if (!aValue || aValue->IsEmptyString()) {
         ClearHasName();
+        // The result of ShouldExposeIdAsHTMLDocumentProperty() might change
+        // after clearing the hasName flag.
+        if (doc && exposedIdOnDocument &&
+            !ShouldExposeIdAsHTMLDocumentProperty(this)) {
+          doc->RemoveFromDocumentNameTable(this, exposedIdOnDocument);
+        }
+      }
+    } else if (aName == nsGkAtoms::id) {
+      if (Document* doc = GetUncomposedDoc()) {
+        nsAtom* exposedIdOnDocument =
+            ShouldExposeIdAsHTMLDocumentProperty(this) ? DoGetID() : nullptr;
+        nsAtom* exposedNameOnDocument =
+            ShouldExposeNameAsHTMLDocumentProperty(this)
+                ? GetParsedAttr(nsGkAtoms::name)->GetAtomValue()
+                : nullptr;
+        if (exposedIdOnDocument &&
+            exposedIdOnDocument != exposedNameOnDocument) {
+          doc->RemoveFromDocumentNameTable(this, exposedIdOnDocument);
+        }
       }
     } else if (aName == nsGkAtoms::contenteditable) {
       if (aValue) {
@@ -837,9 +937,7 @@ void nsGenericHTMLElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
       const auto IsEditableExceptInherit = [](const nsAttrValue& aValue) {
         return aValue.Equals(EmptyString(), eCaseMatters) ||
                aValue.Equals(u"true"_ns, eIgnoreCase) ||
-               (StaticPrefs::
-                    dom_element_contenteditable_plaintext_only_enabled() &&
-                aValue.Equals(u"plaintext-only"_ns, eIgnoreCase));
+               aValue.Equals(u"plaintext-only"_ns, eIgnoreCase);
       };
       // FYI: Now, both HasContentEditableAttrTrueOrPlainTextOnly() and
       // HasContentEditableAttrFalse() return true.  Therefore, we need to clear
@@ -877,6 +975,29 @@ void nsGenericHTMLElement::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
         SetHasName();
         if (CanHaveName(NodeInfo()->NameAtom())) {
           AddToNameTable(aValue->GetAtomValue());
+        }
+        if (Document* doc = GetUncomposedDoc()) {
+          if (ShouldExposeNameAsHTMLDocumentProperty(this)) {
+            nsAtom* id = ShouldExposeIdAsHTMLDocumentProperty(this) ? DoGetID()
+                                                                    : nullptr;
+            nsAtom* name = aValue->GetAtomValue();
+            // Make sure not to double-add if id and name are the same
+            if (id != name) {
+              doc->AddToDocumentNameTable(this, name);
+            }
+          }
+        }
+      }
+    } else if (aName == nsGkAtoms::id) {
+      if (Document* doc = GetUncomposedDoc()) {
+        if (ShouldExposeIdAsHTMLDocumentProperty(this)) {
+          nsAtom* id = aValue->GetAtomValue();
+          nsAtom* name = ShouldExposeNameAsHTMLDocumentProperty(this)
+                             ? GetParsedAttr(nsGkAtoms::name)->GetAtomValue()
+                             : nullptr;
+          if (id != name) {
+            doc->AddToDocumentNameTable(this, id);
+          }
         }
       }
     } else if (aName == nsGkAtoms::inputmode ||
@@ -1127,23 +1248,23 @@ nsMapRuleToAttributesFunc nsGenericHTMLElement::GetAttributeMappingFunction()
   return &MapCommonAttributesInto;
 }
 
-static constexpr nsAttrValue::EnumTable kDivAlignTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kDivAlignTable[] = {
     {"left", StyleTextAlign::MozLeft},
     {"right", StyleTextAlign::MozRight},
     {"center", StyleTextAlign::MozCenter},
     {"middle", StyleTextAlign::MozCenter},
     {"justify", StyleTextAlign::Justify},
-    {nullptr, 0}};
+};
 
-static constexpr nsAttrValue::EnumTable kFrameborderTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kFrameborderTable[] = {
     {"yes", FrameBorderProperty::Yes},
     {"no", FrameBorderProperty::No},
     {"1", FrameBorderProperty::One},
     {"0", FrameBorderProperty::Zero},
-    {nullptr, 0}};
+};
 
 // TODO(emilio): Nobody uses the parsed attribute here.
-static constexpr nsAttrValue::EnumTable kScrollingTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kScrollingTable[] = {
     {"yes", ScrollingAttribute::Yes},
     {"no", ScrollingAttribute::No},
     {"on", ScrollingAttribute::On},
@@ -1151,36 +1272,36 @@ static constexpr nsAttrValue::EnumTable kScrollingTable[] = {
     {"scroll", ScrollingAttribute::Scroll},
     {"noscroll", ScrollingAttribute::Noscroll},
     {"auto", ScrollingAttribute::Auto},
-    {nullptr, 0}};
+};
 
-static constexpr nsAttrValue::EnumTable kTableVAlignTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kTableVAlignTable[] = {
     {"top", StyleVerticalAlignKeyword::Top},
     {"middle", StyleVerticalAlignKeyword::Middle},
     {"bottom", StyleVerticalAlignKeyword::Bottom},
     {"baseline", StyleVerticalAlignKeyword::Baseline},
-    {nullptr, 0}};
+};
+
+static constexpr nsAttrValue::EnumTableEntry kAlignTable[] = {
+    {"left", StyleTextAlign::Left},
+    {"right", StyleTextAlign::Right},
+
+    {"top", StyleVerticalAlignKeyword::Top},
+    {"middle", StyleVerticalAlignKeyword::MozMiddleWithBaseline},
+
+    // Intentionally not bottom.
+    {"bottom", StyleVerticalAlignKeyword::Baseline},
+
+    {"center", StyleVerticalAlignKeyword::MozMiddleWithBaseline},
+    {"baseline", StyleVerticalAlignKeyword::Baseline},
+
+    {"texttop", StyleVerticalAlignKeyword::TextTop},
+    {"absmiddle", StyleVerticalAlignKeyword::Middle},
+    {"abscenter", StyleVerticalAlignKeyword::Middle},
+    {"absbottom", StyleVerticalAlignKeyword::Bottom},
+};
 
 bool nsGenericHTMLElement::ParseAlignValue(const nsAString& aString,
                                            nsAttrValue& aResult) {
-  static constexpr nsAttrValue::EnumTable kAlignTable[] = {
-      {"left", StyleTextAlign::Left},
-      {"right", StyleTextAlign::Right},
-
-      {"top", StyleVerticalAlignKeyword::Top},
-      {"middle", StyleVerticalAlignKeyword::MozMiddleWithBaseline},
-
-      // Intentionally not bottom.
-      {"bottom", StyleVerticalAlignKeyword::Baseline},
-
-      {"center", StyleVerticalAlignKeyword::MozMiddleWithBaseline},
-      {"baseline", StyleVerticalAlignKeyword::Baseline},
-
-      {"texttop", StyleVerticalAlignKeyword::TextTop},
-      {"absmiddle", StyleVerticalAlignKeyword::Middle},
-      {"abscenter", StyleVerticalAlignKeyword::Middle},
-      {"absbottom", StyleVerticalAlignKeyword::Bottom},
-      {nullptr, 0}};
-
   static_assert(uint8_t(StyleTextAlign::Left) !=
                     uint8_t(StyleVerticalAlignKeyword::Top) &&
                 uint8_t(StyleTextAlign::Left) !=
@@ -1212,12 +1333,12 @@ bool nsGenericHTMLElement::ParseAlignValue(const nsAString& aString,
 
 //----------------------------------------
 
-static constexpr nsAttrValue::EnumTable kTableHAlignTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kTableHAlignTable[] = {
     {"left", StyleTextAlign::Left},
     {"right", StyleTextAlign::Right},
     {"center", StyleTextAlign::Center},
     {"justify", StyleTextAlign::Justify},
-    {nullptr, 0}};
+};
 
 bool nsGenericHTMLElement::ParseTableHAlignValue(const nsAString& aString,
                                                  nsAttrValue& aResult) {
@@ -1227,14 +1348,14 @@ bool nsGenericHTMLElement::ParseTableHAlignValue(const nsAString& aString,
 //----------------------------------------
 
 // This table is used for td, th, tr, col, thead, tbody and tfoot.
-static constexpr nsAttrValue::EnumTable kTableCellHAlignTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kTableCellHAlignTable[] = {
     {"left", StyleTextAlign::MozLeft},
     {"right", StyleTextAlign::MozRight},
     {"center", StyleTextAlign::MozCenter},
     {"justify", StyleTextAlign::Justify},
     {"middle", StyleTextAlign::MozCenter},
     {"absmiddle", StyleTextAlign::Center},
-    {nullptr, 0}};
+};
 
 bool nsGenericHTMLElement::ParseTableCellHAlignValue(const nsAString& aString,
                                                      nsAttrValue& aResult) {
@@ -1266,27 +1387,28 @@ bool nsGenericHTMLElement::ParseImageAttribute(nsAtom* aAttribute,
   return false;
 }
 
+static constexpr nsAttrValue::EnumTableEntry kReferrerPolicyTable[] = {
+    {GetEnumString(ReferrerPolicy::No_referrer).get(),
+     static_cast<int16_t>(ReferrerPolicy::No_referrer)},
+    {GetEnumString(ReferrerPolicy::Origin).get(),
+     static_cast<int16_t>(ReferrerPolicy::Origin)},
+    {GetEnumString(ReferrerPolicy::Origin_when_cross_origin).get(),
+     static_cast<int16_t>(ReferrerPolicy::Origin_when_cross_origin)},
+    {GetEnumString(ReferrerPolicy::No_referrer_when_downgrade).get(),
+     static_cast<int16_t>(ReferrerPolicy::No_referrer_when_downgrade)},
+    {GetEnumString(ReferrerPolicy::Unsafe_url).get(),
+     static_cast<int16_t>(ReferrerPolicy::Unsafe_url)},
+    {GetEnumString(ReferrerPolicy::Strict_origin).get(),
+     static_cast<int16_t>(ReferrerPolicy::Strict_origin)},
+    {GetEnumString(ReferrerPolicy::Same_origin).get(),
+     static_cast<int16_t>(ReferrerPolicy::Same_origin)},
+    {GetEnumString(ReferrerPolicy::Strict_origin_when_cross_origin).get(),
+     static_cast<int16_t>(ReferrerPolicy::Strict_origin_when_cross_origin)},
+};
+
 bool nsGenericHTMLElement::ParseReferrerAttribute(const nsAString& aString,
                                                   nsAttrValue& aResult) {
   using mozilla::dom::ReferrerInfo;
-  static constexpr nsAttrValue::EnumTable kReferrerPolicyTable[] = {
-      {GetEnumString(ReferrerPolicy::No_referrer).get(),
-       static_cast<int16_t>(ReferrerPolicy::No_referrer)},
-      {GetEnumString(ReferrerPolicy::Origin).get(),
-       static_cast<int16_t>(ReferrerPolicy::Origin)},
-      {GetEnumString(ReferrerPolicy::Origin_when_cross_origin).get(),
-       static_cast<int16_t>(ReferrerPolicy::Origin_when_cross_origin)},
-      {GetEnumString(ReferrerPolicy::No_referrer_when_downgrade).get(),
-       static_cast<int16_t>(ReferrerPolicy::No_referrer_when_downgrade)},
-      {GetEnumString(ReferrerPolicy::Unsafe_url).get(),
-       static_cast<int16_t>(ReferrerPolicy::Unsafe_url)},
-      {GetEnumString(ReferrerPolicy::Strict_origin).get(),
-       static_cast<int16_t>(ReferrerPolicy::Strict_origin)},
-      {GetEnumString(ReferrerPolicy::Same_origin).get(),
-       static_cast<int16_t>(ReferrerPolicy::Same_origin)},
-      {GetEnumString(ReferrerPolicy::Strict_origin_when_cross_origin).get(),
-       static_cast<int16_t>(ReferrerPolicy::Strict_origin_when_cross_origin)},
-      {nullptr, ReferrerPolicy::_empty}};
   return aResult.ParseEnumValue(aString, kReferrerPolicyTable, false);
 }
 
@@ -1334,8 +1456,15 @@ void nsGenericHTMLElement::MapCommonAttributesIntoExceptHidden(
 void nsGenericHTMLElement::MapCommonAttributesInto(
     MappedDeclarationsBuilder& aBuilder) {
   MapCommonAttributesIntoExceptHidden(aBuilder);
-  if (!aBuilder.PropertyIsSet(eCSSProperty_display)) {
-    if (aBuilder.GetAttr(nsGkAtoms::hidden)) {
+  MOZ_ASSERT(!aBuilder.PropertyIsSet(eCSSProperty_display));
+  MOZ_ASSERT(!aBuilder.PropertyIsSet(eCSSProperty_content_visibility));
+
+  if (const nsAttrValue* hidden = aBuilder.GetAttr(nsGkAtoms::hidden)) {
+    if (StaticPrefs::dom_hidden_until_found_enabled() &&
+        hidden->Equals(nsGkAtoms::untilFound, eIgnoreCase)) {
+      aBuilder.SetKeywordValue(eCSSProperty_content_visibility,
+                               StyleContentVisibility::Hidden);
+    } else {
       aBuilder.SetKeywordValue(eCSSProperty_display, StyleDisplay::None._0);
     }
   }
@@ -2534,7 +2663,7 @@ void nsGenericHTMLElement::ChangeEditableState(int32_t aChange) {
   // in shadow DOM and the composed document is in design mode.
   if (IsInDesignMode() && !IsInShadowTree() && aChange > 0 &&
       previousEditingState == Document::EditingState::eContentEditable) {
-    if (HTMLEditor* htmlEditor =
+    if (const RefPtr<HTMLEditor> htmlEditor =
             nsContentUtils::GetHTMLEditor(document->GetPresContext())) {
       htmlEditor->NotifyEditingHostMaybeChanged();
     }
@@ -2807,14 +2936,14 @@ void nsGenericHTMLFormControlElement::SetFormAutofillState(
 
 //----------------------------------------------------------------------
 
-static constexpr nsAttrValue::EnumTable kPopoverTargetActionTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kPopoverTargetActionTable[] = {
     {"toggle", PopoverTargetAction::Toggle},
     {"show", PopoverTargetAction::Show},
     {"hide", PopoverTargetAction::Hide},
-    {nullptr, 0}};
+};
 
-static const nsAttrValue::EnumTable* kPopoverTargetActionDefault =
-    &kPopoverTargetActionTable[0];
+static constexpr const nsAttrValue::EnumTableEntry*
+    kPopoverTargetActionDefault = &kPopoverTargetActionTable[0];
 
 nsGenericHTMLFormControlElementWithState::
     nsGenericHTMLFormControlElementWithState(

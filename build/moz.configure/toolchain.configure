@@ -79,6 +79,14 @@ option(
 
 
 option(
+    env="LIBS",
+    help="Extra libraries for linking object files",
+    nargs=1,
+    default="",
+)
+
+
+option(
     env="MOZ_OPTIMIZE_FLAGS",
     help="Extra optimization flags",
     nargs=1,
@@ -225,7 +233,7 @@ with only_when(host_is_osx | target_is_osx):
     )
 
     def mac_sdk_min_version():
-        return "14.4"
+        return "15.4"
 
     @depends(
         "--with-macos-sdk",
@@ -330,7 +338,7 @@ with only_when(target_is_ios):
         "--enable-ios-target",
         env="IPHONEOS_DEPLOYMENT_TARGET",
         nargs=1,
-        default="17.4",
+        default="18.4",
         help="Set the minimum iOS version needed at runtime",
     )
 
@@ -357,7 +365,7 @@ with only_when(target_is_ios):
         return target.cpu == "x86_64" or target.raw_os == "ios-sim"
 
     def ios_sdk_min_version():
-        return "17.4"
+        return "18.4"
 
     @depends(target_is_ios_simulator)
     def ios_sdk_name(target_is_ios_simulator):
@@ -931,21 +939,27 @@ clang_search_path = bootstrap_search_path("clang/bin")
 
 
 @depends(
-    bootstrap_search_path("rustc/bin", when="MOZ_AUTOMATION"),
+    bootstrap_path("rustc/bin", when=moz_automation),
     original_path,
 )
 @imports("os")
 @imports(_from="os", _import="environ")
 def rust_search_path(rust_path, original_path):
-    result = list(rust_path or original_path)
-    # Also add the rustup install directory for cargo/rustc.
+    result = []
+    # The order we search for a rust compiler is:
+    # - bootstrap directory (only used by CI at the moment)
+    # - rustup install directory ($CARGO_HOME/bin)
+    # - $PATH
     cargo_home = environ.get("CARGO_HOME", "")
     if cargo_home:
         cargo_home = os.path.abspath(cargo_home)
     else:
         cargo_home = os.path.expanduser(os.path.join("~", ".cargo"))
     rustup_path = os.path.join(cargo_home, "bin")
-    result.insert(0, rustup_path)
+    if rust_path:
+        result.append(rust_path)
+    result.append(rustup_path)
+    result.extend(original_path)
     return result
 
 

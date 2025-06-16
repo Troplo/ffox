@@ -198,38 +198,8 @@ bool wasm::CheckIsSubtypeOf(Decoder& d, const CodeMetadata& codeMeta,
 
 // Function body validation.
 
-struct NopOpDumper {
-  void dumpOpBegin(OpBytes op) {}
-  void dumpOpEnd() {}
-  void dumpTypeIndex(uint32_t typeIndex) {}
-  void dumpFuncIndex(uint32_t funcIndex) {}
-  void dumpTableIndex(uint32_t tableIndex) {}
-  void dumpGlobalIndex(uint32_t globalIndex) {}
-  void dumpMemoryIndex(uint32_t memoryIndex) {}
-  void dumpElemIndex(uint32_t elemIndex) {}
-  void dumpDataIndex(uint32_t dataIndex) {}
-  void dumpTagIndex(uint32_t tagIndex) {}
-  void dumpLocalIndex(uint32_t localIndex) {}
-  void dumpResultType(ResultType type) {}
-  void dumpI32Const(int32_t constant) {}
-  void dumpI64Const(int64_t constant) {}
-  void dumpF32Const(float constant) {}
-  void dumpF64Const(double constant) {}
-  void dumpV128Const(V128 constant) {}
-  void dumpVectorMask(V128 mask) {}
-  void dumpRefType(RefType type) {}
-  void dumpHeapType(RefType type) {}
-  void dumpValType(ValType type) {}
-  void dumpTryTableCatches(const TryTableCatchVector& catches) {}
-  void dumpLinearMemoryAddress(LinearMemoryAddress<Nothing> addr) {}
-  void dumpBlockDepth(uint32_t relativeDepth) {}
-  void dumpBlockDepths(const Uint32Vector& relativeDepths) {}
-  void dumpFieldIndex(uint32_t fieldIndex) {}
-  void dumpNumElements(uint32_t numElements) {}
-  void dumpLaneIndex(uint32_t laneIndex) {}
-};
-
-bool wasm::ValidateOps(ValidatingOpIter& iter, BaseOpDumper& dumper,
+template <class T>
+bool wasm::ValidateOps(ValidatingOpIter& iter, T& dumper,
                        const CodeMetadata& codeMeta) {
   while (true) {
     OpBytes op;
@@ -2436,6 +2406,13 @@ bool wasm::ValidateOps(ValidatingOpIter& iter, BaseOpDumper& dumper,
   MOZ_CRASH("unreachable");
 }
 
+template bool wasm::ValidateOps<NopOpDumper>(ValidatingOpIter& iter,
+                                             NopOpDumper& dumper,
+                                             const CodeMetadata& codeMeta);
+template bool wasm::ValidateOps<OpDumper>(ValidatingOpIter& iter,
+                                          OpDumper& dumper,
+                                          const CodeMetadata& codeMeta);
+
 bool wasm::ValidateFunctionBody(const CodeMetadata& codeMeta,
                                 uint32_t funcIndex, uint32_t bodySize,
                                 Decoder& d) {
@@ -2448,7 +2425,7 @@ bool wasm::ValidateFunctionBody(const CodeMetadata& codeMeta,
   }
 
   ValidatingOpIter iter(codeMeta, d, locals);
-  BaseOpDumper visitor;
+  NopOpDumper visitor;
 
   if (!iter.startFunction(funcIndex)) {
     return false;
@@ -2898,13 +2875,24 @@ static bool DecodeLimits(Decoder& d, LimitsKind kind, Limits* limits) {
   return true;
 }
 
-static bool DecodeTableTypeAndLimits(Decoder& d, CodeMetadata* codeMeta) {
+// Combined decoding for both table types and the augmented form of table types
+// that can include init expressions:
+//
+// https://wasm-dsl.github.io/spectec/core/binary/types.html#table-types
+// https://wasm-dsl.github.io/spectec/core/binary/modules.html#table-section
+//
+// Only defined tables are therefore allowed to have init expressions, not
+// imported tables.
+static bool DecodeTableType(Decoder& d, CodeMetadata* codeMeta, bool isImport) {
   bool initExprPresent = false;
   uint8_t typeCode;
   if (!d.peekByte(&typeCode)) {
     return d.fail("expected type code");
   }
   if (typeCode == (uint8_t)TypeCode::TableHasInitExpr) {
+    if (isImport) {
+      return d.fail("imported tables cannot have initializer expressions");
+    }
     d.uncheckedReadFixedU8();
     uint8_t flags;
     if (!d.readFixedU8(&flags) || flags != 0) {
@@ -2950,14 +2938,14 @@ static bool DecodeTableTypeAndLimits(Decoder& d, CodeMetadata* codeMeta) {
     }
     initExpr = Some(std::move(initializer));
   } else {
-    if (!tableElemType.isNullable()) {
+    if (!tableElemType.isNullable() && !isImport) {
       return d.fail("table with non-nullable references requires initializer");
     }
   }
 
   return codeMeta->tables.emplaceBack(limits, tableElemType,
                                       std::move(initExpr),
-                                      /* isAsmJS */ false);
+                                      /* isAsmJS */ false, isImport);
 }
 
 static bool DecodeGlobalType(Decoder& d, const SharedTypeContext& types,
@@ -3078,10 +3066,9 @@ static bool DecodeImport(Decoder& d, CodeMetadata* codeMeta,
       break;
     }
     case DefinitionKind::Table: {
-      if (!DecodeTableTypeAndLimits(d, codeMeta)) {
+      if (!DecodeTableType(d, codeMeta, /*isImport=*/true)) {
         return false;
       }
-      codeMeta->tables.back().isImported = true;
       break;
     }
     case DefinitionKind::Memory: {
@@ -3302,7 +3289,7 @@ static bool DecodeTableSection(Decoder& d, CodeMetadata* codeMeta) {
   }
 
   for (uint32_t i = 0; i < numTables; ++i) {
-    if (!DecodeTableTypeAndLimits(d, codeMeta)) {
+    if (!DecodeTableType(d, codeMeta, /*isImport=*/false)) {
       return false;
     }
   }
@@ -3832,6 +3819,10 @@ bool wasm::StartsCodeSection(const uint8_t* begin, const uint8_t* end,
     }
 
     if (id == uint8_t(SectionId::Code)) {
+      if (range.size > MaxCodeSectionBytes) {
+        return false;
+      }
+
       *codeSection = range;
       return true;
     }
@@ -3927,7 +3918,9 @@ static bool DecodeBranchHintingSection(Decoder& d, CodeMetadata* codeMeta) {
     codeMeta->branchHints.setFailedAndClear();
   }
 
-  d.finishCustomSection(BranchHintingSectionName, *range);
+  if (!d.finishCustomSection(BranchHintingSectionName, *range)) {
+    codeMeta->branchHints.setFailedAndClear();
+  }
   return true;
 }
 #endif
@@ -4167,9 +4160,9 @@ static bool DecodeModuleNameSubsection(Decoder& d,
     return d.fail("failed to read module name length");
   }
 
-  MOZ_ASSERT(d.currentOffset() >= nameSection.payloadOffset);
+  MOZ_ASSERT(d.currentOffset() >= nameSection.payload.start);
   moduleName.offsetInNamePayload =
-      d.currentOffset() - nameSection.payloadOffset;
+      d.currentOffset() - nameSection.payload.start;
 
   const uint8_t* bytes;
   if (!d.readBytes(moduleName.length, &bytes)) {
@@ -4181,7 +4174,7 @@ static bool DecodeModuleNameSubsection(Decoder& d,
   }
 
   // Only save the module name if the whole subsection validates.
-  codeMeta->moduleName.emplace(moduleName);
+  codeMeta->nameSection->moduleName = moduleName;
   return true;
 }
 
@@ -4229,9 +4222,9 @@ static bool DecodeFunctionNameSubsection(Decoder& d,
       return false;
     }
 
-    MOZ_ASSERT(d.currentOffset() >= nameSection.payloadOffset);
+    MOZ_ASSERT(d.currentOffset() >= nameSection.payload.start);
     funcName.offsetInNamePayload =
-        d.currentOffset() - nameSection.payloadOffset;
+        d.currentOffset() - nameSection.payload.start;
 
     if (!d.readBytes(funcName.length)) {
       return d.fail("unable to read function name bytes");
@@ -4244,9 +4237,8 @@ static bool DecodeFunctionNameSubsection(Decoder& d,
     return false;
   }
 
-  // To encourage fully valid function names subsections; only save names if
-  // the entire subsection decoded correctly.
-  codeMeta->funcNames = std::move(funcNames);
+  // Only save names if the entire subsection decoded correctly.
+  codeMeta->nameSection->funcNames = std::move(funcNames);
   return true;
 }
 
@@ -4260,8 +4252,10 @@ static bool DecodeNameSection(Decoder& d, CodeMetadata* codeMeta,
     return true;
   }
 
-  codeMeta->nameCustomSectionIndex =
-      Some(codeMeta->customSectionRanges.length() - 1);
+  codeMeta->nameSection.emplace((NameSection){
+      .customSectionIndex =
+          uint32_t(codeMeta->customSectionRanges.length() - 1),
+  });
   const CustomSectionRange& nameSection = codeMeta->customSectionRanges.back();
 
   // Once started, custom sections do not report validation errors.
@@ -4281,7 +4275,9 @@ static bool DecodeNameSection(Decoder& d, CodeMetadata* codeMeta,
   }
 
 finish:
-  d.finishCustomSection(NameSectionName, *range);
+  if (!d.finishCustomSection(NameSectionName, *range)) {
+    codeMeta->nameSection = mozilla::Nothing();
+  }
   return true;
 }
 
@@ -4297,10 +4293,6 @@ bool wasm::DecodeModuleTail(Decoder& d, CodeMetadata* codeMeta,
 
   while (!d.done()) {
     if (!d.skipCustomSection(codeMeta)) {
-      if (d.resilientMode()) {
-        d.clearError();
-        return true;
-      }
       return false;
     }
   }
@@ -4310,10 +4302,8 @@ bool wasm::DecodeModuleTail(Decoder& d, CodeMetadata* codeMeta,
 
 // Validate algorithm.
 
-bool wasm::Validate(JSContext* cx, const ShareableBytes& bytecode,
+bool wasm::Validate(JSContext* cx, const BytecodeSource& bytecode,
                     const FeatureOptions& options, UniqueChars* error) {
-  Decoder d(bytecode.vector, 0, error);
-
   FeatureArgs features = FeatureArgs::build(cx, options);
   SharedCompileArgs compileArgs = CompileArgs::buildForValidation(features);
   if (!compileArgs) {
@@ -4325,16 +4315,46 @@ bool wasm::Validate(JSContext* cx, const ShareableBytes& bytecode,
   }
   MutableCodeMetadata codeMeta = moduleMeta->codeMeta;
 
-  if (!DecodeModuleEnvironment(d, codeMeta, moduleMeta)) {
+  Decoder envDecoder(bytecode.envSpan(), bytecode.envRange().start, error);
+  if (!DecodeModuleEnvironment(envDecoder, codeMeta, moduleMeta)) {
     return false;
   }
 
-  if (!DecodeCodeSection(d, codeMeta)) {
-    return false;
-  }
+  if (bytecode.hasCodeSection()) {
+    // DecodeModuleEnvironment will stop and return true if there is an unknown
+    // section before the code section. We must check this and return an error.
+    if (!moduleMeta->codeMeta->codeSectionRange) {
+      envDecoder.fail("unknown section before code section");
+      return false;
+    }
 
-  if (!DecodeModuleTail(d, codeMeta, moduleMeta)) {
-    return false;
+    // Our pre-parse that split the module should ensure that after we've
+    // parsed the environment there are no bytes left.
+    MOZ_RELEASE_ASSERT(envDecoder.done());
+
+    Decoder codeDecoder(bytecode.codeSpan(), bytecode.codeRange().start, error);
+    if (!DecodeCodeSection(codeDecoder, codeMeta)) {
+      return false;
+    }
+    // Our pre-parse that split the module should ensure that after we've
+    // parsed the code section there are no bytes left.
+    MOZ_RELEASE_ASSERT(codeDecoder.done());
+
+    Decoder tailDecoder(bytecode.tailSpan(), bytecode.tailRange().start, error);
+    if (!DecodeModuleTail(tailDecoder, codeMeta, moduleMeta)) {
+      return false;
+    }
+    // Decoding the module tail should consume all remaining bytes.
+    MOZ_RELEASE_ASSERT(tailDecoder.done());
+  } else {
+    if (!DecodeCodeSection(envDecoder, codeMeta)) {
+      return false;
+    }
+    if (!DecodeModuleTail(envDecoder, codeMeta, moduleMeta)) {
+      return false;
+    }
+    // Decoding the module tail should consume all remaining bytes.
+    MOZ_RELEASE_ASSERT(envDecoder.done());
   }
 
   MOZ_ASSERT(!*error, "unreported error in decoding");

@@ -147,7 +147,9 @@ describe("<ImpressionStats>", () => {
         recommended_at: undefined,
         received_rank: undefined,
         topic: undefined,
+        features: undefined,
         is_list_card: undefined,
+        format: "medium-card",
       },
       {
         id: 2,
@@ -160,7 +162,9 @@ describe("<ImpressionStats>", () => {
         recommended_at: undefined,
         received_rank: undefined,
         topic: undefined,
+        features: undefined,
         is_list_card: undefined,
+        format: "medium-card",
       },
       {
         id: 3,
@@ -173,7 +177,9 @@ describe("<ImpressionStats>", () => {
         recommended_at: undefined,
         received_rank: undefined,
         topic: undefined,
+        features: undefined,
         is_list_card: undefined,
+        format: "medium-card",
       },
     ]);
     assert.equal(
@@ -265,7 +271,9 @@ describe("<ImpressionStats>", () => {
         received_rank: undefined,
         fetchTimestamp: TEST_FETCH_TIMESTAMP,
         topic: undefined,
+        features: undefined,
         is_list_card: undefined,
+        format: "medium-card",
       },
       {
         id: 2,
@@ -278,7 +286,9 @@ describe("<ImpressionStats>", () => {
         received_rank: undefined,
         fetchTimestamp: TEST_FETCH_TIMESTAMP,
         topic: undefined,
+        features: undefined,
         is_list_card: undefined,
+        format: "medium-card",
       },
       {
         id: 3,
@@ -291,7 +301,9 @@ describe("<ImpressionStats>", () => {
         received_rank: undefined,
         fetchTimestamp: TEST_FETCH_TIMESTAMP,
         topic: undefined,
+        features: undefined,
         is_list_card: undefined,
+        format: "medium-card",
       },
     ]);
     assert.equal(

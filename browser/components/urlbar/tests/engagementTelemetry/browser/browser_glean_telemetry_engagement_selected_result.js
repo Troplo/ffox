@@ -13,7 +13,7 @@
 ChromeUtils.defineESModuleGetters(this, {
   UrlbarProviderClipboard:
     "resource:///modules/UrlbarProviderClipboard.sys.mjs",
-  SearchUtils: "resource://gre/modules/SearchUtils.sys.mjs",
+  SearchUtils: "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
 });
 
 // This test has many subtests and can time out in verify mode.
@@ -893,7 +893,7 @@ add_task(async function selected_result_action() {
         selected_position: 2,
         provider: "UrlbarProviderGlobalActions",
         results: "search_engine,action",
-        actions: "none",
+        actions: "none,settings",
       },
     ]);
   });

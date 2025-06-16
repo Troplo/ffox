@@ -9,6 +9,7 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   Addon: "chrome://remote/content/shared/Addon.sys.mjs",
   assert: "chrome://remote/content/shared/webdriver/Assert.sys.mjs",
+  error: "chrome://remote/content/shared/webdriver/Errors.sys.mjs",
   pprint: "chrome://remote/content/shared/Format.sys.mjs",
 });
 
@@ -83,6 +84,8 @@ class WebExtensionModule extends RootBiDiModule {
    * @param {object=} options
    * @param {ExtensionArchivePath|ExtensionPath|ExtensionBase64} options.extensionData
    *     The WebExtension to be installed.
+   * @param {boolean=} options.moz_permanent (moz:permanent)
+   *     If true, install the web extension permanently. Defaults to `false`.
    *
    * @returns {InstallResult}
    *     The id of the installed WebExtension.
@@ -93,7 +96,7 @@ class WebExtensionModule extends RootBiDiModule {
    *     Tried to install an invalid WebExtension.
    */
   async install(options = {}) {
-    const { extensionData } = options;
+    const { extensionData, "moz:permanent": permanent = false } = options;
 
     lazy.assert.object(
       extensionData,
@@ -110,6 +113,11 @@ class WebExtensionModule extends RootBiDiModule {
         lazy.pprint`got ${type}`
     )(type);
 
+    lazy.assert.boolean(
+      permanent,
+      lazy.pprint`Expected "moz:permanent" to be a boolean, got ${permanent}`
+    );
+
     let extensionId;
 
     switch (type) {
@@ -119,7 +127,11 @@ class WebExtensionModule extends RootBiDiModule {
           lazy.pprint`Expected "extensionData.value" to be a string, got ${value}`
         );
 
-        extensionId = await lazy.Addon.installWithBase64(value, false, false);
+        extensionId = await lazy.Addon.installWithBase64(
+          value,
+          !permanent,
+          false
+        );
         break;
       case ExtensionDataType.ArchivePath:
       case ExtensionDataType.Path:
@@ -128,7 +140,7 @@ class WebExtensionModule extends RootBiDiModule {
           lazy.pprint`Expected "extensionData.path" to be a string, got ${path}`
         );
 
-        extensionId = await lazy.Addon.installWithPath(path, false, false);
+        extensionId = await lazy.Addon.installWithPath(path, !permanent, false);
     }
 
     return {
@@ -159,6 +171,12 @@ class WebExtensionModule extends RootBiDiModule {
       addonId,
       lazy.pprint`Expected "extension" to be a string, got ${addonId}`
     );
+
+    if (addonId === "") {
+      throw new lazy.error.NoSuchWebExtensionError(
+        `Expected "extension" to be a non-empty string, got ${addonId}`
+      );
+    }
 
     await lazy.Addon.uninstall(addonId);
   }

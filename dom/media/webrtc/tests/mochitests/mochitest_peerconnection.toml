@@ -111,9 +111,6 @@ scheme = "http"
 
 ["test_peerConnection_basicAudioRequireEOC.html"]
 
-["test_peerConnection_verifyNonEmptyFmtp.html"]
-skip-if = ["os == 'android'"]
-
 ["test_peerConnection_basicAudioVerifyRtpHeaderExtensions.html"]
 
 ["test_peerConnection_basicAudioVideo.html"]
@@ -400,13 +397,17 @@ skip-if = ["os == 'android'"] # Bug 1614460
 ["test_peerConnection_simulcastOffer_oldSetParameters.html"]
 
 ["test_peerConnection_simulcastOffer_screenshare.html"]
-skip-if = ["os == 'android'"] # no screenshare on android
+skip-if = [
+  "os == 'android'", # no screenshare on android
+  "os == 'mac' && os_version == '15.30' && arch == 'aarch64'", # Bug 1941688
+]
 
 ["test_peerConnection_stats.html"]
 
 ["test_peerConnection_stats_jitter.html"]
 
 ["test_peerConnection_stats_oneway.html"]
+skip-if = ["os == 'linux' && os_version == '24.04' && processor == 'x86_64' && display == 'x11' && opt && socketprocess_e10s"] # Bug 1798188
 
 ["test_peerConnection_stats_relayProtocol.html"]
 skip-if = [
@@ -461,6 +462,9 @@ skip-if = [
 skip-if = ["os == 'android' && processor == 'x86_64' && !debug"] # Bug 1783287
 
 ["test_peerConnection_verifyDescriptions.html"]
+
+["test_peerConnection_verifyNonEmptyFmtp.html"]
+skip-if = ["os == 'android'"]
 
 ["test_peerConnection_verifyVideoAfterRenegotiation.html"]
 

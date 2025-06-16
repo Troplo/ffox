@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -28,10 +29,10 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import mozilla.components.compose.base.annotation.FlexibleWindowLightDarkPreview
+import mozilla.components.compose.base.button.PrimaryButton
 import org.mozilla.fenix.R
 import org.mozilla.fenix.compose.LinkText
 import org.mozilla.fenix.compose.LinkTextState
-import org.mozilla.fenix.compose.button.PrimaryButton
 import org.mozilla.fenix.theme.FirefoxTheme
 
 /**
@@ -66,8 +67,7 @@ fun TermsOfServiceOnboardingPage(
                 // Main content group
                 Column(
                     modifier = Modifier
-                        .padding(vertical = 32.dp)
-                        .height(imageHeight(boxWithConstraintsScope)),
+                        .padding(vertical = 32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -75,6 +75,7 @@ fun TermsOfServiceOnboardingPage(
                         painter = painterResource(id = imageRes),
                         contentDescription = null,
                         modifier = Modifier
+                            .heightIn(max = imageHeight(boxWithConstraintsScope))
                             .height(167.dp)
                             .width(161.dp),
                     )
@@ -212,7 +213,7 @@ private fun OnboardingPagePreview() {
                 imageRes = R.drawable.ic_firefox,
                 primaryButton = Action(
                     text = stringResource(
-                        id = R.string.onboarding_term_of_service_agree_and_continue_button_label,
+                        id = R.string.onboarding_term_of_service_agree_and_continue_button_label_2,
                     ),
                     onClick = {},
                 ),

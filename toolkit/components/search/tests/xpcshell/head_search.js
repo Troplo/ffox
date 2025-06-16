@@ -14,12 +14,14 @@ ChromeUtils.defineESModuleGetters(this, {
   RemoteSettings: "resource://services-settings/remote-settings.sys.mjs",
   RemoteSettingsClient:
     "resource://services-settings/RemoteSettingsClient.sys.mjs",
-  SearchEngineClassification: "resource://gre/modules/RustSearch.sys.mjs",
-  SearchEngineSelector: "resource://gre/modules/SearchEngineSelector.sys.mjs",
+  SearchEngineClassification:
+    "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustSearch.sys.mjs",
+  SearchEngineSelector:
+    "moz-src:///toolkit/components/search/SearchEngineSelector.sys.mjs",
   SearchService: "resource://gre/modules/SearchService.sys.mjs",
-  SearchSettings: "resource://gre/modules/SearchSettings.sys.mjs",
+  SearchSettings: "moz-src:///toolkit/components/search/SearchSettings.sys.mjs",
   SearchTestUtils: "resource://testing-common/SearchTestUtils.sys.mjs",
-  SearchUtils: "resource://gre/modules/SearchUtils.sys.mjs",
+  SearchUtils: "moz-src:///toolkit/components/search/SearchUtils.sys.mjs",
   TestUtils: "resource://testing-common/TestUtils.sys.mjs",
   updateAppInfo: "resource://testing-common/AppInfo.sys.mjs",
   Utils: "resource://services-settings/Utils.sys.mjs",
@@ -437,25 +439,14 @@ function useCustomGeoServer(region, waitToRespond = Promise.resolve()) {
  *   An object with the expected details for the private search engine.
  */
 async function assertGleanDefaultEngine(expected) {
-  await TestUtils.waitForCondition(
-    () =>
-      Glean.searchEngineDefault.engineId.testGetValue() ==
-      (expected.normal.engineId ?? ""),
-    "Should have set the correct telemetry id for the normal engine"
-  );
-
-  await TestUtils.waitForCondition(
-    () =>
-      Glean.searchEnginePrivate.engineId.testGetValue() ==
-      (expected.private?.engineId ?? ""),
-    "Should have set the correct telemetry id for the private engine"
-  );
-
   for (let property of [
+    "providerId",
+    "partnerCode",
+    "overriddenByThirdParty",
+    "engineId",
     "displayName",
     "loadPath",
     "submissionUrl",
-    "verified",
   ]) {
     if (property in expected.normal) {
       Assert.equal(
@@ -659,6 +650,7 @@ async function assertSelectorEnginesEqualsExpected(
           partnerCode: "",
           telemetrySuffix: "",
           orderHint: null,
+          clickUrl: null,
           ...expectedEngines[i],
         };
         expectedEngines[i].classification =

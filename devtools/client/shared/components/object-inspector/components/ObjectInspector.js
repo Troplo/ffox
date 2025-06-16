@@ -8,7 +8,7 @@ const {
   Component,
   createFactory,
   createElement,
-} = require("resource://devtools/client/shared/vendor/react.js");
+} = require("resource://devtools/client/shared/vendor/react.mjs");
 const {
   connect,
   Provider,
@@ -47,7 +47,7 @@ const {
 } = Utils.node;
 const {
   MODE,
-} = require("resource://devtools/client/shared/components/reps/reps/constants.js");
+} = ChromeUtils.importESModule("resource://devtools/client/shared/components/reps/reps/constants.mjs", {global: "current"});
 
 // This implements a component that renders an interactive inspector
 // for looking at JavaScript objects. It expects descriptions of
@@ -80,7 +80,7 @@ class ObjectInspector extends Component {
   static defaultProps = {
     autoReleaseObjectActors: true
   };
-  constructor(props) {
+  constructor(_props) {
     super();
     this.cachedNodes = new Map();
 
@@ -195,7 +195,7 @@ class ObjectInspector extends Component {
     const length = roots.length;
 
     for (let i = 0; i < length; i++) {
-      let rootItem = roots[i];
+      const rootItem = roots[i];
 
       if (evaluations.has(rootItem.path)) {
         roots[i] = getEvaluatedItem(rootItem, evaluations);
@@ -358,7 +358,7 @@ class ObjectInspector extends Component {
   }
 }
 
-function mapStateToProps(state, props) {
+function mapStateToProps(state, _props) {
   return {
     expandedPaths: getExpandedPaths(state),
     loadedProperties: getLoadedProperties(state),
@@ -368,10 +368,11 @@ function mapStateToProps(state, props) {
 
 const OI = connect(mapStateToProps, actions)(ObjectInspector);
 
+// eslint-disable-next-line react/display-name
 module.exports = props => {
   const { roots, standalone = false } = props;
 
-  if (roots.length == 0) {
+  if (!roots.length) {
     return null;
   }
 

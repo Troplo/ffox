@@ -4,6 +4,25 @@ ChromeUtils.defineESModuleGetters(this, {
   PERMISSION_L10N: "resource://gre/modules/ExtensionPermissionMessages.sys.mjs",
 });
 
+const assertSectionHeaders = (popupContentEl, expectedHeaders = []) => {
+  for (const { id, isVisible, fluentId } of expectedHeaders) {
+    const titleEl = popupContentEl.querySelector(`#${id}`);
+    ok(titleEl, `Expected element for ${id}`);
+    Assert.equal(
+      BrowserTestUtils.isVisible(titleEl),
+      isVisible,
+      `Expected ${id} to${isVisible ? "" : " not"} be visible`
+    );
+    if (isVisible) {
+      Assert.equal(
+        titleEl.textContent,
+        PERMISSION_L10N.formatValueSync(fluentId),
+        `Expected formatted string for ${id}`
+      );
+    }
+  }
+};
+
 // This test case verifies that `permissions.request()` resolves in the
 // expected order.
 add_task(async function test_permissions_prompt() {
@@ -129,21 +148,6 @@ add_task(async function test_permissions_prompt() {
 // as the addon install prompt (the test case part of the AOM mochitests
 // and named testInstallDialogShowsFullDomainsList).
 add_task(async function testOptionalPermissionsDialogShowsFullDomainsList() {
-  await SpecialPowers.pushPrefEnv({
-    set: [
-      // These are both expected to be the default, but we are setting
-      // them explicitly to make sure this test task is always running
-      // with the prefs set with these values even if we would be
-      // rolling back the pref value temporarily.
-      ["extensions.ui.installDialogFullDomains", true],
-    ],
-  });
-  // Sanity check.
-  ok(
-    ExtensionsUI.SHOW_FULL_DOMAINS_LIST,
-    "Expect SHOW_FULL_DOMAINS_LIST to be enabled"
-  );
-
   const createTestExtension = ({
     id,
     domainsListLength = 0,
@@ -248,6 +252,21 @@ add_task(async function testOptionalPermissionsDialogShowsFullDomainsList() {
       domainsListLength: 0,
       verifyDialog(popupContentEl) {
         assertNoDomainsList(popupContentEl);
+        assertSectionHeaders(popupContentEl, [
+          {
+            id: "addon-webext-perm-title-required",
+            isVisible: true,
+            fluentId: "webext-perms-header-optional-required-perms",
+          },
+          {
+            id: "addon-webext-perm-title-data-collection",
+            isVisible: false,
+          },
+          {
+            id: "addon-webext-perm-title-optional",
+            isVisible: false,
+          },
+        ]);
       },
     },
     {
@@ -257,7 +276,9 @@ add_task(async function testOptionalPermissionsDialogShowsFullDomainsList() {
       domainsListLength: 1,
       verifyDialog(popupContentEl) {
         assertNoDomainsList(popupContentEl);
-        assertOneDomainPermission(popupContentEl.permsSingleEl);
+        // This will fail if there are other unexpected permission strings
+        // listed in the permissions list.
+        assertOneDomainPermission(popupContentEl.permsListEl);
       },
     },
     {
@@ -278,7 +299,7 @@ add_task(async function testOptionalPermissionsDialogShowsFullDomainsList() {
       optional_permissions: [],
       domainsListLength: 10,
       verifyDialog(popupContentEl) {
-        const domainsListEl = popupContentEl.permsSingleEl.querySelector(
+        const domainsListEl = popupContentEl.permsListEl.querySelector(
           ".webext-perm-domains-list"
         );
         Assert.ok(domainsListEl, "Expect domains list element to be found");
@@ -322,3 +343,419 @@ add_task(async function testOptionalPermissionsDialogShowsFullDomainsList() {
     await extension.unload();
   }
 });
+
+add_task(async function testOptionalPermissionsDialogWithDataCollection() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["extensions.dataCollectionPermissions.enabled", true]],
+  });
+
+  const createTestExtension = ({
+    id,
+    optional_permissions = undefined,
+    data_collection_permissions = undefined,
+  }) => {
+    return ExtensionTestUtils.loadExtension({
+      manifest: {
+        // Set the generated id as a name to make it easier to recognize the
+        // test case from dialog screenshots (e.g. in the screenshot captured
+        // when the test hits a failure).
+        name: id,
+        version: "1.0",
+        optional_permissions,
+        browser_specific_settings: {
+          gecko: { id, data_collection_permissions },
+        },
+      },
+      files: {
+        "extpage.html": `<!DOCTYPE html><script src="extpage.js"></script>`,
+        "extpage.js"() {
+          browser.test.onMessage.addListener(async msg => {
+            if (msg !== "request-perms") {
+              browser.test.fail(`Got unexpected test message ${msg}`);
+              return;
+            }
+
+            const {
+              browser_specific_settings: {
+                gecko: { data_collection_permissions },
+              },
+              optional_permissions,
+            } = browser.runtime.getManifest();
+
+            let perms = {
+              data_collection: data_collection_permissions.optional,
+            };
+            if (optional_permissions.length) {
+              perms.permissions = optional_permissions;
+            }
+
+            browser.test.withHandlingUserInput(() => {
+              browser.permissions.request(perms);
+              browser.test.sendMessage("perms-requested");
+            });
+          });
+
+          browser.test.sendMessage("ready");
+        },
+      },
+    });
+  };
+
+  const TEST_CASES = [
+    {
+      title: "With an optional data collection permission",
+      data_collection_permissions: {
+        optional: ["healthInfo"],
+      },
+      verifyDialog(popupContentEl, { extensionId }) {
+        Assert.equal(
+          popupContentEl.querySelector(".popup-notification-description")
+            .textContent,
+          PERMISSION_L10N.formatValueSync(
+            "webext-perms-optional-text-with-data-collection-only",
+            { extension: extensionId }
+          ),
+          "Expected header string"
+        );
+        assertSectionHeaders(popupContentEl, [
+          {
+            id: "addon-webext-perm-title-required",
+            isVisible: false,
+          },
+          {
+            id: "addon-webext-perm-title-data-collection",
+            isVisible: true,
+            fluentId: "webext-perms-header-optional-data-collection-perms",
+          },
+          {
+            id: "addon-webext-perm-title-optional",
+            isVisible: false,
+          },
+        ]);
+        Assert.equal(
+          popupContentEl.permsListEl.childElementCount,
+          0,
+          "Expected no permission"
+        );
+        Assert.equal(
+          popupContentEl.permsListDataCollectionEl.childElementCount,
+          1,
+          "Expected a data collection permission"
+        );
+        Assert.equal(
+          popupContentEl.permsListDataCollectionEl.textContent,
+          PERMISSION_L10N.formatValueSync(
+            "webext-perms-description-data-some-optional",
+            {
+              permissions: "health information",
+            }
+          ),
+          "Expected formatted data collection permission string"
+        );
+        Assert.ok(
+          popupContentEl.hasAttribute("learnmoreurl"),
+          "Expected a learn more link"
+        );
+      },
+    },
+    {
+      title: "With multiple optional data collection permissions",
+      data_collection_permissions: {
+        optional: ["healthInfo", "bookmarksInfo"],
+      },
+      verifyDialog(popupContentEl, { extensionId }) {
+        Assert.equal(
+          popupContentEl.querySelector(".popup-notification-description")
+            .textContent,
+          PERMISSION_L10N.formatValueSync(
+            "webext-perms-optional-text-with-data-collection-only",
+            { extension: extensionId }
+          ),
+          "Expected header string"
+        );
+        Assert.equal(
+          popupContentEl.permsListEl.childElementCount,
+          0,
+          "Expected no permission"
+        );
+        Assert.equal(
+          popupContentEl.permsListDataCollectionEl.childElementCount,
+          1,
+          "Expected a data collection permission"
+        );
+        Assert.equal(
+          popupContentEl.permsListDataCollectionEl.textContent,
+          PERMISSION_L10N.formatValueSync(
+            "webext-perms-description-data-some-optional",
+            {
+              permissions: "health information, bookmarks",
+            }
+          ),
+          "Expected formatted data collection permission string"
+        );
+        Assert.ok(
+          popupContentEl.hasAttribute("learnmoreurl"),
+          "Expected a learn more link"
+        );
+      },
+    },
+    {
+      title: "With technical and interaction data",
+      data_collection_permissions: {
+        optional: ["technicalAndInteraction"],
+      },
+      verifyDialog(popupContentEl, { extensionId }) {
+        Assert.equal(
+          popupContentEl.querySelector(".popup-notification-description")
+            .textContent,
+          PERMISSION_L10N.formatValueSync(
+            "webext-perms-optional-text-with-data-collection-only",
+            { extension: extensionId }
+          ),
+          "Expected header string"
+        );
+        Assert.equal(
+          popupContentEl.permsListEl.childElementCount,
+          0,
+          "Expected no permission"
+        );
+        Assert.equal(
+          popupContentEl.permsListDataCollectionEl.childElementCount,
+          1,
+          "Expected a data collection permission"
+        );
+        Assert.equal(
+          popupContentEl.permsListDataCollectionEl.textContent,
+          PERMISSION_L10N.formatValueSync(
+            "webext-perms-description-data-some-optional",
+            {
+              permissions: "technical and interaction data",
+            }
+          ),
+          "Expected formatted data collection permission string"
+        );
+        Assert.ok(
+          popupContentEl.hasAttribute("learnmoreurl"),
+          "Expected a learn more link"
+        );
+      },
+    },
+    {
+      title: "With optional API and data collection permissions",
+      optional_permissions: ["bookmarks"],
+      data_collection_permissions: {
+        optional: ["bookmarksInfo"],
+      },
+      verifyDialog(popupContentEl, { extensionId }) {
+        Assert.equal(
+          popupContentEl.querySelector(".popup-notification-description")
+            .textContent,
+          PERMISSION_L10N.formatValueSync(
+            "webext-perms-optional-text-with-data-collection",
+            { extension: extensionId }
+          ),
+          "Expected header string"
+        );
+        assertSectionHeaders(popupContentEl, [
+          {
+            id: "addon-webext-perm-title-required",
+            isVisible: true,
+            fluentId: "webext-perms-header-optional-required-perms",
+          },
+          {
+            id: "addon-webext-perm-title-data-collection",
+            isVisible: true,
+            fluentId: "webext-perms-header-optional-data-collection-perms",
+          },
+          {
+            id: "addon-webext-perm-title-optional",
+            isVisible: false,
+          },
+        ]);
+        Assert.equal(
+          popupContentEl.permsListEl.childElementCount,
+          1,
+          "Expected a permission"
+        );
+        Assert.equal(
+          popupContentEl.permsListDataCollectionEl.childElementCount,
+          1,
+          "Expected a data collection permission"
+        );
+        Assert.equal(
+          popupContentEl.permsListEl.textContent,
+          PERMISSION_L10N.formatValueSync("webext-perms-description-bookmarks"),
+          "Expected formatted data collection permission string"
+        );
+        Assert.equal(
+          popupContentEl.permsListDataCollectionEl.lastChild.textContent,
+          PERMISSION_L10N.formatValueSync(
+            "webext-perms-description-data-some-optional",
+            {
+              permissions: "bookmarks",
+            }
+          ),
+          "Expected formatted data collection permission string"
+        );
+        Assert.ok(
+          popupContentEl.hasAttribute("learnmoreurl"),
+          "Expected a learn more link"
+        );
+      },
+    },
+    {
+      title: "With non-promptable API and optional data collection permission",
+      optional_permissions: ["webRequest"],
+      data_collection_permissions: {
+        optional: ["healthInfo"],
+      },
+      verifyDialog(popupContentEl, { extensionId }) {
+        Assert.equal(
+          popupContentEl.querySelector(".popup-notification-description")
+            .textContent,
+          PERMISSION_L10N.formatValueSync(
+            "webext-perms-optional-text-with-data-collection-only",
+            { extension: extensionId }
+          ),
+          "Expected header string"
+        );
+        assertSectionHeaders(popupContentEl, [
+          {
+            id: "addon-webext-perm-title-required",
+            isVisible: false,
+          },
+          {
+            id: "addon-webext-perm-title-data-collection",
+            isVisible: true,
+            fluentId: "webext-perms-header-optional-data-collection-perms",
+          },
+          {
+            id: "addon-webext-perm-title-optional",
+            isVisible: false,
+          },
+        ]);
+        // We expect no entry because `webRequest` is non-promptable.
+        Assert.equal(
+          popupContentEl.permsListEl.childElementCount,
+          0,
+          "Expected no permission"
+        );
+        Assert.equal(
+          popupContentEl.permsListDataCollectionEl.childElementCount,
+          1,
+          "Expected a data collection permission"
+        );
+        Assert.equal(
+          popupContentEl.permsListDataCollectionEl.textContent,
+          PERMISSION_L10N.formatValueSync(
+            "webext-perms-description-data-some-optional",
+            {
+              permissions: "health information",
+            }
+          ),
+          "Expected formatted data collection permission string"
+        );
+        Assert.ok(
+          popupContentEl.hasAttribute("learnmoreurl"),
+          "Expected a learn more link"
+        );
+      },
+    },
+  ];
+
+  for (const {
+    title,
+    optional_permissions,
+    data_collection_permissions,
+    verifyDialog,
+  } of TEST_CASES) {
+    info(title);
+
+    const extensionId = `@${title.toLowerCase().replaceAll(/[^\w]+/g, "-")}`;
+    const extension = createTestExtension({
+      id: extensionId,
+      optional_permissions,
+      data_collection_permissions,
+    });
+    await extension.startup();
+
+    let extPageURL = `moz-extension://${extension.uuid}/extpage.html`;
+    await BrowserTestUtils.withNewTab(extPageURL, async () => {
+      let promiseRequestDisalog = promisePopupNotificationShown(
+        "addon-webext-permissions"
+      );
+      await extension.awaitMessage("ready");
+      extension.sendMessage("request-perms");
+      await extension.awaitMessage("perms-requested");
+      const popupContentEl = await promiseRequestDisalog;
+      verifyDialog(popupContentEl, { extensionId });
+    });
+
+    await extension.unload();
+  }
+
+  await SpecialPowers.popPrefEnv();
+});
+
+add_task(
+  async function testOptionalPermissionsDialogWithDataCollectionAlreadyGranted() {
+    await SpecialPowers.pushPrefEnv({
+      set: [["extensions.dataCollectionPermissions.enabled", true]],
+    });
+
+    const extension = ExtensionTestUtils.loadExtension({
+      manifest: {
+        version: "1.0",
+        browser_specific_settings: {
+          gecko: {
+            data_collection_permissions: {
+              optional: ["healthInfo"],
+            },
+          },
+        },
+      },
+      files: {
+        "extpage.html": `<!DOCTYPE html><script src="extpage.js"></script>`,
+        "extpage.js"() {
+          browser.test.onMessage.addListener(async msg => {
+            if (msg !== "request-perms") {
+              browser.test.fail(`Got unexpected test message ${msg}`);
+              return;
+            }
+
+            browser.test.withHandlingUserInput(async () => {
+              await browser.permissions.request({
+                data_collection: ["healthInfo"],
+              });
+              browser.test.sendMessage("perms-requested");
+            });
+          });
+
+          browser.test.sendMessage("ready");
+        },
+      },
+    });
+    await extension.startup();
+
+    let extPageURL = `moz-extension://${extension.uuid}/extpage.html`;
+    await BrowserTestUtils.withNewTab(extPageURL, async () => {
+      let promiseRequestDisalog = promisePopupNotificationShown(
+        "addon-webext-permissions"
+      ).then(panel => {
+        // Grant the permission.
+        panel.button.click();
+      });
+
+      await extension.awaitMessage("ready");
+      extension.sendMessage("request-perms");
+      await extension.awaitMessage("perms-requested");
+      await promiseRequestDisalog;
+
+      extension.sendMessage("request-perms");
+      await extension.awaitMessage("perms-requested");
+    });
+
+    await extension.unload();
+    await SpecialPowers.popPrefEnv();
+  }
+);

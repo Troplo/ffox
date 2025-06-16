@@ -38,7 +38,7 @@ DebugState::DebugState(const Code& code, const Module& module)
       module_(&module),
       enterFrameTrapsEnabled_(false),
       enterAndLeaveFrameTrapsCounter_(0) {
-  MOZ_RELEASE_ASSERT(code.codeMeta().debugEnabled);
+  MOZ_RELEASE_ASSERT(code.debugEnabled());
 }
 
 void DebugState::trace(JSTracer* trc) {
@@ -60,8 +60,8 @@ static bool SlowCallSiteSearchByOffset(const CodeBlock& code, uint32_t offset,
   for (uint32_t callSiteIndex = 0; callSiteIndex < code.callSites.length();
        callSiteIndex++) {
     if (code.callSites.kind(callSiteIndex) == CallSiteKind::Breakpoint &&
-        code.callSites[callSiteIndex].lineOrBytecode() == offset) {
-      *callSite = code.callSites[callSiteIndex];
+        code.callSites.bytecodeOffset(callSiteIndex).offset() == offset) {
+      *callSite = code.callSites.get(callSiteIndex, code.inliningContext);
       return true;
     }
   }
@@ -80,7 +80,8 @@ bool DebugState::getAllColumnOffsets(Vector<ExprLoc>* offsets) {
     if (debugCode().callSites.kind(callSiteIndex) != CallSiteKind::Breakpoint) {
       continue;
     }
-    uint32_t offset = debugCode().callSites[callSiteIndex].lineOrBytecode();
+    uint32_t offset =
+        debugCode().callSites.bytecodeOffset(callSiteIndex).offset();
     if (!offsets->emplaceBack(
             offset,
             JS::WasmFunctionIndex::DefaultBinarySourceColumnNumberOneOrigin,
@@ -152,8 +153,7 @@ void DebugState::decrementStepperCount(JS::GCContext* gcx, Instance* instance,
     if (debugCode().callSites.kind(callSiteIndex) != CallSiteKind::Breakpoint) {
       continue;
     }
-    uint32_t offset =
-        debugCode().callSites[callSiteIndex].returnAddressOffset();
+    uint32_t offset = debugCode().callSites.returnAddressOffset(callSiteIndex);
     if (codeRange.begin() <= offset && offset <= codeRange.end()) {
       keepDebugging = keepDebugging || breakpointSites_.has(offset);
     }
@@ -180,9 +180,8 @@ void DebugState::toggleBreakpointTrap(JSRuntime* rt, Instance* instance,
   }
   size_t debugTrapOffset = callSite.returnAddressOffset();
 
-  const CodeSegment& codeSegment = debugSegment();
   const CodeRange* codeRange =
-      code_->lookupFuncRange(codeSegment.base() + debugTrapOffset);
+      code_->lookupFuncRange(debugCode().base() + debugTrapOffset);
   MOZ_ASSERT(codeRange);
 
   uint32_t funcIndex = codeRange->funcIndex();
@@ -300,7 +299,7 @@ void DebugState::disableDebuggingForFunction(Instance* instance,
 }
 
 void DebugState::enableDebugTrapping(Instance* instance) {
-  instance->setDebugStub(code_->sharedStubs().segment->base() +
+  instance->setDebugStub(code_->sharedStubs().base() +
                          code_->debugStubOffset());
 }
 
@@ -340,11 +339,11 @@ void DebugState::adjustEnterAndLeaveFrameTrapsState(JSContext* cx,
            !iter.done() && !mustLeaveEnabled; iter.next()) {
         WasmBreakpointSite* site = iter.get().value();
         CallSite callSite;
-        if (SlowCallSiteSearchByOffset(debugCode(), site->offset, &callSite)) {
+        const CodeBlock& codeBlock = debugCode();
+        if (SlowCallSiteSearchByOffset(codeBlock, site->offset, &callSite)) {
           size_t debugTrapOffset = callSite.returnAddressOffset();
-          const CodeSegment& codeSegment = debugSegment();
           const CodeRange* codeRange =
-              code_->lookupFuncRange(codeSegment.base() + debugTrapOffset);
+              code_->lookupFuncRange(codeBlock.base() + debugTrapOffset);
           MOZ_ASSERT(codeRange);
           mustLeaveEnabled = codeRange->funcIndex() == funcIdx;
         }
@@ -389,9 +388,10 @@ bool DebugState::debugGetLocalTypes(uint32_t funcIndex, ValTypeVector* locals,
   }
 
   // Decode local var types from wasm binary function body.
-  uint32_t bytecodeOffset = codeMeta().funcBytecodeOffset(funcIndex);
-  Decoder d(bytecode().begin() + bytecodeOffset, bytecode().end(),
-            bytecodeOffset,
+  const BytecodeRange& funcRange = codeTailMeta().funcDefRange(funcIndex);
+  BytecodeSpan funcBytecode = codeTailMeta().funcDefBody(funcIndex);
+  Decoder d(funcBytecode.data(), funcBytecode.data() + funcBytecode.size(),
+            funcRange.start,
             /* error = */ nullptr);
   return DecodeValidatedLocalEntries(types, d, locals);
 }

@@ -8,7 +8,7 @@ use crate::lock::rank;
 use crate::resource::{Fallible, TrackingData};
 use crate::snatch::Snatchable;
 use crate::{
-    device::{Device, DeviceError},
+    device::Device,
     global::Global,
     id::{self, BlasId, TlasId},
     lock::RwLock,
@@ -26,6 +26,13 @@ impl Device {
     ) -> Result<Arc<resource::Blas>, CreateBlasError> {
         self.check_is_valid()?;
         self.require_features(Features::EXPERIMENTAL_RAY_TRACING_ACCELERATION_STRUCTURE)?;
+
+        if blas_desc
+            .flags
+            .contains(wgt::AccelerationStructureFlags::ALLOW_RAY_HIT_VERTEX_RETURN)
+        {
+            self.require_features(Features::EXPERIMENTAL_RAY_HIT_VERTEX_RETURN)?;
+        }
 
         let size_info = match &sizes {
             wgt::BlasGeometrySizeDescriptors::Triangles { descriptors } => {
@@ -102,7 +109,7 @@ impl Device {
                     allow_compaction: false,
                 })
         }
-        .map_err(DeviceError::from_hal)?;
+        .map_err(|e| self.handle_hal_error_with_nonfatal_oom(e))?;
 
         let handle = unsafe {
             self.raw()
@@ -139,6 +146,13 @@ impl Device {
             ));
         }
 
+        if desc
+            .flags
+            .contains(wgt::AccelerationStructureFlags::ALLOW_RAY_HIT_VERTEX_RETURN)
+        {
+            self.require_features(Features::EXPERIMENTAL_RAY_HIT_VERTEX_RETURN)?;
+        }
+
         let size_info = unsafe {
             self.raw().get_acceleration_structure_build_sizes(
                 &hal::GetAccelerationStructureBuildSizesDescriptor {
@@ -163,7 +177,7 @@ impl Device {
                     allow_compaction: false,
                 })
         }
-        .map_err(DeviceError::from_hal)?;
+        .map_err(|e| self.handle_hal_error_with_nonfatal_oom(e))?;
 
         let instance_buffer_size =
             self.alignments.raw_tlas_instance_size * desc.max_instances.max(1) as usize;
@@ -176,7 +190,7 @@ impl Device {
                 memory_flags: hal::MemoryFlags::PREFER_COHERENT,
             })
         }
-        .map_err(DeviceError::from_hal)?;
+        .map_err(|e| self.handle_hal_error_with_nonfatal_oom(e))?;
 
         Ok(Arc::new(resource::Tlas {
             raw: Snatchable::new(raw),

@@ -8,11 +8,7 @@
 # License 1.0 was not distributed with this source code in the PATENTS file, you
 # can obtain it at www.aomedia.org/license/patent.
 #
-if(CONFIG_TFLITE)
-  cmake_minimum_required(VERSION 3.11)
-else()
-  cmake_minimum_required(VERSION 3.9)
-endif()
+cmake_minimum_required(VERSION 3.16)
 
 set(AOM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 set(AOM_CONFIG_DIR "${CMAKE_CURRENT_BINARY_DIR}")
@@ -25,7 +21,9 @@ if("${AOM_ROOT}" STREQUAL "${AOM_CONFIG_DIR}")
                 "And re-run CMake from the aom_build directory.")
 endif()
 
-project(AOM C CXX)
+# VERSION is the release version of the library. It should be updated at the
+# same time as the LT_* variables.
+project(AOM LANGUAGES C CXX VERSION 3.12.0)
 
 # GENERATED source property global visibility.
 if(POLICY CMP0118)
@@ -58,9 +56,11 @@ endif()
 # passed to libtool.
 #
 # We set SO_FILE_VERSION = [c-a].a.r
-set(LT_CURRENT 14)
-set(LT_REVISION 0)
-set(LT_AGE 11)
+#
+# The VERSION number in project() should be updated when these variables are.
+set(LT_CURRENT 15)
+set(LT_REVISION 1)
+set(LT_AGE 12)
 math(EXPR SO_VERSION "${LT_CURRENT} - ${LT_AGE}")
 set(SO_FILE_VERSION "${SO_VERSION}.${LT_AGE}.${LT_REVISION}")
 unset(LT_CURRENT)
@@ -270,6 +270,43 @@ add_rtcd_build_step("${AOM_ROOT}/av1/common/av1_rtcd_defs.pl"
 add_library(aom_rtcd OBJECT ${AOM_RTCD_SOURCES})
 add_dependencies(aom_rtcd aom_version)
 
+if(CONFIG_HIGHWAY)
+  list(APPEND AOM_HIGHWAY_SOURCES
+              "${AOM_ROOT}/third_party/highway/hwy/abort.h"
+              "${AOM_ROOT}/third_party/highway/hwy/aligned_allocator.h"
+              "${AOM_ROOT}/third_party/highway/hwy/base.h"
+              "${AOM_ROOT}/third_party/highway/hwy/cache_control.h"
+              "${AOM_ROOT}/third_party/highway/hwy/per_target.h"
+              "${AOM_ROOT}/third_party/highway/hwy/print.h"
+              "${AOM_ROOT}/third_party/highway/hwy/foreach_target.h"
+              "${AOM_ROOT}/third_party/highway/hwy/highway_export.h"
+              "${AOM_ROOT}/third_party/highway/hwy/highway.h"
+              "${AOM_ROOT}/third_party/highway/hwy/print-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/timer-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/detect_compiler_arch.h"
+              "${AOM_ROOT}/third_party/highway/hwy/detect_targets.h"
+              "${AOM_ROOT}/third_party/highway/hwy/targets.h"
+              "${AOM_ROOT}/third_party/highway/hwy/ops/arm_neon-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/ops/arm_sve-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/ops/emu128-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/ops/generic_ops-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/ops/scalar-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/ops/set_macros-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/ops/shared-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/ops/x86_128-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/ops/x86_256-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/ops/x86_512-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/ops/x86_avx3-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/contrib/algo/copy-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/contrib/algo/find-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/contrib/algo/transform-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/contrib/dot/dot-inl.h"
+              "${AOM_ROOT}/third_party/highway/hwy/contrib/image/image.h"
+              "${AOM_ROOT}/third_party/highway/hwy/contrib/math/math-inl.h")
+  add_library(aom_hwy OBJECT ${AOM_HIGHWAY_SOURCES})
+  set(AOM_LIB_TARGETS ${AOM_LIB_TARGETS} aom_hwy)
+endif()
+
 if(ENABLE_EXAMPLES)
   add_library(aom_encoder_stats OBJECT ${AOM_ENCODER_STATS_SOURCES})
   set(AOM_LIB_TARGETS ${AOM_LIB_TARGETS} aom_encoder_stats)
@@ -285,9 +322,11 @@ else()
   set(target_objs_aom $<TARGET_OBJECTS:aom_obj>)
 endif()
 add_library(aom ${target_objs_aom} $<TARGET_OBJECTS:aom_rtcd>)
+target_include_directories(aom PUBLIC $<INSTALL_INTERFACE:include>)
 
 if(BUILD_SHARED_LIBS)
   add_library(aom_static STATIC ${target_objs_aom} $<TARGET_OBJECTS:aom_rtcd>)
+  target_include_directories(aom_static PUBLIC $<INSTALL_INTERFACE:include>)
   set_target_properties(aom_static PROPERTIES OUTPUT_NAME aom)
   if(MSVC OR (WIN32 AND NOT MINGW))
     # Fix race condition between the import library and the static library.

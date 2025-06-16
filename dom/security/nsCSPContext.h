@@ -106,10 +106,10 @@ class nsCSPContext : public nsIContentSecurityPolicy {
       const mozilla::dom::SecurityPolicyViolationEventInit&
           aViolationEventInit);
 
-  void RecordInternalViolationTelemetry(
+  void HandleInternalPageViolation(
       const mozilla::dom::CSPViolationData& aCSPViolationData,
-      const mozilla::dom::SecurityPolicyViolationEventInit&
-          aViolationEventInit);
+      const mozilla::dom::SecurityPolicyViolationEventInit& aViolationEventInit,
+      const nsAString& aViolatedDirectiveNameAndValue);
 
   nsresult FireViolationEvent(
       mozilla::dom::Element* aTriggeringElement,
@@ -183,16 +183,28 @@ class nsCSPContext : public nsIContentSecurityPolicy {
                        bool aSendContentLocationInViolationReports);
 
   // helper to report inline script/style violations
-  void reportInlineViolation(CSPDirective aDirective,
+  void ReportInlineViolation(CSPDirective aDirective,
                              mozilla::dom::Element* aTriggeringElement,
                              nsICSPEventListener* aCSPEventListener,
                              const nsAString& aNonce, bool aReportSample,
-                             const nsAString& aSample,
+                             const nsAString& aSourceCode,
                              const nsAString& aViolatedDirective,
                              const nsAString& aViolatedDirectiveString,
                              CSPDirective aEffectiveDirective,
                              uint32_t aViolatedPolicyIndex,
                              uint32_t aLineNumber, uint32_t aColumnNumber);
+
+  enum class PolicyDataVersion {
+    Pre136,   // Before v136
+    Post136,  // v136-137 with bug 1901492 or v138+ with bug 1958259. (This is
+              // the current version)
+    V138_9PreRelease,  // v138 Beta/Nightly and v139 Nightly with bug 1942306
+                       // and without bug 1958259
+  };
+
+  nsresult TryReadPolicies(PolicyDataVersion aVersion,
+                           mozilla::Span<const uint8_t> aData,
+                           uint32_t aNumPolicies);
 
   nsCString mReferrer;
   uint64_t mInnerWindowID;          // See `nsPIDOMWindowInner::mWindowID`.

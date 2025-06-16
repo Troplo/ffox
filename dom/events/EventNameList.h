@@ -150,6 +150,8 @@
 
 EVENT(abort, eImageAbort, EventNameType_All, eBasicEventClass)
 EVENT(beforetoggle, eBeforeToggle, EventNameType_HTMLXUL, eBasicEventClass)
+// https://html.spec.whatwg.org/#event-beforematch
+EVENT(beforematch, eBeforematch, EventNameType_All, eBasicEventClass)
 EVENT(cancel, eCancel, EventNameType_HTMLXUL, eBasicEventClass)
 EVENT(canplay, eCanPlay, EventNameType_HTML, eBasicEventClass)
 EVENT(canplaythrough, eCanPlayThrough, EventNameType_HTML, eBasicEventClass)
@@ -223,6 +225,8 @@ EVENT(pointerover, ePointerOver, EventNameType_All, ePointerEventClass)
 EVENT(pointerout, ePointerOut, EventNameType_All, ePointerEventClass)
 EVENT(pointerenter, ePointerEnter, EventNameType_All, ePointerEventClass)
 EVENT(pointerleave, ePointerLeave, EventNameType_All, ePointerEventClass)
+EVENT(pointerrawupdate, ePointerRawUpdate, EventNameType_All,
+      ePointerEventClass)
 EVENT(gotpointercapture, ePointerGotCapture, EventNameType_All,
       ePointerEventClass)
 EVENT(lostpointercapture, ePointerLostCapture, EventNameType_All,

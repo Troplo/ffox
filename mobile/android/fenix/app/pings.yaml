@@ -33,6 +33,30 @@ first-session:
   notification_emails:
     - android-probes@mozilla.com
 
+play-store-attribution:
+  description: |
+    This ping captures the install referrer attribution data.
+  include_client_id: true
+  send_if_empty: true
+  bugs:
+    - https://bugzilla.mozilla.org/show_bug.cgi?id=1947786
+  data_reviews:
+    - https://phabricator.services.mozilla.com/D238284
+  notification_emails:
+    - android-probes@mozilla.com
+
+adjust-attribution:
+  description: |
+    This ping captures the Adjust attribution data.
+  include_client_id: true
+  send_if_empty: true
+  bugs:
+    - https://bugzilla.mozilla.org/show_bug.cgi?id=1947786
+  data_reviews:
+    - https://phabricator.services.mozilla.com/D238284
+  notification_emails:
+    - android-probes@mozilla.com
+
 home:
   description: |
     Homepage new tab related instrumentation.
@@ -95,8 +119,11 @@ fx-suggest:
     Distinguishable by its `ping_type`.
     Does not contain a `client_id`, preferring a `context_id` instead.
   include_client_id: false
+  uploader_capabilities:
+    - ohttp
   bugs:
     - https://bugzilla.mozilla.org/show_bug.cgi?id=1857092
+    - https://bugzilla.mozilla.org/show_bug.cgi?id=1969155
   data_reviews:
     - https://github.com/mozilla-mobile/firefox-android/pull/3958#issuecomment-1758607927
   notification_emails:
@@ -223,3 +250,16 @@ broken-site-report:
     - https://phabricator.services.mozilla.com/D232122#8037249
   notification_emails:
     - twisniewski@mozilla.com
+
+nimbus:
+  description: |
+    This ping is submitted by Nimbus code after the enrollment workflow has completed.
+  include_client_id: true
+  send_if_empty: true
+  bugs:
+    - https://bugzilla.mozilla.org/show_bug.cgi?id=1951125
+  data_reviews:
+    - https://bugzilla.mozilla.org/show_bug.cgi?id=1951125
+  notification_emails:
+    - chumphreys@mozilla.com
+    - project-nimbus@mozilla.com

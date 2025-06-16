@@ -564,11 +564,11 @@ static uint32_t SizeOfFormEntry(const FormEntryValue& aValue) {
               formDataSize += entry.name().Length();
               const auto& entryValue = entry.value();
               switch (entryValue.type()) {
-                case FormDataValue::TBlobImpl:
+                case IPCFormDataValue::TBlobImpl:
                   formDataSize +=
                       entryValue.get_BlobImpl()->GetAllocationSize();
                   break;
-                case FormDataValue::TnsString:
+                case IPCFormDataValue::TnsString:
                   formDataSize += entryValue.get_nsString().Length();
                   break;
                 default:
@@ -1675,8 +1675,7 @@ void SessionStoreUtils::RestoreDocShellState(
   if (aDocShell) {
     nsCOMPtr<nsIURI> currentUri;
     nsDocShell::Cast(aDocShell)->GetCurrentURI(getter_AddRefs(currentUri));
-    if (aState.URI() &&
-        (!currentUri || mozilla::net::SchemeIsAbout(currentUri))) {
+    if (aState.URI() && (!currentUri || currentUri->SchemeIs("about"))) {
       aDocShell->SetCurrentURIForSessionStore(aState.URI());
     }
     RestoreDocShellCapabilities(aDocShell, aState.docShellCaps());

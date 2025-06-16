@@ -20,7 +20,6 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 const kPrefCustomizationDebug = "browser.uiCustomization.debug";
-const kPrefScreenshots = "extensions.screenshots.disabled";
 
 ChromeUtils.defineLazyGetter(lazy, "log", () => {
   let { ConsoleAPI } = ChromeUtils.importESModule(
@@ -36,25 +35,27 @@ ChromeUtils.defineLazyGetter(lazy, "log", () => {
 
 XPCOMUtils.defineLazyPreferenceGetter(
   lazy,
-  "screenshotsDisabled",
-  kPrefScreenshots,
-  false
-);
-
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "SCREENSHOT_BROWSER_COMPONENT",
-  "screenshots.browser.component.enabled",
-  false
-);
-
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
   "sidebarRevampEnabled",
   "sidebar.revamp",
   false
 );
 
+/**
+ * A helper method to synchronize aNode's DOM attributes with the properties and
+ * values in aAttrs. If aNode has an attribute that is false-y in aAttrs,
+ * then this attribute is removed.
+ *
+ * If aAttrs includes "shortcutId", the value is never set on aNode, but is
+ * instead used when setting the "label" or "tooltiptext" attributes to include
+ * the shortcut key combo. shortcutId should refer to the ID of the XUL <key>
+ * element that acts as the shortcut.
+ *
+ * @param {Element} aNode
+ *   The element to change the attributes of.
+ * @param {object} aAttrs
+ *   A set of key-value pairs where the key is set as the attribute name, and
+ *   the value is set as the attribute value.
+ */
 function setAttributes(aNode, aAttrs) {
   let doc = aNode.ownerDocument;
   for (let [name, value] of Object.entries(aAttrs)) {
@@ -86,6 +87,12 @@ function setAttributes(aNode, aAttrs) {
   }
 }
 
+/**
+ * The array of built-in CustomizableUICreateWidgetProperties that are
+ * registered as widgets upon browser start.
+ *
+ * @type {CustomizableUICreateWidgetProperties[]}
+ */
 export const CustomizableWidgets = [
   {
     id: "history-panelmenu",
@@ -546,49 +553,6 @@ if (Services.prefs.getBoolPref("identity.fxaccounts.enabled")) {
               break;
           }
         }
-      }
-    },
-  });
-}
-
-if (!lazy.screenshotsDisabled) {
-  CustomizableWidgets.push({
-    id: "screenshot-button",
-    shortcutId: "key_screenshot",
-    l10nId: "screenshot-toolbarbutton",
-    onCommand(aEvent) {
-      if (lazy.SCREENSHOT_BROWSER_COMPONENT) {
-        Services.obs.notifyObservers(
-          aEvent.currentTarget.ownerGlobal,
-          "menuitem-screenshot",
-          "ToolbarButton"
-        );
-      } else {
-        Services.obs.notifyObservers(
-          null,
-          "menuitem-screenshot-extension",
-          "toolbar"
-        );
-      }
-    },
-    onCreated(aNode) {
-      aNode.ownerGlobal.MozXULElement.insertFTLIfNeeded(
-        "browser/screenshots.ftl"
-      );
-      Services.obs.addObserver(this, "toggle-screenshot-disable");
-    },
-    observe(subj, topic, data) {
-      let document = subj.document;
-      let button = document.getElementById("screenshot-button");
-
-      if (!button) {
-        return;
-      }
-
-      if (data == "true") {
-        button.setAttribute("disabled", "true");
-      } else {
-        button.removeAttribute("disabled");
       }
     },
   });

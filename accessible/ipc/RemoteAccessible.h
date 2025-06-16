@@ -230,6 +230,9 @@ class RemoteAccessible : public Accessible, public HyperTextAccessibleBase {
 
   virtual Maybe<int32_t> GetIntARIAAttr(nsAtom* aAttrName) const override;
 
+  virtual bool GetStringARIAAttr(nsAtom* aAttrName,
+                                 nsAString& aAttrValue) const override;
+
   virtual void Language(nsAString& aLocale) override;
 
   //////////////////////////////////////////////////////////////////////////////
@@ -274,7 +277,6 @@ class RemoteAccessible : public Accessible, public HyperTextAccessibleBase {
 
   virtual void TakeFocus() const override;
   virtual void ScrollTo(uint32_t aHow) const override;
-  virtual void SetCaretOffset(int32_t aOffset) override;
 
   /**
    * Allow the platform to store a pointers worth of data on us.
@@ -355,7 +357,7 @@ class RemoteAccessible : public Accessible, public HyperTextAccessibleBase {
   Maybe<const nsTArray<int32_t>&> GetCachedTextLines();
   nsRect GetCachedCharRect(int32_t aOffset);
   RefPtr<const AccAttributes> GetCachedTextAttributes();
-  RefPtr<const AccAttributes> GetCachedARIAAttributes() const;
+  const AccAttributes* GetCachedARIAAttributes() const;
 
   nsString GetCachedHTMLNameAttribute() const;
 

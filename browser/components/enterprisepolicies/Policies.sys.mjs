@@ -559,6 +559,11 @@ export var Policies = {
         "ClientSignature",
         "browser.contentanalysis.client_signature"
       );
+      setPrefIfPresentAndLock(
+        param,
+        "MaxConnectionsCount",
+        "browser.contentanalysis.max_connections"
+      );
       let resultPrefs = [
         ["DefaultResult", "default_result"],
         ["TimeoutResult", "timeout_result"],
@@ -803,9 +808,23 @@ export var Policies = {
 
   DisableBuiltinPDFViewer: {
     onBeforeAddons(manager, param) {
-      if (param) {
-        setAndLockPref("pdfjs.disabled", true);
+      let policies = Services.policies.getActivePolicies();
+      if (
+        policies.Handlers?.mimeTypes?.["application/pdf"] ||
+        policies.Handlers?.extensions?.pdf
+      ) {
+        // If there is an existing Handlers policy modifying PDF behavior,
+        // don't do anything.
+        return;
       }
+      let pdfMIMEInfo = lazy.gMIMEService.getFromTypeAndExtension(
+        "application/pdf",
+        "pdf"
+      );
+      let mimeInfo = {
+        action: param ? "useSystemDefault" : "handleInternally",
+      };
+      processMIMEInfo(mimeInfo, pdfMIMEInfo);
     },
   },
 
@@ -840,6 +859,9 @@ export var Policies = {
         TLS_RSA_WITH_AES_256_CBC_SHA: "security.ssl3.rsa_aes_256_sha",
         TLS_RSA_WITH_3DES_EDE_CBC_SHA:
           "security.ssl3.deprecated.rsa_des_ede3_sha",
+        TLS_CHACHA20_POLY1305_SHA256: "security.tls13.chacha20_poly1305_sha256",
+        TLS_AES_128_GCM_SHA256: "security.tls13.aes_128_gcm_sha256",
+        TLS_AES_256_GCM_SHA384: "security.tls13.aes_256_gcm_sha384",
       };
 
       for (let cipher in param) {
@@ -900,9 +922,9 @@ export var Policies = {
   },
 
   DisableFirefoxScreenshots: {
-    onBeforeAddons(manager, param) {
+    onBeforeUIStartup(manager, param) {
       if (param) {
-        setAndLockPref("extensions.screenshots.disabled", true);
+        setAndLockPref("screenshots.browser.component.enabled", false);
       }
     },
   },
@@ -951,14 +973,6 @@ export var Policies = {
     onBeforeUIStartup(manager, param) {
       if (param) {
         manager.disallowFeature("passwordReveal");
-      }
-    },
-  },
-
-  DisablePocket: {
-    onBeforeAddons(manager, param) {
-      if (param) {
-        setAndLockPref("extensions.pocket.enabled", false);
       }
     },
   },
@@ -1042,6 +1056,7 @@ export var Policies = {
         setAndLockPref("datareporting.healthreport.uploadEnabled", false);
         setAndLockPref("datareporting.policy.dataSubmissionEnabled", false);
         setAndLockPref("toolkit.telemetry.archive.enabled", false);
+        setAndLockPref("datareporting.usage.uploadEnabled", false);
         blockAboutPage(manager, "about:telemetry");
       }
     },
@@ -1318,11 +1333,10 @@ export var Policies = {
           setAndLockPref("extensions.getAddons.showPane", false);
           // Turn off recommendations
           setAndLockPref(
-            "extensions.htmlaboutaddons.recommendations.enable",
+            "extensions.htmlaboutaddons.recommendations.enabled",
             false
           );
-          // Block about:debugging
-          blockAboutPage(manager, "about:debugging");
+          manager.disallowFeature("installTemporaryAddon");
         }
         if ("restricted_domains" in extensionSettings["*"]) {
           let restrictedDomains = Services.prefs
@@ -1451,25 +1465,6 @@ export var Policies = {
         PoliciesUtils.setDefaultPref(
           "browser.newtabpage.activity-stream.feeds.section.highlights",
           param.Highlights,
-          param.Locked
-        );
-      }
-      if ("Pocket" in param) {
-        PoliciesUtils.setDefaultPref(
-          "browser.newtabpage.activity-stream.feeds.system.topstories",
-          param.Pocket,
-          param.Locked
-        );
-        PoliciesUtils.setDefaultPref(
-          "browser.newtabpage.activity-stream.feeds.section.topstories",
-          param.Pocket,
-          param.Locked
-        );
-      }
-      if ("SponsoredPocket" in param) {
-        PoliciesUtils.setDefaultPref(
-          "browser.newtabpage.activity-stream.showSponsored",
-          param.SponsoredPocket,
           param.Locked
         );
       }
@@ -1652,7 +1647,7 @@ export var Policies = {
       if ("Default" in param) {
         setAndLockPref("xpinstall.enabled", param.Default);
         if (!param.Default) {
-          blockAboutPage(manager, "about:debugging");
+          manager.disallowFeature("installTemporaryAddon");
           setAndLockPref(
             "browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons",
             false
@@ -1978,7 +1973,6 @@ export var Policies = {
         "security.mixed_content.block_active_content",
         "security.mixed_content.block_display_content",
         "security.mixed_content.upgrade_display_content",
-        "security.osclientcerts.assume_rsa_pss_support",
         "security.osclientcerts.autoload",
         "security.OCSP.enabled",
         "security.OCSP.require",
@@ -2396,7 +2390,10 @@ export var Policies = {
                 let engine = Services.search.getEngineByName(engineName);
                 if (engine) {
                   try {
-                    await Services.search.removeEngine(engine);
+                    await Services.search.removeEngine(
+                      engine,
+                      Ci.nsISearchService.CHANGE_REASON_ENTERPRISE
+                    );
                   } catch (ex) {
                     lazy.log.error("Unable to remove the search engine", ex);
                   }
@@ -2558,6 +2555,21 @@ export var Policies = {
     },
   },
 
+  SkipTermsOfUse: {
+    onBeforeAddons(manager, param) {
+      if (param) {
+        setAndLockPref(
+          "datareporting.policy.dataSubmissionPolicyAcceptedVersion",
+          999
+        );
+        setAndLockPref(
+          "datareporting.policy.dataSubmissionPolicyNotifiedTime",
+          Date.now().toString()
+        );
+      }
+    },
+  },
+
   SSLVersionMax: {
     onBeforeAddons(manager, param) {
       let tlsVersion;
@@ -2633,9 +2645,22 @@ export var Policies = {
           param.FeatureRecommendations,
           param.Locked
         );
+
+        // We use the mostRecentTargetLanguages pref to control the
+        // translations panel intro. Setting a language value simulates a
+        // first translation, which skips the intro panel for users with
+        // FeatureRecommendations disabled.
+        const topWebPreferredLanguage = Services.prefs
+          .getComplexValue("intl.accept_languages", Ci.nsIPrefLocalizedString)
+          .data.split(/\s*,\s*/g)[0];
+
+        const preferredLanguage = topWebPreferredLanguage.length
+          ? topWebPreferredLanguage
+          : Services.locale.appLocaleAsBCP47;
+
         PoliciesUtils.setDefaultPref(
-          "browser.translations.panelShown",
-          !param.FeatureRecommendations,
+          "browser.translations.mostRecentTargetLanguages",
+          param.FeatureRecommendations ? "" : preferredLanguage,
           param.Locked
         );
       }

@@ -683,8 +683,7 @@ inline void NS_QueryNotificationCallbacks(T* channel, const nsIID& iid,
 
 template <class C, class T>
 inline void NS_QueryNotificationCallbacks(C* channel, nsCOMPtr<T>& result) {
-  NS_QueryNotificationCallbacks(channel, NS_GET_TEMPLATE_IID(T),
-                                getter_AddRefs(result));
+  NS_QueryNotificationCallbacks(channel, NS_GET_IID(T), getter_AddRefs(result));
 }
 
 /**
@@ -761,7 +760,7 @@ template <class T>
 inline void NS_QueryNotificationCallbacks(nsIInterfaceRequestor* callbacks,
                                           nsILoadGroup* loadGroup,
                                           nsCOMPtr<T>& result) {
-  NS_QueryNotificationCallbacks(callbacks, loadGroup, NS_GET_TEMPLATE_IID(T),
+  NS_QueryNotificationCallbacks(callbacks, loadGroup, NS_GET_IID(T),
                                 getter_AddRefs(result));
 }
 
@@ -947,6 +946,12 @@ bool NS_IsAboutBlankAllowQueryAndFragment(nsIURI* uri);
  */
 bool NS_IsAboutSrcdoc(nsIURI* uri);
 
+/**
+ * Test whether a URI has an "about", "blob", "data", "file", or an HTTP(S)
+ * scheme.
+ */
+bool NS_IsFetchScheme(nsIURI* uri);
+
 nsresult NS_GenerateHostPort(const nsCString& host, int32_t port,
                              nsACString& hostLine);
 
@@ -1091,21 +1096,9 @@ nsresult GetParameterHTTP(const nsACString& aHeaderVal, const char* aParamName,
 bool ChannelIsPost(nsIChannel* aChannel);
 
 /**
- * Convenience functions for verifying nsIURI schemes. These functions simply
- * wrap aURI->SchemeIs(), but specify the protocol as part of the function name.
+ * Convenience function for verifying nsIURI scheme is either HTTP or HTTPS.
  */
-
-bool SchemeIsHTTP(nsIURI* aURI);
-bool SchemeIsHTTPS(nsIURI* aURI);
-bool SchemeIsJavascript(nsIURI* aURI);
-bool SchemeIsChrome(nsIURI* aURI);
-bool SchemeIsAbout(nsIURI* aURI);
-bool SchemeIsBlob(nsIURI* aURI);
-bool SchemeIsFile(nsIURI* aURI);
-bool SchemeIsData(nsIURI* aURI);
-bool SchemeIsViewSource(nsIURI* aURI);
-bool SchemeIsResource(nsIURI* aURI);
-bool SchemeIsFTP(nsIURI* aURI);
+bool SchemeIsHttpOrHttps(nsIURI* aURI);
 
 // Helper functions for SetProtocol methods to follow
 // step 2.1 in https://url.spec.whatwg.org/#scheme-state
@@ -1195,6 +1188,9 @@ void ParseSimpleURISchemes(const nsACString& schemeList);
 
 nsresult AddExtraHeaders(nsIHttpChannel* aHttpChannel,
                          const nsACString& aExtraHeaders, bool aMerge = true);
+
+bool IsLocalNetworkAccess(nsILoadInfo::IPAddressSpace aParentIPAddressSpace,
+                          nsILoadInfo::IPAddressSpace aTargetIPAddressSpace);
 }  // namespace net
 }  // namespace mozilla
 

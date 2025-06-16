@@ -60,7 +60,6 @@ if (isNode()) {
   pref("devtools.debugger.features.log-points", true);
   pref("devtools.debugger.features.inline-preview", true);
   pref("devtools.debugger.features.javascript-tracing", false);
-  pref("devtools.debugger.features.codemirror-next", true);
   pref("devtools.editor.tabsize", 2);
   pref("devtools.editor.expandtab", false);
   pref("devtools.editor.autoclosebrackets", false);
@@ -97,12 +96,6 @@ export const prefs = new PrefsHelper("devtools", {
   expressions: ["Json", "debugger.expressions", []],
   searchOptions: ["Json", "debugger.search-options"],
   debuggerPrefsSchemaVersion: ["Int", "debugger.prefs-schema-version"],
-  projectDirectoryRoot: ["Char", "debugger.project-directory-root", ""],
-  projectDirectoryRootName: [
-    "Char",
-    "debugger.project-directory-root-name",
-    "",
-  ],
   skipPausing: ["Bool", "debugger.skip-pausing"],
   mapScopes: ["Bool", "debugger.map-scopes-enabled"],
   logActions: ["Bool", "debugger.log-actions"],
@@ -149,7 +142,6 @@ export const features = new PrefsHelper("devtools.debugger.features", {
   inlinePreview: ["Bool", "inline-preview"],
   windowlessServiceWorkers: ["Bool", "windowless-service-workers"],
   javascriptTracing: ["Bool", "javascript-tracing"],
-  codemirrorNext: ["Bool", "codemirror-next"],
 });
 
 // Import the asyncStore already spawned by the TargetMixin class

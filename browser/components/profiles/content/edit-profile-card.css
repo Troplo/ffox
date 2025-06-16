@@ -7,7 +7,11 @@
 #profile-content {
   display: flex;
   flex-direction: column;
-  gap: var(--space-medium);
+  gap: var(--space-xlarge);
+}
+
+#profile-content h1[data-l10n-id="edit-profile-page-header"] {
+  margin-block: 0;
 }
 
 #header-avatar {
@@ -21,6 +25,11 @@
 #profile-name-area {
   display: flex;
   flex-direction: column;
+  gap: var(--space-xsmall);
+}
+
+#profile-name-area label {
+  margin-bottom: var(--space-xsmall);
 }
 
 #profile-name {
@@ -33,20 +42,13 @@
   }
 }
 
-.message-parent {
-  position: relative;
-}
-
 .message {
   display: inline-flex;
   gap: var(--space-xsmall);
   padding: var(--space-xsmall);
 
-  position: absolute;
-  inset-inline-start: 0;
-
   &[hidden] {
-    visibility: hidden;
+    display: none;
   }
 
   > .message-icon {
@@ -66,8 +68,18 @@
   color: var(--icon-color-success);
 }
 
+#themes::part(inputs) {
+  margin-top: var(--space-medium);
+}
+
+#avatars::part(inputs) {
+  margin-top: var(--space-medium);
+}
+
 #avatars::part(inputs),
 #themes::part(inputs) {
   flex-direction: row;
   flex-wrap: wrap;
+  row-gap: var(--space-small);
+  column-gap: var(--space-medium);
 }

@@ -10,29 +10,26 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.tooling.preview.PreviewLightDark
 import mozilla.components.compose.base.Divider
-import mozilla.components.compose.base.annotation.LightDarkPreview
 import org.mozilla.fenix.R
 import org.mozilla.fenix.components.menu.compose.MenuGroup
 import org.mozilla.fenix.components.menu.compose.MenuItem
 import org.mozilla.fenix.components.menu.compose.MenuScaffold
 import org.mozilla.fenix.components.menu.compose.MenuTextItem
 import org.mozilla.fenix.components.menu.compose.header.SubmenuHeader
+import org.mozilla.fenix.settings.trustpanel.store.WebsiteInfoState
 import org.mozilla.fenix.theme.FirefoxTheme
-
-internal const val CONNECTION_SECURITY_PANEL_ROUTE = "connection_security_panel"
 
 @Composable
 internal fun ConnectionSecurityPanel(
-    title: String,
-    isSecured: Boolean,
-    certificateName: String,
+    websiteInfoState: WebsiteInfoState,
     onBackButtonClick: () -> Unit,
 ) {
     MenuScaffold(
         header = {
             SubmenuHeader(
-                header = title,
+                header = websiteInfoState.websiteTitle,
                 onClick = onBackButtonClick,
             )
         },
@@ -40,25 +37,25 @@ internal fun ConnectionSecurityPanel(
         Column {
             MenuGroup {
                 MenuItem(
-                    label = if (isSecured) {
+                    label = if (websiteInfoState.isSecured) {
                         stringResource(id = R.string.connection_security_panel_secure)
                     } else {
                         stringResource(id = R.string.connection_security_panel_not_secure)
                     },
-                    beforeIconPainter = if (isSecured) {
+                    beforeIconPainter = if (websiteInfoState.isSecured) {
                         painterResource(id = R.drawable.mozac_ic_lock_24)
                     } else {
                         painterResource(id = R.drawable.mozac_ic_lock_slash_24)
                     },
                 )
 
-                if (certificateName.isNotEmpty()) {
+                if (websiteInfoState.certificateName.isNotEmpty()) {
                     Divider(color = FirefoxTheme.colors.borderSecondary)
 
                     MenuTextItem(
                         label = stringResource(
                             id = R.string.connection_security_panel_verified_by,
-                            certificateName,
+                            websiteInfoState.certificateName,
                         ),
                     )
                 }
@@ -67,7 +64,7 @@ internal fun ConnectionSecurityPanel(
     }
 }
 
-@LightDarkPreview
+@PreviewLightDark
 @Composable
 private fun TrackersBlockedPanelPreview() {
     FirefoxTheme {
@@ -76,9 +73,12 @@ private fun TrackersBlockedPanelPreview() {
                 .background(color = FirefoxTheme.colors.layer3),
         ) {
             ConnectionSecurityPanel(
-                title = "Mozilla",
-                isSecured = true,
-                certificateName = "Let's Encrypt",
+                websiteInfoState = WebsiteInfoState(
+                    isSecured = true,
+                    websiteUrl = "https://www.mozilla.org",
+                    websiteTitle = "Mozilla",
+                    certificateName = "Let's Encrypt",
+                ),
                 onBackButtonClick = {},
             )
         }

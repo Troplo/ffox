@@ -187,6 +187,14 @@ class MochitestArguments(ArgumentContainer):
             },
         ],
         [
+            ["--android"],
+            {
+                "action": "store_true",
+                "default": False,
+                "help": "Force an android test run.",
+            },
+        ],
+        [
             ["--utility-path"],
             {
                 "dest": "utilityPath",
@@ -978,7 +986,8 @@ class MochitestArguments(ArgumentContainer):
         "webServer": "127.0.0.1",
         "httpPort": DEFAULT_PORTS["http"],
         "sslPort": DEFAULT_PORTS["https"],
-        "webSocketPort": "9988",
+        "webSocketPort": DEFAULT_PORTS["ws"],
+        "webSocketSSLPort": DEFAULT_PORTS["wss"],
         # The default websocket port is incorrect in mozprofile; it is
         # set to the SSL proxy setting. See:
         # see https://bugzilla.mozilla.org/show_bug.cgi?id=916517
@@ -997,7 +1006,7 @@ class MochitestArguments(ArgumentContainer):
                     try:
                         options.app = build_obj.get_binary_path()
                     except BinaryNotFoundException as e:
-                        print("{}\n\n{}\n".format(e, e.help()))
+                        print(f"{e}\n\n{e.help()}\n")
                         sys.exit(1)
                 else:
                     parser.error(
@@ -1009,8 +1018,8 @@ class MochitestArguments(ArgumentContainer):
             options.app = self.get_full_path(options.app, parser.oldcwd)
             if not os.path.exists(options.app):
                 parser.error(
-                    "Error: Path {} doesn't exist. Are you executing "
-                    "$objdir/_tests/testing/mochitest/runtests.py?".format(options.app)
+                    f"Error: Path {options.app} doesn't exist. Are you executing "
+                    "$objdir/_tests/testing/mochitest/runtests.py?"
                 )
 
         if options.flavor is None:
@@ -1214,8 +1223,8 @@ class MochitestArguments(ArgumentContainer):
         # The a11y and chrome flavors can't run with e10s.
         if options.flavor in ("a11y", "chrome") and options.e10s:
             parser.error(
-                "mochitest-{} does not support e10s, try again with "
-                "--disable-e10s.".format(options.flavor)
+                f"mochitest-{options.flavor} does not support e10s, try again with "
+                "--disable-e10s."
             )
 
         # If e10s explicitly disabled and no fission option specified, disable fission
@@ -1284,6 +1293,19 @@ class AndroidArguments(ArgumentContainer):
                 "default": None,
                 "help": "Path to adb binary.",
                 "suppress": True,
+            },
+        ],
+        [
+            ["--activity"],
+            {
+                "dest": "appActivity",
+                "default": "TestRunnerActivity",
+                "help": (
+                    "Specify the android app activity that should be used (e.g. "
+                    "GeckoViewActivity for org.mozilla.geckoview_example). Uses "
+                    "TestRunnerActivity by default for org.mozilla.geckoview.test_"
+                    "runner"
+                ),
             },
         ],
         [
@@ -1428,6 +1450,27 @@ class MochitestArgumentParser(ArgumentParser):
 
         self.oldcwd = os.getcwd()
         self.app = app
+
+        mozlog.commandline.add_logging_group(self)
+
+    @property
+    def containers(self):
+        if self._containers:
+            return self._containers
+
+        containers = container_map[self.app]
+        self._containers = [c() for c in containers]
+        return self._containers
+
+    def validate(self, args):
+        for container in self.containers:
+            args = container.validate(self, args, self.context)
+        return args
+
+    def parse_known_args(self, args=None, namespace=None):
+        if not self.app and any("--android" == arg for arg in args):
+            self.app = "android"
+
         if not self.app and build_obj:
             if conditions.is_android(build_obj):
                 self.app = "android"
@@ -1464,18 +1507,5 @@ class MochitestArgumentParser(ArgumentParser):
                 group.add_argument(*cli, **kwargs)
 
         self.set_defaults(**defaults)
-        mozlog.commandline.add_logging_group(self)
 
-    @property
-    def containers(self):
-        if self._containers:
-            return self._containers
-
-        containers = container_map[self.app]
-        self._containers = [c() for c in containers]
-        return self._containers
-
-    def validate(self, args):
-        for container in self.containers:
-            args = container.validate(self, args, self.context)
-        return args
+        return super().parse_known_args(args, namespace)

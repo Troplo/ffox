@@ -43,6 +43,10 @@ namespace ipc {
 class PrincipalInfo;
 }  // namespace ipc
 
+namespace net {
+class CookieStruct;
+}
+
 namespace dom {
 
 class ContentParent;
@@ -52,6 +56,7 @@ class ServiceWorkerManagerChild;
 class ServiceWorkerPrivate;
 class ServiceWorkerRegistrar;
 class ServiceWorkerShutdownBlocker;
+struct CookieListItem;
 
 class ServiceWorkerUpdateFinishCallback {
  protected:
@@ -258,6 +263,11 @@ class ServiceWorkerManager final : public nsIServiceWorkerManager,
 
   void MaybeCheckNavigationUpdate(const ClientInfo& aClientInfo);
 
+  nsresult SendCookieChangeEvent(const OriginAttributes& aOriginAttributes,
+                                 const nsACString& aScope,
+                                 const net::CookieStruct& aCookie,
+                                 bool aCookieDeleted);
+
   nsresult SendPushEvent(const nsACString& aOriginAttributes,
                          const nsACString& aScope, const nsAString& aMessageId,
                          const Maybe<nsTArray<uint8_t>>& aData);
@@ -428,14 +438,6 @@ class ServiceWorkerManager final : public nsIServiceWorkerManager,
   void UpdateTimerFired(nsIPrincipal* aPrincipal, const nsACString& aScope);
 
   void MaybeSendUnregister(nsIPrincipal* aPrincipal, const nsACString& aScope);
-
-  nsresult SendNotificationEvent(const nsAString& aEventName,
-                                 const nsACString& aOriginSuffix,
-                                 const nsAString& aScope, const nsAString& aID,
-                                 const nsAString& aTitle, const nsAString& aDir,
-                                 const nsAString& aLang, const nsAString& aBody,
-                                 const nsAString& aTag, const nsAString& aIcon,
-                                 const nsAString& aData);
 
   // Used by remove() and removeAll() when clearing history.
   // MUST ONLY BE CALLED FROM UnregisterIfMatchesHost!

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:tools="http://schemas.android.com/tools" xmlns:moz="http://schemas.android.com/apk/res-auto">
+<resources xmlns:tools="http://schemas.android.com/tools">
   <!-- Description for privacy add-on permission. -->
   <string name="mozac_feature_addons_permissions_privacy_description">Կարդալ և փոփոխել գաղտնիության կարգավորումները</string>
   <!-- Description for all_urls add-on permission. -->
@@ -36,8 +36,6 @@
   <string name="mozac_feature_addons_permissions_content_description_item">%1$s, %2$d՝ %3$d-ից</string>
   <!-- Description for tabs add-on permission. -->
   <string name="mozac_feature_addons_permissions_tabs_description">Մատչել դիտարկիչի ներդիրները</string>
-  <!-- Description for unlimited_storage permission. -->
-  <string name="mozac_feature_addons_permissions_unlimited_storage_description" moz:removedIn="137" tools:ignore="UnusedResources">Պահել անսահմանափակ քանակությամբ սպասառուի տվյալներ</string>
   <!-- Description for navigation permission. -->
   <string name="mozac_feature_addons_permissions_web_navigation_description">Մուտք գործել դիտարկիչի գործունեությունը նավիգացիայի ընթացքում</string>
   <!-- Description for bookmarks permission. -->
@@ -99,7 +97,7 @@
   <!-- The last date that the add-on was updated. -->
   <string name="mozac_feature_addons_last_updated">Վերջին թարմացումը</string>
   <!-- The developer website (Homepage) of the add-on. -->
-  <string name="mozac_feature_addons_home_page">Տնային էջ</string>
+  <string name="mozac_feature_addons_home_page">Տնէջ</string>
   <!-- A link where users can find more information about add-ons permissions. -->
   <string name="mozac_feature_addons_learn_more">Իմանալ ավելին թույլտվությունների մասին</string>
   <!-- The rating of the add-on. -->
@@ -111,7 +109,7 @@
   <!-- Indicates the add-on is enabled. -->
   <string name="mozac_feature_addons_settings_on">Միաց.</string>
   <!-- Indicates the add-on is allowed in private browsing mode. -->
-  <string name="mozac_feature_addons_settings_allow_in_private_browsing">Թույլատրել Մասնավոր դիտարկմամբ</string>
+  <string name="mozac_feature_addons_settings_allow_in_private_browsing">Թույլատրել գաղտնի դիտարկումում</string>
   <!-- Indicates the add-on is allowed in private browsing mode. -->
   <string name="mozac_feature_addons_settings_run_in_private_browsing">Աշխատեցնել գաղտնի դիտարկմամբ</string>
   <!-- This is displayed when the add-on is not allowed to run in private browsing. -->

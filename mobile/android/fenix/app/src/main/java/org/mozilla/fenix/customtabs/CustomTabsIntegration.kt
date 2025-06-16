@@ -13,36 +13,23 @@ import androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO
 import androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES
 import androidx.appcompat.content.res.AppCompatResources.getDrawable
 import androidx.core.graphics.ColorUtils
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.distinctUntilChangedBy
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
 import mozilla.components.browser.state.selector.findCustomTabOrSelectedTab
 import mozilla.components.browser.state.store.BrowserStore
 import mozilla.components.browser.toolbar.BrowserToolbar
 import mozilla.components.browser.toolbar.display.DisplayToolbar
-import mozilla.components.compose.base.theme.layout.AcornWindowSize
 import mozilla.components.feature.customtabs.CustomTabsColorsConfig
 import mozilla.components.feature.customtabs.CustomTabsToolbarButtonConfig
 import mozilla.components.feature.customtabs.CustomTabsToolbarFeature
 import mozilla.components.feature.customtabs.CustomTabsToolbarListeners
 import mozilla.components.feature.tabs.CustomTabsUseCases
-import mozilla.components.lib.state.ext.flow
 import mozilla.components.support.base.feature.LifecycleAwareFeature
 import mozilla.components.support.base.feature.UserInteractionHandler
 import mozilla.components.support.utils.ColorUtils.calculateAlphaFromPercentage
-import mozilla.telemetry.glean.private.NoExtras
-import org.mozilla.fenix.GleanMetrics.NavigationBar
 import org.mozilla.fenix.R
 import org.mozilla.fenix.browser.BrowserFragment.Companion.OPEN_IN_ACTION_WEIGHT
-import org.mozilla.fenix.components.AppStore
 import org.mozilla.fenix.components.menu.MenuAccessPoint
-import org.mozilla.fenix.components.toolbar.BrowserToolbarView
 import org.mozilla.fenix.components.toolbar.ToolbarMenu
 import org.mozilla.fenix.components.toolbar.interactor.BrowserToolbarInteractor
-import org.mozilla.fenix.components.toolbar.navbar.shouldAddNavigationBar
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.utils.Settings
@@ -51,9 +38,8 @@ import org.mozilla.fenix.utils.Settings
 class CustomTabsIntegration(
     private val context: Context,
     store: BrowserStore,
-    private val appStore: AppStore,
     useCases: CustomTabsUseCases,
-    private val browserToolbarView: BrowserToolbarView,
+    private val browserToolbar: BrowserToolbar,
     private val sessionId: String,
     private val activity: Activity,
     private val interactor: BrowserToolbarInteractor,
@@ -61,13 +47,7 @@ class CustomTabsIntegration(
     private val isSandboxCustomTab: Boolean,
     private val isPrivate: Boolean,
     isMenuRedesignEnabled: Boolean,
-    private val isNavBarEnabled: Boolean,
 ) : LifecycleAwareFeature, UserInteractionHandler {
-
-    private val toolbar: BrowserToolbar = browserToolbarView.view
-    private lateinit var scope: CoroutineScope
-    private val isNavBarVisible
-        get() = context.shouldAddNavigationBar()
 
     @VisibleForTesting
     internal var forwardAction: BrowserToolbar.TwoStateButton? = null
@@ -80,17 +60,17 @@ class CustomTabsIntegration(
 
     init {
         // Remove toolbar shadow
-        toolbar.elevation = 0f
+        browserToolbar.elevation = 0f
 
-        toolbar.display.displayIndicatorSeparator = false
-        toolbar.display.indicators = listOf(
+        browserToolbar.display.displayIndicatorSeparator = false
+        browserToolbar.display.indicators = listOf(
             DisplayToolbar.Indicators.SECURITY,
         )
 
         // If in private mode, override toolbar background to use private color
         // See #5334
         if (isPrivate) {
-            toolbar.background = getDrawable(activity, R.drawable.toolbar_background)
+            browserToolbar.background = getDrawable(activity, R.drawable.toolbar_background)
         }
     }
 
@@ -107,7 +87,7 @@ class CustomTabsIntegration(
 
     private val feature = CustomTabsToolbarFeature(
         store = store,
-        toolbar = toolbar,
+        toolbar = browserToolbar,
         sessionId = sessionId,
         useCases = useCases,
         menuBuilder = if (isMenuRedesignEnabled) null else customTabToolbarMenu.menuBuilder,
@@ -115,9 +95,6 @@ class CustomTabsIntegration(
         window = activity.window,
         customTabsToolbarListeners = CustomTabsToolbarListeners(
             menuListener = {
-                if (context.settings().navigationToolbarEnabled) {
-                    NavigationBar.customMenuTapped.record(NoExtras())
-                }
                 interactor.onMenuButtonClicked(
                     accessPoint = MenuAccessPoint.External,
                     customTabSessionId = sessionId,
@@ -137,9 +114,9 @@ class CustomTabsIntegration(
         appNightMode = activity.settings().getAppNightMode(),
         forceActionButtonTinting = isPrivate,
         customTabsToolbarButtonConfig = CustomTabsToolbarButtonConfig(
-            showMenu = !isNavBarVisible,
-            showRefreshButton = isNavBarEnabled,
-            allowCustomizingCloseButton = !isNavBarEnabled,
+            showMenu = true,
+            showRefreshButton = false,
+            allowCustomizingCloseButton = true,
         ),
         customTabsColorsConfig = getCustomTabsColorsConfig(),
     )
@@ -154,69 +131,21 @@ class CustomTabsIntegration(
         }
     }
 
-    private fun getCustomTabsColorsConfig() = when (activity.settings().navigationToolbarEnabled) {
-        true -> CustomTabsColorsConfig(
-            updateStatusBarColor = false,
-            updateSystemNavigationBarColor = false,
-            updateToolbarsColor = false,
-        )
-
-        false -> CustomTabsColorsConfig(
-            updateStatusBarColor = !isPrivate,
-            updateSystemNavigationBarColor = !isPrivate,
-            updateToolbarsColor = !isPrivate,
-        )
-    }
+    private fun getCustomTabsColorsConfig() = CustomTabsColorsConfig(
+        updateStatusBarColor = !isPrivate,
+        updateSystemNavigationBarColor = !isPrivate,
+        updateToolbarsColor = !isPrivate,
+    )
 
     override fun start() {
         feature.start()
-        scope = MainScope().apply {
-            launch {
-                appStore.flow()
-                    .distinctUntilChangedBy { it.orientation }
-                    .map { it.orientation }
-                    .collect {
-                        updateToolbarLayout(
-                            context = context,
-                            isNavBarEnabled = isNavBarEnabled,
-                            isWindowSizeSmall = AcornWindowSize.getWindowSize(context) == AcornWindowSize.Small,
-                        )
-                    }
-            }
-        }
     }
 
     override fun stop() {
         feature.stop()
-        scope.cancel()
     }
 
     override fun onBackPressed() = feature.onBackPressed()
-
-    @VisibleForTesting(otherwise = VisibleForTesting.PROTECTED)
-    internal fun updateToolbarLayout(
-        context: Context,
-        isNavBarEnabled: Boolean,
-        isWindowSizeSmall: Boolean,
-    ) {
-        if (isNavBarEnabled) {
-            updateAddressBarNavigationActions(
-                context = context,
-                isWindowSizeSmall = isWindowSizeSmall,
-            )
-
-            browserToolbarView.updateMenuVisibility(
-                isVisible = !isWindowSizeSmall,
-            )
-
-            updateOpenInAction(
-                isNavbarVisible = isWindowSizeSmall,
-                context = context,
-            )
-
-            feature.updateMenuVisibility(isVisible = !isWindowSizeSmall)
-        }
-    }
 
     @VisibleForTesting
     internal fun updateAddressBarNavigationActions(
@@ -225,30 +154,9 @@ class CustomTabsIntegration(
     ) {
         if (!isWindowSizeSmall) {
             addNavigationActions(context)
-            toolbar.invalidateActions()
+            browserToolbar.invalidateActions()
         } else {
             removeNavigationActions()
-        }
-    }
-
-    @VisibleForTesting
-    internal fun updateOpenInAction(
-        isNavbarVisible: Boolean,
-        context: Context,
-    ) {
-        if (!isNavbarVisible) {
-            val enableTint = feature.iconColor
-            val disableTint = ColorUtils.setAlphaComponent(
-                feature.iconColor,
-                calculateAlphaFromPercentage(DISABLED_STATE_OPACITY),
-            )
-            initOpenInAction(
-                context = context,
-                enableTint = enableTint,
-                disableTint = disableTint,
-            )
-        } else {
-            removeOpenInAction()
         }
     }
 
@@ -315,7 +223,7 @@ class CustomTabsIntegration(
                     )
                 },
             ).also {
-                toolbar.addNavigationAction(it)
+                browserToolbar.addNavigationAction(it)
             }
         }
     }
@@ -362,7 +270,7 @@ class CustomTabsIntegration(
                     )
                 },
             ).also {
-                toolbar.addNavigationAction(it)
+                browserToolbar.addNavigationAction(it)
             }
         }
     }
@@ -370,12 +278,12 @@ class CustomTabsIntegration(
     @VisibleForTesting
     internal fun removeNavigationActions() {
         forwardAction?.let {
-            toolbar.removeNavigationAction(it)
+            browserToolbar.removeNavigationAction(it)
         }
         forwardAction = null
 
         backAction?.let {
-            toolbar.removeNavigationAction(it)
+            browserToolbar.removeNavigationAction(it)
         }
         backAction = null
     }
@@ -421,7 +329,7 @@ class CustomTabsIntegration(
                     )
                 },
             ).also {
-                toolbar.addBrowserAction(it)
+                browserToolbar.addBrowserAction(it)
             }
         }
     }
@@ -429,7 +337,7 @@ class CustomTabsIntegration(
     @VisibleForTesting
     internal fun removeOpenInAction() {
         openInAction?.let {
-            toolbar.removeBrowserAction(it)
+            browserToolbar.removeBrowserAction(it)
         }
         openInAction = null
     }

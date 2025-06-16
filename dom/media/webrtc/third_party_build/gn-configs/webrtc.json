@@ -1,7 +1,6 @@
 {
   "build_root_dir": "third_party",
   "target_dir": "libwebrtc",
-  "preprocessing_script": "dom/media/webrtc/third_party_build/gn-configs/webrtc_preprocessor.py",
   "moz_build_flag": "build_mozilla_webrtc",
   "gn_target": "//:webrtc",
   "gn_sandbox_variables": {
@@ -13,6 +12,19 @@
   "mozilla_flags": ["-fobjc-arc", "-mavx2", "-mfma", "-mfpu=neon", "-msse2"],
   "write_mozbuild_variables": {
     "INCLUDE_TK_CFLAGS_DIRS": [
+      "third_party/libwebrtc/modules/desktop_capture/desktop_capture_gn",
+      "third_party/libwebrtc/modules/portal/portal_gn",
+      "third_party/libwebrtc/modules/video_capture/video_capture_internal_impl_gn"
+    ],
+    "INCLUDE_SYSTEM_GBM_HANDLING": [
+      "third_party/libwebrtc/modules/desktop_capture/desktop_capture_gn",
+      "third_party/libwebrtc/modules/portal/portal_gn"
+    ],
+    "INCLUDE_SYSTEM_LIBDRM_HANDLING": [
+      "third_party/libwebrtc/modules/desktop_capture/desktop_capture_gn",
+      "third_party/libwebrtc/modules/portal/portal_gn"
+    ],
+    "INCLUDE_SYSTEM_PIPEWIRE_HANDLING": [
       "third_party/libwebrtc/modules/desktop_capture/desktop_capture_gn",
       "third_party/libwebrtc/modules/portal/portal_gn",
       "third_party/libwebrtc/modules/video_capture/video_capture_internal_impl_gn"

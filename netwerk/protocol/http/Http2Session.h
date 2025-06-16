@@ -49,9 +49,9 @@ class Http2Session final : public ASpdySession,
   ~Http2Session();
 
  public:
-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_HTTP2SESSION_IID)
+  NS_INLINE_DECL_STATIC_IID(NS_HTTP2SESSION_IID)
 
-  NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSAHTTPTRANSACTION
   NS_DECL_NSAHTTPCONNECTION(mConnection)
   NS_DECL_NSAHTTPSEGMENTREADER
@@ -159,6 +159,15 @@ class Http2Session final : public ASpdySession,
     SETTINGS_TYPE_ENABLE_CONNECT_PROTOCOL = 8,
     // see rfc9218. used to disable HTTP/2 priority signals
     SETTINGS_NO_RFC7540_PRIORITIES = 9,
+    // Used to indicate support for WebTransport over HTTP/2
+    SETTINGS_WEBTRANSPORT_MAX_SESSIONS = 0x2b60,
+    // Settings for WebTransport
+    // https://www.ietf.org/archive/id/draft-ietf-webtrans-http2-11.html#section-10.1
+    SETTINGS_WEBTRANSPORT_INITIAL_MAX_DATA = 0x2b61,
+    SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_UNI = 0x2b62,
+    SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAM_DATA_BIDI = 0x2b63,
+    SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_UNI = 0x2b64,
+    SETTINGS_WEBTRANSPORT_INITIAL_MAX_STREAMS_BIDI = 0x2b65,
   };
 
   // This should be big enough to hold all of your control packets,
@@ -299,7 +308,7 @@ class Http2Session final : public ASpdySession,
 
   ExtendedCONNECTSupport GetExtendedCONNECTSupport() override;
 
-  already_AddRefed<nsHttpConnection> CreateTunnelStream(
+  Result<already_AddRefed<nsHttpConnection>, nsresult> CreateTunnelStream(
       nsAHttpTransaction* aHttpTransaction, nsIInterfaceRequestor* aCallbacks,
       PRIntervalTime aRtt, bool aIsExtendedCONNECT = false) override;
 
@@ -348,6 +357,7 @@ class Http2Session final : public ASpdySession,
                    bool aRemoveFromQueue = true);
   void SendHello();
   void RemoveStreamFromQueues(Http2StreamBase*);
+  void RemoveStreamFromTables(Http2StreamBase*);
   [[nodiscard]] nsresult ParsePadding(uint8_t&, uint16_t&);
 
   void SetWriteCallbacks();
@@ -403,9 +413,8 @@ class Http2Session final : public ASpdySession,
   RefPtr<nsAHttpSegmentReader> mSegmentReader;
   nsAHttpSegmentWriter* mSegmentWriter;
 
-  uint32_t mSendingChunkSize; /* the transmission chunk size */
-  uint32_t mNextStreamID;     /* 24 bits */
-  uint32_t mLastPushedID;
+  uint32_t mSendingChunkSize;    /* the transmission chunk size */
+  uint32_t mNextStreamID;        /* 24 bits */
   uint32_t mConcurrentHighWater; /* max parallelism on session */
   uint32_t mPushAllowance;       /* rwin for unmatched pushes */
 
@@ -424,7 +433,6 @@ class Http2Session final : public ASpdySession,
   nsTArray<WeakPtr<Http2StreamBase>> mQueuedStreams;
   nsTArray<WeakPtr<Http2StreamBase>> mPushesReadyForRead;
   nsTArray<WeakPtr<Http2StreamBase>> mSlowConsumersReadyForRead;
-  nsTArray<Http2PushedStream*> mPushedStreams;
 
   // Compression contexts for header transport.
   // HTTP/2 compresses only HTTP headers and does not reset the context in
@@ -474,7 +482,6 @@ class Http2Session final : public ASpdySession,
   // next recvd frame which must be the same type
   uint32_t mExpectedHeaderID;
   uint32_t mExpectedPushPromiseID;
-  uint32_t mContinuedPromiseStream;
 
   // for the conversion of downstream http headers into http/2 formatted headers
   // The data here does not persist between frames
@@ -547,6 +554,12 @@ class Http2Session final : public ASpdySession,
   // The initial value of the local stream and session window
   uint32_t mInitialRwin;
 
+  uint32_t mInitialWebTransportMaxData = 0;
+  uint32_t mInitialWebTransportMaxStreamDataBidi = 0;
+  uint32_t mInitialWebTransportMaxStreamDataUnidi = 0;
+  uint32_t mInitialWebTransportMaxStreamsBidi = 0;
+  uint32_t mInitialWebTransportMaxStreamsUnidi = 0;
+
   // This is a output queue of bytes ready to be written to the SSL stream.
   // When that streams returns WOULD_BLOCK on direct write the bytes get
   // coalesced together here. This results in larger writes to the SSL layer.
@@ -612,7 +625,12 @@ class Http2Session final : public ASpdySession,
 
   bool mPeerFailedHandshake;
 
+  uint32_t mWebTransportMaxSessions = 0;
+
+  uint32_t mOngoingWebTransportSessions = 0;
+
  private:
+  TimeStamp mLastTRRResponseTime;  // Time of the last successful TRR response
   uint32_t mTrrStreams;
 
   // Whether we allow websockets, based on a pref
@@ -625,8 +643,6 @@ class Http2Session final : public ASpdySession,
   // we've received the settings.
   bool mHasTransactionWaitingForExtendedCONNECT = false;
 };
-
-NS_DEFINE_STATIC_IID_ACCESSOR(Http2Session, NS_HTTP2SESSION_IID);
 
 }  // namespace net
 }  // namespace mozilla

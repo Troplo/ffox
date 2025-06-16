@@ -29,6 +29,7 @@ def set_build_attributes(config, jobs):
 EXTRA_COMPILERS = {
     "clang-4": {"CC": "clang-4.0", "CCC": "clang++-4.0"},
     "clang-10": {"CC": "clang-10", "CCC": "clang++-10"},
+    "clang-18": {"CC": "clang-18", "CCC": "clang++-18"},
     # gcc-4.6 introduced nullptr.
     "gcc-4.4": {"CC": "gcc-4.4", "CCC": "g++-4.4", "NSS_DISABLE_GTESTS": "1"},
     # gcc-4.8 has incomplete c++11 support
@@ -152,7 +153,7 @@ def set_gyp_command(config, jobs):
         command = script + " --python=python3"
         if "64" not in platform:
             command += " -t ia32"
-        if attributes["build_type"] == "opt":
+        if attributes["build_type"] in ("opt", "opt-static"):
             command += " --opt"
         if "fips" in attributes["build_type"]:
             command += " --enable-fips"
@@ -161,7 +162,7 @@ def set_gyp_command(config, jobs):
         if attributes.get("nspr"):
             command += " --nspr-only --nspr-test-build --nspr-test-run"
         if attributes.get("static"):
-            command += " --static"
+            command += " --static -Ddisable_libpkix=1"
         if attributes.get("fuzz"):
             command += " --disable-tests -Ddisable_libpkix=1 --fuzz"
             job.setdefault("worker", {}).setdefault("env", {}).update({

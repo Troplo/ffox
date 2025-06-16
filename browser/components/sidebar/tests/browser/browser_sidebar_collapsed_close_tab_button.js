@@ -5,11 +5,11 @@
 
 add_setup(async () => {
   await SpecialPowers.pushPrefEnv({
-    set: [["sidebar.verticalTabs", true]],
+    set: [[VERTICAL_TABS_PREF, true]],
   });
   await waitForTabstripOrientation("vertical");
   Assert.equal(
-    Services.prefs.getStringPref("sidebar.visibility"),
+    Services.prefs.getStringPref(SIDEBAR_VISIBILITY_PREF),
     "always-show",
     "Sanity check the visibilty pref when verticalTabs are enabled"
   );
@@ -23,7 +23,7 @@ add_task(async function test_toggle_collapse_close_button() {
   const sidebar = document.querySelector("sidebar-main");
   ok(sidebar, "Sidebar is shown.");
 
-  if (window.SidebarController._state.launcherExpanded) {
+  if (SidebarController._state.launcherExpanded) {
     await SidebarController.initializeUIState({ launcherExpanded: false });
     await sidebar.updateComplete;
   }
@@ -103,9 +103,13 @@ add_task(async function test_toggle_collapse_close_button() {
   // Expand the sidebar and make sure the collased close button no longer shows
   await SidebarController.initializeUIState({ launcherExpanded: true });
   await sidebar.updateComplete;
-  await TestUtils.waitForCondition(() => {
-    return window.SidebarController._state.launcherExpanded;
-  }, "Sidebar launcher is expanded");
+  info("Waiting for sidebar to be expanded");
+  await BrowserTestUtils.waitForMutationCondition(
+    sidebar,
+    { attributes: true, attributeFilter: ["expanded"] },
+    () => sidebar.expanded
+  );
+  info("Sidebar launcher is expanded");
   computedStyle = window.getComputedStyle(
     gBrowser.selectedTab.querySelector(".tab-close-button")
   );

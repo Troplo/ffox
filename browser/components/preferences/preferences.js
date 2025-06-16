@@ -85,7 +85,6 @@ ChromeUtils.defineESModuleGetters(this, {
     "resource://gre/modules/ExtensionPreferencesManager.sys.mjs",
   ExtensionSettingsStore:
     "resource://gre/modules/ExtensionSettingsStore.sys.mjs",
-  FeatureGate: "resource://featuregates/FeatureGate.sys.mjs",
   FileUtils: "resource://gre/modules/FileUtils.sys.mjs",
   FirefoxRelay: "resource://gre/modules/FirefoxRelay.sys.mjs",
   HomePage: "resource:///modules/HomePage.sys.mjs",
@@ -202,8 +201,10 @@ function init_all() {
     register_module("paneTranslations", gTranslationsPane);
   }
   if (Services.prefs.getBoolPref("browser.preferences.experimental")) {
-    // Set hidden based on previous load's hidden value.
+    // Set hidden based on previous load's hidden value or if Nimbus is
+    // disabled.
     document.getElementById("category-experimental").hidden =
+      !ExperimentAPI.studiesEnabled ||
       Services.prefs.getBoolPref(
         "browser.preferences.experimental.hidden",
         false
@@ -310,14 +311,18 @@ async function gotoPref(
   }
 
   let item;
+  let unknownCategory = false;
   if (category != "paneSearchResults") {
     // Hide second level headers in normal view
     for (let element of document.querySelectorAll(".search-header")) {
       element.hidden = true;
     }
 
-    item = categories.querySelector(".category[value=" + category + "]");
+    item = categories.querySelector(
+      ".category[value=" + CSS.escape(category) + "]"
+    );
     if (!item || item.hidden) {
+      unknownCategory = true;
       category = kDefaultCategoryInternalName;
       item = categories.querySelector(".category[value=" + category + "]");
     }
@@ -325,6 +330,7 @@ async function gotoPref(
 
   if (
     gLastCategory.category ||
+    unknownCategory ||
     category != kDefaultCategoryInternalName ||
     subcategory
   ) {
@@ -445,31 +451,12 @@ function scrollAndHighlight(subcategory) {
   if (!element) {
     return;
   }
-  let header = getClosestDisplayedHeader(element);
 
-  header.scrollIntoView({
+  element.scrollIntoView({
     behavior: "smooth",
     block: "center",
   });
   element.classList.add("spotlight");
-}
-
-/**
- * If there is no visible second level header it will return first level header,
- * otherwise return second level header.
- * @returns {Element} - The closest displayed header.
- */
-function getClosestDisplayedHeader(element) {
-  let header = element.closest("groupbox");
-  let searchHeader = header.querySelector(".search-header");
-  if (
-    searchHeader &&
-    searchHeader.hidden &&
-    header.previousElementSibling.classList.contains("subcategory")
-  ) {
-    header = header.previousElementSibling;
-  }
-  return header;
 }
 
 function friendlyPrefCategoryNameToInternalName(aName) {

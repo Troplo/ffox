@@ -5,15 +5,19 @@
 <link rel="help" href="https://open-ui.org/components/invokers.explainer/" />
 <script src="/resources/testharness.js"></script>
 <script src="/resources/testharnessreport.js"></script>
-<script src="/resources/testdriver.js"></script>
-<script src="/resources/testdriver-actions.js"></script>
-<script src="/resources/testdriver-vendor.js"></script>
 <script src="resources/invoker-utils.js"></script>
 
 <div id="invokee" popover>
   <button id="containedinvoker" commandfor="invokee" command="hide-popover"></button>
 </div>
 <button id="invokerbutton" commandfor="invokee" command="toggle-popover"></button>
+
+<style>
+#invokee {
+  margin: 0;
+  position-area: block-end span-all;
+}
+</style>
 
 <script>
   function resetState() {
@@ -32,7 +36,7 @@
     invokee.addEventListener("command", (e) => { invokerbutton.setAttribute('command', 'hide-popover'); }, {
       once: true,
     });
-    await clickOn(invokerbutton);
+    invokerbutton.click();
     t.add_cleanup(resetState);
     assert_true(invokee.matches(":popover-open"));
   }, "changing command attribute inside invokeevent doesn't impact the invocation");
@@ -45,26 +49,26 @@
     "tOgGlE-pOpOvEr",
     "sHoW-pOpOvEr",
   ].forEach((command) => {
-    promise_test(
-      async function (t) {
+    test(
+      function (t) {
         t.add_cleanup(resetState);
         invokerbutton.command = command;
         assert_false(invokee.matches(":popover-open"));
-        await clickOn(invokerbutton);
+        invokerbutton.click();
         assert_true(invokee.matches(":popover-open"));
       },
       `invoking (as ${command}) closed popover opens`,
     );
 
-    promise_test(
-      async function (t) {
+    test(
+      function (t) {
         t.add_cleanup(resetState);
         invokerbutton.command = command;
         assert_false(invokee.matches(":popover-open"));
         invokee.addEventListener("command", (e) => e.preventDefault(), {
           once: true,
         });
-        await clickOn(invokerbutton);
+        invokerbutton.click();
         assert_false(invokee.matches(":popover-open"));
       },
       `invoking (as ${command}) closed popover with preventDefault does not open`,
@@ -79,20 +83,20 @@
     "tOgGlE-pOpOvEr",
     "hIdE-pOpOvEr",
   ].forEach((command) => {
-    promise_test(
-      async function (t) {
+    test(
+      function (t) {
         t.add_cleanup(resetState);
         invokerbutton.command = command;
         invokee.showPopover();
         assert_true(invokee.matches(":popover-open"));
-        await clickOn(invokerbutton);
+        invokerbutton.click();
         assert_false(invokee.matches(":popover-open"));
       },
       `invoking (as ${command}) open popover closes`,
     );
 
-    promise_test(
-      async function (t) {
+    test(
+      function (t) {
         t.add_cleanup(resetState);
         invokerbutton.command = command;
         invokee.showPopover();
@@ -100,26 +104,26 @@
         invokee.addEventListener("command", (e) => e.preventDefault(), {
           once: true,
         });
-        await clickOn(invokerbutton);
+        invokerbutton.click();
         assert_true(invokee.matches(":popover-open"));
       },
       `invoking (as ${command}) open popover with preventDefault does not close`,
     );
 
-    promise_test(
-      async function (t) {
+    test(
+      function (t) {
         t.add_cleanup(resetState);
         containedinvoker.command = command;
         invokee.showPopover();
         assert_true(invokee.matches(":popover-open"));
-        await clickOn(containedinvoker);
+        containedinvoker.click();
         assert_false(invokee.matches(":popover-open"));
       },
       `invoking (as ${command}) from within open popover closes`,
     );
 
-    promise_test(
-      async function (t) {
+    test(
+      function (t) {
         t.add_cleanup(resetState);
         containedinvoker.command = command;
         invokee.showPopover();
@@ -127,7 +131,7 @@
           once: true,
         });
         assert_true(invokee.matches(":popover-open"));
-        await clickOn(containedinvoker);
+        containedinvoker.click();
         assert_true(invokee.matches(":popover-open"));
       },
       `invoking (as ${command}) from within open popover with preventDefault does not close`,
@@ -135,21 +139,33 @@
   });
 
   // show-popover specific
-  promise_test(async function (t) {
+  test(function (t) {
     t.add_cleanup(resetState);
     invokerbutton.setAttribute("command", "show-popover");
     invokee.showPopover();
     assert_true(invokee.matches(":popover-open"));
-    await clickOn(invokerbutton);
+    invokerbutton.click();
     assert_true(invokee.matches(":popover-open"));
   }, "invoking (as show-popover) open popover is noop");
 
   // hide-popover specific
-  promise_test(async function (t) {
+  test(function (t) {
     t.add_cleanup(resetState);
     invokerbutton.setAttribute("command", "hide-popover");
     assert_false(invokee.matches(":popover-open"));
-    await clickOn(invokerbutton);
+    invokerbutton.click();
     assert_false(invokee.matches(":popover-open"));
   }, "invoking (as hide-popover) closed popover is noop");
+
+
+  test(function (t) {
+    t.add_cleanup(resetState);
+    invokerbutton.setAttribute("command", "show-popover");
+    invokerbutton.click();
+    assert_true(invokee.matches(":popover-open"),
+      ":popover-open should match after calling invokerbutton.click()");
+    const rect = invokee.getBoundingClientRect();
+    assert_not_equals(rect.y, 0,
+      "popover should not be at the top of the window because it is anchor positioned.");
+  }, "invoking (as show-popover) should create an implicit anchor reference for anchor positioning.");
 </script>

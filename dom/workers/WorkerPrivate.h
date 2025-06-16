@@ -65,7 +65,10 @@ namespace mozilla {
 class ThrottledEventQueue;
 namespace dom {
 
+class PRemoteWorkerDebuggerChild;
+class PRemoteWorkerDebuggerParent;
 class RemoteWorkerChild;
+class RemoteWorkerDebuggerChild;
 class RemoteWorkerNonLifeCycleOpControllerChild;
 
 // If you change this, the corresponding list in nsIWorkerDebugger.idl needs
@@ -309,10 +312,17 @@ class WorkerPrivate final
   // Mark worker private as running in the background tab
   // for further throttling
   void SetIsRunningInBackground();
+  void SetIsPlayingAudio(bool aIsPlayingAudio);
+
+  bool IsPlayingAudio() {
+    AssertIsOnWorkerThread();
+    return mIsPlayingAudio;
+  }
 
   void SetIsRunningInForeground();
 
   bool ChangeBackgroundStateInternal(bool aIsBackground);
+  bool ChangePlaybackStateInternal(bool aIsPlayingAudio);
 
   // returns true, if worker is running in the background tab
   bool IsRunningInBackground() const { return mIsInBackground; }
@@ -927,7 +937,7 @@ class WorkerPrivate final
     return mLoadInfo.mCSP;
   }
 
-  void SetCsp(nsIContentSecurityPolicy* aCSP);
+  nsresult SetCsp(nsIContentSecurityPolicy* aCSP);
 
   nsresult SetCSPFromHeaderValues(const nsACString& aCSPHeaderValue,
                                   const nsACString& aCSPReportOnlyHeaderValue);
@@ -935,7 +945,11 @@ class WorkerPrivate final
   void StoreCSPOnClient();
 
   const mozilla::ipc::CSPInfo& GetCSPInfo() const {
-    return *mLoadInfo.mCSPInfo;
+    return mLoadInfo.mCSPContext->CSPInfo();
+  }
+
+  WorkerCSPContext* GetCSPContext() const {
+    return mLoadInfo.mCSPContext.get();
   }
 
   void UpdateReferrerInfoFromHeader(
@@ -949,32 +963,6 @@ class WorkerPrivate final
 
   void SetReferrerInfo(nsIReferrerInfo* aReferrerInfo) {
     mLoadInfo.mReferrerInfo = aReferrerInfo;
-  }
-
-  bool IsEvalAllowed() const { return mLoadInfo.mEvalAllowed; }
-
-  void SetEvalAllowed(bool aAllowed) { mLoadInfo.mEvalAllowed = aAllowed; }
-
-  bool GetReportEvalCSPViolations() const {
-    return mLoadInfo.mReportEvalCSPViolations;
-  }
-
-  void SetReportEvalCSPViolations(bool aReport) {
-    mLoadInfo.mReportEvalCSPViolations = aReport;
-  }
-
-  bool IsWasmEvalAllowed() const { return mLoadInfo.mWasmEvalAllowed; }
-
-  void SetWasmEvalAllowed(bool aAllowed) {
-    mLoadInfo.mWasmEvalAllowed = aAllowed;
-  }
-
-  bool GetReportWasmEvalCSPViolations() const {
-    return mLoadInfo.mReportWasmEvalCSPViolations;
-  }
-
-  void SetReportWasmEvalCSPViolations(bool aReport) {
-    mLoadInfo.mReportWasmEvalCSPViolations = aReport;
   }
 
   bool XHRParamsAllowed() const { return mLoadInfo.mXHRParamsAllowed; }
@@ -1057,6 +1045,26 @@ class WorkerPrivate final
 
   void DisableDebugger();
 
+  void BindRemoteWorkerDebuggerChild();
+
+  void CreateRemoteDebuggerEndpoints();
+
+  void SetIsRemoteDebuggerRegistered(const bool& aRegistered);
+
+  void SetIsRemoteDebuggerReady(const bool& aReady);
+
+  void EnableRemoteDebugger();
+
+  void DisableRemoteDebugger();
+
+  void DisableRemoteDebuggerOnWorkerThread(const bool& aForShutdown = false);
+
+  void SetIsQueued(const bool& aQueued);
+
+  bool IsQueued() const;
+
+  void UpdateWindowIDToDebugger(const uint64_t& aWindowID, const bool& aIsAdd);
+
   already_AddRefed<WorkerRunnable> MaybeWrapAsWorkerRunnable(
       already_AddRefed<nsIRunnable> aRunnable);
 
@@ -1131,7 +1139,7 @@ class WorkerPrivate final
 
   void StartCancelingTimer();
 
-  const nsAString& Id();
+  const nsString& Id();
 
   const nsID& AgentClusterId() const { return mAgentClusterId; }
 
@@ -1493,6 +1501,15 @@ class WorkerPrivate final
 
   mozilla::ipc::Endpoint<PRemoteWorkerNonLifeCycleOpControllerChild> mChildEp;
 
+  RefPtr<RemoteWorkerDebuggerChild> mRemoteDebugger;
+  mozilla::ipc::Endpoint<PRemoteWorkerDebuggerChild> mDebuggerChildEp;
+  mozilla::ipc::Endpoint<PRemoteWorkerDebuggerParent> mDebuggerParentEp;
+  bool mRemoteDebuggerRegistered MOZ_GUARDED_BY(mMutex);
+  bool mRemoteDebuggerReady MOZ_GUARDED_BY(mMutex);
+  bool mIsQueued;  // Should only touched on parent thread.
+  mozilla::CondVar mDebuggerBindingCondVar MOZ_GUARDED_BY(mMutex);
+  RefPtr<WorkerEventTarget> mWorkerDebuggerEventTarget;
+
   JS::UniqueChars mDefaultLocale;  // nulled during worker JSContext init
   TimeStamp mKillTime;
   WorkerStatus mParentStatus MOZ_GUARDED_BY(mMutex);
@@ -1654,6 +1671,7 @@ class WorkerPrivate final
 
   bool mDebuggerRegistered MOZ_GUARDED_BY(mMutex);
   mozilla::Atomic<bool> mIsInBackground;
+  bool mIsPlayingAudio{};
 
   // During registration, this worker may be marked as not being ready to
   // execute debuggee runnables or content.

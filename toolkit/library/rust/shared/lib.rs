@@ -89,6 +89,7 @@ extern crate ipcclientcerts;
 extern crate trust_anchors;
 
 #[cfg(any(
+    target_os = "android",
     target_os = "macos",
     target_os = "ios",
     all(target_os = "windows", not(target_arch = "aarch64"))
@@ -111,8 +112,9 @@ extern crate rust_minidump_writer_linux;
 
 #[cfg(feature = "crashreporter")]
 extern crate mozannotation_client;
+
 #[cfg(feature = "crashreporter")]
-extern crate mozannotation_server;
+extern crate crash_helper_client;
 
 #[cfg(feature = "webmidi_midir_impl")]
 extern crate midir_impl;

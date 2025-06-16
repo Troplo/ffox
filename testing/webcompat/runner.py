@@ -222,7 +222,7 @@ class WDConfig:
         )
 
 
-class ResultRecorder(object):
+class ResultRecorder:
     def __init__(self, logger):
         self.logger = logger
 
@@ -258,7 +258,7 @@ class ResultRecorder(object):
     def record_error(self, report):
         # error in setup/teardown
         if report.when != "call":
-            message = "%s error" % report.when
+            message = f"{report.when} error"
         self.record(report.nodeid, "ERROR", message, report.longrepr)
 
     def record_skip(self, report):
@@ -273,7 +273,7 @@ class ResultRecorder(object):
         )
 
 
-class TemporaryDirectory(object):
+class TemporaryDirectory:
     def __enter__(self):
         self.path = tempfile.mkdtemp(prefix="pytest-")
         return self.path

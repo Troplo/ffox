@@ -16,6 +16,7 @@
 #include "MediaInfo.h"
 #include "PDMFactory.h"
 #include "VPXDecoder.h"
+#include "nsPrintfCString.h"
 #ifdef MOZ_AV1
 #  include "AOMDecoder.h"
 #endif
@@ -30,6 +31,9 @@ extern LazyLogModule gMediaDecoderLog;
 
 #define LOG(x, ...) \
   MOZ_LOG(gMediaDecoderLog, LogLevel::Debug, (x, ##__VA_ARGS__))
+
+#define LOGV(x, ...) \
+  MOZ_LOG(gMediaDecoderLog, LogLevel::Verbose, (x, ##__VA_ARGS__))
 
 // Gets the pixel aspect ratio from the decoded video size and the rendered
 // size.
@@ -57,6 +61,11 @@ inline gfx::IntSize ApplyPixelAspectRatio(double aPixelAspectRatio,
   return gfx::IntSize(static_cast<int32_t>(width), aImage.Height());
 }
 
+static bool IsBeingProfiledOrLogEnabled() {
+  return MOZ_LOG_TEST(gMediaDecoderLog, LogLevel::Info) ||
+         profiler_thread_is_being_profiled_for_markers();
+}
+
 // H264ChangeMonitor is used to ensure that only AVCC or AnnexB is fed to the
 // underlying MediaDataDecoder. The H264ChangeMonitor allows playback of content
 // where the SPS NAL may not be provided in the init segment (e.g. AVC3 or Annex
@@ -65,10 +74,25 @@ inline gfx::IntSize ApplyPixelAspectRatio(double aPixelAspectRatio,
 
 class H264ChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
  public:
-  explicit H264ChangeMonitor(const VideoInfo& aInfo, bool aFullParsing)
-      : mCurrentConfig(aInfo), mFullParsing(aFullParsing) {
+  explicit H264ChangeMonitor(const CreateDecoderParams& aParams)
+      : mCurrentConfig(aParams.VideoConfig()),
+        mFullParsing(aParams.mOptions.contains(
+            CreateDecoderParams::Option::FullH264Parsing))
+#ifdef MOZ_WMF_MEDIA_ENGINE
+        ,
+        mIsMediaEnginePlayback(aParams.mMediaEngineId.isSome())
+#endif
+  {
     if (CanBeInstantiated()) {
-      UpdateConfigFromExtraData(aInfo.mExtraData);
+      UpdateConfigFromExtraData(mCurrentConfig.mExtraData);
+      auto avcc = AVCCConfig::Parse(mCurrentConfig.mExtraData);
+      if (avcc.isOk() && avcc.unwrap().NALUSize() != 4) {
+        // `CheckForChange()` will use `AnnexB::ConvertSampleToAVCC()` to change
+        // NAL units into 4-byte.
+        // `AVCDecoderConfigurationRecord.lengthSizeMinusOne` in the config
+        // should be modified too.
+        mCurrentConfig.mExtraData->ReplaceElementAt(4, 0xfc | 3);
+      }
     }
   }
 
@@ -128,9 +152,13 @@ class H264ChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
     mPreviousExtraData = aSample->mExtraData;
     UpdateConfigFromExtraData(extra_data);
 
-    PROFILER_MARKER_TEXT("H264 Stream Change", MEDIA_PLAYBACK, {},
-                         "H264ChangeMonitor::CheckForChange has detected a "
-                         "change in the stream and will request a new decoder");
+    if (IsBeingProfiledOrLogEnabled()) {
+      nsPrintfCString msg(
+          "H264ChangeMonitor::CheckForChange has detected a "
+          "change in the stream and will request a new decoder");
+      LOG("%s", msg.get());
+      PROFILER_MARKER_TEXT("H264 Stream Change", MEDIA_PLAYBACK, {}, msg);
+    }
     return NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER;
   }
 
@@ -147,8 +175,25 @@ class H264ChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
     aSample->mExtraData = mCurrentConfig.mExtraData;
     aSample->mTrackInfo = mTrackInfo;
 
+    bool appendExtradata = aNeedKeyFrame;
+#ifdef MOZ_WMF_MEDIA_ENGINE
+    // The error SPR_E_INVALID_H264_SLICE_HEADERS is caused by the media engine
+    // being unable to handle an IDR frame without a valid SPS. Therefore, we
+    // ensure that SPS should always be presented in the bytestream for all IDR
+    // frames.
+    if (mIsMediaEnginePlayback &&
+        H264::GetFrameType(aSample) == H264::FrameType::I_FRAME_IDR) {
+      RefPtr<MediaByteBuffer> extradata = H264::ExtractExtraData(aSample);
+      appendExtradata = aNeedKeyFrame || !H264::HasSPS(extradata);
+      LOG("%s need to append extradata for IDR sample [%" PRId64 ",%" PRId64
+          "]",
+          appendExtradata ? "Do" : "No", aSample->mTime.ToMicroseconds(),
+          aSample->GetEndTime().ToMicroseconds());
+    }
+#endif
+
     if (aConversion == MediaDataDecoder::ConversionRequired::kNeedAnnexB) {
-      auto res = AnnexB::ConvertAVCCSampleToAnnexB(aSample, aNeedKeyFrame);
+      auto res = AnnexB::ConvertAVCCSampleToAnnexB(aSample, appendExtradata);
       if (res.isErr()) {
         return MediaResult(res.unwrapErr(),
                            RESULT_DETAIL("ConvertSampleToAnnexB"));
@@ -191,6 +236,10 @@ class H264ChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
   VideoInfo mCurrentConfig;
   uint32_t mStreamID = 0;
   const bool mFullParsing;
+#ifdef MOZ_WMF_MEDIA_ENGINE
+  // True if the playback is performed by Windows Media Foundation Engine.
+  const bool mIsMediaEnginePlayback;
+#endif
   bool mGotSPS = false;
   RefPtr<TrackInfoSharedPtr> mTrackInfo;
   RefPtr<MediaByteBuffer> mPreviousExtraData;
@@ -236,8 +285,6 @@ class HEVCChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
             : nullptr;
     // Sample doesn't contain any SPS and we already have SPS, do nothing.
     auto curConfig = HVCCConfig::Parse(mCurrentConfig.mExtraData);
-    LOG("current config: %s",
-        curConfig.isOk() ? curConfig.inspect().ToString().get() : "invalid");
     if ((!extraData || extraData->IsEmpty()) && curConfig.unwrap().HasSPS()) {
       return NS_OK;
     }
@@ -249,7 +296,9 @@ class HEVCChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
       return NS_OK;
     }
     const HVCCConfig newConfig = rv.unwrap();
-    LOG("new config: %s", newConfig.ToString().get());
+    LOGV("Current config: %s, new config: %s",
+         curConfig.isOk() ? curConfig.inspect().ToString().get() : "invalid",
+         newConfig.ToString().get());
 
     if (!newConfig.HasSPS() && !curConfig.unwrap().HasSPS()) {
       // We don't have inband data and the original config didn't contain a SPS.
@@ -264,11 +313,13 @@ class HEVCChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
     }
     UpdateConfigFromExtraData(extraData);
 
-    nsPrintfCString msg(
-        "HEVCChangeMonitor::CheckForChange has detected a change in the stream "
-        "and will request a new decoder");
-    LOG("%s", msg.get());
-    PROFILER_MARKER_TEXT("HEVC Stream Change", MEDIA_PLAYBACK, {}, msg);
+    if (IsBeingProfiledOrLogEnabled()) {
+      nsPrintfCString msg(
+          "HEVCChangeMonitor::CheckForChange has detected a change in the "
+          "stream and will request a new decoder");
+      LOG("%s", msg.get());
+      PROFILER_MARKER_TEXT("HEVC Stream Change", MEDIA_PLAYBACK, {}, msg);
+    }
     return NS_ERROR_DOM_MEDIA_NEED_NEW_DECODER;
   }
 
@@ -285,8 +336,18 @@ class HEVCChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
     aSample->mExtraData = mCurrentConfig.mExtraData;
     aSample->mTrackInfo = mTrackInfo;
 
+    bool appendExtradata = aNeedKeyFrame;
+    if (aSample->mCrypto.IsEncrypted() && !mReceivedFirstEncryptedSample) {
+      LOG("Detected first encrypted sample [%" PRId64 ",%" PRId64
+          "], keyframe=%d",
+          aSample->mTime.ToMicroseconds(),
+          aSample->GetEndTime().ToMicroseconds(), aSample->mKeyframe);
+      mReceivedFirstEncryptedSample = true;
+      appendExtradata = true;
+    }
+
     if (aConversion == MediaDataDecoder::ConversionRequired::kNeedAnnexB) {
-      auto res = AnnexB::ConvertHVCCSampleToAnnexB(aSample, aNeedKeyFrame);
+      auto res = AnnexB::ConvertHVCCSampleToAnnexB(aSample, appendExtradata);
       if (res.isErr()) {
         return MediaResult(res.unwrapErr(),
                            RESULT_DETAIL("ConvertSampleToAnnexB"));
@@ -299,6 +360,8 @@ class HEVCChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
     // We only support HEVC via hardware decoding.
     return true;
   }
+
+  void Flush() override { mReceivedFirstEncryptedSample = false; }
 
  private:
   void UpdateConfigFromExtraData(MediaByteBuffer* aExtraData) {
@@ -386,6 +449,11 @@ class HEVCChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
 
   uint32_t mStreamID = 0;
   RefPtr<TrackInfoSharedPtr> mTrackInfo;
+
+  // This ensures the first encrypted sample always includes all necessary
+  // information for decoding, as some decoders, such as MediaEngine, require
+  // SPS/PPS to be appended during the clearlead-to-encrypted transition.
+  bool mReceivedFirstEncryptedSample = false;
 };
 
 class VPXChangeMonitor : public MediaChangeMonitor::CodecChangeMonitor {
@@ -763,9 +831,7 @@ RefPtr<PlatformDecoderModule::CreateDecoderPromise> MediaChangeMonitor::Create(
       changeMonitor = MakeUnique<HEVCChangeMonitor>(config);
     } else {
       MOZ_ASSERT(MP4Decoder::IsH264(config.mMimeType));
-      changeMonitor = MakeUnique<H264ChangeMonitor>(
-          config, aParams.mOptions.contains(
-                      CreateDecoderParams::Option::FullH264Parsing));
+      changeMonitor = MakeUnique<H264ChangeMonitor>(aParams);
     }
   } else {
     MOZ_ASSERT(MP4Decoder::IsAAC(aParams.AudioConfig().mMimeType));
@@ -886,6 +952,7 @@ RefPtr<MediaDataDecoder::FlushPromise> MediaChangeMonitor::Flush() {
   mDecodePromiseRequest.DisconnectIfExists();
   mDecodePromise.RejectIfExists(NS_ERROR_DOM_MEDIA_CANCELED, __func__);
   mNeedKeyframe = true;
+  mChangeMonitor->Flush();
   mPendingFrames.Clear();
 
   MOZ_RELEASE_ASSERT(mFlushPromise.IsEmpty(), "Previous flush didn't complete");

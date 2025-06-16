@@ -15,7 +15,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
   CustomizableUI: "resource:///modules/CustomizableUI.sys.mjs",
   MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
-  OpenInTabsUtils: "resource:///modules/OpenInTabsUtils.sys.mjs",
+  OpenInTabsUtils:
+    "moz-src:///browser/components/tabbrowser/OpenInTabsUtils.sys.mjs",
   PlacesTransactions: "resource://gre/modules/PlacesTransactions.sys.mjs",
   PlacesUtils: "resource://gre/modules/PlacesUtils.sys.mjs",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.sys.mjs",
@@ -906,8 +907,8 @@ export var PlacesUIUtils = {
   ) {
     if (
       aNode &&
-      lazy.PlacesUtils.nodeIsURI(aNode) &&
-      this.checkURLSecurity(aNode, aWindow)
+      this.checkURLSecurity(aNode, aWindow) &&
+      this.isURILike(aNode)
     ) {
       let isBookmark = lazy.PlacesUtils.nodeIsBookmark(aNode);
 
@@ -937,6 +938,21 @@ export var PlacesUIUtils = {
         aWindow.updateTelemetry([aNode]);
       }
     }
+  },
+
+  /**
+   * Determines whether a node represents a URI.
+   *
+   * @param {nsINavHistoryResultNode | HTMLElement} aNode
+   *   A result node.
+   * @returns {boolean}
+   *   Whether the node represents a URI.
+   */
+  isURILike(aNode) {
+    if (aNode instanceof Ci.nsINavHistoryResultNode) {
+      return lazy.PlacesUtils.nodeIsURI(aNode);
+    }
+    return !!aNode.uri;
   },
 
   /**
@@ -1390,8 +1406,16 @@ export var PlacesUIUtils = {
 
   placesContextShowing(event) {
     let menupopup = event.target;
-    if (menupopup.id != "placesContext") {
+    if (
+      !["placesContext", "sidebar-history-context-menu"].includes(menupopup.id)
+    ) {
       // Ignore any popupshowing events from submenus
+      return;
+    }
+
+    if (menupopup.id == "sidebar-history-context-menu") {
+      PlacesUIUtils.lastContextMenuTriggerNode =
+        menupopup.triggerNode.triggerNode;
       return;
     }
 
@@ -1442,7 +1466,13 @@ export var PlacesUIUtils = {
       menupopup._view.destroyContextMenu();
     }
 
-    if (menupopup.id == "placesContext") {
+    if (
+      [
+        "sidebar-history-context-menu",
+        "placesContext",
+        "sidebar-synced-tabs-context-menu",
+      ].includes(menupopup.id)
+    ) {
       PlacesUIUtils.lastContextMenuTriggerNode = null;
       PlacesUIUtils.lastContextMenuCommand = null;
     }
@@ -1466,9 +1496,14 @@ export var PlacesUIUtils = {
       return;
     }
     let view = this.getViewForNode(triggerNode);
-    this._openNodeIn(view.selectedNode, "tab", view.ownerWindow, {
-      userContextId,
-    });
+    this._openNodeIn(
+      view?.selectedNode || triggerNode,
+      "tab",
+      view?.ownerWindow || triggerNode.ownerGlobal.top,
+      {
+        userContextId,
+      }
+    );
   },
 
   openSelectionInTabs(event) {
@@ -1519,48 +1554,9 @@ export var PlacesUIUtils = {
       let window = this.triggerNode.ownerGlobal;
       switch (command) {
         case "placesCmd_copy": {
-          // This is a little hacky, but there is a lot of code in Places that handles
-          // clipboard stuff, so it's easier to reuse.
-          let node = {};
-          node.type = 0;
-          node.title = this.triggerNode.label;
-          node.uri = this.triggerNode.link;
-
-          // Copied from _populateClipboard in controller.js
-
-          // This order is _important_! It controls how this and other applications
-          // select data to be inserted based on type.
-          let contents = [
-            { type: lazy.PlacesUtils.TYPE_X_MOZ_URL, entries: [] },
-            { type: lazy.PlacesUtils.TYPE_HTML, entries: [] },
-            { type: lazy.PlacesUtils.TYPE_PLAINTEXT, entries: [] },
-          ];
-
-          contents.forEach(function (content) {
-            content.entries.push(lazy.PlacesUtils.wrapNode(node, content.type));
-          });
-
-          let xferable = Cc[
-            "@mozilla.org/widget/transferable;1"
-          ].createInstance(Ci.nsITransferable);
-          xferable.init(null);
-
-          function addData(type, data) {
-            xferable.addDataFlavor(type);
-            xferable.setTransferData(
-              type,
-              lazy.PlacesUtils.toISupportsString(data)
-            );
-          }
-
-          contents.forEach(function (content) {
-            addData(content.type, content.entries.join(lazy.PlacesUtils.endl));
-          });
-
-          Services.clipboard.setData(
-            xferable,
-            null,
-            Ci.nsIClipboard.kGlobalClipboard
+          lazy.BrowserUtils.copyLink(
+            this.triggerNode.link,
+            this.triggerNode.label
           );
           break;
         }

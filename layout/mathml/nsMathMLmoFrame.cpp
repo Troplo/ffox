@@ -239,7 +239,7 @@ void nsMathMLmoFrame::ProcessOperatorData() {
     }
 
     // see if the accent attribute is there
-    mContent->AsElement()->GetAttr(nsGkAtoms::accent_, value);
+    mContent->AsElement()->GetAttr(nsGkAtoms::accent, value);
     if (value.LowerCaseEqualsLiteral("true")) {
       mEmbellishData.flags |= NS_MATHML_EMBELLISH_ACCENT;
     } else if (value.LowerCaseEqualsLiteral("false")) {
@@ -247,7 +247,7 @@ void nsMathMLmoFrame::ProcessOperatorData() {
     }
 
     // see if the movablelimits attribute is there
-    mContent->AsElement()->GetAttr(nsGkAtoms::movablelimits_, value);
+    mContent->AsElement()->GetAttr(nsGkAtoms::movablelimits, value);
     if (value.LowerCaseEqualsLiteral("true")) {
       mEmbellishData.flags |= NS_MATHML_EMBELLISH_MOVABLELIMITS;
     } else if (value.LowerCaseEqualsLiteral("false")) {
@@ -260,8 +260,6 @@ void nsMathMLmoFrame::ProcessOperatorData() {
     mFlags |= form;
     return;
   }
-
-  nsPresContext* presContext = PresContext();
 
   // beware of bug 133814 - there is a two-way dependency in the
   // embellished hierarchy: our embellished ancestors need to set
@@ -388,7 +386,7 @@ void nsMathMLmoFrame::ProcessOperatorData() {
   // which is not necessarily the default one.
   //
   nscoord leadingSpace = mEmbellishData.leadingSpace;
-  mContent->AsElement()->GetAttr(nsGkAtoms::lspace_, value);
+  mContent->AsElement()->GetAttr(nsGkAtoms::lspace, value);
   if (!value.IsEmpty()) {
     nsCSSValue cssValue;
     if (dom::MathMLElement::ParseNumericValue(value, cssValue, 0,
@@ -397,8 +395,7 @@ void nsMathMLmoFrame::ProcessOperatorData() {
           !cssValue.GetFloatValue()) {
         leadingSpace = 0;
       } else if (cssValue.IsLengthUnit()) {
-        leadingSpace = CalcLength(presContext, mComputedStyle, cssValue,
-                                  fontSizeInflation);
+        leadingSpace = CalcLength(cssValue, fontSizeInflation, this);
       }
       mFlags |= NS_MATHML_OPERATOR_LSPACE_ATTR;
     }
@@ -417,7 +414,7 @@ void nsMathMLmoFrame::ProcessOperatorData() {
   // which is not necessarily the default one.
   //
   nscoord trailingSpace = mEmbellishData.trailingSpace;
-  mContent->AsElement()->GetAttr(nsGkAtoms::rspace_, value);
+  mContent->AsElement()->GetAttr(nsGkAtoms::rspace, value);
   if (!value.IsEmpty()) {
     nsCSSValue cssValue;
     if (dom::MathMLElement::ParseNumericValue(value, cssValue, 0,
@@ -426,8 +423,7 @@ void nsMathMLmoFrame::ProcessOperatorData() {
           !cssValue.GetFloatValue()) {
         trailingSpace = 0;
       } else if (cssValue.IsLengthUnit()) {
-        trailingSpace = CalcLength(presContext, mComputedStyle, cssValue,
-                                   fontSizeInflation);
+        trailingSpace = CalcLength(cssValue, fontSizeInflation, this);
       }
       mFlags |= NS_MATHML_OPERATOR_RSPACE_ATTR;
     }
@@ -459,35 +455,35 @@ void nsMathMLmoFrame::ProcessOperatorData() {
   // special: accent and movablelimits are handled above,
   // don't process them here
 
-  mContent->AsElement()->GetAttr(nsGkAtoms::stretchy_, value);
+  mContent->AsElement()->GetAttr(nsGkAtoms::stretchy, value);
   if (value.LowerCaseEqualsLiteral("false")) {
     mFlags &= ~NS_MATHML_OPERATOR_STRETCHY;
   } else if (value.LowerCaseEqualsLiteral("true")) {
     mFlags |= NS_MATHML_OPERATOR_STRETCHY;
   }
   if (NS_MATHML_OPERATOR_IS_FENCE(mFlags)) {
-    mContent->AsElement()->GetAttr(nsGkAtoms::fence_, value);
+    mContent->AsElement()->GetAttr(nsGkAtoms::fence, value);
     if (value.LowerCaseEqualsLiteral("false")) {
       mFlags &= ~NS_MATHML_OPERATOR_FENCE;
     } else {
       mEmbellishData.flags |= NS_MATHML_EMBELLISH_FENCE;
     }
   }
-  mContent->AsElement()->GetAttr(nsGkAtoms::largeop_, value);
+  mContent->AsElement()->GetAttr(nsGkAtoms::largeop, value);
   if (value.LowerCaseEqualsLiteral("false")) {
     mFlags &= ~NS_MATHML_OPERATOR_LARGEOP;
   } else if (value.LowerCaseEqualsLiteral("true")) {
     mFlags |= NS_MATHML_OPERATOR_LARGEOP;
   }
   if (NS_MATHML_OPERATOR_IS_SEPARATOR(mFlags)) {
-    mContent->AsElement()->GetAttr(nsGkAtoms::separator_, value);
+    mContent->AsElement()->GetAttr(nsGkAtoms::separator, value);
     if (value.LowerCaseEqualsLiteral("false")) {
       mFlags &= ~NS_MATHML_OPERATOR_SEPARATOR;
     } else {
       mEmbellishData.flags |= NS_MATHML_EMBELLISH_SEPARATOR;
     }
   }
-  mContent->AsElement()->GetAttr(nsGkAtoms::symmetric_, value);
+  mContent->AsElement()->GetAttr(nsGkAtoms::symmetric, value);
   if (value.LowerCaseEqualsLiteral("false")) {
     mFlags &= ~NS_MATHML_OPERATOR_SYMMETRIC;
   } else if (value.LowerCaseEqualsLiteral("true")) {
@@ -507,7 +503,7 @@ void nsMathMLmoFrame::ProcessOperatorData() {
   // normal size.
   //
   mMinSize = 0;
-  mContent->AsElement()->GetAttr(nsGkAtoms::minsize_, value);
+  mContent->AsElement()->GetAttr(nsGkAtoms::minsize, value);
   if (!value.IsEmpty()) {
     nsCSSValue cssValue;
     if (dom::MathMLElement::ParseNumericValue(value, cssValue, 0,
@@ -518,8 +514,7 @@ void nsMathMLmoFrame::ProcessOperatorData() {
       } else if (eCSSUnit_Percent == unit) {
         mMinSize = cssValue.GetPercentValue();
       } else if (eCSSUnit_Null != unit) {
-        mMinSize = float(CalcLength(presContext, mComputedStyle, cssValue,
-                                    fontSizeInflation));
+        mMinSize = float(CalcLength(cssValue, fontSizeInflation, this));
         mFlags |= NS_MATHML_OPERATOR_MINSIZE_ABSOLUTE;
       }
     }
@@ -538,7 +533,7 @@ void nsMathMLmoFrame::ProcessOperatorData() {
   // normal size.
   //
   mMaxSize = NS_MATHML_OPERATOR_SIZE_INFINITY;
-  mContent->AsElement()->GetAttr(nsGkAtoms::maxsize_, value);
+  mContent->AsElement()->GetAttr(nsGkAtoms::maxsize, value);
   if (!value.IsEmpty()) {
     nsCSSValue cssValue;
     if (dom::MathMLElement::ParseNumericValue(value, cssValue, 0,
@@ -549,8 +544,7 @@ void nsMathMLmoFrame::ProcessOperatorData() {
       } else if (eCSSUnit_Percent == unit) {
         mMaxSize = cssValue.GetPercentValue();
       } else if (eCSSUnit_Null != unit) {
-        mMaxSize = float(CalcLength(presContext, mComputedStyle, cssValue,
-                                    fontSizeInflation));
+        mMaxSize = float(CalcLength(cssValue, fontSizeInflation, this));
         mFlags |= NS_MATHML_OPERATOR_MAXSIZE_ABSOLUTE;
       }
     }
@@ -1081,12 +1075,12 @@ nsresult nsMathMLmoFrame::AttributeChanged(int32_t aNameSpaceID,
   // in a significant way and re-layout the entire hierarchy.
   // This is not needed for the fence and separator
   // attributes, since they have no visual effect.
-  if (aAttribute == nsGkAtoms::accent_ || aAttribute == nsGkAtoms::form ||
-      aAttribute == nsGkAtoms::largeop_ || aAttribute == nsGkAtoms::maxsize_ ||
-      aAttribute == nsGkAtoms::minsize_ ||
-      aAttribute == nsGkAtoms::movablelimits_ ||
-      aAttribute == nsGkAtoms::rspace_ || aAttribute == nsGkAtoms::stretchy_ ||
-      aAttribute == nsGkAtoms::symmetric_ || aAttribute == nsGkAtoms::lspace_) {
+  if (aAttribute == nsGkAtoms::accent || aAttribute == nsGkAtoms::form ||
+      aAttribute == nsGkAtoms::largeop || aAttribute == nsGkAtoms::maxsize ||
+      aAttribute == nsGkAtoms::minsize ||
+      aAttribute == nsGkAtoms::movablelimits ||
+      aAttribute == nsGkAtoms::rspace || aAttribute == nsGkAtoms::stretchy ||
+      aAttribute == nsGkAtoms::symmetric || aAttribute == nsGkAtoms::lspace) {
     // set the target as the parent of our outermost embellished container
     // (we ensure that we are the core, not just a sibling of the core)
     nsIFrame* target = this;

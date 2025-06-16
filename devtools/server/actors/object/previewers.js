@@ -4,7 +4,8 @@
 
 "use strict";
 
-const { DevToolsServer } = require("resource://devtools/server/devtools-server.js");
+/* global Temporal, TrustedHTML, TrustedScript, TrustedScriptURL */
+
 const DevToolsUtils = require("resource://devtools/shared/DevToolsUtils.js");
 loader.lazyRequireGetter(
   this,
@@ -58,6 +59,7 @@ const OBJECT_WITH_URL_CLASSNAMES = new Set([
   "CSSImportRule",
   "CSSStyleSheet",
   "Location",
+  "TrustedScriptURL"
 ]);
 
 /**
@@ -228,64 +230,102 @@ const previewers = {
   ],
 
   "Temporal.Instant": [
-    function(objectActor, grip, depth) {
+    function(objectActor, grip, _depth) {
       temporalPreviewer(Temporal.Instant, objectActor, grip);
       return true;
     },
   ],
 
   "Temporal.PlainDate": [
-    function(objectActor, grip, depth) {
+    function(objectActor, grip, _depth) {
       temporalPreviewer(Temporal.PlainDate, objectActor, grip);
       return true;
     },
   ],
 
   "Temporal.PlainDateTime": [
-    function(objectActor, grip, depth) {
+    function(objectActor, grip, _depth) {
       temporalPreviewer(Temporal.PlainDateTime, objectActor, grip);
       return true;
     },
   ],
 
-  "Temporal.PlainDate": [
-    function(objectActor, grip, depth) {
-      temporalPreviewer(Temporal.PlainDate, objectActor, grip);
-      return true;
-    },
-  ],
-
   "Temporal.PlainMonthDay": [
-    function(objectActor, grip, depth) {
+    function(objectActor, grip, _depth) {
       temporalPreviewer(Temporal.PlainMonthDay, objectActor, grip);
       return true;
     },
   ],
 
   "Temporal.PlainTime": [
-    function(objectActor, grip, depth) {
+    function(objectActor, grip, _depth) {
       temporalPreviewer(Temporal.PlainTime, objectActor, grip);
       return true;
     },
   ],
 
   "Temporal.PlainYearMonth": [
-    function(objectActor, grip, depth) {
+    function(objectActor, grip, _depth) {
       temporalPreviewer(Temporal.PlainYearMonth, objectActor, grip);
       return true;
     },
   ],
 
   "Temporal.ZonedDateTime": [
-    function(objectActor, grip, depth) {
+    function(objectActor, grip, _depth) {
       temporalPreviewer(Temporal.ZonedDateTime, objectActor, grip);
       return true;
     },
   ],
 
   "Temporal.Duration": [
-    function(objectActor, grip, depth) {
+    function(objectActor, grip, _depth) {
       temporalPreviewer(Temporal.Duration, objectActor, grip);
+      return true;
+    },
+  ],
+
+  TrustedHTML: [
+    function(objectActor, grip, depth) {
+      const text = TrustedHTML.prototype.toString.call(
+        // In worker objectActor.safeRawObj is considered unsafe and is null
+        objectActor.safeRawObj || objectActor.rawObj
+      );
+
+      grip.preview = {
+        kind: "ObjectWithText",
+        text: objectActor.createValueGrip(text, depth)
+      };
+      return true;
+    },
+  ],
+
+  TrustedScript: [
+    function(objectActor, grip, depth) {
+      const text = TrustedScript.prototype.toString.call(
+        // In worker objectActor.safeRawObj is considered unsafe and is null
+        objectActor.safeRawObj || objectActor.rawObj
+      );
+
+      grip.preview = {
+        kind: "ObjectWithText",
+        text: objectActor.createValueGrip(text, depth)
+      };
+      return true;
+    },
+  ],
+
+  TrustedScriptURL: [
+    function(objectActor, grip, depth) {
+      const url = TrustedScriptURL.prototype.toString.call(
+        // In worker objectActor.safeRawObj is considered unsafe and is null
+        objectActor.safeRawObj || objectActor.rawObj
+      );
+
+      grip.preview = {
+        kind: "ObjectWithURL",
+        url: objectActor.createValueGrip(url, depth)
+      };
       return true;
     },
   ],
@@ -296,7 +336,7 @@ const previewers = {
 
       grip.preview = {
         kind: "ArrayLike",
-        length: length,
+        length,
       };
 
       if (depth > 1) {
@@ -416,7 +456,7 @@ const previewers = {
 
       grip.preview = {
         kind: "MapLike",
-        size: size,
+        size,
       };
 
       if (depth > 1) {
@@ -812,6 +852,7 @@ function temporalPreviewer(cls, objectActor, grip) {
  *        when we are inspecting nested attributes.
  * @returns
  */
+// eslint-disable-next-line complexity
 function GenericObject(objectActor, grip, depth) {
   const { obj, safeRawObj } = objectActor;
   if (grip.preview || grip.displayString || depth > 1) {
@@ -862,7 +903,7 @@ function GenericObject(objectActor, grip, depth) {
   const privatePropertiesSymbols = ObjectUtils.getSafePrivatePropertiesSymbols(
     obj
   );
-  if (privatePropertiesSymbols.length > 0) {
+  if (privatePropertiesSymbols.length) {
     preview.privatePropertiesLength = privatePropertiesSymbols.length;
     preview.privateProperties = [];
 
@@ -899,7 +940,7 @@ function GenericObject(objectActor, grip, depth) {
   }
 
   const symbols = ObjectUtils.getSafeOwnPropertySymbols(obj);
-  if (symbols.length > 0) {
+  if (symbols.length) {
     preview.ownSymbolsLength = symbols.length;
     preview.ownSymbols = [];
 
@@ -942,7 +983,8 @@ function GenericObject(objectActor, grip, depth) {
 
 // Preview functions that do not rely on the object class.
 previewers.Object = [
-  function TypedArray({ obj }, grip, depth) {
+  function TypedArray(objectActor, grip, depth) {
+    const { obj, className } = objectActor;
     if (!ObjectUtils.isTypedArray(obj)) {
       return false;
     }
@@ -961,12 +1003,20 @@ previewers.Object = [
       grip.preview.length
     );
     grip.preview.items = [];
+    const isBigIntArray = className.startsWith("BigInt") || className.startsWith("BigUint");
+
     for (let i = 0; i < previewLength; i++) {
       const desc = obj.getOwnPropertyDescriptor(i);
       if (!desc) {
         break;
       }
-      grip.preview.items.push(desc.value);
+
+      // We need to create grips for items of BigInt arrays. Other typed arrays are fine
+      // as they hold serializable primitives (Numbers)
+      const item = isBigIntArray
+        ? ObjectUtils.createBigIntValueGrip(desc.value)
+        : desc.value;
+      grip.preview.items.push(item);
     }
 
     return true;
@@ -977,12 +1027,15 @@ previewers.Object = [
       return false;
     }
 
-    const { obj } = objectActor;
+    const { obj, allowSideEffect = false } = objectActor;
 
-    // The name and/or message could be getters, and even if it's unsafe, we do want
-    // to show it to the user (See Bug 1710694).
-    const name = DevToolsUtils.getProperty(obj, "name", true);
-    const msg = DevToolsUtils.getProperty(obj, "message", true);
+    // The name and/or message could be getters, and even if it's unsafe,
+    // we do want to show it to the user, unless the error is muted
+    // (See Bug 1710694).
+    const invokeUnsafeGetters = allowSideEffect && !obj.isMutedError;
+
+    const name = DevToolsUtils.getProperty(obj, "name", invokeUnsafeGetters);
+    const msg = DevToolsUtils.getProperty(obj, "message", invokeUnsafeGetters);
     const stack = DevToolsUtils.getProperty(obj, "stack");
     const fileName = DevToolsUtils.getProperty(obj, "fileName");
     const lineNumber = DevToolsUtils.getProperty(obj, "lineNumber");
@@ -1178,6 +1231,16 @@ previewers.Object = [
       preview.attributesLength = safeRawObj.attributes.length;
       for (const attr of safeRawObj.attributes) {
         preview.attributes[attr.nodeName] = objectActor.createValueGrip(attr.value, depth);
+      }
+
+      // Custom elements may have private properties. Ensure that we provide
+      // enough information for ObjectInspector to know it should check for
+      // them.
+      const privatePropertiesSymbols = ObjectUtils.getSafePrivatePropertiesSymbols(
+        obj
+      );
+      if (privatePropertiesSymbols.length) {
+        preview.privatePropertiesLength = privatePropertiesSymbols.length;
       }
     } else if (className == "Attr") {
       preview.value = objectActor.createValueGrip(safeRawObj.value, depth);

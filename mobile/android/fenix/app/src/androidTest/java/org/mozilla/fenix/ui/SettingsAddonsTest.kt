@@ -4,6 +4,7 @@
 
 package org.mozilla.fenix.ui
 
+import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import org.junit.Rule
 import org.junit.Test
 import org.mozilla.fenix.R
@@ -17,6 +18,7 @@ import org.mozilla.fenix.helpers.TestHelper
 import org.mozilla.fenix.helpers.TestHelper.verifySnackBarText
 import org.mozilla.fenix.helpers.TestHelper.waitUntilSnackbarGone
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.addonsMenu
 import org.mozilla.fenix.ui.robots.homeScreen
 
@@ -26,7 +28,13 @@ import org.mozilla.fenix.ui.robots.homeScreen
  */
 class SettingsAddonsTest : TestSetup() {
     @get:Rule
-    val activityTestRule = HomeActivityIntentTestRule.withDefaultSettingsOverrides()
+    val activityTestRule =
+        AndroidComposeTestRule(
+            HomeActivityIntentTestRule.withDefaultSettingsOverrides(),
+        ) { it.activity }
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/875780
     // Walks through settings add-ons menu to ensure all items are present
@@ -69,7 +77,7 @@ class SettingsAddonsTest : TestSetup() {
                 cancelInstallAddon()
                 clickInstallAddon(addonName)
                 acceptPermissionToInstallAddon()
-                verifyAddonInstallCompletedPrompt(addonName, activityTestRule)
+                verifyAddonInstallCompletedPrompt(addonName, activityTestRule.activityRule)
                 closeAddonInstallCompletePrompt()
                 verifyAddonIsInstalled(addonName)
                 verifyEnabledTitleDisplayed()
@@ -83,10 +91,10 @@ class SettingsAddonsTest : TestSetup() {
         val addonName = "uBlock Origin"
 
         addonsMenu {
-            installAddon(addonName, activityTestRule)
+            installAddon(addonName, activityTestRule.activityRule)
             closeAddonInstallCompletePrompt()
         }.openDetailedMenuForAddon(addonName) {
-        }.removeAddon(activityTestRule) {
+        }.removeAddon(activityTestRule.activityRule) {
             verifySnackBarText("Successfully uninstalled $addonName")
             waitUntilSnackbarGone()
         }.goBack {
@@ -111,16 +119,16 @@ class SettingsAddonsTest : TestSetup() {
         val trackingProtectionPage = getEnhancedTrackingProtectionAsset(mockWebServer)
 
         addonsMenu {
-            installAddon(uBlockAddon, activityTestRule)
+            installAddon(uBlockAddon, activityTestRule.activityRule)
             closeAddonInstallCompletePrompt()
-            installAddon(darkReaderAddon, activityTestRule)
+            installAddon(darkReaderAddon, activityTestRule.activityRule)
             closeAddonInstallCompletePrompt()
         }.goBack {
         }.openNavigationToolbar {
         }.enterURLAndEnterToBrowser(trackingProtectionPage.url) {
             verifyUrl(trackingProtectionPage.url.toString())
-        }.goToHomescreen {
-        }.openTopSiteTabWithTitle("Top Articles") {
+        }.goToHomescreen(activityTestRule) {
+        }.openTopSiteTabWithTitle(activityTestRule, "Top Articles") {
         }.openThreeDotMenu {
         }.openSettings {
             verifySettingsView()
@@ -135,11 +143,11 @@ class SettingsAddonsTest : TestSetup() {
         val addonName = "uBlock Origin"
 
         addonsMenu {
-            installAddonInPrivateMode(addonName, activityTestRule)
+            installAddonInPrivateMode(addonName, activityTestRule.activityRule)
             closeAddonInstallCompletePrompt()
         }.goBack {
-        }.openContextMenuOnSponsoredShortcut("Top Articles") {
-        }.openTopSiteInPrivateTab {
+        }.openContextMenuOnTopSitesWithTitle(activityTestRule, "Top Articles") {
+        }.openTopSiteInPrivateTab(activityTestRule) {
             verifyPocketPageContent()
         }.openThreeDotMenu {
             openAddonsSubList()
@@ -154,10 +162,10 @@ class SettingsAddonsTest : TestSetup() {
         val addonName = "uBlock Origin"
 
         addonsMenu {
-            installAddon(addonName, activityTestRule)
+            installAddon(addonName, activityTestRule.activityRule)
             closeAddonInstallCompletePrompt()
         }.goBack {
-        }.openTopSiteTabWithTitle("Top Articles") {
+        }.openTopSiteTabWithTitle(activityTestRule, "Top Articles") {
             verifyUrl("getpocket.com/explore")
         }.openThreeDotMenu {
             openAddonsSubList()

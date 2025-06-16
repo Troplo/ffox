@@ -20,6 +20,7 @@ use crate::values::generics::length::{
 };
 use crate::values::generics::NonNegative;
 use crate::values::specified::calc::{self, AllowAnchorPositioningFunctions, CalcNode};
+use crate::values::specified::font::QueryFontMetricsFlags;
 use crate::values::specified::NonNegativeNumber;
 use crate::values::CSSFloat;
 use crate::{Zero, ZeroNoPercent};
@@ -249,9 +250,13 @@ impl FontRelativeLength {
             context: &Context,
             base_size: FontBaseSize,
             orientation: FontMetricsOrientation,
+            flags: QueryFontMetricsFlags,
         ) -> FontMetrics {
-            let retrieve_math_scales = false;
-            context.query_font_metrics(base_size, orientation, retrieve_math_scales)
+            context.query_font_metrics(
+                base_size,
+                orientation,
+                flags,
+            )
         }
 
         let reference_font_size = base_size.resolve(context);
@@ -268,8 +273,12 @@ impl FontRelativeLength {
             },
             Self::Ex(length) => {
                 // The x-height is an intrinsically horizontal metric.
-                let metrics =
-                    query_font_metrics(context, base_size, FontMetricsOrientation::Horizontal);
+                let metrics = query_font_metrics(
+                    context,
+                    base_size,
+                    FontMetricsOrientation::Horizontal,
+                    QueryFontMetricsFlags::empty(),
+                );
                 let reference_size = metrics.x_height.unwrap_or_else(|| {
                     // https://drafts.csswg.org/css-values/#ex
                     //
@@ -295,6 +304,7 @@ impl FontRelativeLength {
                     context,
                     base_size,
                     FontMetricsOrientation::MatchContextPreferHorizontal,
+                    QueryFontMetricsFlags::NEEDS_CH,
                 );
                 let reference_size = metrics.zero_advance_measure.unwrap_or_else(|| {
                     // https://drafts.csswg.org/css-values/#ch
@@ -319,8 +329,12 @@ impl FontRelativeLength {
                 (reference_size, length)
             },
             Self::Cap(length) => {
-                let metrics =
-                    query_font_metrics(context, base_size, FontMetricsOrientation::Horizontal);
+                let metrics = query_font_metrics(
+                    context,
+                    base_size,
+                    FontMetricsOrientation::Horizontal,
+                    QueryFontMetricsFlags::empty(),
+                );
                 let reference_size = metrics.cap_height.unwrap_or_else(|| {
                     // https://drafts.csswg.org/css-values/#cap
                     //
@@ -337,6 +351,7 @@ impl FontRelativeLength {
                     context,
                     base_size,
                     FontMetricsOrientation::MatchContextPreferVertical,
+                    QueryFontMetricsFlags::NEEDS_IC,
                 );
                 let reference_size = metrics.ic_width.unwrap_or_else(|| {
                     // https://drafts.csswg.org/css-values/#ic
@@ -407,7 +422,15 @@ impl FontRelativeLength {
                 //     When specified on the root element, the rlh units refer
                 //     to the initial values of font and line-height properties.
                 //
-                let reference_size = if context.builder.is_root_element || context.in_media_query {
+                let reference_size = if context.builder.is_root_element {
+                    context.builder
+                        .calc_line_height(
+                            context.device(),
+                            line_height_base,
+                            context.style().writing_mode,
+                        )
+                        .0
+                } else if context.in_media_query {
                     context
                         .device()
                         .calc_line_height(
@@ -1723,7 +1746,13 @@ impl LengthPercentage {
             },
             Token::Function(ref name) => {
                 let function = CalcNode::math_function(context, name, location)?;
-                let calc = CalcNode::parse_length_or_percentage(context, input, num_context, function, allow_anchor)?;
+                let calc = CalcNode::parse_length_or_percentage(
+                    context,
+                    input,
+                    num_context,
+                    function,
+                    allow_anchor,
+                )?;
                 Ok(LengthPercentage::Calc(Box::new(calc)))
             },
             _ => return Err(location.new_unexpected_token_error(token.clone())),
@@ -1744,6 +1773,23 @@ impl LengthPercentage {
             AllowedNumericType::All,
             allow_quirks,
             AllowAnchorPositioningFunctions::No,
+        )
+    }
+
+    /// Parses allowing the unitless length quirk, as well as allowing
+    /// anchor-positioning related function, `anchor-size()`.
+    #[inline]
+    fn parse_quirky_with_anchor_size_function<'i, 't>(
+        context: &ParserContext,
+        input: &mut Parser<'i, 't>,
+        allow_quirks: AllowQuirks,
+    ) -> Result<Self, ParseError<'i>> {
+        Self::parse_internal(
+            context,
+            input,
+            AllowedNumericType::All,
+            allow_quirks,
+            AllowAnchorPositioningFunctions::AllowAnchorSize,
         )
     }
 
@@ -1959,9 +2005,9 @@ impl NonNegativeLengthPercentage {
         input: &mut Parser<'i, 't>,
         allow_quirks: AllowQuirks,
     ) -> Result<Self, ParseError<'i>> {
-        LengthPercentage::parse_non_negative_with_anchor_size(context, input, allow_quirks).map(NonNegative)
+        LengthPercentage::parse_non_negative_with_anchor_size(context, input, allow_quirks)
+            .map(NonNegative)
     }
-
 }
 
 /// Either a `<length>` or the `auto` keyword.
@@ -2008,17 +2054,13 @@ macro_rules! parse_size_non_length {
     ($size:ident, $input:expr, $auto_or_none:expr => $auto_or_none_ident:ident) => {{
         let size = $input.try_parse(|input| {
             Ok(try_match_ident_ignore_ascii_case! { input,
-                #[cfg(feature = "gecko")]
                 "min-content" | "-moz-min-content" => $size::MinContent,
-                #[cfg(feature = "gecko")]
                 "max-content" | "-moz-max-content" => $size::MaxContent,
-                #[cfg(feature = "gecko")]
                 "fit-content" | "-moz-fit-content" => $size::FitContent,
                 #[cfg(feature = "gecko")]
                 "-moz-available" => $size::MozAvailable,
                 #[cfg(feature = "gecko")]
                 "-webkit-fill-available" if is_webkit_fill_available_keyword_enabled() => $size::WebkitFillAvailable,
-                #[cfg(feature = "gecko")]
                 "stretch" if is_stretch_enabled() => $size::Stretch,
                 $auto_or_none => $size::$auto_or_none_ident,
             })
@@ -2033,18 +2075,12 @@ macro_rules! parse_size_non_length {
 fn is_webkit_fill_available_keyword_enabled() -> bool {
     static_prefs::pref!("layout.css.webkit-fill-available.enabled")
 }
-#[cfg(feature = "gecko")]
 fn is_stretch_enabled() -> bool {
     static_prefs::pref!("layout.css.stretch-size-keyword.enabled")
 }
 
-#[cfg(feature = "gecko")]
 fn is_fit_content_function_enabled() -> bool {
     static_prefs::pref!("layout.css.fit-content-function.enabled")
-}
-#[cfg(feature = "servo")]
-fn is_fit_content_function_enabled() -> bool {
-    false
 }
 
 macro_rules! parse_fit_content_function {
@@ -2072,10 +2108,23 @@ impl Size {
         parse_size_non_length!(Size, input, "auto" => Auto);
         parse_fit_content_function!(Size, input, context, allow_quirks);
 
-        if let Ok(length) =
-            input.try_parse(|i| NonNegativeLengthPercentage::parse_non_negative_with_anchor_size(context, i, allow_quirks))
+        match input
+            .try_parse(|i| NonNegativeLengthPercentage::parse_quirky(context, i, allow_quirks))
         {
-            return Ok(GenericSize::LengthPercentage(length));
+            Ok(length) => return Ok(GenericSize::LengthPercentage(length)),
+            Err(e) if !static_prefs::pref!("layout.css.anchor-positioning.enabled") => {
+                return Err(e.into())
+            },
+            Err(_) => (),
+        };
+        if let Ok(length) = input.try_parse(|i| {
+            NonNegativeLengthPercentage::parse_non_negative_with_anchor_size(
+                context,
+                i,
+                allow_quirks,
+            )
+        }) {
+            return Ok(GenericSize::AnchorContainingCalcFunction(length));
         }
         Ok(Self::AnchorSizeFunction(Box::new(
             GenericAnchorSizeFunction::parse(context, input)?,
@@ -2111,10 +2160,23 @@ impl MaxSize {
         parse_size_non_length!(MaxSize, input, "none" => None);
         parse_fit_content_function!(MaxSize, input, context, allow_quirks);
 
-        if let Ok(length) =
-            input.try_parse(|i| NonNegativeLengthPercentage::parse_non_negative_with_anchor_size(context, i, allow_quirks))
+        match input
+            .try_parse(|i| NonNegativeLengthPercentage::parse_quirky(context, i, allow_quirks))
         {
-            return Ok(GenericMaxSize::LengthPercentage(length));
+            Ok(length) => return Ok(GenericMaxSize::LengthPercentage(length)),
+            Err(e) if !static_prefs::pref!("layout.css.anchor-positioning.enabled") => {
+                return Err(e.into())
+            },
+            Err(_) => (),
+        };
+        if let Ok(length) = input.try_parse(|i| {
+            NonNegativeLengthPercentage::parse_non_negative_with_anchor_size(
+                context,
+                i,
+                allow_quirks,
+            )
+        }) {
+            return Ok(GenericMaxSize::AnchorContainingCalcFunction(length));
         }
         Ok(Self::AnchorSizeFunction(Box::new(
             GenericAnchorSizeFunction::parse(context, input)?,
@@ -2132,7 +2194,7 @@ pub type AnchorSizeFunction = GenericAnchorSizeFunction<LengthPercentage>;
 pub type Margin = GenericMargin<LengthPercentage>;
 
 impl Margin {
-    /// Parses an inset type, allowing the unitless length quirk.
+    /// Parses a margin type, allowing the unitless length quirk.
     /// <https://quirks.spec.whatwg.org/#the-unitless-length-quirk>
     #[inline]
     pub fn parse_quirky<'i, 't>(
@@ -2144,8 +2206,17 @@ impl Margin {
         {
             return Ok(Self::LengthPercentage(l));
         }
-        if input.try_parse(|i| i.expect_ident_matching("auto")).is_ok() {
-            return Ok(Self::Auto);
+        match input.try_parse(|i| i.expect_ident_matching("auto")) {
+            Ok(_) => return Ok(Self::Auto),
+            Err(e) if !static_prefs::pref!("layout.css.anchor-positioning.enabled") => {
+                return Err(e.into())
+            },
+            Err(_) => (),
+        };
+        if let Ok(l) = input.try_parse(|i| {
+            LengthPercentage::parse_quirky_with_anchor_size_function(context, i, allow_quirks)
+        }) {
+            return Ok(Self::AnchorContainingCalcFunction(l));
         }
         let inner = AnchorSizeFunction::parse(context, input)?;
         Ok(Self::AnchorSizeFunction(Box::new(inner)))

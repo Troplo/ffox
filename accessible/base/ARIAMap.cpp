@@ -14,9 +14,11 @@
 #include "States.h"
 
 #include "nsAttrName.h"
+#include "nsGenericHTMLElement.h"
 #include "nsWhitespaceTokenizer.h"
 
 #include "mozilla/BinarySearch.h"
+#include "mozilla/dom/Document.h"
 #include "mozilla/dom/Element.h"
 
 #include "nsUnicharUtils.h"
@@ -847,7 +849,7 @@ static const nsRoleMapEntry sWAIRoleMaps[] = {
     states::LINKED
   },
   { // list
-    nsGkAtoms::list_,
+    nsGkAtoms::list,
     roles::LIST,
     kUseMapRole,
     eNoValue,
@@ -881,7 +883,7 @@ static const nsRoleMapEntry sWAIRoleMaps[] = {
     states::READONLY
   },
   { // log
-    nsGkAtoms::log_,
+    nsGkAtoms::log,
     roles::NOTHING,
     kUseNativeRole,
     eNoValue,
@@ -1017,7 +1019,7 @@ static const nsRoleMapEntry sWAIRoleMaps[] = {
     kNoReqStates
   },
   { // note
-    nsGkAtoms::note_,
+    nsGkAtoms::note,
     roles::NOTE,
     kUseMapRole,
     eNoValue,
@@ -1170,7 +1172,7 @@ static const nsRoleMapEntry sWAIRoleMaps[] = {
     eARIAReadonlyOrEditable
   },
   { // separator
-    nsGkAtoms::separator_,
+    nsGkAtoms::separator,
     roles::SEPARATOR,
     kUseMapRole,
     eHasValueMinMaxIfFocusable,
@@ -1517,7 +1519,8 @@ uint8_t aria::GetFirstValidRoleMapIndexExcluding(
     // Skip any roles that we aren't interested in.
     bool shouldSkip = false;
     for (nsStaticAtom* atomRole : aRolesToSkip) {
-      if (role.Equals(atomRole->GetUTF16String())) {
+      if (role.Equals(atomRole->GetUTF16String(),
+                      nsCaseInsensitiveStringComparator)) {
         shouldSkip = true;
         break;
       }
@@ -1602,11 +1605,43 @@ uint8_t aria::AttrCharacteristicsFor(nsAtom* aAtom) {
   return 0;
 }
 
-bool aria::HasDefinedARIAHidden(nsIContent* aContent) {
+bool aria::IsValidARIAHidden(nsIContent* aContent) {
   return aContent && aContent->IsElement() &&
          nsAccUtils::ARIAAttrValueIs(aContent->AsElement(),
                                      nsGkAtoms::aria_hidden, nsGkAtoms::_true,
-                                     eCaseMatters);
+                                     eCaseMatters) &&
+         !ShouldIgnoreARIAHidden(aContent);
+}
+
+bool aria::IsValidARIAHidden(DocAccessible* aDocAcc) {
+  nsCOMPtr<nsIContent> docContent = aDocAcc->GetContent();
+  // First, check if our Doc Accessible has aria-hidden set on its content
+  bool isValid = IsValidARIAHidden(docContent);
+
+  // If our Doc Accessible was created using an element other than the
+  // root element, we need to verify the validity of any aria-hidden on
+  // the root element as well.
+  auto* rootElement = aDocAcc->DocumentNode()->GetRootElement();
+  if (docContent != rootElement) {
+    isValid |= IsValidARIAHidden(rootElement);
+  }
+
+  return isValid;
+}
+
+bool aria::ShouldIgnoreARIAHidden(nsIContent* aContent) {
+  if (!aContent) {
+    return false;
+  }
+
+  dom::Document* doc = aContent->OwnerDoc();
+  bool isValidElementType = (aContent == doc->GetDocumentElement());
+
+  if (auto docBody = doc->GetBody()) {
+    isValidElementType |= (aContent == docBody->AsContent());
+  }
+
+  return isValidElementType && doc->IsTopLevelContentDocument();
 }
 
 const nsRoleMapEntry* aria::GetRoleMap(const nsStaticAtom* aAriaRole) {

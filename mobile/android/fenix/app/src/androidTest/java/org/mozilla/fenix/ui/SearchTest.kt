@@ -18,6 +18,8 @@ import org.junit.Before
 import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
+import org.mozilla.fenix.R
+import org.mozilla.fenix.customannotations.SkipLeaks
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.helpers.AppAndSystemHelper
@@ -26,6 +28,7 @@ import org.mozilla.fenix.helpers.AppAndSystemHelper.denyPermission
 import org.mozilla.fenix.helpers.AppAndSystemHelper.grantSystemPermission
 import org.mozilla.fenix.helpers.AppAndSystemHelper.verifyKeyboardVisibility
 import org.mozilla.fenix.helpers.Constants
+import org.mozilla.fenix.helpers.DataGenerationHelper.getStringResource
 import org.mozilla.fenix.helpers.HomeActivityTestRule
 import org.mozilla.fenix.helpers.MatcherHelper
 import org.mozilla.fenix.helpers.MockBrowserDataHelper
@@ -40,6 +43,7 @@ import org.mozilla.fenix.helpers.TestHelper.exitMenu
 import org.mozilla.fenix.helpers.TestHelper.verifySnackBarText
 import org.mozilla.fenix.helpers.TestHelper.waitForAppWindowToBeUpdated
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.clickContextMenuItem
 import org.mozilla.fenix.ui.robots.clickPageObject
 import org.mozilla.fenix.ui.robots.homeScreen
@@ -63,7 +67,8 @@ class SearchTest : TestSetup() {
     private lateinit var searchMockServer: MockWebServer
     private val queryString: String = "firefox"
     private val generalEnginesList = listOf("DuckDuckGo", "Google", "Bing")
-    private val topicEnginesList = listOf("Wikipedia", "eBay")
+    private val topicEnginesList = listOf("Wikipedia (en)")
+    private val firefoxSuggestHeader = getStringResource(R.string.firefox_suggest_header)
 
     @get:Rule
     val activityTestRule = AndroidComposeTestRule(
@@ -78,6 +83,9 @@ class SearchTest : TestSetup() {
             shouldUseBottomToolbar = true,
         ),
     ) { it.activity }
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     @Before
     override fun setUp() {
@@ -122,7 +130,8 @@ class SearchTest : TestSetup() {
             verifySearchToolbar(isDisplayed = true)
             clickSearchSelectorButton()
             verifySearchShortcutListContains(
-                "DuckDuckGo", "Google", "Wikipedia", "Bing", "eBay",
+                *generalEnginesList.toTypedArray(),
+                *topicEnginesList.toTypedArray(),
                 "Bookmarks", "Tabs", "History", "Search settings",
             )
         }
@@ -164,8 +173,6 @@ class SearchTest : TestSetup() {
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2154196
     @Test
     fun verifySearchPlaceholderForTopicSpecificSearchEnginesTest() {
-        val topicEnginesList = listOf("Wikipedia", "eBay")
-
         topicEnginesList.forEach {
             homeScreen {
             }.openSearch {
@@ -240,9 +247,7 @@ class SearchTest : TestSetup() {
     @SmokeTest
     @Test
     fun searchEnginesCanBeChangedTemporarilyFromSearchSelectorMenuTest() {
-        val enginesList = listOf("DuckDuckGo", "Google", "Wikipedia", "Bing", "eBay")
-
-        enginesList.forEach {
+        (generalEnginesList + topicEnginesList).forEach {
             homeScreen {
             }.openSearch {
                 clickSearchSelectorButton()
@@ -251,7 +256,7 @@ class SearchTest : TestSetup() {
                 verifySearchEngineIcon(it)
             }.submitQuery("mozilla ") {
                 verifyUrl("mozilla")
-            }.goToHomescreen {}
+            }.goToHomescreen(activityTestRule) {}
         }
     }
 
@@ -310,7 +315,7 @@ class SearchTest : TestSetup() {
         }.openTabDrawer(activityTestRule) {
         }.openThreeDotMenu {
         }.closeAllTabs {
-            verifyRecentlyVisitedSearchGroupDisplayed(shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
+            verifyRecentlyVisitedSearchGroupDisplayed(activityTestRule, shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
         }
     }
 
@@ -351,8 +356,8 @@ class SearchTest : TestSetup() {
         }.openTabDrawer(activityTestRule) {
         }.openThreeDotMenu {
         }.closeAllTabs {
-            verifyRecentlyVisitedSearchGroupDisplayed(shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
-        }.openRecentlyVisitedSearchGroupHistoryList(queryString) {
+            verifyRecentlyVisitedSearchGroupDisplayed(activityTestRule, shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
+        }.openRecentlyVisitedSearchGroupHistoryList(activityTestRule, queryString) {
             verifyTestPageUrl(firstPageUrl)
             verifyTestPageUrl(secondPageUrl)
             verifyTestPageUrl(originPageUrl)
@@ -379,7 +384,7 @@ class SearchTest : TestSetup() {
         }.openTabDrawer(activityTestRule) {
         }.openThreeDotMenu {
         }.closeAllTabs {
-            verifyRecentlyVisitedSearchGroupDisplayed(shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
+            verifyRecentlyVisitedSearchGroupDisplayed(activityTestRule, shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
         }
     }
 
@@ -407,8 +412,8 @@ class SearchTest : TestSetup() {
         }.openTabDrawer(activityTestRule) {
         }.openThreeDotMenu {
         }.closeAllTabs {
-            togglePrivateBrowsingModeOnOff()
-            verifyRecentlyVisitedSearchGroupDisplayed(shouldBeDisplayed = false, searchTerm = queryString, groupSize = 3)
+            togglePrivateBrowsingModeOnOff(composeTestRule = activityTestRule)
+            verifyRecentlyVisitedSearchGroupDisplayed(activityTestRule, shouldBeDisplayed = false, searchTerm = queryString, groupSize = 3)
         }.openThreeDotMenu {
         }.openHistory {
             verifyHistoryItemExists(shouldExist = false, item = "3 sites")
@@ -416,6 +421,7 @@ class SearchTest : TestSetup() {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1592269
+    @Ignore("Bug causing inconsistencies, see: https://bugzilla.mozilla.org/show_bug.cgi?id=1943051 for more info")
     @SmokeTest
     @Test
     fun deleteIndividualHistoryItemsFromSearchGroupTest() {
@@ -441,8 +447,8 @@ class SearchTest : TestSetup() {
         }.openTabDrawer(activityTestRule) {
         }.openThreeDotMenu {
         }.closeAllTabs {
-            verifyRecentlyVisitedSearchGroupDisplayed(shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
-        }.openRecentlyVisitedSearchGroupHistoryList(queryString) {
+            verifyRecentlyVisitedSearchGroupDisplayed(activityTestRule, shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
+        }.openRecentlyVisitedSearchGroupHistoryList(activityTestRule, queryString) {
             clickDeleteHistoryButton(firstPageUrl.toString())
             TestHelper.longTapSelectItem(secondPageUrl)
             multipleSelectionToolbar {
@@ -453,7 +459,7 @@ class SearchTest : TestSetup() {
         }
         homeScreen {
             // checking that the group is removed when only 1 item is left
-            verifyRecentlyVisitedSearchGroupDisplayed(shouldBeDisplayed = false, searchTerm = queryString, groupSize = 1)
+            verifyRecentlyVisitedSearchGroupDisplayed(activityTestRule, shouldBeDisplayed = false, searchTerm = queryString, groupSize = 1)
         }
     }
 
@@ -483,15 +489,15 @@ class SearchTest : TestSetup() {
         }.openTabDrawer(activityTestRule) {
         }.openThreeDotMenu {
         }.closeAllTabs {
-            verifyRecentlyVisitedSearchGroupDisplayed(shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
-        }.openRecentlyVisitedSearchGroupHistoryList(queryString) {
+            verifyRecentlyVisitedSearchGroupDisplayed(activityTestRule, shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
+        }.openRecentlyVisitedSearchGroupHistoryList(activityTestRule, queryString) {
             clickDeleteAllHistoryButton()
             confirmDeleteAllHistory()
             verifySnackBarText(expectedText = "Group deleted")
             verifyHistoryItemExists(shouldExist = false, firstPageUrl.toString())
         }.goBack {}
         homeScreen {
-            verifyRecentlyVisitedSearchGroupDisplayed(shouldBeDisplayed = false, queryString, groupSize = 3)
+            verifyRecentlyVisitedSearchGroupDisplayed(activityTestRule, shouldBeDisplayed = false, queryString, groupSize = 3)
         }.openThreeDotMenu {
         }.openHistory {
             verifySearchGroupDisplayed(shouldBeDisplayed = false, queryString, groupSize = 3)
@@ -526,12 +532,12 @@ class SearchTest : TestSetup() {
         }.openTabDrawer(activityTestRule) {
         }.openThreeDotMenu {
         }.closeAllTabs {
-            verifyRecentlyVisitedSearchGroupDisplayed(shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
-        }.openRecentlyVisitedSearchGroupHistoryList(queryString) {
+            verifyRecentlyVisitedSearchGroupDisplayed(activityTestRule, shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
+        }.openRecentlyVisitedSearchGroupHistoryList(activityTestRule, queryString) {
         }.openWebsiteFromSearchGroup(firstPageUrl) {
             verifyUrl(firstPageUrl.toString())
-        }.goToHomescreen {
-        }.openRecentlyVisitedSearchGroupHistoryList(queryString) {
+        }.goToHomescreen(activityTestRule) {
+        }.openRecentlyVisitedSearchGroupHistoryList(activityTestRule, queryString) {
             TestHelper.longTapSelectItem(firstPageUrl)
             TestHelper.longTapSelectItem(secondPageUrl)
             Espresso.openActionBarOverflowOrOptionsMenu(activityTestRule.activity)
@@ -573,8 +579,8 @@ class SearchTest : TestSetup() {
         }.openTabDrawer(activityTestRule) {
         }.openThreeDotMenu {
         }.closeAllTabs {
-            verifyRecentlyVisitedSearchGroupDisplayed(shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
-        }.openRecentlyVisitedSearchGroupHistoryList(queryString) {
+            verifyRecentlyVisitedSearchGroupDisplayed(activityTestRule, shouldBeDisplayed = true, searchTerm = queryString, groupSize = 3)
+        }.openRecentlyVisitedSearchGroupHistoryList(activityTestRule, queryString) {
             TestHelper.longTapSelectItem(firstPageUrl)
         }
 
@@ -590,6 +596,7 @@ class SearchTest : TestSetup() {
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1232633
     // Default search code for Google-US
     @Test
+    @SkipLeaks
     fun defaultSearchCodeGoogleUS() {
         homeScreen {
         }.openSearch {
@@ -640,6 +647,7 @@ class SearchTest : TestSetup() {
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1232638
     // Default search code for DuckDuckGo-US
     @Test
+    @SkipLeaks
     fun defaultSearchCodeDuckDuckGoUS() {
         homeScreen {
         }.openThreeDotMenu {
@@ -679,10 +687,10 @@ class SearchTest : TestSetup() {
         homeScreen {
         }.openSearch {
             typeSearch("generic")
+            verifyTheSuggestionsHeader(activityTestRule, firefoxSuggestHeader)
             verifySearchSuggestionsAreDisplayed(
                 activityTestRule,
                 searchSuggestions = arrayOf(
-                    "Firefox Suggest",
                     firstPage.url.toString(),
                     secondPage.url.toString(),
                 ),
@@ -769,10 +777,10 @@ class SearchTest : TestSetup() {
             clickClearButton()
             typeSearch(searchTerm = "generic")
             verifyTypedToolbarText("generic", exists = true)
+            verifyTheSuggestionsHeader(activityTestRule, firefoxSuggestHeader)
             verifySearchSuggestionsAreDisplayed(
                 rule = activityTestRule,
                 searchSuggestions = arrayOf(
-                    "Firefox Suggest",
                     firstPageUrl.url.toString(),
                     secondPageUrl.url.toString(),
                 ),
@@ -820,10 +828,10 @@ class SearchTest : TestSetup() {
         }.clickSearchSelectorButton {
             selectTemporarySearchMethod("Bookmarks")
             typeSearch("test")
+            verifyTheSuggestionsHeader(activityTestRule, firefoxSuggestHeader)
             verifySearchSuggestionsAreDisplayed(
                 rule = activityTestRule,
                 searchSuggestions = arrayOf(
-                    "Firefox Suggest",
                     "Test1",
                     "https://bookmarktest1.com/",
                     "Test2",
@@ -867,6 +875,7 @@ class SearchTest : TestSetup() {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2230212
+    @Ignore("Failing, see https://bugzilla.mozilla.org/show_bug.cgi?id=1965301")
     @SmokeTest
     @Test
     fun searchHistoryNotRememberedInPrivateBrowsingTest() {
@@ -882,7 +891,7 @@ class SearchTest : TestSetup() {
         }.openNavigationToolbar {
         }.clickUrlbar {
         }.submitQuery("test page 1") {
-        }.goToHomescreen {
+        }.goToHomescreen(activityTestRule) {
         }.togglePrivateBrowsingMode()
 
         homeScreen {
@@ -892,12 +901,12 @@ class SearchTest : TestSetup() {
         }.openNavigationToolbar {
         }.clickUrlbar {
             typeSearch(searchTerm = "test page")
+            verifyTheSuggestionsHeader(activityTestRule, firefoxSuggestHeader)
+            verifyTheSuggestionsHeader(activityTestRule, "TestSearchEngine search")
             verifySearchSuggestionsAreDisplayed(
                 rule = activityTestRule,
                 searchSuggestions = arrayOf(
-                    "TestSearchEngine search",
                     "test page 1",
-                    "Firefox Suggest",
                     firstPageUrl.url.toString(),
                 ),
             )
@@ -916,7 +925,7 @@ class SearchTest : TestSetup() {
     // Expected for app language set to Arabic
     @Test
     fun verifySearchEnginesFunctionalityUsingRTLLocaleTest() {
-        val arabicLocale = Locale("ar", "AR")
+        val arabicLocale = Locale.Builder().setLanguage("ar").setRegion("AR").build()
 
         AppAndSystemHelper.runWithAppLocaleChanged(arabicLocale, activityTestRule.activityRule) {
             homeScreen {

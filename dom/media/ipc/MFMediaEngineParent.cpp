@@ -269,12 +269,24 @@ void MFMediaEngineParent::HandleMediaEngineEvent(
 
 void MFMediaEngineParent::NotifyError(MF_MEDIA_ENGINE_ERR aError,
                                       HRESULT aResult) {
-  // TODO : handle HRESULT 0x8004CD12, DRM_E_TEE_INVALID_HWDRM_STATE, which can
-  // happen during OS sleep/resume, or moving video to different graphics
-  // adapters.
   if (aError == MF_MEDIA_ENGINE_ERR_NOERROR) {
     return;
   }
+#ifdef MOZ_WMF_CDM
+  // A special error requires to reset the hareware context, not a real error.
+  if (aResult == DRM_E_TEE_INVALID_HWDRM_STATE) {
+    LOG("Notify error 'DRM_E_TEE_INVALID_HWDRM_STATE', hr=%lx", aResult);
+    ENGINE_MARKER(
+        "MFMediaEngineParent,Received 'DRM_E_TEE_INVALID_HWDRM_STATE'");
+    auto* proxy = mContentProtectionManager
+                      ? mContentProtectionManager->GetCDMProxy()
+                      : nullptr;
+    if (proxy) {
+      proxy->OnHardwareContextReset();
+    }
+    return;
+  }
+#endif
   LOG("Notify error '%s', hr=%lx", MFMediaEngineErrorToStr(aError), aResult);
   ENGINE_MARKER_TEXT(
       "MFMediaEngineParent::NotifyError",
@@ -286,20 +298,23 @@ void MFMediaEngineParent::NotifyError(MF_MEDIA_ENGINE_ERR aError,
       return;
     case MF_MEDIA_ENGINE_ERR_DECODE: {
       MediaResult error(NS_ERROR_DOM_MEDIA_DECODE_ERR,
-                        nsPrintfCString("Decoder error (hr=%lx)", aResult));
+                        nsPrintfCString("Decoder error (hr=%lx)", aResult),
+                        Some(static_cast<int32_t>(aResult)));
       Unused << SendNotifyError(error);
       return;
     }
     case MF_MEDIA_ENGINE_ERR_SRC_NOT_SUPPORTED: {
       MediaResult error(
           NS_ERROR_DOM_MEDIA_NOT_SUPPORTED_ERR,
-          nsPrintfCString("Source not supported (hr=%lx)", aResult));
+          nsPrintfCString("Source not supported (hr=%lx)", aResult),
+          Some(static_cast<int32_t>(aResult)));
       Unused << SendNotifyError(error);
       return;
     }
     case MF_MEDIA_ENGINE_ERR_ENCRYPTED: {
       MediaResult error(NS_ERROR_DOM_MEDIA_FATAL_ERR,
-                        nsPrintfCString("Encrypted error (hr=%lx)", aResult));
+                        nsPrintfCString("Encrypted error (hr=%lx)", aResult),
+                        Some(static_cast<int32_t>(aResult)));
       Unused << SendNotifyError(error);
       return;
     }
@@ -387,6 +402,11 @@ HRESULT MFMediaEngineParent::SetMediaInfo(const MediaInfoIPDL& aInfo,
     RETURN_IF_FAILED(mediaEngineEx->EnableWindowlessSwapchainMode(true));
     LOG("Enabled dcomp swap chain mode");
     ENGINE_MARKER("MFMediaEngineParent,EnabledSwapChain");
+    if (isEncryted) {
+      // Microsoft recommends to disable low latency with DRM.
+      RETURN_IF_FAILED(mediaEngineEx->SetRealTimeMode(false));
+      LOG("Turned off the real time mode for encrypted playback");
+    }
   }
 
   mRequestSampleListener = mMediaSource->RequestSampleEvent().Connect(

@@ -205,6 +205,27 @@ h6 {
   margin-block: 2.33em;
 }
 
+/* properties from https://source.chromium.org/chromium/chromium/src/+/main:third_party/blink/renderer/core/css/fullscreen.css;l=68-83;drc=4670338ccf46aaf26aee2402b0f722106d55b003  */
+/* stylelint-disable-next-line media-query-no-invalid */
+@media (-moz-in-android-pip-mode) and -moz-pref("layout.css.android-pip.enabled") {
+  video {
+    position: fixed !important;
+    left: 0 !important;
+    top: 0 !important;
+    margin: 0 !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    width: 100% !important;
+    height: 100% !important;
+    transform: none !important;
+
+    background-color: black !important;
+    z-index: 2147483647 !important;
+  }
+}
+
 /* stylelint-disable-next-line media-query-no-invalid */
 @media -moz-pref("layout.css.h1-in-section-ua-styles.enabled") {
   :is(article, aside, nav, section)
@@ -703,9 +724,6 @@ iframe:fullscreen {
  *
  * Note that these rules need to be duplicated in details.css for the anonymous
  * summary, which wouldn't match otherwise.
- *
- * The spec here says something different, see
- * https://github.com/whatwg/html/issues/8610
  */
 details > summary:first-of-type {
   display: list-item;
@@ -714,6 +732,14 @@ details > summary:first-of-type {
 }
 details[open] > summary:first-of-type {
   list-style-type: disclosure-open;
+}
+
+details::details-content {
+  display: block;
+  content-visibility: hidden;
+}
+details[open]::details-content {
+  content-visibility: revert;
 }
 
 /* media elements */
@@ -745,10 +771,11 @@ audio[controls] {
   transform: translate(0) !important;
 }
 
-video > .caption-box {
+video > .caption-box:-moz-native-anonymous {
   width: 100%;
   height: 100%;
   position: relative;
+  pointer-events: none;
 }
 
 /**

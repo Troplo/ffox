@@ -380,26 +380,31 @@ class nsLayoutUtils {
    *         0 otherwise (meaning they're the same, or they're in
    *           different frame trees)
    */
-  static int32_t CompareTreePosition(nsIFrame* aFrame1, nsIFrame* aFrame2,
-                                     nsIFrame* aCommonAncestor = nullptr) {
+  static int32_t CompareTreePosition(
+      const nsIFrame* aFrame1, const nsIFrame* aFrame2,
+      const nsIFrame* aCommonAncestor = nullptr) {
     return DoCompareTreePosition(aFrame1, aFrame2, aCommonAncestor);
   }
 
-  static int32_t CompareTreePosition(nsIFrame* aFrame1, nsIFrame* aFrame2,
-                                     nsTArray<nsIFrame*>& aFrame2Ancestors,
-                                     nsIFrame* aCommonAncestor = nullptr) {
+  static int32_t CompareTreePosition(
+      const nsIFrame* aFrame1, const nsIFrame* aFrame2,
+      nsTArray<const nsIFrame*>& aFrame2Ancestors,
+      const nsIFrame* aCommonAncestor = nullptr) {
     return DoCompareTreePosition(aFrame1, aFrame2, aFrame2Ancestors,
                                  aCommonAncestor);
   }
 
-  static nsIFrame* FillAncestors(nsIFrame* aFrame, nsIFrame* aStopAtAncestor,
-                                 nsTArray<nsIFrame*>* aAncestors);
+  static const nsIFrame* FillAncestors(const nsIFrame* aFrame,
+                                       const nsIFrame* aStopAtAncestor,
+                                       nsTArray<const nsIFrame*>* aAncestors);
 
-  static int32_t DoCompareTreePosition(nsIFrame* aFrame1, nsIFrame* aFrame2,
-                                       nsIFrame* aCommonAncestor);
-  static int32_t DoCompareTreePosition(nsIFrame* aFrame1, nsIFrame* aFrame2,
-                                       nsTArray<nsIFrame*>& aFrame2Ancestors,
-                                       nsIFrame* aCommonAncestor);
+  static int32_t DoCompareTreePosition(const nsIFrame* aFrame1,
+                                       const nsIFrame* aFrame2,
+                                       const nsIFrame* aCommonAncestor);
+  static int32_t DoCompareTreePosition(
+      const nsIFrame* aFrame1, const nsIFrame* aFrame2,
+      nsTArray<const nsIFrame*>& aFrame2Ancestors,
+      const nsIFrame* aCommonAncestor);
 
   /**
    * LastContinuationWithChild gets the last continuation in aFrame's chain
@@ -1124,6 +1129,7 @@ class nsLayoutUtils {
     ForWebRender = 0x100,
     UseHighQualityScaling = 0x200,
     ResetViewportScrolling = 0x400,
+    CompositeOffscreen = 0x800,
   };
 
   /**
@@ -1391,12 +1397,6 @@ class nsLayoutUtils {
    */
   static nsBlockFrame* FindNearestBlockAncestor(nsIFrame* aFrame);
 
-  /**
-   * Find the nearest ancestor that's not for generated content. Will return
-   * aFrame if aFrame is not for generated content.
-   */
-  static nsIFrame* GetNonGeneratedAncestor(nsIFrame* aFrame);
-
   /*
    * Whether the frame is an nsBlockFrame which is not a wrapper block.
    */
@@ -1461,6 +1461,19 @@ class nsLayoutUtils {
    *         the root content.
    */
   static bool IsViewportScrollbarFrame(nsIFrame* aFrame);
+
+  /**
+   * Use only for paddings / widths / heights, since it clamps negative calc()
+   * to 0.
+   */
+  template <typename LengthPercentageLike>
+  static mozilla::Maybe<nscoord> GetAbsoluteSize(
+      const LengthPercentageLike& aSize) {
+    if (!aSize.ConvertsToLength()) {
+      return mozilla::Nothing();
+    }
+    return mozilla::Some(std::max(0, aSize.ToLength()));
+  }
 
   /**
    * Get the contribution of aFrame to its containing block's intrinsic
@@ -1548,8 +1561,6 @@ class nsLayoutUtils {
   }
 
   static nscoord ComputeCBDependentValue(nscoord aPercentBasis,
-                                         mozilla::StylePhysicalAxis aAxis,
-                                         mozilla::StylePositionProperty aProp,
                                          const AnchorResolvedInset& aInset) {
     if (aInset->IsAuto()) {
       // Callers are assumed to have handled other cases already.
@@ -1559,16 +1570,17 @@ class nsLayoutUtils {
                  "Have unconstrained percentage basis when percentage "
                  "resolution needed; this should only result from very "
                  "large sizes, not attempts at intrinsic size calculation");
-    return aInset->AsLengthPercentage().ResolveWithAnchor(aPercentBasis, aAxis,
-                                                          aProp);
+    return aInset->AsLengthPercentage().Resolve(aPercentBasis);
   }
 
   static nscoord ComputeCBDependentValue(nscoord aPercentBasis,
-                                         const mozilla::StyleMargin& aMargin) {
-    if (!aMargin.IsLengthPercentage()) {
+                                         const AnchorResolvedMargin& aMargin) {
+    if (!aMargin->IsLengthPercentage()) {
+      MOZ_ASSERT(aMargin->IsAuto(), "Didn't resolve anchor functions first?");
       return 0;
     }
-    return ComputeCBDependentValue(aPercentBasis, aMargin.AsLengthPercentage());
+    return ComputeCBDependentValue(aPercentBasis,
+                                   aMargin->AsLengthPercentage());
   }
 
   static nscoord ComputeBSizeValue(nscoord aContainingBlockBSize,
@@ -1696,10 +1708,6 @@ class nsLayoutUtils {
   static bool IsPaddingZero(const LengthPercentage& aLength) {
     // clamp negative calc() to 0
     return aLength.Resolve(nscoord_MAX) <= 0 && aLength.Resolve(0) <= 0;
-  }
-
-  static bool IsMarginZero(const LengthPercentage& aLength) {
-    return aLength.Resolve(nscoord_MAX) == 0 && aLength.Resolve(0) == 0;
   }
 
   static void MarkDescendantsDirty(nsIFrame* aSubtreeRoot);

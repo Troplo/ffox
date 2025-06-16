@@ -9,16 +9,18 @@ const TOP_PAGE = DOMAIN + PATH + "empty_file.html";
 
 async function test_sidebar_hidden_on_popup() {
   await SpecialPowers.pushPrefEnv({
-    set: [["sidebar.verticalTabs", true]],
+    set: [[VERTICAL_TABS_PREF, true]],
   });
   await waitForTabstripOrientation("vertical");
   const win = await BrowserTestUtils.openNewBrowserWindow();
   const { document } = win;
 
   const sidebar = document.getElementById("sidebar-main");
-  await BrowserTestUtils.waitForCondition(
-    () => BrowserTestUtils.isVisible(sidebar),
-    "Sidebar is visible"
+  info("Waiting for sidebar to be visible");
+  await BrowserTestUtils.waitForMutationCondition(
+    sidebar,
+    { attributes: true, attributeFilter: ["hidden"] },
+    () => BrowserTestUtils.isVisible(sidebar)
   );
   is(sidebar.hidden, false, "Sidebar is shown initially");
 

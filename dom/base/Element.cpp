@@ -323,6 +323,9 @@ void Element::SetPointerCapture(int32_t aPointerId, ErrorResult& aError) {
     aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return;
   }
+  // XXX If pointerInfo->mIsSynthesizedForTests does not match the last
+  // WidgetPointerEvent's mFlags.mIsSynthesizedForTests, should we treat it
+  // as unknown pointerId?
   if (!pointerInfo->mActiveState ||
       pointerInfo->mActiveDocument != OwnerDoc()) {
     return;
@@ -1122,10 +1125,10 @@ const DOMTokenListSupportedToken Element::sAnchorAndFormRelValues[] = {
     "noreferrer", "noopener", "opener", nullptr};
 
 // https://html.spec.whatwg.org/multipage/urls-and-fetching.html#lazy-loading-attribute
-static constexpr nsAttrValue::EnumTable kLoadingTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kLoadingTable[] = {
     {"eager", Element::Loading::Eager},
     {"lazy", Element::Loading::Lazy},
-    {nullptr, 0}};
+};
 
 void Element::GetLoading(nsAString& aValue) const {
   GetEnumAttr(nsGkAtoms::loading, kLoadingTable[0].tag, aValue);
@@ -1134,7 +1137,8 @@ void Element::GetLoading(nsAString& aValue) const {
 bool Element::ParseLoadingAttribute(const nsAString& aValue,
                                     nsAttrValue& aResult) {
   return aResult.ParseEnumValue(aValue, kLoadingTable,
-                                /* aCaseSensitive = */ false, kLoadingTable);
+                                /* aCaseSensitive = */ false,
+                                &kLoadingTable[0]);
 }
 
 Element::Loading Element::LoadingState() const {
@@ -1143,6 +1147,36 @@ Element::Loading Element::LoadingState() const {
     return Loading::Eager;
   }
   return static_cast<Loading>(val->GetEnumValue());
+}
+
+namespace {
+// <https://html.spec.whatwg.org/multipage/urls-and-fetching.html#fetch-priority-attributes>.
+static constexpr nsAttrValue::EnumTableEntry kFetchPriorityEnumTable[] = {
+    {kFetchPriorityAttributeValueHigh, FetchPriority::High},
+    {kFetchPriorityAttributeValueLow, FetchPriority::Low},
+    {kFetchPriorityAttributeValueAuto, FetchPriority::Auto}};
+
+// <https://html.spec.whatwg.org/multipage/urls-and-fetching.html#fetch-priority-attributes>.
+static constexpr const nsAttrValue::EnumTableEntry*
+    kFetchPriorityEnumTableInvalidValueDefault = &kFetchPriorityEnumTable[2];
+}  // namespace
+
+void Element::ParseFetchPriority(const nsAString& aValue,
+                                 nsAttrValue& aResult) {
+  aResult.ParseEnumValue(aValue, kFetchPriorityEnumTable,
+                         false /* aCaseSensitive */,
+                         kFetchPriorityEnumTableInvalidValueDefault);
+}
+
+FetchPriority Element::GetFetchPriority() const {
+  const nsAttrValue* fetchpriorityAttribute =
+      GetParsedAttr(nsGkAtoms::fetchpriority);
+  if (fetchpriorityAttribute) {
+    MOZ_ASSERT(fetchpriorityAttribute->Type() == nsAttrValue::eEnum);
+    return FetchPriority(fetchpriorityAttribute->GetEnumValue());
+  }
+
+  return FetchPriority::Auto;
 }
 
 //----------------------------------------------------------------------
@@ -1602,10 +1636,10 @@ Attr* Element::GetAttributeNode(const nsAString& aName) {
   return Attributes()->GetNamedItem(aName);
 }
 
-already_AddRefed<Attr> Element::SetAttributeNode(Attr& aNewAttr,
-                                                 ErrorResult& aError) {
+already_AddRefed<Attr> Element::SetAttributeNode(
+    Attr& aNewAttr, nsIPrincipal* aSubjectPrincipal, ErrorResult& aError) {
   RefPtr<nsDOMAttributeMap> attrMap = Attributes();
-  return attrMap->SetNamedItemNS(aNewAttr, aError);
+  return attrMap->SetNamedItemNS(aNewAttr, aSubjectPrincipal, aError);
 }
 
 already_AddRefed<Attr> Element::RemoveAttributeNode(Attr& aAttribute,
@@ -1692,8 +1726,8 @@ void Element::SetAttribute(
     Maybe<nsAutoString> compliantStringHolder;
     const nsAString* compliantString =
         TrustedTypeUtils::GetTrustedTypesCompliantAttributeValue(
-            *this, nameAtom, kNameSpaceID_None, aValue, compliantStringHolder,
-            aError);
+            *this, nameAtom, kNameSpaceID_None, aValue, aTriggeringPrincipal,
+            compliantStringHolder, aError);
     if (aError.Failed()) {
       return;
     }
@@ -1708,7 +1742,7 @@ void Element::SetAttribute(
   const nsAString* compliantString =
       TrustedTypeUtils::GetTrustedTypesCompliantAttributeValue(
           *this, attributeName, name->NamespaceID(), aValue,
-          compliantStringHolder, aError);
+          aTriggeringPrincipal, compliantStringHolder, aError);
   if (aError.Failed()) {
     return;
   }
@@ -1741,7 +1775,7 @@ void Element::SetAttributeNS(
   RefPtr<nsAtom> attributeName = ni->NameAtom();
   const nsAString* compliantString =
       TrustedTypeUtils::GetTrustedTypesCompliantAttributeValue(
-          *this, attributeName, ni->NamespaceID(), aValue,
+          *this, attributeName, ni->NamespaceID(), aValue, aTriggeringPrincipal,
           compliantStringHolder, aError);
   if (aError.Failed()) {
     return;
@@ -1794,10 +1828,10 @@ Attr* Element::GetAttributeNodeNSInternal(const nsAString& aNamespaceURI,
   return Attributes()->GetNamedItemNS(aNamespaceURI, aLocalName);
 }
 
-already_AddRefed<Attr> Element::SetAttributeNodeNS(Attr& aNewAttr,
-                                                   ErrorResult& aError) {
+already_AddRefed<Attr> Element::SetAttributeNodeNS(
+    Attr& aNewAttr, nsIPrincipal* aSubjectPrincipal, ErrorResult& aError) {
   RefPtr<nsDOMAttributeMap> attrMap = Attributes();
-  return attrMap->SetNamedItemNS(aNewAttr, aError);
+  return attrMap->SetNamedItemNS(aNewAttr, aSubjectPrincipal, aError);
 }
 
 already_AddRefed<nsIHTMLCollection> Element::GetElementsByTagNameNS(
@@ -3526,8 +3560,7 @@ void Element::GetEventTargetParentForLinks(EventChainPreVisitor& aVisitor) {
       if (!focusEvent || !focusEvent->mIsRefocus) {
         nsAutoString target;
         GetLinkTarget(target);
-        nsContentUtils::TriggerLink(this, absURI, target,
-                                    /* click */ false);
+        nsContentUtils::TriggerLinkMouseOver(this, absURI, target);
         // Make sure any ancestor links don't also TriggerLink
         aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
       }
@@ -3685,8 +3718,12 @@ nsresult Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor) {
               // eLegacyDOMActivate.
               nsAutoString target;
               GetLinkTarget(target);
-              nsContentUtils::TriggerLink(this, absURI, target,
-                                          /* click */ true);
+              UserNavigationInvolvement userInvolvement =
+                  mouseEvent->IsTrusted()
+                      ? UserNavigationInvolvement::Activation
+                      : UserNavigationInvolvement::None;
+              nsContentUtils::TriggerLinkClick(this, absURI, target,
+                                               userInvolvement);
             }
             // Since we didn't dispatch DOMActivate because there were no
             // listeners, do still set mEventStatus as if it was dispatched
@@ -3710,7 +3747,12 @@ nsresult Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor) {
         if (nsCOMPtr<nsIURI> absURI = GetHrefURI()) {
           nsAutoString target;
           GetLinkTarget(target);
-          nsContentUtils::TriggerLink(this, absURI, target, /* click */ true);
+          UserNavigationInvolvement userInvolvement =
+              aVisitor.mEvent->IsTrusted()
+                  ? UserNavigationInvolvement::Activation
+                  : UserNavigationInvolvement::None;
+          nsContentUtils::TriggerLinkClick(this, absURI, target,
+                                           userInvolvement);
           aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
         }
       }
@@ -3840,12 +3882,11 @@ bool Element::Matches(const nsACString& aSelector, ErrorResult& aResult) {
   return Servo_SelectorList_Matches(this, list);
 }
 
-static const nsAttrValue::EnumTable kCORSAttributeTable[] = {
+static constexpr nsAttrValue::EnumTableEntry kCORSAttributeTable[] = {
     // Order matters here
     // See ParseCORSValue
     {"anonymous", CORS_ANONYMOUS},
-    {"use-credentials", CORS_USE_CREDENTIALS},
-    {nullptr, 0}};
+    {"use-credentials", CORS_USE_CREDENTIALS}};
 
 /* static */
 void Element::ParseCORSValue(const nsAString& aValue, nsAttrValue& aResult) {
@@ -4125,7 +4166,8 @@ void Element::GetAnimations(const GetAnimationsOptions& aOptions,
     // be reflected in the flags passed in DocumentOrShadowRoot::GetAnimations
     // too.
     doc->FlushPendingNotifications(
-        ChangesToFlush(FlushType::Style, false /* flush animations */));
+        ChangesToFlush(FlushType::Style, /* aFlushAnimations = */ false,
+                       /* aUpdateRelevancy = */ false));
   }
 
   GetAnimationsWithoutFlush(aOptions, aAnimations);
@@ -4172,7 +4214,7 @@ static void GetAnimationsOfViewTransitionTree(
     return;
   }
 
-  Element* root = vt->GetRoot();
+  Element* root = vt->GetViewTransitionTreeRoot();
   if (!root) {
     return;
   }
@@ -4292,7 +4334,7 @@ void Element::SetInnerHTML(const TrustedHTMLOrNullIsEmptyString& aInnerHTML,
   const nsAString* compliantString =
       TrustedTypeUtils::GetTrustedTypesCompliantString(
           aInnerHTML, sink, kTrustedTypesOnlySinkGroup, *this,
-          compliantStringHolder, aError);
+          aSubjectPrincipal, compliantStringHolder, aError);
 
   if (aError.Failed()) {
     return;
@@ -4312,6 +4354,7 @@ void Element::GetOuterHTML(OwningTrustedHTMLOrNullIsEmptyString& aOuterHTML) {
 }
 
 void Element::SetOuterHTML(const TrustedHTMLOrNullIsEmptyString& aOuterHTML,
+                           nsIPrincipal* aSubjectPrincipal,
                            ErrorResult& aError) {
   constexpr nsLiteralString sink = u"Element outerHTML"_ns;
 
@@ -4319,7 +4362,7 @@ void Element::SetOuterHTML(const TrustedHTMLOrNullIsEmptyString& aOuterHTML,
   const nsAString* compliantString =
       TrustedTypeUtils::GetTrustedTypesCompliantString(
           aOuterHTML, sink, kTrustedTypesOnlySinkGroup, *this,
-          compliantStringHolder, aError);
+          aSubjectPrincipal, compliantStringHolder, aError);
   if (aError.Failed()) {
     return;
   }
@@ -4381,14 +4424,14 @@ enum nsAdjacentPosition { eBeforeBegin, eAfterBegin, eBeforeEnd, eAfterEnd };
 
 void Element::InsertAdjacentHTML(
     const nsAString& aPosition, const TrustedHTMLOrString& aTrustedHTMLOrString,
-    ErrorResult& aError) {
+    nsIPrincipal* aSubjectPrincipal, ErrorResult& aError) {
   constexpr nsLiteralString kSink = u"Element insertAdjacentHTML"_ns;
 
   Maybe<nsAutoString> compliantStringHolder;
   const nsAString* compliantString =
       TrustedTypeUtils::GetTrustedTypesCompliantString(
           aTrustedHTMLOrString, kSink, kTrustedTypesOnlySinkGroup, *this,
-          compliantStringHolder, aError);
+          aSubjectPrincipal, compliantStringHolder, aError);
 
   if (aError.Failed()) {
     return;
@@ -4698,8 +4741,8 @@ void Element::ClearDataset() {
 
 template <class T>
 void Element::GetCustomInterface(nsGetterAddRefs<T> aResult) {
-  nsCOMPtr<nsISupports> iface = CustomElementRegistry::CallGetCustomInterface(
-      this, NS_GET_TEMPLATE_IID(T));
+  nsCOMPtr<nsISupports> iface =
+      CustomElementRegistry::CallGetCustomInterface(this, NS_GET_IID(T));
   if (iface) {
     if (NS_SUCCEEDED(CallQueryInterface(iface, static_cast<T**>(aResult)))) {
       return;
@@ -5284,145 +5327,9 @@ void Element::RegUnRegAccessKey(bool aDoReg) {
   }
 }
 
-void Element::SetHTML(const nsAString& aInnerHTML,
-                      const SetHTMLOptions& aOptions, ErrorResult& aError) {
-  // Throw for disallowed elements
-  if (IsHTMLElement(nsGkAtoms::script)) {
-    aError.ThrowTypeError("This does not work on <script> elements");
-    return;
-  }
-  if (IsHTMLElement(nsGkAtoms::object)) {
-    aError.ThrowTypeError("This does not work on <object> elements");
-    return;
-  }
-  if (IsHTMLElement(nsGkAtoms::iframe)) {
-    aError.ThrowTypeError("This does not work on <iframe> elements");
-    return;
-  }
-
-  // Keep "this" alive should be guaranteed by the caller, and also the content
-  // of a template element (if this is one) should never been released from this
-  // during this call.  Therefore, using raw pointer here is safe.
-  FragmentOrElement* target = this;
-  // Handle template case.
-  if (target->IsTemplateElement()) {
-    DocumentFragment* frag =
-        static_cast<HTMLTemplateElement*>(target)->Content();
-    MOZ_ASSERT(frag);
-    target = frag;
-  }
-
-  // TODO: Avoid parsing and implement a fast-path for non-markup input,
-  // Filed as bug 1731215.
-
-  // mozAutoSubtreeModified keeps the owner document alive.  Therefore, using a
-  // raw pointer here is safe.
-  Document* const doc = target->OwnerDoc();
-
-  // Batch possible DOMSubtreeModified events.
-  mozAutoSubtreeModified subtree(doc, nullptr);
-
-  target->FireNodeRemovedForChildren();
-
-  // Needed when innerHTML is used in combination with contenteditable
-  mozAutoDocUpdate updateBatch(doc, true);
-
-  // Remove childnodes.
-  nsAutoMutationBatch mb(target, true, false);
-  target->RemoveAllChildren(true);
-  mb.RemovalDone();
-
-  nsAutoScriptLoaderDisabler sld(doc);
-
-  FragmentOrElement* parseContext = this;
-  if (ShadowRoot* shadowRoot = ShadowRoot::FromNode(parseContext)) {
-    // Fix up the context to be the host of the ShadowRoot.  See
-    // https://w3c.github.io/DOM-Parsing/#dom-innerhtml-innerhtml setter step 1.
-    parseContext = shadowRoot->GetHost();
-  }
-
-  // We MUST NOT cause any requests during parsing, so we'll
-  // create an inert Document and parse into a new DocumentFragment.
-  RefPtr<Document> inertDoc;
-  nsAtom* contextLocalName = parseContext->NodeInfo()->NameAtom();
-  int32_t contextNameSpaceID = parseContext->GetNameSpaceID();
-  ElementCreationOptionsOrString options;
-  RefPtr<DocumentFragment> fragment;
-  if (doc->IsHTMLDocument()) {
-    inertDoc = nsContentUtils::CreateInertHTMLDocument(nullptr);
-    if (!inertDoc) {
-      aError = NS_ERROR_FAILURE;
-      return;
-    }
-    fragment = new (inertDoc->NodeInfoManager())
-        DocumentFragment(inertDoc->NodeInfoManager());
-
-    aError = nsContentUtils::ParseFragmentHTML(aInnerHTML, fragment,
-                                               contextLocalName,
-                                               contextNameSpaceID, false, true);
-
-  } else if (doc->IsXMLDocument()) {
-    inertDoc = nsContentUtils::CreateInertXMLDocument(nullptr);
-    if (!inertDoc) {
-      aError = NS_ERROR_FAILURE;
-      return;
-    }
-    fragment = new (inertDoc->NodeInfoManager())
-        DocumentFragment(inertDoc->NodeInfoManager());
-
-    // TODO(freddyb) `nsContentUtils::CreateContextualFragment` is actually
-    // collecting a ton of stacks to get in an (X)HTMLish state.
-    // I'm afraid we might need that too. Ugh.
-    AutoTArray<nsString, 0> emptyTagStack;
-    aError =
-        nsContentUtils::ParseFragmentXML(aInnerHTML, inertDoc, emptyTagStack,
-                                         true, -1, getter_AddRefs(fragment));
-  }
-
-  if (aError.Failed()) {
-    return;
-  }
-
-  // Suppress assertion about node removal mutation events that can't have
-  // listeners anyway, because no one has had the chance to register
-  // mutation listeners on the fragment that comes from the parser.
-  nsAutoScriptBlockerSuppressNodeRemoved scriptBlocker;
-
-  int32_t oldChildCount = static_cast<int32_t>(target->GetChildCount());
-
-  nsCOMPtr<nsIGlobalObject> global = GetOwnerGlobal();
-  if (!global) {
-    aError.ThrowInvalidStateError("Missing owner global.");
-    return;
-  }
-
-  RefPtr<Sanitizer> sanitizer;
-  if (aOptions.mSanitizer.IsSanitizer()) {
-    sanitizer = aOptions.mSanitizer.GetAsSanitizer();
-  } else if (aOptions.mSanitizer.IsSanitizerConfig()) {
-    sanitizer = Sanitizer::New(
-        global, aOptions.mSanitizer.GetAsSanitizerConfig(), aError);
-  } else {
-    sanitizer = Sanitizer::New(
-        global, aOptions.mSanitizer.GetAsSanitizerPresets(), aError);
-  }
-  if (aError.Failed()) {
-    return;
-  }
-
-  sanitizer->SanitizeFragment(fragment, aError);
-  if (aError.Failed()) {
-    return;
-  }
-
-  target->AppendChild(*fragment, aError);
-  if (aError.Failed()) {
-    return;
-  }
-
-  mb.NodesAdded();
-  nsContentUtils::FireMutationEventsForDirectParsing(doc, target,
-                                                     oldChildCount);
+void Element::SetHTML(const nsAString& aHTML, const SetHTMLOptions& aOptions,
+                      ErrorResult& aError) {
+  nsContentUtils::SetHTML(this, this, aHTML, aOptions, aError);
 }
 
 void Element::GetHTML(const GetHTMLOptions& aOptions, nsAString& aResult) {
@@ -5470,9 +5377,23 @@ EditorBase* Element::GetExtantEditor() const {
 }
 
 void Element::SetHTMLUnsafe(const TrustedHTMLOrString& aHTML,
+                            const SetHTMLUnsafeOptions& aOptions,
+                            nsIPrincipal* aSubjectPrincipal,
                             ErrorResult& aError) {
-  nsContentUtils::SetHTMLUnsafe(this, this, aHTML, false /*aIsShadowRoot*/,
+  nsContentUtils::SetHTMLUnsafe(this, this, aHTML, aOptions,
+                                false /*aIsShadowRoot*/, aSubjectPrincipal,
                                 aError);
+}
+
+// https://html.spec.whatwg.org/#event-beforematch
+void Element::FireBeforematchEvent(ErrorResult& aRv) {
+  RefPtr<Event> event = NS_NewDOMEvent(this, nullptr, nullptr);
+  event->InitEvent(u"beforematch"_ns,
+                   /*aCanBubble=*/true,
+                   /*aCancelable=*/false);
+
+  event->SetTrusted(true);
+  DispatchEvent(*event, aRv);
 }
 
 bool Element::BlockingContainsRender() const {

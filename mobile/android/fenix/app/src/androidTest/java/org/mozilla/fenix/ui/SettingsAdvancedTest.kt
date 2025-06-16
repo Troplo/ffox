@@ -19,6 +19,7 @@ import org.mozilla.fenix.helpers.TestHelper.exitMenu
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.waitForAppWindowToBeUpdated
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.clickPageObject
 import org.mozilla.fenix.ui.robots.homeScreen
 import org.mozilla.fenix.ui.robots.navigationToolbar
@@ -35,6 +36,9 @@ class SettingsAdvancedTest : TestSetup() {
 
     @get:Rule
     val activityIntentTestRule = HomeActivityIntentTestRule.withDefaultSettingsOverrides()
+
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2092699
     // Walks through settings menu and sub-menus to ensure all items are present
@@ -136,7 +140,7 @@ class SettingsAdvancedTest : TestSetup() {
         navigationToolbar {
         }.enterURLAndEnterToBrowser(externalLinksPage.url) {
             clickPageObject(youTubeSchemaLink)
-            verifyOpenLinkInAnotherAppPrompt()
+            verifyOpenLinkInAnotherAppPrompt(appName = "YouTube")
             clickPageObject(itemWithResIdAndText("android:id/button2", "CANCEL"))
             verifyUrl(externalLinksPage.url.toString())
         }
@@ -166,7 +170,7 @@ class SettingsAdvancedTest : TestSetup() {
         navigationToolbar {
         }.enterURLAndEnterToBrowser(externalLinksPage.url) {
             clickPageObject(youTubeSchemaLink)
-            verifyOpenLinkInAnotherAppPrompt()
+            verifyOpenLinkInAnotherAppPrompt(appName = "YouTube")
             waitForAppWindowToBeUpdated()
             clickPageObject(itemWithResIdAndText("android:id/button1", "OPEN"))
             mDevice.waitForIdle()
@@ -202,6 +206,7 @@ class SettingsAdvancedTest : TestSetup() {
         }.enterURLAndEnterToBrowser(externalLinksPage.url) {
             clickPageObject(youTubeSchemaLink)
             verifyPrivateBrowsingOpenLinkInAnotherAppPrompt(
+                appName = "YouTube",
                 url = "youtube",
                 pageObject = youTubeSchemaLink,
             )
@@ -237,6 +242,7 @@ class SettingsAdvancedTest : TestSetup() {
         }.enterURLAndEnterToBrowser(externalLinksPage.url) {
             clickPageObject(youTubeSchemaLink)
             verifyPrivateBrowsingOpenLinkInAnotherAppPrompt(
+                appName = "YouTube",
                 url = "youtube",
                 pageObject = youTubeSchemaLink,
             )

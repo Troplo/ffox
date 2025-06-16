@@ -25,6 +25,7 @@ ChromeUtils.defineESModuleGetters(lazy, {
   PipelineOptions: "chrome://global/content/ml/EngineProcess.sys.mjs",
   DEFAULT_ENGINE_ID: "chrome://global/content/ml/EngineProcess.sys.mjs",
   DEFAULT_MODELS: "chrome://global/content/ml/EngineProcess.sys.mjs",
+  WASM_BACKENDS: "chrome://global/content/ml/EngineProcess.sys.mjs",
 });
 
 ChromeUtils.defineLazyGetter(lazy, "console", () => {
@@ -50,37 +51,6 @@ XPCOMUtils.defineLazyPreferenceGetter(
   "browser.ml.modelHubUrlTemplate"
 );
 XPCOMUtils.defineLazyPreferenceGetter(lazy, "LOG_LEVEL", "browser.ml.logLevel");
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "CHECK_FOR_MEMORY",
-  "browser.ml.checkForMemory"
-);
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "MINIMUM_PHYSICAL_MEMORY",
-  "browser.ml.minimumPhysicalMemory"
-);
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "MAXIMUM_MEMORY_PRESSURE",
-  "browser.ml.maximumMemoryPressure"
-);
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "DEFAULT_MODEL_MEMORY_USAGE",
-  "browser.ml.defaultModelMemoryUsage"
-);
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "QUEUE_WAIT_TIMEOUT",
-  "browser.ml.queueWaitTimeout"
-);
-XPCOMUtils.defineLazyPreferenceGetter(
-  lazy,
-  "QUEUE_WAIT_INTERVAL",
-  "browser.ml.queueWaitInterval"
-);
-
 XPCOMUtils.defineLazyServiceGetter(
   lazy,
   "mlUtils",
@@ -88,7 +58,22 @@ XPCOMUtils.defineLazyServiceGetter(
   "nsIMLUtils"
 );
 
-const ONE_GiB = 1024 * 1024 * 1024;
+XPCOMUtils.defineLazyPreferenceGetter(
+  lazy,
+  "PIPELINE_OVERRIDE_OPTIONS",
+  "browser.ml.overridePipelineOptions",
+  "{}"
+);
+
+const SAFE_OVERRIDE_OPTIONS = [
+  "dtype",
+  "logLevel",
+  "modelRevision",
+  "numThreads",
+  "processorRevision",
+  "timeoutMS",
+  "tokenizerRevision",
+];
 
 /**
  * The engine child is responsible for the life cycle and instantiation of the local
@@ -151,9 +136,9 @@ export class MLEngineChild extends JSProcessActorChild {
         logLevel: lazy.LOG_LEVEL,
       });
 
-      // And then overwrite with the ones passed in the message
-      options.updateOptions(pipelineOptions);
-
+      const updatedPipelineOptions =
+        this.getUpdatedPipelineOptions(pipelineOptions);
+      options.updateOptions(updatedPipelineOptions);
       const engineId = options.engineId;
       this.#engineStatuses.set(engineId, "INITIALIZING");
 
@@ -211,10 +196,20 @@ export class MLEngineChild extends JSProcessActorChild {
   /**
    * Gets the wasm array buffer from RemoteSettings.
    *
+   * @param {string} backend - The ML engine for which the WASM buffer is requested.
    * @returns {Promise<ArrayBuffer>}
    */
-  getWasmArrayBuffer() {
-    return this.sendQuery("MLEngine:GetWasmArrayBuffer");
+  getWasmArrayBuffer(backend) {
+    return this.sendQuery("MLEngine:GetWasmArrayBuffer", backend);
+  }
+
+  /**
+   * Gets the configuration of the worker
+   *
+   * @returns {Promise<object>}
+   */
+  getWorkerConfig() {
+    return this.sendQuery("MLEngine:GetWorkerConfig");
   }
 
   /**
@@ -222,10 +217,11 @@ export class MLEngineChild extends JSProcessActorChild {
    *
    * @returns {Promise<object>}
    */
-  getInferenceOptions(featureId, taskName) {
+  getInferenceOptions(featureId, taskName, modelId) {
     return this.sendQuery("MLEngine:GetInferenceOptions", {
       featureId,
       taskName,
+      modelId,
     });
   }
 
@@ -239,8 +235,13 @@ export class MLEngineChild extends JSProcessActorChild {
     return this.sendQuery("MLEngine:GetModelFile", config);
   }
 
-  getInferenceProcessInfo() {
-    return this.sendQuery("MLEngine:GetInferenceProcessInfo");
+  /**
+   * Notify that the model download is completed by communicating with the parent actor.
+   *
+   * @param {object} config - The configuration accepted by the parent function.
+   */
+  async notifyModelDownloadComplete(config) {
+    this.sendQuery("MLEngine:NotifyModelDownloadComplete", config);
   }
 
   /**
@@ -280,6 +281,26 @@ export class MLEngineChild extends JSProcessActorChild {
       }
     }
     return statusMap;
+  }
+
+  /**
+   * @param {PipelineOptions} pipelineOptions - options that we want to safely override
+   * @returns {object} - updated pipeline options
+   */
+  getUpdatedPipelineOptions(pipelineOptions) {
+    const overrideOptionsByFeature = JSON.parse(lazy.PIPELINE_OVERRIDE_OPTIONS);
+    const overrideOptions = {};
+    if (overrideOptionsByFeature.hasOwnProperty(pipelineOptions.featureId)) {
+      for (let key of Object.keys(
+        overrideOptionsByFeature[pipelineOptions.featureId]
+      )) {
+        if (SAFE_OVERRIDE_OPTIONS.includes(key)) {
+          overrideOptions[key] =
+            overrideOptionsByFeature[pipelineOptions.featureId][key];
+        }
+      }
+    }
+    return { ...pipelineOptions, ...overrideOptions };
   }
 }
 
@@ -330,12 +351,10 @@ class EngineDispatcher {
    * @returns {Promise<Engine>}
    */
   async initializeInferenceEngine(pipelineOptions, notificationsCallback) {
-    // Create the inference engine given the wasm runtime and the options.
-    const wasm = await this.mlEngineChild.getWasmArrayBuffer();
-
     let remoteSettingsOptions = await this.mlEngineChild.getInferenceOptions(
       this.#featureId,
-      this.#taskName
+      this.#taskName,
+      pipelineOptions.modelId ?? null
     );
 
     // Merge the RemoteSettings inference options with the pipeline options provided.
@@ -356,16 +375,27 @@ class EngineDispatcher {
     }
 
     lazy.console.debug("Inference engine options:", mergedOptions);
-
     this.pipelineOptions = mergedOptions;
 
+    // load the wasm if required.
+    let wasm = null;
+    if (lazy.WASM_BACKENDS.includes(pipelineOptions.backend || "onnx")) {
+      wasm = await this.mlEngineChild.getWasmArrayBuffer(
+        pipelineOptions.backend
+      );
+    }
+
+    const workerConfig = await this.mlEngineChild.getWorkerConfig();
+
     return InferenceEngine.create({
+      workerUrl: workerConfig.url,
+      workerOptions: workerConfig.options,
       wasm,
       pipelineOptions: mergedOptions,
       notificationsCallback,
       getModelFileFn: this.mlEngineChild.getModelFile.bind(this.mlEngineChild),
-      getInferenceProcessInfoFn:
-        this.mlEngineChild.getInferenceProcessInfo.bind(this.mlEngineChild),
+      notifyModelDownloadCompleteFn:
+        this.mlEngineChild.notifyModelDownloadComplete.bind(this.mlEngineChild),
     });
   }
 
@@ -598,6 +628,9 @@ class EngineDispatcher {
  * @param {string} config.modelHubRootUrl - root url of the model hub. When not provided, uses the default from prefs.
  * @param {string} config.modelHubUrlTemplate - url template of the model hub. When not provided, uses the default from prefs.
  * @param {?function(object):Promise<[string, object]>} config.getModelFileFn - A function that actually retrieves the model and headers.
+ * @param {string} config.featureId - The feature id
+ * @param {string} config.sessionId - Shared across the same session.
+ * @param {object} config.telemetryData - Additional telemetry data.
  * @returns {Promise} A promise that resolves to a Meta object containing the URL, response headers,
  * and model path.
  */
@@ -608,6 +641,9 @@ async function getModelFile({
   getModelFileFn,
   modelHubRootUrl,
   modelHubUrlTemplate,
+  featureId,
+  sessionId,
+  telemetryData,
 }) {
   const [data, headers] = await getModelFileFn({
     engineId: engineId || lazy.DEFAULT_ENGINE_ID,
@@ -615,98 +651,11 @@ async function getModelFile({
     url,
     rootUrl: modelHubRootUrl || lazy.MODEL_HUB_ROOT_URL,
     urlTemplate: modelHubUrlTemplate || lazy.MODEL_HUB_URL_TEMPLATE,
+    featureId,
+    sessionId,
+    telemetryData,
   });
   return new lazy.BasePromiseWorker.Meta([url, headers, data], {});
-}
-
-/**
- * A collection that maps model identifiers to their known memory usage.
- * This list will migrate to RS in a collection that contains known memory usage.
- */
-const MODEL_MEMORY_USAGE = {
-  "mozilla/distilvit:4:q8:wasm": ONE_GiB,
-  "testing/greedy:1:q8:wasm": 100 * ONE_GiB,
-};
-
-/**
- * Gets the memory usage for a given model pipeline configuration.
- * If the model is unknown, it defaults to 2GB.
- *
- * @param {PipelineOptions} pipelineOptions - Configuration options for the model pipeline.
- *
- * @returns {Promise<number>} The memory usage for the model in bytes.
- */
-async function getModelMemoryUsage(pipelineOptions) {
-  const key = `${pipelineOptions.modelId.toLowerCase()}:${
-    pipelineOptions.numThreads
-  }:${pipelineOptions.dtype}:${pipelineOptions.device}`;
-
-  lazy.console.debug(`Checking memory uage for key ${key}`);
-  // This list will migrate to RS in a collection that contains known memory usage:
-  // See Bug 1924958
-  // For now just an example:
-  // For unknown models we ask for a fixed value
-  return MODEL_MEMORY_USAGE[key] || lazy.DEFAULT_MODEL_MEMORY_USAGE * ONE_GiB;
-}
-
-/**
- * Repeatedly checks if there is enough memory to infer, at the specified `interval` (in seconds),
- * until either sufficient memory is available or the `timeout` (in seconds) is reached.
- *
- * @param {object} options - The options for the memory check.
- * @param {PipelineOptions} options.pipelineOptions - The options for the pipeline.
- * @param {number} options.interval - The interval (in seconds) between memory checks.
- * @param {number} options.timeout - The maximum amount of time (in seconds) to continue checking for memory availability.
- *
- * @returns {Promise<void>} Resolves when there is enough memory, or rejects if the timeout is reached.
- */
-async function waitForEnoughMemory({ pipelineOptions, interval, timeout }) {
-  const estimatedMemoryUsage = await getModelMemoryUsage(pipelineOptions);
-  const estimatedMemoryUsageMiB = Math.round(
-    estimatedMemoryUsage / (1024 * 1024)
-  );
-
-  lazy.console.debug(`Estimated memory usage: ${estimatedMemoryUsageMiB}MiB`);
-
-  return new Promise((resolve, reject) => {
-    const startTime = Date.now();
-
-    const checkMemory = () => {
-      try {
-        const canInfer = lazy.mlUtils.hasEnoughMemoryToInfer(
-          estimatedMemoryUsage,
-          lazy.MAXIMUM_MEMORY_PRESSURE,
-          lazy.MINIMUM_PHYSICAL_MEMORY * ONE_GiB
-        );
-
-        if (canInfer) {
-          lazy.console.debug("Enough memory available to start inference.");
-          resolve(); // Resolve the promise when there's enough memory.
-        } else {
-          lazy.console.warn(
-            `We are tight in memory for ${pipelineOptions.modelId} (estimated: ${estimatedMemoryUsageMiB})`
-          );
-
-          // TODO : check the `executionPriority` flag:
-          // - if 0, kill any 2 and try again, and then any 1 and try again
-          // - if 1, kill any 2 and try again
-          // - if 2, wait
-          if (Date.now() - startTime >= timeout * 1000) {
-            reject(
-              new Error("Timeout reached while waiting for enough memory.")
-            );
-          } else {
-            lazy.setTimeout(checkMemory, interval * 1000); // Retry after `interval` milliseconds.
-          }
-        }
-      } catch (err) {
-        lazy.console.error("Failed to get memory estimation", err);
-        reject(err); // Reject if an error occurs during memory check.
-      }
-    };
-
-    checkMemory(); // Initial check.
-  });
 }
 
 /**
@@ -720,62 +669,63 @@ class InferenceEngine {
    * Initialize the worker.
    *
    * @param {object} config
+   * @param {string} config.workerUrl  The url of the worker
+   * @param {object} config.workerOptions the options to pass to BasePromiseWorker
    * @param {ArrayBuffer} config.wasm
    * @param {PipelineOptions} config.pipelineOptions
    * @param {?function(ProgressAndStatusCallbackParams):void} config.notificationsCallback The callback to call for updating about notifications such as dowload progress status.
    * @param {?function(object):Promise<[string, object]>} config.getModelFileFn - A function that actually retrieves the model and headers.
-   * @param {?function(object):Promise<object>} config.getInferenceProcessInfoFn - A function to get inference process info
+   * @param {?function(object):Promise<void>} config.notifyModelDownloadCompleteFn - A function to notify that all files needing downloads are completed.
    * @returns {InferenceEngine}
    */
   static async create({
+    workerUrl,
+    workerOptions,
     wasm,
     pipelineOptions,
     notificationsCallback, // eslint-disable-line no-unused-vars
     getModelFileFn,
-    getInferenceProcessInfoFn,
+    notifyModelDownloadCompleteFn,
   }) {
     // Check for the numThreads value. If it's not set, use the best value for the platform, which is the number of physical cores
     pipelineOptions.numThreads =
       pipelineOptions.numThreads || lazy.mlUtils.getOptimalCPUConcurrency();
 
-    // Before we start the worker, we want to make sure we have the resources to run it.
-    if (lazy.CHECK_FOR_MEMORY) {
-      try {
-        await waitForEnoughMemory({
-          pipelineOptions,
-          interval: lazy.QUEUE_WAIT_INTERVAL,
-          timeout: lazy.QUEUE_WAIT_TIMEOUT,
-        });
-      } catch (error) {
-        // Handle the error when there isn't enough memory or a timeout is reached
-        lazy.console.error("Failed to allocate enough memory:", error);
-
-        // TODO: kill existing engines if they are not a priority
-        throw error;
-      }
-    }
     /** @type {BasePromiseWorker} */
-    const worker = new lazy.BasePromiseWorker(
-      "chrome://global/content/ml/MLEngine.worker.mjs",
-      { type: "module" },
-      {
-        getModelFile: async url =>
-          getModelFile({
-            engineId: pipelineOptions.engineId,
-            url,
-            taskName: pipelineOptions.taskName,
-            getModelFileFn,
-            modelHubRootUrl: pipelineOptions.modelHubRootUrl,
-            modelHubUrlTemplate: pipelineOptions.modelHubUrlTemplate,
-          }),
-        getInferenceProcessInfo: getInferenceProcessInfoFn,
-        onInferenceProgress: notificationsCallback,
-      }
-    );
+    const worker = new lazy.BasePromiseWorker(workerUrl, workerOptions, {
+      getModelFile: async (url, sessionId = "") =>
+        getModelFile({
+          engineId: pipelineOptions.engineId,
+          url,
+          taskName: pipelineOptions.taskName,
+          getModelFileFn,
+          modelHubRootUrl: pipelineOptions.modelHubRootUrl,
+          modelHubUrlTemplate: pipelineOptions.modelHubUrlTemplate,
+          featureId: pipelineOptions.featureId,
+          sessionId,
+          // We have model, revision that are parsed for the url.
+          // However, we want to save in telemetry the ones that are configured
+          // for the pipeline. This allows consistent reporting regarding of how
+          // the backend constructs the url.
+          telemetryData: {
+            modelId: pipelineOptions.modelId,
+            modelRevision: pipelineOptions.modelRevision,
+          },
+        }),
+      onInferenceProgress: notificationsCallback,
+      notifyModelDownloadComplete: async (sessionId = "") =>
+        notifyModelDownloadCompleteFn({
+          sessionId,
+          featureId: pipelineOptions.featureId,
+          engineId: pipelineOptions.engineId,
+          modelId: pipelineOptions.modelId,
+          modelRevision: pipelineOptions.modelRevision,
+        }),
+    });
 
     const args = [wasm, pipelineOptions];
     const closure = {};
-    const transferables = [wasm];
+    const transferables = wasm instanceof ArrayBuffer ? [wasm] : [];
     await worker.post("initializeEngine", args, closure, transferables);
     return new InferenceEngine(worker);
   }

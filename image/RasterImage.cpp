@@ -34,7 +34,6 @@
 #include "mozilla/SizeOfState.h"
 #include "mozilla/StaticPrefs_image.h"
 #include "mozilla/glean/ImageDecodersMetrics.h"
-#include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 
 #include "mozilla/gfx/2D.h"
@@ -209,6 +208,20 @@ RasterImage::GetHeight(int32_t* aHeight) {
 }
 
 //******************************************************************************
+NS_IMETHODIMP
+RasterImage::GetIntrinsicSize(ImageIntrinsicSize* aIntrinsicSize) {
+  NS_ENSURE_ARG_POINTER(aIntrinsicSize);
+
+  if (mError) {
+    return NS_ERROR_FAILURE;
+  }
+
+  aIntrinsicSize->mWidth = Some(mSize.width);
+  aIntrinsicSize->mHeight = Some(mSize.height);
+  return NS_OK;
+}
+
+//******************************************************************************
 void RasterImage::MediaFeatureValuesChangedAllDocuments(
     const mozilla::MediaFeatureChange& aChange) {}
 
@@ -246,7 +259,7 @@ size_t RasterImage::GetNativeSizesLength() {
 
 //******************************************************************************
 NS_IMETHODIMP
-RasterImage::GetIntrinsicSize(nsSize* aSize) {
+RasterImage::GetIntrinsicSizeInAppUnits(nsSize* aSize) {
   if (mError) {
     return NS_ERROR_FAILURE;
   }

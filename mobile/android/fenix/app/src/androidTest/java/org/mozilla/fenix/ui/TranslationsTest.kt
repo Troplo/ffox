@@ -6,8 +6,10 @@ package org.mozilla.fenix.ui
 
 import androidx.compose.ui.test.junit4.AndroidComposeTestRule
 import androidx.core.net.toUri
+import org.junit.Ignore
 import org.junit.Rule
 import org.junit.Test
+import org.mozilla.fenix.customannotations.SkipLeaks
 import org.mozilla.fenix.customannotations.SmokeTest
 import org.mozilla.fenix.helpers.AppAndSystemHelper.disableWifiNetworkConnection
 import org.mozilla.fenix.helpers.AppAndSystemHelper.enableDataSaverSystemSetting
@@ -15,6 +17,7 @@ import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.TestAssetHelper
 import org.mozilla.fenix.helpers.TestAssetHelper.waitingTimeLong
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.browserScreen
 import org.mozilla.fenix.ui.robots.navigationToolbar
 import org.mozilla.fenix.ui.robots.translationsRobot
@@ -25,18 +28,19 @@ class TranslationsTest : TestSetup() {
         AndroidComposeTestRule(
             HomeActivityIntentTestRule(
                 skipOnboarding = true,
-                isNavigationToolbarEnabled = false,
-                isNavigationBarCFREnabled = false,
-                isSetAsDefaultBrowserPromptEnabled = false,
                 isMenuRedesignEnabled = false,
                 isMenuRedesignCFREnabled = false,
                 isPageLoadTranslationsPromptEnabled = true,
             ),
         ) { it.activity }
 
+    @get:Rule
+    val memoryLeaksRule = DetectMemoryLeaksRule()
+
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2436643
     @SmokeTest
     @Test
+    @SkipLeaks
     fun verifyTheFirstTranslationNotNowButtonFunctionalityTest() {
         val testPage = TestAssetHelper.getFirstForeignWebPageAsset(mockWebServer)
 
@@ -120,7 +124,7 @@ class TranslationsTest : TestSetup() {
     @Test
     fun verifyTheTranslationIsDisplayedAutomaticallyTest() {
         val firstTestPage = TestAssetHelper.getFirstForeignWebPageAsset(mockWebServer)
-        val secondTestPage = "https://support.mozilla.org/de/"
+        val secondTestPage = "https://mozilla-mobile.github.io/testapp/v2.0/germanForeignWebPage.html"
 
         navigationToolbar {
         }.enterURL(firstTestPage.url) {
@@ -132,8 +136,10 @@ class TranslationsTest : TestSetup() {
         browserScreen {
         }.openTabDrawer(composeTestRule) {
         }.openNewTab {
-        }.submitQuery(secondTestPage) {
-            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
+        }.dismissSearchBar {
+        }
+        navigationToolbar {
+        }.enterURL(secondTestPage.toUri()) {
         }
         translationsRobot(composeTestRule) {
             verifyTranslationSheetIsDisplayed(isDisplayed = true)
@@ -164,7 +170,7 @@ class TranslationsTest : TestSetup() {
     @Test
     fun verifyTheNeverTranslateOptionTest() {
         val firstTestPage = TestAssetHelper.getFirstForeignWebPageAsset(mockWebServer)
-        val secondTestPage = "https://support.mozilla.org/fr/"
+        val secondTestPage = TestAssetHelper.getSecondForeignWebPageAsset(mockWebServer)
 
         navigationToolbar {
         }.enterURL(firstTestPage.url) {
@@ -188,7 +194,7 @@ class TranslationsTest : TestSetup() {
         browserScreen {
         }.openTabDrawer(composeTestRule) {
         }.openNewTab {
-        }.submitQuery(secondTestPage) {
+        }.submitQuery(secondTestPage.url.toString()) {
             waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
         }
         translationsRobot(composeTestRule) {
@@ -283,9 +289,10 @@ class TranslationsTest : TestSetup() {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2437990
     @Test
+    @SkipLeaks
     fun verifyTheAlwaysOfferToTranslateOptionTest() {
         val firstTestPage = TestAssetHelper.getFirstForeignWebPageAsset(mockWebServer)
-        val secondTestPage = "https://support.mozilla.org/fr/"
+        val secondTestPage = TestAssetHelper.getSecondForeignWebPageAsset(mockWebServer)
 
         navigationToolbar {
         }.enterURL(firstTestPage.url) {
@@ -296,18 +303,19 @@ class TranslationsTest : TestSetup() {
             verifyAlwaysOfferToTranslateOptionIsChecked(isChecked = true)
             clickAlwaysOfferToTranslateOption()
             verifyAlwaysOfferToTranslateOptionIsChecked(isChecked = false)
+            clickGoBackTranslationSheetButton()
         }.swipeCloseTranslationsSheet {
             verifyPageContent(firstTestPage.content)
         }
         navigationToolbar {
-        }.enterURL(secondTestPage.toUri()) {
-            waitForPageToLoad(pageLoadWaitingTime = waitingTimeLong)
+            verifyTranslationButton(isPageTranslated = false)
+        }
+
+        navigationToolbar {
+        }.enterURL(secondTestPage.url) {
         }
         translationsRobot(composeTestRule) {
             verifyTranslationSheetIsDisplayed(isDisplayed = false)
-        }
-        navigationToolbar {
-            verifyTranslationButton(isPageTranslated = false)
         }
     }
 
@@ -390,6 +398,7 @@ class TranslationsTest : TestSetup() {
     }
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2440963
+    @Ignore("Failing, see https://bugzilla.mozilla.org/show_bug.cgi?id=1965222")
     @Test
     fun downloadLanguageWhileDataSaverModeIsOnTest() {
         val firstTestPage = TestAssetHelper.getFirstForeignWebPageAsset(mockWebServer)

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::time::Duration;
+use std::{hint::black_box, time::Duration};
 
 use criterion::{criterion_group, criterion_main, BatchSize::SmallInput, Criterion};
 use neqo_transport::{ConnectionParameters, State};
@@ -12,7 +12,7 @@ use test_fixture::{
     boxed,
     sim::{
         connection::{ConnectionNode, ReachState, ReceiveData, SendData},
-        network::{Delay, TailDrop},
+        network::{RandomDelay, TailDrop},
         ReadySimulator, Simulator,
     },
 };
@@ -21,7 +21,10 @@ const ZERO: Duration = Duration::from_millis(0);
 const JITTER: Duration = Duration::from_millis(10);
 const TRANSFER_AMOUNT: usize = 1 << 22; // 4Mbyte
 
-#[allow(clippy::needless_pass_by_value)] // Passing String where &str would do is fine here.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "Passing String where &str would do is fine here."
+)]
 fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<str>>) {
     for pacing in [false, true] {
         let mut group = c.benchmark_group(format!("transfer/pacing-{pacing}"));
@@ -33,19 +36,25 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                 || {
                     let nodes = boxed![
                         ConnectionNode::new_client(
-                            ConnectionParameters::default().pmtud(true).pacing(pacing),
+                            ConnectionParameters::default()
+                                .pmtud(true)
+                                .pacing(pacing)
+                                .mlkem(false),
                             boxed![ReachState::new(State::Confirmed)],
                             boxed![SendData::new(TRANSFER_AMOUNT)]
                         ),
                         TailDrop::dsl_uplink(),
-                        Delay::new(ZERO..JITTER),
+                        RandomDelay::new(ZERO..JITTER),
                         ConnectionNode::new_server(
-                            ConnectionParameters::default().pmtud(true).pacing(pacing),
+                            ConnectionParameters::default()
+                                .pmtud(true)
+                                .pacing(pacing)
+                                .mlkem(false),
                             boxed![ReachState::new(State::Confirmed)],
                             boxed![ReceiveData::new(TRANSFER_AMOUNT)]
                         ),
                         TailDrop::dsl_downlink(),
-                        Delay::new(ZERO..JITTER),
+                        RandomDelay::new(ZERO..JITTER),
                     ];
                     let mut sim = Simulator::new(label, nodes);
                     if let Some(seed) = &seed {
@@ -53,7 +62,7 @@ fn benchmark_transfer(c: &mut Criterion, label: &str, seed: Option<impl AsRef<st
                     }
                     sim.setup()
                 },
-                ReadySimulator::run,
+                black_box(ReadySimulator::run),
                 SmallInput,
             );
         });
@@ -75,7 +84,7 @@ fn benchmark_transfer_fixed(c: &mut Criterion) {
 
 criterion_group! {
     name = transfer;
-    config = Criterion::default().warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(15));
+    config = Criterion::default().warm_up_time(Duration::from_secs(5)).measurement_time(Duration::from_secs(60));
     targets = benchmark_transfer_variable, benchmark_transfer_fixed
 }
 criterion_main!(transfer);

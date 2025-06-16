@@ -9,17 +9,22 @@ import com.google.android.material.bottomsheet.BottomSheetBehavior
 import mozilla.components.concept.engine.mediasession.MediaSession
 import org.junit.Rule
 import org.junit.Test
+import org.mozilla.fenix.customannotations.SkipLeaks
 import org.mozilla.fenix.customannotations.SmokeTest
+import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.helpers.HomeActivityIntentTestRule
 import org.mozilla.fenix.helpers.MatcherHelper
+import org.mozilla.fenix.helpers.MockBrowserDataHelper
 import org.mozilla.fenix.helpers.RetryTestRule
 import org.mozilla.fenix.helpers.TestAssetHelper
+import org.mozilla.fenix.helpers.TestHelper.appContext
 import org.mozilla.fenix.helpers.TestHelper.clickSnackbarButton
 import org.mozilla.fenix.helpers.TestHelper.closeApp
 import org.mozilla.fenix.helpers.TestHelper.mDevice
 import org.mozilla.fenix.helpers.TestHelper.restartApp
 import org.mozilla.fenix.helpers.TestHelper.verifySnackBarText
 import org.mozilla.fenix.helpers.TestSetup
+import org.mozilla.fenix.helpers.perf.DetectMemoryLeaksRule
 import org.mozilla.fenix.ui.robots.browserScreen
 import org.mozilla.fenix.ui.robots.clickPageObject
 import org.mozilla.fenix.ui.robots.homeScreen
@@ -52,7 +57,10 @@ class TabbedBrowsingTest : TestSetup() {
             ),
         ) { it.activity }
 
-    @Rule(order = 1)
+    @get:Rule(order = 1)
+    val memoryLeaksRule = DetectMemoryLeaksRule()
+
+    @Rule(order = 2)
     @JvmField
     val retryTestRule = RetryTestRule(3)
 
@@ -311,7 +319,7 @@ class TabbedBrowsingTest : TestSetup() {
         navigationToolbar {
         }.enterURLAndEnterToBrowser(firstWebPage.url) {
             waitForPageToLoad()
-        }.goToHomescreen {
+        }.goToHomescreen(composeTestRule) {
         }.openNavigationToolbar {
         }.enterURLAndEnterToBrowser(secondWebPage.url) {
             waitForPageToLoad()
@@ -329,6 +337,12 @@ class TabbedBrowsingTest : TestSetup() {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2343663
     @Test
+    @SkipLeaks(
+        reasons = [
+            "https://bugzilla.mozilla.org/show_bug.cgi?id=1962065",
+            "https://bugzilla.mozilla.org/show_bug.cgi?id=1962070",
+        ],
+    )
     fun tabsCounterShortcutMenuNewPrivateTabTest() {
         val defaultWebPage = TestAssetHelper.getGenericAsset(mockWebServer, 1)
 
@@ -345,6 +359,7 @@ class TabbedBrowsingTest : TestSetup() {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2343662
     @Test
+    @SkipLeaks(reasons = ["https://bugzilla.mozilla.org/show_bug.cgi?id=1962065"])
     fun tabsCounterShortcutMenuNewTabTest() {
         val defaultWebPage = TestAssetHelper.getGenericAsset(mockWebServer, 1)
 
@@ -361,6 +376,7 @@ class TabbedBrowsingTest : TestSetup() {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/927315
     @Test
+    @SkipLeaks(reasons = ["https://bugzilla.mozilla.org/show_bug.cgi?id=1962065"])
     fun privateTabsCounterShortcutMenuCloseTabTest() {
         val firstWebPage = TestAssetHelper.getGenericAsset(mockWebServer, 1)
         val secondWebPage = TestAssetHelper.getGenericAsset(mockWebServer, 2)
@@ -369,7 +385,7 @@ class TabbedBrowsingTest : TestSetup() {
         navigationToolbar {
         }.enterURLAndEnterToBrowser(firstWebPage.url) {
             waitForPageToLoad()
-        }.goToHomescreen {
+        }.goToHomescreen(composeTestRule) {
         }.openNavigationToolbar {
         }.enterURLAndEnterToBrowser(secondWebPage.url) {
             waitForPageToLoad()
@@ -392,6 +408,7 @@ class TabbedBrowsingTest : TestSetup() {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2344199
     @Test
+    @SkipLeaks(reasons = ["https://bugzilla.mozilla.org/show_bug.cgi?id=1962065"])
     fun privateTabsCounterShortcutMenuNewPrivateTabTest() {
         val defaultWebPage = TestAssetHelper.getGenericAsset(mockWebServer, 1)
 
@@ -411,6 +428,7 @@ class TabbedBrowsingTest : TestSetup() {
 
     // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/2344198
     @Test
+    @SkipLeaks(reasons = ["https://bugzilla.mozilla.org/show_bug.cgi?id=1962065"])
     fun privateTabsCounterShortcutMenuNewTabTest() {
         val defaultWebPage = TestAssetHelper.getGenericAsset(mockWebServer, 1)
 
@@ -483,7 +501,7 @@ class TabbedBrowsingTest : TestSetup() {
 
         navigationToolbar {
         }.enterURLAndEnterToBrowser(defaultWebPage.url) {
-        }.goToHomescreen {
+        }.goToHomescreen(composeTestRule) {
         }.togglePrivateBrowsingMode()
 
         closeApp(composeTestRule.activityRule)
@@ -519,6 +537,60 @@ class TabbedBrowsingTest : TestSetup() {
             verifyPrivateBrowsingHomeScreenItems()
         }.openTabDrawer(composeTestRule) {
             verifyNoOpenTabsInPrivateBrowsing()
+        }
+    }
+
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/3024942
+    @Test
+    fun verifyTabsTrayListView() {
+        appContext.settings().gridTabView = false
+
+        val webPages = TestAssetHelper.getGenericAssets(mockWebServer)
+
+        MockBrowserDataHelper.createTabItem(webPages[0].url.toString())
+        MockBrowserDataHelper.createTabItem(webPages[1].url.toString())
+        MockBrowserDataHelper.createTabItem(webPages[2].url.toString())
+        MockBrowserDataHelper.createTabItem(webPages[3].url.toString())
+
+        homeScreen {
+        }.openTabDrawer(composeTestRule) {
+            verifyNormalTabsList()
+        }.closeTabDrawer {}
+        homeScreen {
+        }.openTabDrawer(composeTestRule) {
+            verifyOpenTabsOrder(title = webPages[0].title, position = 1, isListViewEnabled = true)
+            verifyOpenTabsOrder(title = webPages[1].title, position = 2, isListViewEnabled = true)
+            verifyOpenTabsOrder(title = webPages[2].title, position = 3, isListViewEnabled = true)
+            verifyOpenTabsOrder(title = webPages[3].title, position = 4, isListViewEnabled = true)
+            swipeTabLeft(title = webPages[0].title, isListViewEnabled = true)
+            verifyOpenTabsOrder(title = webPages[1].title, position = 1, isListViewEnabled = true)
+        }
+    }
+
+    // TestRail link: https://mozilla.testrail.io/index.php?/cases/view/1126911
+    @Test
+    fun verifyTabsTrayGridView() {
+        appContext.settings().gridTabView = true
+
+        val webPages = TestAssetHelper.getGenericAssets(mockWebServer)
+
+        MockBrowserDataHelper.createTabItem(webPages[0].url.toString())
+        MockBrowserDataHelper.createTabItem(webPages[1].url.toString())
+        MockBrowserDataHelper.createTabItem(webPages[2].url.toString())
+        MockBrowserDataHelper.createTabItem(webPages[3].url.toString())
+
+        homeScreen {
+        }.openTabDrawer(composeTestRule) {
+            verifyNormalTabsList()
+        }.closeTabDrawer {}
+        homeScreen {
+        }.openTabDrawer(composeTestRule) {
+            verifyOpenTabsOrder(title = webPages[0].title, position = 1)
+            verifyOpenTabsOrder(title = webPages[1].title, position = 2)
+            verifyOpenTabsOrder(title = webPages[2].title, position = 3)
+            verifyOpenTabsOrder(title = webPages[3].title, position = 4)
+            swipeTabLeft(title = webPages[0].title)
+            verifyOpenTabsOrder(title = webPages[1].title, position = 1)
         }
     }
 }

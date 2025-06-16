@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:moz="http://mozac.org/tools" xmlns:tools="http://schemas.android.com/tools">
+<resources xmlns:tools="http://schemas.android.com/tools">
   <!--
     #######################################################################################
 
@@ -11,7 +11,7 @@
   -->
 
   <!-- Label used for buttons, e.g. in dialogs -->
-  <string name="action_cancel">Renunță</string>
+  <string name="action_cancel">Anulează</string>
   <!-- Label used for buttons, e.g. in dialogs -->
   <string name="action_ok">OK</string>
   <string name="action_save">Salvează</string>
@@ -50,7 +50,6 @@
   <string name="menu_settings">Setări</string>
   <string name="menu_about">Despre</string>
   <string name="menu_help">Ajutor</string>
-  <string name="menu_rights" moz:removedIn="137">Drepturile tale</string>
   <!--
     Menu item: This is the label for a menu entry that shows how many trackers have been blocked
     for the currently loaded website. The number of blocked trackers is shown below this label.
@@ -396,7 +395,7 @@
   <!-- Label of the action that will add the current website to the home screen (shown in the confirmation dialog). -->
   <string name="dialog_addtohomescreen_action_add">Adaugă</string>
   <!-- Label of the action that will close the dialog and not add anything to the home screen (shown in the confirmation dialog). -->
-  <string name="dialog_addtohomescreen_action_cancel">Renunță</string>
+  <string name="dialog_addtohomescreen_action_cancel">Anulează</string>
   <!--
     The user visible name of the "notification channel" (Android 8+ feature) for the ongoing notification shown while a browsing session is active.
     The recommended maximum length is 40 characters; the value may be truncated if it is too long.
@@ -420,11 +419,6 @@
     item in the list of browsers. Clicking it will open the app store installed on the device (usually that's Google Play).
   -->
   <string name="download_firefox" tools:ignore="BrandUsage">Descarcă Firefox</string>
-  <!--
-    Text shown in the "Your rights" screen.
-    %1$s will be replaced with the name of the app (e.g. Firefox Focus)
-  -->
-  <string name="your_rights_content1" moz:removedIn="137">%1$s este un program liber și cu sursă deschisă realizat de Mozilla și alți colaboratori.</string>
   <!-- Text shown in prompts for GeckoView -->
   <string name="gv_prompt_username_hint">Utilizator</string>
   <string name="gv_prompt_password_hint">Parolă</string>

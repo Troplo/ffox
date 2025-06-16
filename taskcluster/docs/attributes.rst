@@ -45,7 +45,7 @@ Project names are the repositories.  They can be:
 * `mozilla-central`
 * `mozilla-beta`
 * `mozilla-release`
-* `mozilla-esr128`
+* `mozilla-esr140`
 * ... A partial list can be found in taskcluster/gecko_taskgraph/util/attributes.py
 
 For try, this attribute applies only if ``-p all`` is specified.  All jobs can
@@ -316,6 +316,9 @@ batch
 =====
 Used by `perftest` to indicates that a task can be run as a batch.
 
+perftest_name
+=============
+Used by `perftest` to indicate the test name being run.
 
 enable-full-crashsymbols
 ========================

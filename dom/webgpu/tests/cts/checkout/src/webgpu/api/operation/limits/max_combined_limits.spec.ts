@@ -11,11 +11,12 @@ implementation allows, all of them are useable.
 
 import { makeTestGroup } from '../../../../common/framework/test_group.js';
 import { range } from '../../../../common/util/util.js';
-import { kTextureFormatInfo } from '../../../format_info.js';
-import { AllFeaturesMaxLimitsGPUTest, TextureTestMixin } from '../../../gpu_test.js';
+import { getColorRenderByteCost } from '../../../format_info.js';
+import { AllFeaturesMaxLimitsGPUTest } from '../../../gpu_test.js';
+import * as ttu from '../../../texture_test_utils.js';
 import { TexelView } from '../../../util/texture/texel_view.js';
 
-export const g = makeTestGroup(TextureTestMixin(AllFeaturesMaxLimitsGPUTest));
+export const g = makeTestGroup(AllFeaturesMaxLimitsGPUTest);
 
 g.test('max_storage_buffer_texture_frag_outputs')
   .desc(
@@ -31,10 +32,9 @@ g.test('max_storage_buffer_texture_frag_outputs')
     const kWidth = 4;
     const kHeight = 4;
 
-    const info = kTextureFormatInfo[format];
     const numColorAttachments = Math.min(
       device.limits.maxColorAttachments,
-      device.limits.maxColorAttachmentBytesPerSample / info.colorRender.byteCost
+      device.limits.maxColorAttachmentBytesPerSample / getColorRenderByteCost(format)
     );
     const numStorageBuffers =
       device.limits.maxStorageBuffersInFragmentStage ??
@@ -199,7 +199,8 @@ ${range(numColorAttachments, i => `  fragOut.f${i} = vec4u(p + ${i} * 3);`).join
     });
 
     storageTextures.forEach((texture, i) => {
-      t.expectTexelViewComparisonIsOkInTexture(
+      ttu.expectTexelViewComparisonIsOkInTexture(
+        t,
         { texture },
         TexelView.fromTextureDataByReference(
           'rgba32uint',
@@ -232,7 +233,8 @@ ${range(numColorAttachments, i => `  fragOut.f${i} = vec4u(p + ${i} * 3);`).join
           bytesPerRow = kWidth * 16;
           break;
       }
-      t.expectTexelViewComparisonIsOkInTexture(
+      ttu.expectTexelViewComparisonIsOkInTexture(
+        t,
         { texture },
         TexelView.fromTextureDataByReference(format, expected, {
           bytesPerRow,

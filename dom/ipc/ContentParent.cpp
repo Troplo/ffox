@@ -25,6 +25,7 @@
 #include "GMPServiceParent.h"
 #include "HandlerServiceParent.h"
 #include "IHistory.h"
+#include <cstdint>
 #include <map>
 #include <utility>
 
@@ -48,7 +49,6 @@
 #include "mozilla/AutoRestore.h"
 #include "mozilla/ClipboardContentAnalysisParent.h"
 #include "mozilla/BasePrincipal.h"
-#include "mozilla/BenchmarkStorageParent.h"
 #include "mozilla/Casting.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/ClipboardReadRequestParent.h"
@@ -84,6 +84,7 @@
 #include "mozilla/StyleSheetInlines.h"
 #include "mozilla/TaskController.h"
 #include "mozilla/glean/DomMetrics.h"
+#include "mozilla/glean/IpcMetrics.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TelemetryIPC.h"
 #include "mozilla/ThreadSafety.h"
@@ -122,6 +123,7 @@
 #include "mozilla/dom/Permissions.h"
 #include "mozilla/dom/ProcessMessageManager.h"
 #include "mozilla/dom/PushNotifier.h"
+#include "mozilla/dom/RemoteWorkerDebuggerManagerParent.h"
 #include "mozilla/dom/RemoteWorkerServiceParent.h"
 #include "mozilla/dom/ServiceWorkerManager.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
@@ -152,7 +154,7 @@
 #include "mozilla/ipc/Endpoint.h"
 #include "mozilla/ipc/FileDescriptorUtils.h"
 #include "mozilla/ipc/IPCStreamUtils.h"
-#include "mozilla/ipc/SharedMemory.h"
+#include "mozilla/ipc/SharedMemoryHandle.h"
 #include "mozilla/ipc/TestShellParent.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/ImageBridgeParent.h"
@@ -326,12 +328,64 @@
 #  include "nsIRemoteAgent.h"
 #endif
 
-// For VP9Benchmark::sBenchmarkFpsPref
-#include "Benchmark.h"
-
 #include "mozilla/RemoteDecodeUtils.h"
 #include "nsIToolkitProfileService.h"
 #include "nsIToolkitProfile.h"
+
+#ifdef MOZ_WMF_CDM
+#  include "mozilla/EMEUtils.h"
+#  include "nsIWindowsMediaFoundationCDMOriginsListService.h"
+
+namespace mozilla {
+class OriginsListLoadCallback final : public nsIOriginsListLoadCallback {
+ public:
+  explicit OriginsListLoadCallback(ContentParent* aContentParent)
+      : mContentParent(aContentParent) {
+    MOZ_ASSERT(mContentParent);
+  }
+
+  NS_DECL_ISUPPORTS
+
+  // nsIOriginsListLoadCallback
+  NS_IMETHODIMP OnOriginsListLoaded(nsIArray* aEntries) {
+    if (NS_WARN_IF(!mContentParent)) {
+      return NS_ERROR_FAILURE;
+    }
+
+    uint32_t length = 0;
+    nsresult rv = aEntries->GetLength(&length);
+    if (NS_FAILED(rv)) {
+      return rv;
+    }
+
+    nsTArray<dom::IPCOriginStatusEntry> ipcEntries;
+    for (uint32_t i = 0; i < length; ++i) {
+      nsCOMPtr<nsIOriginStatusEntry> entry;
+      aEntries->QueryElementAt(i, NS_GET_IID(nsIOriginStatusEntry),
+                               getter_AddRefs(entry));
+      if (!entry) {
+        NS_WARNING("OriginsListLoadCallback, skip bad entry?");
+        continue;
+      }
+      nsAutoCString origin;
+      int32_t status = 0;
+      entry->GetOrigin(origin);
+      entry->GetStatus(&status);
+      dom::IPCOriginStatusEntry ipcEntry(origin, status);
+      ipcEntries.AppendElement(ipcEntry);
+    }
+    Unused << mContentParent->SendUpdateMFCDMOriginEntries(ipcEntries);
+    return NS_OK;
+  }
+
+ private:
+  ~OriginsListLoadCallback() = default;
+
+  RefPtr<ContentParent> mContentParent;
+};
+NS_IMPL_ISUPPORTS(OriginsListLoadCallback, nsIOriginsListLoadCallback)
+}  // namespace mozilla
+#endif
 
 static NS_DEFINE_CID(kCClipboardCID, NS_CLIPBOARD_CID);
 
@@ -857,8 +911,8 @@ UniqueContentParentKeepAlive ContentParent::GetUsedBrowserProcess(
       PROFILER_MARKER_TEXT("Process", DOM, {}, marker);
     }
     MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-            ("GetUsedProcess: Reused process %p (%d) for %s", selected.get(),
-             (unsigned int)selected->ChildID(),
+            ("GetUsedProcess: Reused process id=%p childID=%" PRIu64 " for %s",
+             selected.get(), (uint64_t)selected->ChildID(),
              PromiseFlatCString(aRemoteType).get()));
     selected->AssertAlive();
     return selected->AddKeepAlive(aBrowserId);
@@ -882,10 +936,12 @@ UniqueContentParentKeepAlive ContentParent::GetUsedBrowserProcess(
           preallocated->IsLaunching() ? " (still launching)" : "");
       PROFILER_MARKER_TEXT("Process", DOM, {}, marker);
     }
-    MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-            ("Adopted preallocated process %p for type %s%s",
-             preallocated.get(), PromiseFlatCString(aRemoteType).get(),
-             preallocated->IsLaunching() ? " (still launching)" : ""));
+    MOZ_LOG(
+        ContentParent::GetLog(), LogLevel::Debug,
+        ("Adopted preallocated process id=%p childID=%" PRIu64 " for type %s%s",
+         preallocated.get(), (uint64_t)preallocated->ChildID(),
+         PromiseFlatCString(aRemoteType).get(),
+         preallocated->IsLaunching() ? " (still launching)" : ""));
 
     // This ensures that the preallocator won't shut down the process once
     // it finishes starting
@@ -936,10 +992,7 @@ UniqueContentParentKeepAlive ContentParent::GetNewOrUsedLaunchingBrowserProcess(
           ("GetNewOrUsedProcess for type %s",
            PromiseFlatCString(aRemoteType).get()));
 
-  // Fallback check (we really want our callers to avoid this).
   if (AppShutdown::IsInOrBeyond(ShutdownPhase::AppShutdownConfirmed)) {
-    MOZ_DIAGNOSTIC_ASSERT(
-        false, "Late attempt to GetNewOrUsedLaunchingBrowserProcess!");
     return nullptr;
   }
 
@@ -950,9 +1003,12 @@ UniqueContentParentKeepAlive ContentParent::GetNewOrUsedLaunchingBrowserProcess(
   if (aGroup) {
     if (RefPtr<ContentParent> candidate = aGroup->GetHostProcess(aRemoteType)) {
       MOZ_DIAGNOSTIC_ASSERT(!candidate->IsShuttingDown());
-      MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-              ("GetNewOrUsedProcess: Existing host process %p (launching %d)",
-               candidate.get(), candidate->IsLaunching()));
+      MOZ_LOG(
+          ContentParent::GetLog(), LogLevel::Debug,
+          ("GetNewOrUsedProcess: Existing host process id=%p childID=%" PRIu64
+           " (launching %d)",
+           candidate.get(), (uint64_t)candidate->ChildID(),
+           candidate->IsLaunching()));
       contentParent = candidate->TryAddKeepAlive(aBrowserId);
     }
   }
@@ -995,7 +1051,8 @@ UniqueContentParentKeepAlive ContentParent::GetNewOrUsedLaunchingBrowserProcess(
 
     MOZ_LOG(
         ContentParent::GetLog(), LogLevel::Debug,
-        ("GetNewOrUsedProcess: new immediate process %p", contentParent.get()));
+        ("GetNewOrUsedProcess: new immediate process id=%p childID=%" PRIu64,
+         contentParent.get(), (uint64_t)contentParent->ChildID()));
   }
   // else we have an existing or preallocated process (which may be
   // still launching)
@@ -1067,7 +1124,9 @@ RefPtr<ContentParent::LaunchPromise> ContentParent::WaitForLaunchAsync(
         if (aValue.IsResolve() &&
             self->LaunchSubprocessResolve(/* aIsSync = */ false, aPriority)) {
           MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-                  ("WaitForLaunchAsync: async, now launched"));
+                  ("WaitForLaunchAsync: async, now launched, process id=%p, "
+                   "childID=%" PRIu64,
+                   self.get(), (uint64_t)self->ChildID()));
           self->mActivateTS = TimeStamp::Now();
           return LaunchPromise::CreateAndResolve(std::move(self), __func__);
         }
@@ -1261,114 +1320,8 @@ void ContentParent::LogAndAssertFailedPrincipalValidationInfo(
 bool ContentParent::ValidatePrincipal(
     nsIPrincipal* aPrincipal,
     const EnumSet<ValidatePrincipalOptions>& aOptions) {
-  // If the pref says we should not validate, then there is nothing to do
-  if (!StaticPrefs::dom_security_enforceIPCBasedPrincipalVetting()) {
-    return true;
-  }
-
-  // If there is no principal, then there is nothing to validate!
-  if (!aPrincipal) {
-    return aOptions.contains(ValidatePrincipalOptions::AllowNullPtr);
-  }
-
-  // We currently do not track relationships between specific null principals
-  // and content processes, so we can not validate much here - just allow all
-  // null principals we see because they are generally safe anyway!
-  if (aPrincipal->GetIsNullPrincipal()) {
-    return true;
-  }
-
-  // Only allow the system principal if the passed in options flags
-  // request permitting the system principal.
-  if (aPrincipal->IsSystemPrincipal()) {
-    return aOptions.contains(ValidatePrincipalOptions::AllowSystem);
-  }
-
-  // XXXckerschb: we should eliminate the resource carve-out here and always
-  // validate the Principal, see Bug 1686200: Investigate Principal for pdf.js
-  if (aPrincipal->SchemeIs("resource")) {
-    return true;
-  }
-
-  // Validate each inner principal individually, allowing us to catch expanded
-  // principals containing the system principal, etc.
-  if (aPrincipal->GetIsExpandedPrincipal()) {
-    if (!aOptions.contains(ValidatePrincipalOptions::AllowExpanded)) {
-      return false;
-    }
-    // FIXME: There are more constraints on expanded principals in-practice,
-    // such as the structure of extension expanded principals. This may need
-    // to be investigated more in the future.
-    nsCOMPtr<nsIExpandedPrincipal> expandedPrincipal =
-        do_QueryInterface(aPrincipal);
-    const auto& allowList = expandedPrincipal->AllowList();
-    for (const auto& innerPrincipal : allowList) {
-      if (!ValidatePrincipal(innerPrincipal, aOptions)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  // A URI with a file:// scheme can never load in a non-file content process
-  // due to sandboxing.
-  if (aPrincipal->SchemeIs("file")) {
-    // If we don't support a separate 'file' process, then we can return here.
-    if (!StaticPrefs::browser_tabs_remote_separateFileUriProcess()) {
-      return true;
-    }
-    return mRemoteType == FILE_REMOTE_TYPE;
-  }
-
-  if (aPrincipal->SchemeIs("about")) {
-    uint32_t flags = 0;
-    nsresult rv = aPrincipal->GetAboutModuleFlags(&flags);
-    if (rv == nsresult::NS_ERROR_FACTORY_NOT_REGISTERED) {
-      // This happens in our tests. There is a race between an about page
-      // getting unregistered and the content process unregistering a blob URL
-      // which it was using.
-      return true;
-    }
-    if (NS_FAILED(rv)) {
-      return false;
-    }
-
-    // Block principals for about: URIs which can't load in this process.
-    if (!(flags & (nsIAboutModule::URI_CAN_LOAD_IN_CHILD |
-                   nsIAboutModule::URI_MUST_LOAD_IN_CHILD))) {
-      return false;
-    }
-    if (flags & nsIAboutModule::URI_MUST_LOAD_IN_EXTENSION_PROCESS) {
-      return mRemoteType == EXTENSION_REMOTE_TYPE;
-    }
-    return true;
-  }
-
-  if (!mRemoteTypeIsolationPrincipal ||
-      RemoteTypePrefix(mRemoteType) != FISSION_WEB_REMOTE_TYPE) {
-    return true;
-  }
-
-  // Web content can contain extension content frames, so a content process may
-  // send us an extension's principal.
-  auto* addonPolicy = BasePrincipal::Cast(aPrincipal)->AddonPolicy();
-  if (addonPolicy) {
-    return true;
-  }
-
-  // Ensure that the expected site-origin matches the one specified by our
-  // mRemoteTypeIsolationPrincipal.
-  nsAutoCString siteOriginNoSuffix;
-  if (NS_FAILED(aPrincipal->GetSiteOriginNoSuffix(siteOriginNoSuffix))) {
-    return false;
-  }
-  nsAutoCString remoteTypeSiteOriginNoSuffix;
-  if (NS_FAILED(mRemoteTypeIsolationPrincipal->GetSiteOriginNoSuffix(
-          remoteTypeSiteOriginNoSuffix))) {
-    return false;
-  }
-
-  return remoteTypeSiteOriginNoSuffix.Equals(siteOriginNoSuffix);
+  return ValidatePrincipalCouldPotentiallyBeLoadedBy(aPrincipal, mRemoteType,
+                                                     aOptions);
 }
 
 /*static*/
@@ -1536,9 +1489,8 @@ void ContentParent::BroadcastStringBundle(
     const StringBundleDescriptor& aBundle) {
   for (auto* cp : AllProcesses(eLive)) {
     AutoTArray<StringBundleDescriptor, 1> array;
-    array.AppendElement(StringBundleDescriptor(
-        aBundle.bundleURL(), SharedMemory::CloneHandle(aBundle.mapHandle()),
-        aBundle.mapSize()));
+    array.AppendElement(StringBundleDescriptor(aBundle.bundleURL(),
+                                               aBundle.mapHandle().Clone()));
     Unused << cp->SendRegisterStringBundles(std::move(array));
   }
 }
@@ -1547,9 +1499,9 @@ void ContentParent::BroadcastShmBlockAdded(uint32_t aGeneration,
                                            uint32_t aIndex) {
   auto* pfl = gfxPlatformFontList::PlatformFontList();
   for (auto* cp : AllProcesses(eLive)) {
-    SharedMemory::Handle handle =
+    ReadOnlySharedMemoryHandle handle =
         pfl->ShareShmBlockToProcess(aIndex, cp->Pid());
-    if (handle == SharedMemory::NULLHandle()) {
+    if (!handle.IsValid()) {
       // If something went wrong here, we just skip it; the child will need to
       // request the block as needed, at some performance cost.
       continue;
@@ -1593,7 +1545,7 @@ const nsACString& ContentParent::GetRemoteType() const { return mRemoteType; }
 
 static StaticRefPtr<nsIAsyncShutdownClient> sXPCOMShutdownClient;
 static StaticRefPtr<nsIAsyncShutdownClient> sProfileBeforeChangeClient;
-static StaticRefPtr<nsIAsyncShutdownClient> sQuitApplicationGrantedClient;
+static StaticRefPtr<nsIAsyncShutdownClient> sAppShutdownConfirmedClient;
 
 void ContentParent::Init() {
   MOZ_ASSERT(sXPCOMShutdownClient);
@@ -1648,7 +1600,8 @@ void ContentParent::Init() {
 
 void ContentParent::AsyncSendShutDownMessage() {
   MOZ_LOG(ContentParent::GetLog(), LogLevel::Verbose,
-          ("AsyncSendShutDownMessage %p", this));
+          ("AsyncSendShutDownMessage id=%p, childID=%" PRIu64, this,
+           (uint64_t)this->ChildID()));
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(IsDead());
   if (mShutdownPending || !CanSend()) {
@@ -1669,9 +1622,10 @@ void MaybeLogBlockShutdownDiagnostics(ContentParent* aSelf, const char* aMsg,
                                       const char* aFile, int32_t aLine) {
 #if defined(MOZ_DIAGNOSTIC_ASSERT_ENABLED)
   if (aSelf->IsBlockingShutdown()) {
-    MOZ_LOG(ContentParent::GetLog(), LogLevel::Info,
-            ("ContentParent: id=%p pid=%d - %s at %s(%d)", aSelf, aSelf->Pid(),
-             aMsg, aFile, aLine));
+    MOZ_LOG(
+        ContentParent::GetLog(), LogLevel::Info,
+        ("ContentParent: id=%p childID=%" PRIu64 " pid=%d - %s at %s(%d)",
+         aSelf, (uint64_t)aSelf->ChildID(), aSelf->Pid(), aMsg, aFile, aLine));
   }
 #else
   Unused << aSelf;
@@ -1684,7 +1638,8 @@ void MaybeLogBlockShutdownDiagnostics(ContentParent* aSelf, const char* aMsg,
 bool ContentParent::ShutDownProcess(ShutDownMethod aMethod) {
   bool result = false;
   MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-          ("ShutDownProcess: %p", this));
+          ("ShutDownProcess: id=%p childID=%" PRIu64, this,
+           (uint64_t)this->ChildID()));
   // NB: must MarkAsDead() here so that this isn't accidentally
   // returned from Get*() while in the midst of shutdown.
   MarkAsDead();
@@ -1868,7 +1823,8 @@ void ContentParent::RemoveFromList() {
 
 void ContentParent::MarkAsDead() {
   MOZ_LOG(ContentParent::GetLog(), LogLevel::Verbose,
-          ("Marking ContentProcess %p as dead", this));
+          ("Marking ContentProcess id=%p childID=%" PRIu64 " as dead", this,
+           (uint64_t)this->ChildID()));
   MOZ_DIAGNOSTIC_ASSERT(!sInProcessSelector);
   RemoveFromList();
 
@@ -1933,8 +1889,7 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
   if (StringBeginsWith(mRemoteType, WEB_REMOTE_TYPE) ||
       mRemoteType == FILE_REMOTE_TYPE || mRemoteType == EXTENSION_REMOTE_TYPE) {
     TimeDuration runtime = TimeStamp::Now() - mActivateTS;
-    Telemetry::Accumulate(Telemetry::PROCESS_LIFETIME,
-                          uint64_t(runtime.ToSeconds()));
+    glean::process::lifetime.AccumulateRawDuration(runtime);
   }
 
   if (mSendShutdownTimer) {
@@ -1989,6 +1944,17 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
 
   RecvRemoveGeolocationListener();
 
+#ifdef MOZ_WMF_CDM
+  if (mOriginsListCallback) {
+    nsCOMPtr<nsIWindowsMediaFoundationCDMOriginsListService> rsService =
+        do_GetService("@mozilla.org/media/wmfcdm-origins-list;1");
+    if (rsService) {
+      rsService->RemoveCallback(mOriginsListCallback);
+    }
+    mOriginsListCallback = nullptr;
+  }
+#endif
+
   // Destroy our JSProcessActors, and reject any pending queries.
   JSActorDidDestroy();
 
@@ -1998,12 +1964,12 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
     props->SetPropertyAsUint64(u"childID"_ns, mChildID);
 
     if (AbnormalShutdown == why) {
-      Telemetry::Accumulate(Telemetry::SUBPROCESS_ABNORMAL_ABORT, "content"_ns,
-                            1);
+      glean::subprocess::abnormal_abort.Get("content"_ns).Add(1);
 
       props->SetPropertyAsBool(u"abnormal"_ns, true);
 
       nsAutoString dumpID;
+      nsAutoCString processType;
       // There's a window in which child processes can crash
       // after IPC is established, but before a crash reporter
       // is created.
@@ -2023,12 +1989,17 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
         if (mCrashReporter->HasMinidump()) {
           dumpID = mCrashReporter->MinidumpID();
         }
+        processType = mCrashReporter->ProcessType();
       } else {
         HandleOrphanedMinidump(&dumpID);
+        processType = XRE_GeckoProcessTypeToString(GeckoProcessType_Content);
       }
 
       if (!dumpID.IsEmpty()) {
         props->SetPropertyAsAString(u"dumpID"_ns, dumpID);
+      }
+      if (!processType.IsEmpty()) {
+        props->SetPropertyAsACString(u"processType"_ns, processType);
       }
     }
     nsAutoString cpId;
@@ -2052,20 +2023,21 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
   }
 
   MOZ_LOG(ContentParent::GetLog(), LogLevel::Verbose,
-          ("destroying Subprocess in ActorDestroy: ContentParent %p "
-           "mSubprocess %p handle %" PRIuPTR,
+          ("destroying Subprocess in ActorDestroy: ContentParent id=%p "
+           "mSubprocess id=%p handle %" PRIuPTR,
            this, mSubprocess,
            mSubprocess ? (uintptr_t)mSubprocess->GetChildProcessHandle() : -1));
   // FIXME (bug 1520997): does this really need an additional dispatch?
   if (GetCurrentSerialEventTarget()) {
     GetCurrentSerialEventTarget()->Dispatch(NS_NewRunnableFunction(
         "DelayedDeleteSubprocessRunnable", [subprocess = mSubprocess] {
-          MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-                  ("destroyed Subprocess in ActorDestroy: Subprocess %p handle "
-                   "%" PRIuPTR,
-                   subprocess,
-                   subprocess ? (uintptr_t)subprocess->GetChildProcessHandle()
-                              : -1));
+          MOZ_LOG(
+              ContentParent::GetLog(), LogLevel::Debug,
+              ("destroyed Subprocess in ActorDestroy: Subprocess id=%p handle "
+               "%" PRIuPTR,
+               subprocess,
+               subprocess ? (uintptr_t)subprocess->GetChildProcessHandle()
+                          : -1));
           subprocess->Destroy();
         }));
   }
@@ -2081,8 +2053,7 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
   }
 
   // Unregister all the BlobURLs registered by the ContentChild.
-  BlobURLProtocolHandler::RemoveDataEntries(mBlobURLs);
-  mBlobURLs.Clear();
+  BlobURLProtocolHandler::RemoveDataEntriesPerContentParent(ChildID());
 
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
   AssertNotInPool();
@@ -2658,8 +2629,8 @@ ContentParent::ContentParent(const nsACString& aRemoteType)
 #endif
 
   MOZ_LOG(ContentParent::GetLog(), LogLevel::Verbose,
-          ("CreateSubprocess: ContentParent %p mSubprocess %p childID %d", this,
-           mSubprocess, mSubprocess->GetChildID()));
+          ("CreateSubprocess: ContentParent id=%p mSubprocess id=%p childID=%d",
+           this, mSubprocess, mSubprocess->GetChildID()));
 }
 
 ContentParent::~ContentParent() {
@@ -2677,7 +2648,9 @@ ContentParent::~ContentParent() {
 
   if (mIsAPreallocBlocker) {
     MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-            ("Removing blocker on ContentProcess destruction"));
+            ("Removing blocker on ContentProcess id=%p childID=%" PRIu64
+             " destruction",
+             this, (uint64_t)this->ChildID()));
     PreallocatedProcessManager::RemoveBlocker(mRemoteType, this);
     mIsAPreallocBlocker = false;
   }
@@ -2690,8 +2663,10 @@ ContentParent::~ContentParent() {
   if (mSubprocess) {
     MOZ_LOG(
         ContentParent::GetLog(), LogLevel::Verbose,
-        ("DestroySubprocess: ContentParent %p mSubprocess %p handle %" PRIuPTR,
-         this, mSubprocess,
+        ("DestroySubprocess: ContentParent id=%p childID=%" PRIu64
+         " mSubprocess id=%p handle "
+         "%" PRIuPTR,
+         this, (uint64_t)this->ChildID(), mSubprocess,
          mSubprocess ? (uintptr_t)mSubprocess->GetChildProcessHandle() : -1));
     mSubprocess->Destroy();
   }
@@ -2709,7 +2684,8 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
   XPCOMInitData xpcomInit;
 
   MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-          ("ContentParent::InitInternal: %p", (void*)this));
+          ("ContentParent::InitInternal: id=%p, childID=%" PRIu64, (void*)this,
+           (uint64_t)this->ChildID()));
   nsCOMPtr<nsIIOService> io(do_GetIOService());
   MOZ_ASSERT(io, "No IO service?");
   DebugOnly<nsresult> rv = io->GetOffline(&xpcomInit.isOffline());
@@ -2811,7 +2787,7 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
 
   // If the shared fontlist is in use, collect its shmem block handles to pass
   // to the child.
-  nsTArray<SharedMemoryHandle> sharedFontListBlocks;
+  nsTArray<ReadOnlySharedMemoryHandle> sharedFontListBlocks;
   gfxPlatformFontList::PlatformFontList()->ShareFontListToProcess(
       &sharedFontListBlocks, OtherPid());
 
@@ -2850,10 +2826,10 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
   screenManager.CopyScreensToRemote(this);
 
   // Send the UA sheet shared memory buffer and the address it is mapped at.
-  Maybe<SharedMemoryHandle> sharedUASheetHandle;
+  Maybe<ReadOnlySharedMemoryHandle> sharedUASheetHandle;
   uintptr_t sharedUASheetAddress = sheetCache->GetSharedMemoryAddress();
 
-  if (SharedMemoryHandle handle = sheetCache->CloneHandle()) {
+  if (ReadOnlySharedMemoryHandle handle = sheetCache->CloneHandle()) {
     sharedUASheetHandle.emplace(std::move(handle));
   } else {
     sharedUASheetAddress = 0;
@@ -2996,6 +2972,17 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
     }
   }
 
+#ifdef MOZ_WMF_CDM
+  if (!mOriginsListCallback && IsMediaFoundationCDMPlaybackEnabled()) {
+    mOriginsListCallback = new OriginsListLoadCallback(this);
+    nsCOMPtr<nsIWindowsMediaFoundationCDMOriginsListService> rsService =
+        do_GetService("@mozilla.org/media/wmfcdm-origins-list;1");
+    if (rsService) {
+      rsService->SetCallback(mOriginsListCallback);
+    }
+  }
+#endif
+
 #ifdef MOZ_SANDBOX
   bool shouldSandbox = true;
   Maybe<FileDescriptor> brokerFd;
@@ -3060,9 +3047,9 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
         return false;
       }
 
-      registrations.AppendElement(
-          BlobURLRegistrationData(nsCString(aURI), ipcBlob, aPrincipal,
-                                  nsCString(aPartitionKey), aRevoked));
+      registrations.AppendElement(BlobURLRegistrationData(
+          nsCString(aURI), ipcBlob, WrapNotNull(aPrincipal),
+          nsCString(aPartitionKey), aRevoked));
 
       rv = TransmitPermissionsForPrincipal(aPrincipal);
       Unused << NS_WARN_IF(NS_FAILED(rv));
@@ -3494,9 +3481,9 @@ mozilla::ipc::IPCResult ContentParent::RecvFirstIdle() {
   // which we use as a good time to signal the PreallocatedProcessManager
   // that it can start allocating processes from now on.
   if (mIsAPreallocBlocker) {
-    MOZ_LOG(
-        ContentParent::GetLog(), LogLevel::Verbose,
-        ("RecvFirstIdle %p: Removing Blocker for %s", this, mRemoteType.get()));
+    MOZ_LOG(ContentParent::GetLog(), LogLevel::Verbose,
+            ("RecvFirstIdle id=%p childID=%" PRIu64 ": Removing Blocker for %s",
+             this, (uint64_t)this->ChildID(), mRemoteType.get()));
     PreallocatedProcessManager::RemoveBlocker(mRemoteType, this);
     mIsAPreallocBlocker = false;
   }
@@ -3602,8 +3589,8 @@ ContentParent::BlockShutdown(nsIAsyncShutdownClient* aClient) {
     // shutdown and eventually cancel content JS.
     SignalImpendingShutdownToContentJS();
 
-    if (sQuitApplicationGrantedClient) {
-      Unused << sQuitApplicationGrantedClient->RemoveBlocker(this);
+    if (sAppShutdownConfirmedClient) {
+      Unused << sAppShutdownConfirmedClient->RemoveBlocker(this);
     }
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
     mBlockShutdownCalled = false;
@@ -3704,13 +3691,11 @@ static void InitShutdownClients() {
         ClearOnShutdown(&sProfileBeforeChangeClient);
       }
     }
-    // TODO: ShutdownPhase::AppShutdownConfirmed is not mapping to
-    // QuitApplicationGranted, see bug 1762840 comment 4.
     if (!AppShutdown::IsInOrBeyond(ShutdownPhase::AppShutdownConfirmed)) {
-      rv = svc->GetQuitApplicationGranted(getter_AddRefs(client));
+      rv = svc->GetAppShutdownConfirmed(getter_AddRefs(client));
       if (NS_SUCCEEDED(rv)) {
-        sQuitApplicationGrantedClient = client.forget();
-        ClearOnShutdown(&sQuitApplicationGrantedClient);
+        sAppShutdownConfirmedClient = client.forget();
+        ClearOnShutdown(&sAppShutdownConfirmedClient);
       }
     }
   }
@@ -3729,8 +3714,8 @@ void ContentParent::AddShutdownBlockers() {
     sProfileBeforeChangeClient->AddBlocker(
         this, NS_LITERAL_STRING_FROM_CSTRING(__FILE__), __LINE__, u""_ns);
   }
-  if (sQuitApplicationGrantedClient) {
-    sQuitApplicationGrantedClient->AddBlocker(
+  if (sAppShutdownConfirmedClient) {
+    sAppShutdownConfirmedClient->AddBlocker(
         this, NS_LITERAL_STRING_FROM_CSTRING(__FILE__), __LINE__, u""_ns);
   }
 }
@@ -3751,8 +3736,8 @@ void ContentParent::RemoveShutdownBlockers() {
   if (sProfileBeforeChangeClient) {
     Unused << sProfileBeforeChangeClient->RemoveBlocker(this);
   }
-  if (sQuitApplicationGrantedClient) {
-    Unused << sQuitApplicationGrantedClient->RemoveBlocker(this);
+  if (sAppShutdownConfirmedClient) {
+    Unused << sAppShutdownConfirmedClient->RemoveBlocker(this);
   }
 }
 
@@ -4304,7 +4289,7 @@ void ContentParent::HandleOrphanedMinidump(nsString* aDumpId) {
     CrashReporterHost::RecordCrash(GeckoProcessType_Content,
                                    nsICrashService::CRASH_TYPE_CRASH, *aDumpId);
   } else {
-    NS_WARNING(nsPrintfCString("content process childid = %d pid = %" PRIPID
+    NS_WARNING(nsPrintfCString("content process childID = %d pid = %" PRIPID
                                " crashed without leaving a minidump behind",
                                OtherChildID(), OtherPid())
                    .get());
@@ -4343,7 +4328,7 @@ void ContentParent::KillHard(const char* aReason) {
   } else {
     reason = nsDependentCString("KillHard after IsNotifiedShutdownSuccess.");
   }
-  Telemetry::Accumulate(Telemetry::SUBPROCESS_KILL_HARD, reason, 1);
+  glean::subprocess::kill_hard.Get(reason).Add(1);
 
   ProcessHandle otherProcessHandle;
   if (!base::OpenProcessHandle(OtherPid(), &otherProcessHandle)) {
@@ -4364,7 +4349,8 @@ void ContentParent::KillHard(const char* aReason) {
   if (mSubprocess) {
     MOZ_LOG(
         ContentParent::GetLog(), LogLevel::Verbose,
-        ("KillHard Subprocess(%s): ContentParent %p mSubprocess %p handle "
+        ("KillHard Subprocess(%s): ContentParent id=%p mSubprocess id=%p "
+         "handle "
          "%" PRIuPTR,
          aReason, this, mSubprocess,
          mSubprocess ? (uintptr_t)mSubprocess->GetChildProcessHandle() : -1));
@@ -4397,10 +4383,9 @@ void ContentParent::FriendlyName(nsAString& aName, bool aAnonymize) {
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvInitCrashReporter(
-    const NativeThreadId& aThreadId) {
+    const CrashReporter::CrashReporterInitArgs& aInitArgs) {
   mCrashReporter = MakeUnique<CrashReporterHost>(GeckoProcessType_Content,
-                                                 OtherPid(), aThreadId);
-
+                                                 OtherPid(), aInitArgs);
   return IPC_OK();
 }
 
@@ -4557,16 +4542,6 @@ media::PMediaParent* ContentParent::AllocPMediaParent() {
 
 bool ContentParent::DeallocPMediaParent(media::PMediaParent* aActor) {
   return media::DeallocPMediaParent(aActor);
-}
-
-PBenchmarkStorageParent* ContentParent::AllocPBenchmarkStorageParent() {
-  return new BenchmarkStorageParent;
-}
-
-bool ContentParent::DeallocPBenchmarkStorageParent(
-    PBenchmarkStorageParent* aActor) {
-  delete aActor;
-  return true;
 }
 
 #ifdef MOZ_WEBSPEECH
@@ -5628,7 +5603,7 @@ mozilla::ipc::IPCResult ContentParent::RecvShutdownPerfStats(
 
 mozilla::ipc::IPCResult ContentParent::RecvGetFontListShmBlock(
     const uint32_t& aGeneration, const uint32_t& aIndex,
-    SharedMemory::Handle* aOut) {
+    ReadOnlySharedMemoryHandle* aOut) {
   auto* fontList = gfxPlatformFontList::PlatformFontList();
   MOZ_RELEASE_ASSERT(fontList, "gfxPlatformFontList not initialized?");
   fontList->ShareFontListShmBlockToProcess(aGeneration, aIndex, Pid(), aOut);
@@ -5680,12 +5655,12 @@ mozilla::ipc::IPCResult ContentParent::RecvStartCmapLoading(
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvGetHyphDict(
-    nsIURI* aURI, SharedMemory::Handle* aOutHandle, uint32_t* aOutSize) {
+    nsIURI* aURI, ReadOnlySharedMemoryHandle* aOutHandle) {
   if (!aURI) {
     return IPC_FAIL(this, "aURI must not be null.");
   }
-  nsHyphenationManager::Instance()->ShareHyphDictToProcess(
-      aURI, Pid(), aOutHandle, aOutSize);
+  nsHyphenationManager::Instance()->ShareHyphDictToProcess(aURI, Pid(),
+                                                           aOutHandle);
   return IPC_OK();
 }
 
@@ -5732,18 +5707,6 @@ mozilla::ipc::IPCResult ContentParent::RecvBeginDriverCrashGuard(
 mozilla::ipc::IPCResult ContentParent::RecvEndDriverCrashGuard(
     const uint32_t& aGuardType) {
   mDriverCrashGuard = nullptr;
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult ContentParent::RecvNotifyBenchmarkResult(
-    const nsAString& aCodecName, const uint32_t& aDecodeFPS)
-
-{
-  if (aCodecName.EqualsLiteral("VP9")) {
-    Preferences::SetUint(VP9Benchmark::sBenchmarkFpsPref, aDecodeFPS);
-    Preferences::SetUint(VP9Benchmark::sBenchmarkFpsVersionCheck,
-                         VP9Benchmark::sBenchmarkVersionID);
-  }
   return IPC_OK();
 }
 
@@ -5900,12 +5863,8 @@ mozilla::ipc::IPCResult ContentParent::RecvStoreAndBroadcastBlobURLRegistration(
   }
 
   BlobURLProtocolHandler::AddDataEntry(aURI, aPrincipal, aPartitionKey,
-                                       blobImpl);
+                                       blobImpl, Some(ChildID()));
   BroadcastBlobURLRegistration(aURI, blobImpl, aPrincipal, aPartitionKey, this);
-
-  // We want to store this blobURL, so we can unregister it if the child
-  // crashes.
-  mBlobURLs.AppendElement(aURI);
 
   return IPC_OK();
 }
@@ -5922,7 +5881,6 @@ ContentParent::RecvUnstoreAndBroadcastBlobURLUnregistration(
     }
 
     uris.AppendElement(request.url());
-    mBlobURLs.RemoveElement(request.url());
   }
 
   BroadcastBlobURLUnregistration(aRequests, this);
@@ -6190,9 +6148,9 @@ void ContentParent::TransmitBlobURLsForPrincipal(nsIPrincipal* aPrincipal) {
             return false;
           }
 
-          registrations.AppendElement(
-              BlobURLRegistrationData(nsCString(aURI), ipcBlob, aPrincipal,
-                                      nsCString(aPartitionKey), aRevoked));
+          registrations.AppendElement(BlobURLRegistrationData(
+              nsCString(aURI), ipcBlob, WrapNotNull(aPrincipal),
+              nsCString(aPartitionKey), aRevoked));
 
           rv = TransmitPermissionsForPrincipal(aBlobPrincipal);
           Unused << NS_WARN_IF(NS_FAILED(rv));
@@ -6316,6 +6274,22 @@ mozilla::ipc::IPCResult ContentParent::RecvRecordPageLoadEvent(
     mozilla::glean::perf::PageLoadExtra&& aPageLoadEventExtra) {
   // Check whether a webdriver is running.
   aPageLoadEventExtra.usingWebdriver = mozilla::Some(WebdriverRunning());
+
+#if defined(XP_WIN)
+  // The "hasSSD" property is only set on Windows during the first
+  // call to nsISystemInfo.diskInfo - which is done before
+  // browser-startup-idle-tasks-finished
+  // Other platforms do not compute hasSSD, so there's no reason to
+  // query this on other platforms.
+  nsresult rv;
+  nsCOMPtr<nsIPropertyBag2> infoService =
+      mozilla::components::SystemInfo::Service();
+  bool hasSSD;
+  rv = infoService->GetPropertyAsBool(u"hasSSD"_ns, &hasSSD);
+  if (NS_SUCCEEDED(rv)) {
+    aPageLoadEventExtra.hasSsd = Some(hasSSD);
+  }
+#endif
   mozilla::glean::perf::page_load.Record(mozilla::Some(aPageLoadEventExtra));
 
   // Send the PageLoadPing after every 30 page loads, or on startup.
@@ -6446,14 +6420,7 @@ mozilla::ipc::IPCResult ContentParent::RecvPURLClassifierLocalByNameConstructor(
       continue;
     }
 
-    nsAutoCString exceptionHostList;
-    rv = feature->GetExceptionHostList(exceptionHostList);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      continue;
-    }
-
-    ipcFeatures.AppendElement(
-        IPCURLClassifierFeature(name, tables, exceptionHostList));
+    ipcFeatures.AppendElement(IPCURLClassifierFeature(name, tables));
   }
 
   auto* actor = static_cast<URLClassifierLocalByNameParent*>(aActor);
@@ -7826,6 +7793,17 @@ mozilla::ipc::IPCResult ContentParent::RecvHistoryReload(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult ContentParent::RecvConsumeHistoryActivation(
+    const MaybeDiscarded<BrowsingContext>& aTop) {
+  if (aTop.IsNullOrDiscarded()) {
+    return IPC_OK();
+  }
+  aTop->Group()->EachOtherParent(this, [aTop](ContentParent* aParent) {
+    Unused << aParent->SendConsumeHistoryActivation(aTop);
+  });
+  return IPC_OK();
+}
+
 mozilla::ipc::IPCResult ContentParent::RecvCommitWindowContextTransaction(
     const MaybeDiscarded<WindowContext>& aContext,
     WindowContext::BaseTransaction&& aTransaction, uint64_t aEpoch) {
@@ -7864,8 +7842,14 @@ void ContentParent::StartRemoteWorkerService() {
   Endpoint<PRemoteWorkerServiceChild> childEp;
   mRemoteWorkerServiceActor =
       RemoteWorkerServiceParent::CreateForProcess(this, &childEp);
+
+  Endpoint<PRemoteWorkerDebuggerManagerChild> remoteDebuggerChildEp;
+  mRemoteWorkerDebuggerManagerActor =
+      RemoteWorkerDebuggerManagerParent::CreateForProcess(
+          &remoteDebuggerChildEp);
   if (mRemoteWorkerServiceActor) {
-    Unused << SendInitRemoteWorkerService(std::move(childEp));
+    Unused << SendInitRemoteWorkerService(std::move(childEp),
+                                          std::move(remoteDebuggerChildEp));
   }
 }
 

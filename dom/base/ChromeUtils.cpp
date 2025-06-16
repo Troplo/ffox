@@ -88,6 +88,10 @@
 #  include "mozilla/MFCDMParent.h"
 #endif
 
+#ifdef MOZ_WIDGET_ANDROID
+#  include "mozilla/java/GeckoAppShellWrappers.h"
+#endif
+
 namespace mozilla::dom {
 
 // Setup logging
@@ -1281,25 +1285,6 @@ void ChromeUtils::ClearRecentJSDevError(GlobalObject&) {
 }
 #endif  // NIGHTLY_BUILD
 
-void ChromeUtils::ClearStyleSheetCacheByPrincipal(GlobalObject&,
-                                                  nsIPrincipal* aForPrincipal) {
-  SharedStyleSheetCache::Clear(Nothing(), Some(aForPrincipal));
-}
-
-void ChromeUtils::ClearStyleSheetCacheBySite(
-    GlobalObject&, const nsACString& aSchemelessSite,
-    const dom::OriginAttributesPatternDictionary& aPattern) {
-  SharedStyleSheetCache::Clear(Nothing(), Nothing(),
-                               Some(nsCString(aSchemelessSite)),
-                               Some(OriginAttributesPattern(aPattern)));
-}
-
-void ChromeUtils::ClearStyleSheetCache(GlobalObject&,
-                                       const Optional<bool>& aChrome) {
-  SharedStyleSheetCache::Clear(aChrome.WasPassed() ? Some(aChrome.Value())
-                                                   : Nothing());
-}
-
 void ChromeUtils::ClearMessagingLayerSecurityStateByPrincipal(
     GlobalObject&, nsIPrincipal* aPrincipal, ErrorResult& aRv) {
   MOZ_LOG(gMlsLog, LogLevel::Debug,
@@ -1594,31 +1579,137 @@ void ChromeUtils::ClearMessagingLayerSecurityState(GlobalObject&,
   MOZ_LOG(gMlsLog, LogLevel::Debug, ("Successfully cleared all MLS state"));
 }
 
-void ChromeUtils::ClearScriptCacheByPrincipal(GlobalObject&,
-                                              nsIPrincipal* aForPrincipal) {
-  SharedScriptCache::Clear(Nothing(), Some(aForPrincipal));
-}
+void ChromeUtils::ClearResourceCache(
+    GlobalObject& aGlobal, const dom::ClearResourceCacheOptions& aOptions,
+    ErrorResult& aRv) {
+  bool clearStyleSheet = false;
+  bool clearScript = false;
+  bool clearImage = false;
 
-void ChromeUtils::ClearScriptCacheBySite(
-    GlobalObject&, const nsACString& aSchemelessSite,
-    const dom::OriginAttributesPatternDictionary& aPattern) {
-  SharedScriptCache::Clear(Nothing(), Nothing(),
-                           Some(nsCString(aSchemelessSite)), Some(aPattern));
-}
+  if (aOptions.mTypes.WasPassed()) {
+    for (const auto& type : aOptions.mTypes.Value()) {
+      switch (type) {
+        case ResourceCacheType::Stylesheet:
+          clearStyleSheet = true;
+          break;
+        case ResourceCacheType::Script:
+          clearScript = true;
+          break;
+        case ResourceCacheType::Image:
+          clearImage = true;
+          break;
+      }
+    }
+  } else {
+    clearStyleSheet = true;
+    clearScript = true;
+    clearImage = true;
+  }
 
-void ChromeUtils::ClearScriptCache(GlobalObject&,
-                                   const Optional<bool>& aChrome) {
-  SharedScriptCache::Clear(aChrome.WasPassed() ? Some(aChrome.Value())
-                                               : Nothing());
-}
+  int filterCount = 0;
+  if (aOptions.mTarget.WasPassed()) {
+    filterCount++;
+  }
+  if (aOptions.mPrincipal.WasPassed()) {
+    filterCount++;
+  }
+  if (aOptions.mSchemelessSite.WasPassed()) {
+    filterCount++;
+  }
+  if (aOptions.mUrl.WasPassed()) {
+    filterCount++;
+  }
+  if (filterCount > 1) {
+    aRv.ThrowInvalidStateError(
+        "target, principal, schemelessSite, and url properties are mutually "
+        "exclusive");
+    return;
+  }
 
-void ChromeUtils::ClearResourceCache(GlobalObject&,
-                                     const Optional<bool>& aChrome) {
-  Maybe<bool> chrome = aChrome.WasPassed() ? Some(aChrome.Value()) : Nothing();
-  SharedStyleSheetCache::Clear(chrome);
-  SharedScriptCache::Clear(chrome);
-  imgLoader::PrivateBrowsingLoader()->ClearCache(chrome);
-  imgLoader::NormalLoader()->ClearCache(chrome);
+  if (aOptions.mTarget.WasPassed()) {
+    Maybe<bool> chrome;
+    switch (aOptions.mTarget.Value()) {
+      case ResourceCacheTarget::Chrome:
+        chrome.emplace(true);
+        break;
+      case ResourceCacheTarget::Content:
+        chrome.emplace(false);
+        break;
+    }
+
+    if (clearStyleSheet) {
+      SharedStyleSheetCache::Clear(chrome);
+    }
+    if (clearScript) {
+      SharedScriptCache::Clear(chrome);
+    }
+    if (clearImage) {
+      imgLoader::ClearCache(Nothing(), chrome);
+    }
+    return;
+  }
+
+  if (aOptions.mPrincipal.WasPassed()) {
+    nsCOMPtr<nsIPrincipal> principal = aOptions.mPrincipal.Value().get();
+
+    if (clearStyleSheet) {
+      SharedStyleSheetCache::Clear(Nothing(), Some(principal));
+    }
+    if (clearScript) {
+      SharedScriptCache::Clear(Nothing(), Some(principal));
+    }
+    if (clearImage) {
+      imgLoader::ClearCache(Nothing(), Nothing(), Some(principal));
+    }
+    return;
+  }
+
+  if (aOptions.mSchemelessSite.WasPassed()) {
+    nsCString schemelessSite(aOptions.mSchemelessSite.Value());
+    mozilla::OriginAttributesPattern pattern(aOptions.mPattern);
+
+    if (clearStyleSheet) {
+      SharedStyleSheetCache::Clear(Nothing(), Nothing(), Some(schemelessSite),
+                                   Some(pattern));
+    }
+    if (clearScript) {
+      SharedScriptCache::Clear(Nothing(), Nothing(), Some(schemelessSite),
+                               Some(pattern));
+    }
+    if (clearImage) {
+      imgLoader::ClearCache(Nothing(), Nothing(), Nothing(),
+                            Some(schemelessSite), Some(pattern));
+    }
+    return;
+  }
+
+  if (aOptions.mUrl.WasPassed()) {
+    nsCString url(aOptions.mUrl.Value());
+
+    if (clearStyleSheet) {
+      SharedStyleSheetCache::Clear(Nothing(), Nothing(), Nothing(), Nothing(),
+                                   Some(url));
+    }
+    if (clearScript) {
+      SharedScriptCache::Clear(Nothing(), Nothing(), Nothing(), Nothing(),
+                               Some(url));
+    }
+    if (clearImage) {
+      imgLoader::ClearCache(Nothing(), Nothing(), Nothing(), Nothing(),
+                            Nothing(), Some(url));
+    }
+    return;
+  }
+
+  if (clearStyleSheet) {
+    SharedStyleSheetCache::Clear();
+  }
+  if (clearScript) {
+    SharedScriptCache::Clear();
+  }
+  if (clearImage) {
+    imgLoader::ClearCache();
+  }
 }
 
 #define PROCTYPE_TO_WEBIDL_CASE(_procType, _webidl) \
@@ -2382,19 +2473,20 @@ bool ChromeUtils::ShouldResistFingerprinting(
     nsIRFPTargetSetIDL* aOverriddenFingerprintingSettings,
     const Optional<bool>& aIsPBM) {
   RFPTarget target;
+#define JSRFP_TARGET_TO_RFP_TARGET(rfptarget) \
+  case JSRFPTarget::rfptarget:                \
+    target = RFPTarget::rfptarget;            \
+    break;
   switch (aTarget) {
-    case JSRFPTarget::RoundWindowSize:
-      target = RFPTarget::RoundWindowSize;
-      break;
-    case JSRFPTarget::SiteSpecificZoom:
-      target = RFPTarget::SiteSpecificZoom;
-      break;
-    case JSRFPTarget::CSSPrefersColorScheme:
-      target = RFPTarget::CSSPrefersColorScheme;
-      break;
+    JSRFP_TARGET_TO_RFP_TARGET(RoundWindowSize);
+    JSRFP_TARGET_TO_RFP_TARGET(SiteSpecificZoom);
+    JSRFP_TARGET_TO_RFP_TARGET(CSSPrefersColorScheme);
+    JSRFP_TARGET_TO_RFP_TARGET(JSLocalePrompt);
+    JSRFP_TARGET_TO_RFP_TARGET(HttpUserAgent);
     default:
       MOZ_CRASH("Unhandled JSRFPTarget enum value");
   }
+#undef JSRFP_TARGET_TO_RFP_TARGET
 
   bool isPBM = false;
   if (aIsPBM.WasPassed()) {
@@ -2432,6 +2524,67 @@ bool ChromeUtils::ShouldResistFingerprinting(
                                        overriddenFingerprintingSettings);
 }
 
+/* static */
+void ChromeUtils::CallFunctionAndLogException(
+    GlobalObject& aGlobal, JS::Handle<JS::Value> aTargetGlobal,
+    JS::Handle<JS::Value> aFunction, JS::MutableHandle<JS::Value> aRetVal,
+    ErrorResult& aRv) {
+  JSContext* cx = aGlobal.Context();
+  if (!aTargetGlobal.isObject() || !aFunction.isObject()) {
+    aRv.Throw(NS_ERROR_INVALID_ARG);
+    return;
+  }
+
+  JS::Rooted<JS::Realm*> contextRealm(cx, JS::GetCurrentRealmOrNull(cx));
+  if (!contextRealm) {
+    aRv.Throw(NS_ERROR_INVALID_ARG);
+    return;
+  }
+
+  JS::Rooted<JSObject*> global(
+      cx, js::CheckedUnwrapDynamic(&aTargetGlobal.toObject(), cx));
+  if (!global) {
+    aRv.Throw(NS_ERROR_INVALID_ARG);
+    return;
+  }
+
+  // Use AutoJSAPI in order to trigger AutoJSAPI::ReportException
+  // which will do most of the work required for this function.
+  //
+  // We only have to pick the right global for which we want to flag
+  // the exception against.
+  dom::AutoJSAPI jsapi;
+  if (!jsapi.Init(global)) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return;
+  }
+  JSContext* ccx = jsapi.cx();
+
+  // AutoJSAPI picks `aTargetGlobal` as execution compartment
+  // whereas we expect to run `aFunction` from the callsites compartment.
+  JSAutoRealm ar(ccx, JS::GetRealmGlobalOrNull(contextRealm));
+
+  JS::Rooted<JS::Value> funVal(ccx, aFunction);
+  if (!JS_WrapValue(ccx, &funVal)) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return;
+  }
+  if (!JS_CallFunctionValue(ccx, nullptr, funVal, JS::HandleValueArray::empty(),
+                            aRetVal)) {
+    // Ensure re-throwing the exception which may have been thrown by
+    // `aFunction`
+    if (JS_IsExceptionPending(ccx)) {
+      JS::Rooted<JS::Value> exception(cx);
+      if (JS_GetPendingException(ccx, &exception)) {
+        if (JS_WrapValue(cx, &exception)) {
+          aRv.MightThrowJSException();
+          aRv.ThrowJSException(cx, exception);
+        }
+      }
+    }
+  }
+}
+
 std::atomic<uint32_t> ChromeUtils::sDevToolsOpenedCount = 0;
 
 /* static */
@@ -2453,6 +2606,11 @@ void ChromeUtils::NotifyDevToolsOpened(GlobalObject& aGlobal) {
 void ChromeUtils::NotifyDevToolsClosed(GlobalObject& aGlobal) {
   MOZ_ASSERT(ChromeUtils::sDevToolsOpenedCount >= 1);
   ChromeUtils::sDevToolsOpenedCount--;
+}
+
+/* static */
+bool ChromeUtils::IsJSIdentifier(GlobalObject& aGlobal, const nsAString& aStr) {
+  return JS_IsIdentifier(aStr.BeginReading(), aStr.Length());
 }
 
 #ifdef MOZ_WMF_CDM
@@ -2482,6 +2640,19 @@ already_AddRefed<Promise> ChromeUtils::GetGMPContentDecryptionModuleInformation(
   MOZ_ASSERT(domPromise);
   KeySystemConfig::GetGMPKeySystemConfigs(domPromise);
   return domPromise.forget();
+}
+
+void ChromeUtils::AndroidMoveTaskToBack(GlobalObject& aGlobal) {
+#ifdef MOZ_WIDGET_ANDROID
+  MOZ_RELEASE_ASSERT(XRE_IsParentProcess());
+  java::GeckoAppShell::MoveTaskToBack();
+#endif
+}
+
+already_AddRefed<nsIContentSecurityPolicy> ChromeUtils::CreateCSPFromHeader(
+    GlobalObject& aGlobal, const nsAString& aHeader, nsIURI* aSelfURI,
+    nsIPrincipal* aLoadingPrincipal, ErrorResult& aRv) {
+  return CSP_CreateFromHeader(aHeader, aSelfURI, aLoadingPrincipal, aRv);
 }
 
 }  // namespace mozilla::dom

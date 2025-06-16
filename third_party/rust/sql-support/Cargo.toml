@@ -33,16 +33,18 @@ path = "src/lib.rs"
 
 [dependencies]
 lazy_static = "1.4"
-log = "0.4"
 parking_lot = ">=0.11,<=0.12"
 tempfile = "3.1.0"
 thiserror = "1.0"
+
+[dependencies.error-support]
+path = "../error"
 
 [dependencies.interrupt-support]
 path = "../interrupt"
 
 [dependencies.rusqlite]
-version = "0.31.0"
+version = "0.33.0"
 features = [
     "functions",
     "limits",
@@ -50,6 +52,6 @@ features = [
     "unlock_notify",
 ]
 
-[dev-dependencies.env_logger]
-version = "0.10"
-default-features = false
+[dev-dependencies.error-support]
+path = "../error"
+features = ["testing"]

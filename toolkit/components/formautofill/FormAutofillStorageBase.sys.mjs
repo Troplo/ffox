@@ -419,8 +419,6 @@ class AutofillRecords {
 
     this._data.push(recordToSave);
 
-    this.updateUseCountTelemetry();
-
     this._store.saveSoon();
 
     Services.obs.notifyObservers(
@@ -541,13 +539,13 @@ class AutofillRecords {
 
     let recordFound = this._findByGUID(guid);
     if (!recordFound) {
-      throw new Error("No matching record.");
+      // record must have been deleted, nothing to update
+      this.log.debug("Cannot notify. No record found with guid:", guid);
+      return;
     }
 
     recordFound.timesUsed++;
     recordFound.timeLastUsed = Date.now();
-
-    this.updateUseCountTelemetry();
 
     this._store.saveSoon();
     Services.obs.notifyObservers(
@@ -560,15 +558,6 @@ class AutofillRecords {
       "formautofill-storage-changed",
       "notifyUsed"
     );
-  }
-
-  updateUseCountTelemetry() {
-    const telemetryType =
-      this._collectionName == "creditCards"
-        ? lazy.AutofillTelemetry.CREDIT_CARD
-        : lazy.AutofillTelemetry.ADDRESS;
-    let records = this._data.filter(r => !r.deleted);
-    lazy.AutofillTelemetry.recordNumberOfUse(telemetryType, records);
   }
 
   /**
@@ -612,8 +601,6 @@ class AutofillRecords {
         this._data.splice(index, 1);
       }
     }
-
-    this.updateUseCountTelemetry();
 
     this._store.saveSoon();
     Services.obs.notifyObservers(

@@ -53,6 +53,7 @@
 #include "mozilla/InputEventOptions.h"   // for InputEventOptions
 #include "mozilla/IntegerRange.h"        // for IntegerRange
 #include "mozilla/InternalMutationEvent.h"  // for NS_EVENT_BITS_MUTATION_CHARACTERDATAMODIFIED
+#include "mozilla/Logging.h"                //for MOZ_LOG
 #include "mozilla/mozalloc.h"               // for operator new, etc.
 #include "mozilla/mozInlineSpellChecker.h"  // for mozInlineSpellChecker
 #include "mozilla/mozSpellChecker.h"        // for mozSpellChecker
@@ -70,6 +71,7 @@
 #include "mozilla/TextInputListener.h"   // for TextInputListener
 #include "mozilla/TextServicesDocument.h"  // for TextServicesDocument
 #include "mozilla/TextEvents.h"
+#include "mozilla/ToString.h"
 #include "mozilla/TransactionManager.h"    // for TransactionManager
 #include "mozilla/dom/AbstractRange.h"     // for AbstractRange
 #include "mozilla/dom/Attr.h"              // for Attr
@@ -146,6 +148,9 @@ using EmptyCheckOption = HTMLEditUtils::EmptyCheckOption;
 using LeafNodeType = HTMLEditUtils::LeafNodeType;
 using LeafNodeTypes = HTMLEditUtils::LeafNodeTypes;
 using WalkTreeOption = HTMLEditUtils::WalkTreeOption;
+
+static LazyLogModule gEventLog("EditorEvent");
+LazyLogModule gTextInputLog("EditorTextInput");
 
 /*****************************************************************************
  * mozilla::EditorBase
@@ -1647,10 +1652,32 @@ EditorBase::DispatchClipboardEventAndUpdateClipboard(
     return do_AddRef(&SelectionRef());
   }();
 
+  const auto GetDOMEventName = [&]() -> const char* {
+    switch (aEventMessage) {
+      case eCopy:
+        return "copy";
+      case eCut:
+        return "cut";
+      case ePaste:
+      case ePasteNoFormatting:
+        return "paste";
+      default:
+        return ToChar(aEventMessage);
+    }
+  };
+
+  MOZ_LOG(
+      gEventLog, LogLevel::Info,
+      ("%p %s: Dispatching \"%s\" event...", this,
+       mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor", GetDOMEventName()));
   bool actionTaken = false;
   const bool doDefault = nsCopySupport::FireClipboardEvent(
       aEventMessage, aClipboardType, presShell, sel, aDataTransfer,
       &actionTaken);
+  MOZ_LOG(gEventLog, LogLevel::Info,
+          ("%p %s: Dispatched \"%s\" event, defaultPrevented=%s", this,
+           mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor", GetDOMEventName(),
+           doDefault ? "false" : "true"));
   NotifyOfDispatchingClipboardEvent();
 
   if (NS_WARN_IF(Destroyed())) {
@@ -1855,13 +1882,10 @@ nsresult EditorBase::PasteAsAction(nsIClipboard::ClipboardType aClipboardType,
   // the clipboard event and the call to HandlePaste below. This prevents
   // race conditions with Content Analysis on like we see in bug 1918027.
   // Note that this is not needed if we're not going to dispatch the paste
-  // event.
-  RefPtr<DataTransfer> dataTransfer;
-  if (aDispatchPasteEvent == DispatchPasteEvent::Yes) {
-    dataTransfer = aDataTransfer
-                       ? RefPtr<DataTransfer>(aDataTransfer)
-                       : RefPtr<DataTransfer>(CreateDataTransferForPaste(
-                             ePaste, aClipboardType));
+  // event and no aDataTransfer was passed in.
+  RefPtr<DataTransfer> dataTransfer = aDataTransfer;
+  if (!aDataTransfer && aDispatchPasteEvent == DispatchPasteEvent::Yes) {
+    dataTransfer = CreateDataTransferForPaste(ePaste, aClipboardType);
   }
   AutoEditActionDataSetter editActionData(*this, EditAction::ePaste,
                                           aPrincipal);
@@ -2773,6 +2797,14 @@ void EditorBase::NotifyEditorObservers(
 
       if (!mDispatchInputEvent || IsEditActionAborted() ||
           IsEditActionCanceled()) {
+        MOZ_LOG(
+            gEventLog, LogLevel::Warning,
+            ("%p %s: Not dispatching \"input\" event (mDispatchInputEvent=%s, "
+             "IsEditActionAborted()=%s, IsEditActionCanceled()=%s",
+             this, mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor",
+             mDispatchInputEvent ? "true" : "false",
+             IsEditActionAborted() ? "true" : "false",
+             IsEditActionCanceled() ? "true" : "false"));
         break;
       }
 
@@ -2840,16 +2872,27 @@ void EditorBase::DispatchInputEvent() {
 
   RefPtr<Element> targetElement = GetInputEventTargetElement();
   if (NS_WARN_IF(!targetElement)) {
+    MOZ_LOG(gEventLog, LogLevel::Error,
+            ("%p %s: Failed dispatching \"input\" event due to no target", this,
+             mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor"));
     return;
   }
   RefPtr<DataTransfer> dataTransfer = GetInputEventDataTransfer();
   mEditActionData->WillDispatchInputEvent();
+  MOZ_LOG(gEventLog, LogLevel::Info,
+          ("%p %s: Dispatching \"input\" event: { inputType=\"%s\" }...", this,
+           mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor",
+           ToString(ToInputType(GetEditAction())).c_str()));
   DebugOnly<nsresult> rvIgnored = nsContentUtils::DispatchInputEvent(
       targetElement, eEditorInput, ToInputType(GetEditAction()), this,
       dataTransfer ? InputEventOptions(dataTransfer,
                                        InputEventOptions::NeverCancelable::No)
                    : InputEventOptions(GetInputEventData(),
                                        InputEventOptions::NeverCancelable::No));
+  MOZ_LOG(gEventLog, LogLevel::Debug,
+          ("%p %s: Dispatched \"input\" event: { inputType=\"%s\" }", this,
+           mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor",
+           ToString(ToInputType(GetEditAction())).c_str()));
   mEditActionData->DidDispatchInputEvent();
   NS_WARNING_ASSERTION(
       NS_SUCCEEDED(rvIgnored),
@@ -3244,6 +3287,67 @@ nsresult EditorBase::ScrollSelectionFocusIntoView() const {
   return NS_WARN_IF(Destroyed()) ? NS_ERROR_EDITOR_DESTROYED : NS_OK;
 }
 
+EditorDOMPoint EditorBase::ComputePointToInsertText(
+    const EditorDOMPoint& aPoint, InsertTextTo aInsertTextTo) const {
+  if (aInsertTextTo == InsertTextTo::SpecifiedPoint) {
+    return aPoint;
+  }
+
+  if (IsTextEditor()) {
+    // In some cases, the node may be the anonymous div element or a padding
+    // <br> element for empty last line.  Let's try to look for better insertion
+    // point in the nearest text node if there is.
+    return AsTextEditor()->FindBetterInsertionPoint(aPoint);
+  }
+  auto pointToInsert =
+      aPoint.GetPointInTextNodeIfPointingAroundTextNode<EditorDOMPoint>();
+  // If the candidate point is in a Text node which has only a preformatted
+  // linefeed, we should not insert text into the node because it may have
+  // been inserted by us and that's compatible behavior with Chrome.
+  if (pointToInsert.IsInTextNode() &&
+      HTMLEditUtils::TextHasOnlyOnePreformattedLinefeed(
+          *pointToInsert.ContainerAs<Text>())) {
+    if (pointToInsert.IsStartOfContainer()) {
+      if (Text* const previousText = Text::FromNodeOrNull(
+              pointToInsert.ContainerAs<Text>()->GetPreviousSibling())) {
+        pointToInsert = EditorDOMPoint::AtEndOf(*previousText);
+      } else {
+        pointToInsert = pointToInsert.ParentPoint();
+      }
+    } else {
+      MOZ_ASSERT(pointToInsert.IsEndOfContainer());
+      if (Text* const nextText = Text::FromNodeOrNull(
+              pointToInsert.ContainerAs<Text>()->GetNextSibling())) {
+        pointToInsert = EditorDOMPoint(nextText, 0u);
+      } else {
+        pointToInsert = pointToInsert.AfterContainer();
+      }
+    }
+  }
+  if (aInsertTextTo == InsertTextTo::AlwaysCreateNewTextNode) {
+    NS_WARNING_ASSERTION(!pointToInsert.IsInTextNode() ||
+                             pointToInsert.IsStartOfContainer() ||
+                             pointToInsert.IsEndOfContainer(),
+                         "aPointToInsert is \"AlwaysCreateNewTextNode\", but "
+                         "specified point middle of a `Text`");
+    if (!pointToInsert.IsInTextNode()) {
+      return pointToInsert;
+    }
+    return pointToInsert.IsStartOfContainer()
+               ? EditorDOMPoint(pointToInsert.ContainerAs<Text>())
+               : (pointToInsert.IsEndOfContainer()
+                      ? EditorDOMPoint::After(
+                            *pointToInsert.ContainerAs<Text>())
+                      : pointToInsert);
+  }
+  if (aInsertTextTo == InsertTextTo::ExistingTextNodeIfAvailableAndNotStart) {
+    return !(pointToInsert.IsInTextNode() && pointToInsert.IsStartOfContainer())
+               ? pointToInsert
+               : EditorDOMPoint(pointToInsert.ContainerAs<Text>());
+  }
+  return pointToInsert;
+}
+
 Result<InsertTextResult, nsresult> EditorBase::InsertTextWithTransaction(
     const nsAString& aStringToInsert, const EditorDOMPoint& aPointToInsert,
     InsertTextTo aInsertTextTo) {
@@ -3260,64 +3364,8 @@ Result<InsertTextResult, nsresult> EditorBase::InsertTextWithTransaction(
     return InsertTextResult();
   }
 
-  // In some cases, the node may be the anonymous div element or a padding
-  // <br> element for empty last line.  Let's try to look for better insertion
-  // point in the nearest text node if there is.
-  EditorDOMPoint pointToInsert = [&]() {
-    if (IsTextEditor()) {
-      return AsTextEditor()->FindBetterInsertionPoint(aPointToInsert);
-    }
-    auto pointToInsert =
-        aPointToInsert
-            .GetPointInTextNodeIfPointingAroundTextNode<EditorDOMPoint>();
-    // If the candidate point is in a Text node which has only a preformatted
-    // linefeed, we should not insert text into the node because it may have
-    // been inserted by us and that's compatible behavior with Chrome.
-    if (pointToInsert.IsInTextNode() &&
-        HTMLEditUtils::TextHasOnlyOnePreformattedLinefeed(
-            *pointToInsert.ContainerAs<Text>())) {
-      if (pointToInsert.IsStartOfContainer()) {
-        if (Text* const previousText = Text::FromNodeOrNull(
-                pointToInsert.ContainerAs<Text>()->GetPreviousSibling())) {
-          pointToInsert = EditorDOMPoint::AtEndOf(*previousText);
-        } else {
-          pointToInsert = pointToInsert.ParentPoint();
-        }
-      } else {
-        MOZ_ASSERT(pointToInsert.IsEndOfContainer());
-        if (Text* const nextText = Text::FromNodeOrNull(
-                pointToInsert.ContainerAs<Text>()->GetNextSibling())) {
-          pointToInsert = EditorDOMPoint(nextText, 0u);
-        } else {
-          pointToInsert = pointToInsert.AfterContainer();
-        }
-      }
-    }
-    if (aInsertTextTo == InsertTextTo::AlwaysCreateNewTextNode) {
-      NS_WARNING_ASSERTION(!pointToInsert.IsInTextNode() ||
-                               pointToInsert.IsStartOfContainer() ||
-                               pointToInsert.IsEndOfContainer(),
-                           "aPointToInsert is \"AlwaysCreateNewTextNode\", but "
-                           "specified point middle of a `Text`");
-      if (!pointToInsert.IsInTextNode()) {
-        return pointToInsert;
-      }
-      return pointToInsert.IsStartOfContainer()
-                 ? EditorDOMPoint(pointToInsert.ContainerAs<Text>())
-                 : (pointToInsert.IsEndOfContainer()
-                        ? EditorDOMPoint::After(
-                              *pointToInsert.ContainerAs<Text>())
-                        : pointToInsert);
-    }
-    if (aInsertTextTo == InsertTextTo::ExistingTextNodeIfAvailableAndNotStart) {
-      return !(pointToInsert.IsInTextNode() &&
-               pointToInsert.IsStartOfContainer())
-                 ? pointToInsert
-                 : EditorDOMPoint(pointToInsert.ContainerAs<Text>());
-    }
-    return pointToInsert;
-  }();
-
+  EditorDOMPoint pointToInsert =
+      ComputePointToInsertText(aPointToInsert, aInsertTextTo);
   if (ShouldHandleIMEComposition()) {
     if (!pointToInsert.IsInTextNode()) {
       // create a text node
@@ -3994,6 +4042,13 @@ bool EditorBase::EnsureComposition(WidgetCompositionEvent& aCompositionEvent) {
 
 nsresult EditorBase::OnCompositionStart(
     WidgetCompositionEvent& aCompositionStartEvent) {
+  MOZ_LOG(gTextInputLog, LogLevel::Info,
+          ("%p %s::OnCompositionStart(aCompositionStartEvent={ mData=\"%s\"}), "
+           "mComposition=%p",
+           this, mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor",
+           NS_ConvertUTF16toUTF8(aCompositionStartEvent.mData).get(),
+           mComposition.get()));
+
   if (mComposition) {
     NS_WARNING("There was a composition at receiving compositionstart event");
     return NS_OK;
@@ -4014,6 +4069,15 @@ nsresult EditorBase::OnCompositionChange(
     WidgetCompositionEvent& aCompositionChangeEvent) {
   MOZ_ASSERT(aCompositionChangeEvent.mMessage == eCompositionChange,
              "The event should be eCompositionChange");
+
+  MOZ_LOG(
+      gTextInputLog, LogLevel::Info,
+      ("%p %s::OnCompositionChange(aCompositionChangeEvent={ mData=\"%s\", "
+       "IsFollowedByCompositionEnd()=%s }), mComposition=%p",
+       this, mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor",
+       NS_ConvertUTF16toUTF8(aCompositionChangeEvent.mData).get(),
+       aCompositionChangeEvent.IsFollowedByCompositionEnd() ? "true" : "false",
+       mComposition.get()));
 
   if (!mComposition) {
     NS_WARNING(
@@ -4161,6 +4225,13 @@ nsresult EditorBase::OnCompositionChange(
 
 void EditorBase::OnCompositionEnd(
     WidgetCompositionEvent& aCompositionEndEvent) {
+  MOZ_LOG(gTextInputLog, LogLevel::Info,
+          ("%p %s::OnCompositionEnd(aCompositionEndEvent={ mData=\"%s\"}), "
+           "mComposition=%p",
+           this, mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor",
+           NS_ConvertUTF16toUTF8(aCompositionEndEvent.mData).get(),
+           mComposition.get()));
+
   if (!mComposition) {
     NS_WARNING("There is no composition, but receiving compositionend event");
     return;
@@ -5176,7 +5247,7 @@ Result<CaretPoint, nsresult> EditorBase::DeleteRangeWithTransaction(
 Result<CaretPoint, nsresult> EditorBase::DeleteRangesWithTransaction(
     nsIEditor::EDirection aDirectionAndAmount,
     nsIEditor::EStripWrappers aStripWrappers,
-    const AutoClonedRangeArray& aRangesToDelete) {
+    AutoClonedRangeArray& aRangesToDelete) {
   MOZ_ASSERT(IsEditActionDataAvailable());
   MOZ_ASSERT(!Destroyed());
   MOZ_ASSERT(aStripWrappers == eStrip || aStripWrappers == eNoStrip);
@@ -5212,7 +5283,7 @@ Result<CaretPoint, nsresult> EditorBase::DeleteRangesWithTransaction(
        Reversed(deleteSelectionTransaction->ChildTransactions())) {
     if (DeleteTextTransaction* deleteTextTransaction =
             transactionBase->GetAsDeleteTextTransaction()) {
-      deleteContent = deleteTextTransaction->GetText();
+      deleteContent = deleteTextTransaction->GetTextNode();
       deleteCharOffset = deleteTextTransaction->Offset();
       break;
     }
@@ -5490,6 +5561,12 @@ nsresult EditorBase::HandleKeyPressEvent(WidgetKeyboardEvent* aKeyboardEvent) {
 nsresult EditorBase::OnInputText(const nsAString& aStringToInsert) {
   AutoEditActionDataSetter editActionData(*this, EditAction::eInsertText);
   MOZ_ASSERT(!aStringToInsert.IsVoid());
+
+  MOZ_LOG(gTextInputLog, LogLevel::Info,
+          ("%p %s::OnInputText(aStringToInsert=\"%s\")", this,
+           mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor",
+           NS_ConvertUTF16toUTF8(aStringToInsert).get()));
+
   editActionData.SetData(aStringToInsert);
   // FYI: For conforming to current UI Events spec, we should dispatch
   //      "beforeinput" event before "keypress" event, but here is in a
@@ -5689,7 +5766,7 @@ void EditorBase::InitializeSelectionAncestorLimit(
     Element& aAncestorLimit) const {
   MOZ_ASSERT(IsEditActionDataAvailable());
 
-  SelectionRef().SetAncestorLimiter(&aAncestorLimit);
+  MOZ_KnownLive(SelectionRef()).SetAncestorLimiter(&aAncestorLimit);
 }
 
 nsresult EditorBase::InitializeSelection(
@@ -6611,19 +6688,20 @@ void EditorBase::AutoEditActionDataSetter::UpdateSelectionCache(
     MOZ_ASSERT_UNREACHABLE("You do something wrong");
   }();
 
+  RefPtr<Selection> previousSelection = mSelection;
+
   // Keep grabbing the old selection in the top level edit action data until the
   // all owners end handling it.
-  if (mSelection) {
-    topLevelEditActionData.mRetiredSelections.AppendElement(*mSelection);
+  if (previousSelection) {
+    topLevelEditActionData.mRetiredSelections.AppendElement(*previousSelection);
   }
 
   // If the old selection is in batch, we should end the batch which
   // `EditorBase::BeginUpdateViewBatch` started.
-  if (mEditorBase.mUpdateCount && mSelection) {
-    mSelection->EndBatchChanges(__FUNCTION__);
+  if (mEditorBase.mUpdateCount && previousSelection) {
+    previousSelection->EndBatchChanges(__FUNCTION__);
   }
 
-  Selection* previousSelection = mSelection;
   mSelection = &aSelection;
   for (AutoEditActionDataSetter* parentActionData = mParentData;
        parentActionData; parentActionData = parentActionData->mParentData) {
@@ -6827,6 +6905,10 @@ nsresult EditorBase::AutoEditActionDataSetter::MaybeDispatchBeforeInputEvent(
     // action since web apps cannot override it with `beforeinput` event
     // listener, but for backward compatibility, we should return a special
     // success code instead of error.
+    MOZ_LOG(gEventLog, LogLevel::Error,
+            ("%p %s: Failed dispatching \"beforeinput\" event due to no target",
+             &mEditorBase,
+             mEditorBase.mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor"));
     return NS_OK;
   }
   OwningNonNull<EditorBase> editorBase = mEditorBase;
@@ -6906,6 +6988,11 @@ nsresult EditorBase::AutoEditActionDataSetter::MaybeDispatchBeforeInputEvent(
           ? InputEventOptions::NeverCancelable::Yes
           : InputEventOptions::NeverCancelable::No;
   WillDispatchInputEvent();
+  MOZ_LOG(gEventLog, LogLevel::Info,
+          ("%p %s: Dispatching \"beforeinput\" event: { inputType=\"%s\" }...",
+           editorBase.get(),
+           editorBase->mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor",
+           ToString(ToInputType(GetEditAction())).c_str()));
   nsresult rv = nsContentUtils::DispatchInputEvent(
       targetElement, eEditorBeforeInput, inputType, editorBase,
       mDataTransfer
@@ -6913,6 +7000,13 @@ nsresult EditorBase::AutoEditActionDataSetter::MaybeDispatchBeforeInputEvent(
                               neverCancelable)
           : InputEventOptions(mData, std::move(mTargetRanges), neverCancelable),
       &status);
+  MOZ_LOG(gEventLog, LogLevel::Info,
+          ("%p %s: Dispatched \"beforeinput\" event: { inputType=\"%s\" }, "
+           "defaultPrevented=%s",
+           editorBase.get(),
+           editorBase->mIsHTMLEditorClass ? "HTMLEditor" : "TextEditor",
+           ToString(ToInputType(GetEditAction())).c_str(),
+           status == nsEventStatus_eConsumeNoDefault ? "true" : "false"));
   DidDispatchInputEvent();
   if (NS_WARN_IF(mEditorBase.Destroyed())) {
     return NS_ERROR_EDITOR_DESTROYED;

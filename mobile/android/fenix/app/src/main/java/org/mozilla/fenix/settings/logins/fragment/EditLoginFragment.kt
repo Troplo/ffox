@@ -27,17 +27,17 @@ import com.google.android.material.textfield.TextInputLayout
 import mozilla.components.lib.state.ext.consumeFrom
 import mozilla.components.support.ktx.android.view.hideKeyboard
 import mozilla.telemetry.glean.private.NoExtras
-import org.mozilla.fenix.AuthenticationStatus
-import org.mozilla.fenix.BiometricAuthenticationManager
 import org.mozilla.fenix.GleanMetrics.Logins
 import org.mozilla.fenix.R
+import org.mozilla.fenix.biometricauthentication.AuthenticationStatus
+import org.mozilla.fenix.biometricauthentication.BiometricAuthenticationManager
 import org.mozilla.fenix.components.StoreProvider
 import org.mozilla.fenix.databinding.FragmentEditLoginBinding
 import org.mozilla.fenix.ext.components
 import org.mozilla.fenix.ext.registerForActivityResult
 import org.mozilla.fenix.ext.settings
 import org.mozilla.fenix.ext.toEditable
-import org.mozilla.fenix.settings.biometric.bindBiometricsCredentialsPromptOrShowWarning
+import org.mozilla.fenix.settings.biometric.DefaultBiometricUtils
 import org.mozilla.fenix.settings.logins.LoginsAction
 import org.mozilla.fenix.settings.logins.LoginsFragmentStore
 import org.mozilla.fenix.settings.logins.SavedLogin
@@ -340,7 +340,7 @@ class EditLoginFragment : Fragment(R.layout.fragment_edit_login), MenuProvider {
                 AuthenticationStatus.AUTHENTICATION_IN_PROGRESS
             setSecureContentVisibility(false)
 
-            bindBiometricsCredentialsPromptOrShowWarning(
+            DefaultBiometricUtils.bindBiometricsCredentialsPromptOrShowWarning(
                 view = requireView(),
                 onShowPinVerification = { intent -> startForResult.launch(intent) },
                 onAuthSuccess = {
