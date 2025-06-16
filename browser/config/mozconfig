@@ -25,3 +25,6 @@ ac_add_options --enable-jack
 ac_add_options --enable-crashreporter
 ac_add_options --disable-updater
 ac_add_options --disable-tests
+# Arch upstream has it in their PKGBUILD, ALARM does not for aarch64:
+ac_add_options --disable-elf-hack
+ac_add_options --enable-lto=cross
