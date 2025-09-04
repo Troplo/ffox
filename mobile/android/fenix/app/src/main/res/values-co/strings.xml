@@ -11,9 +11,9 @@
   -->
   <string name="content_description_menu">Ozzioni addiziunale</string>
   <!-- Content description (not visible, for screen readers etc.): "Private Browsing" menu button. -->
-  <string name="content_description_private_browsing_button">Attivà a navigazione privata</string>
+  <string name="content_description_private_browsing_button" moz:removedIn="142" tools:ignore="UnusedResources">Attivà a navigazione privata</string>
   <!-- Content description (not visible, for screen readers etc.): "Private Browsing" menu button. -->
-  <string name="content_description_disable_private_browsing_button">Disattivà a navigazione privata</string>
+  <string name="content_description_disable_private_browsing_button" moz:removedIn="142" tools:ignore="UnusedResources">Disattivà a navigazione privata</string>
   <!-- Content description (not visible, for screen readers etc.): "Private Browsing" menu button. -->
   <string name="content_description_private_browsing">Navigazione privata</string>
   <!-- Placeholder text shown in the search bar before a user enters text for the default engine -->
@@ -62,7 +62,7 @@
     Explanation for private browsing displayed to users on home view when they first enable private mode.
     %1$s is the name of the app (for example "Firefox").
   -->
-  <string name="private_browsing_placeholder_description_2">· %1$s squassa e vostre cronolugie di ricerca è di navigazione da l’unghjette private quandu vò chjuditele o chitate l’appiecazione. Benchè quessu ùn vi rende micca anonimu nant’à i siti web nè da u vostru furnidore d’accessu à internet, vi permette di cunservà sicreta a vostra attività in linea per tutte l’altre persone chì impiegherianu u vostru apparechju.</string>
+  <string name="private_browsing_placeholder_description_2" moz:removedIn="141" tools:ignore="UnusedResources">· %1$s squassa e vostre cronolugie di ricerca è di navigazione da l’unghjette private quandu vò chjuditele o chitate l’appiecazione. Benchè quessu ùn vi rende micca anonimu nant’à i siti web nè da u vostru furnidore d’accessu à internet, vi permette di cunservà sicreta a vostra attività in linea per tutte l’altre persone chì impiegherianu u vostru apparechju.</string>
   <string name="private_browsing_common_myths">Idee precuncepite apprupositu di a navigazione privata</string>
   <!--
     True Private Browsing Mode
@@ -98,7 +98,7 @@
 
     Text for the message displayed in the contextual feature recommendation popup promoting the erase private browsing feature.
   -->
-  <string name="erase_action_cfr_message">Picchicciate quì per principià una sessione privata nova. Squassà cronolugia, canistrelli… tuttu.</string>
+  <string name="erase_action_cfr_message" moz:removedIn="141" tools:ignore="UnusedResources">Picchicciate quì per principià una sessione privata nova. Squassà cronolugia, canistrelli… tuttu.</string>
   <!--
     Toolbar "contextual feature recommendation" (CFR)
 
@@ -112,12 +112,8 @@
   <!--
     Address bar swipe "contextual feature recommendation" (CFR)
 
-    Text for the title displayed in the contextual feature recommendation popup promoting swipe of address bar.
+    Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar.
   -->
-  <string name="address_bar_swipe_cfr_title" tools:ignore="UnusedResources" moz:removedIn="139">Fà sfilà a barra d’attrezzi per cambià d’unghjetta</string>
-  <!-- Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar. -->
-  <string name="address_bar_swipe_cfr_message" tools:ignore="UnusedResources" moz:removedIn="139">Spazzà à manca o à diritta per cambià d’unghjetta. Spazzà versu à manca nant’à a vostra ultima unghjetta per apre un’unghjetta nova.</string>
-  <!-- Text for the message displayed in the contextual feature recommendation popup promoting swipe of address bar. -->
   <string name="address_bar_swipe_cfr_message_2">Spazzà a barra d’attrezzi à manca o à diritta per cambià d’unghjetta.</string>
   <!-- Text for the info dialog when camera permissions have been denied but user tries to access a camera feature. -->
   <string name="camera_permissions_needed_message">Accessu richiestu à l’apparechju-fotò. Accidite à i parametri d’Android, picchichjate Permessi, è dopu Permette.</string>
@@ -326,9 +322,9 @@
     Browser menu label that navigates to the SUMO page for the Firefox for Android release notes.
     %1$s is the name of the app (for example "Firefox").
   -->
-  <string name="browser_menu_new_in_firefox">Nuvità in %1$s</string>
+  <string name="browser_menu_new_in_firefox" moz:removedIn="141" tools:ignore="UnusedResources">Nuvità in %1$s</string>
   <!-- Browser menu label that toggles the request for the desktop site of the currently visited page -->
-  <string name="browser_menu_switch_to_desktop_site">Passà à a versione per urdinatore</string>
+  <string name="browser_menu_switch_to_desktop_site" moz:removedIn="141" tools:ignore="UnusedResources">Passà à a versione per urdinatore</string>
   <!-- Browser menu label that toggles the request for the mobile site of the currently visited page -->
   <string name="browser_menu_switch_to_mobile_site">Passà à a versione per telefonu</string>
   <!-- Browser menu label that navigates to the page tools sub-menu -->
@@ -336,7 +332,7 @@
   <!-- Content description (not visible, for screen readers etc.): Back button for all menu redesign sub-menu -->
   <string name="browser_menu_back_button_content_description" moz:removedIn="141" tools:ignore="UnusedResources">Ritornu à u listinu principale</string>
   <!-- Content description (not visible, for screen readers etc.) for bottom sheet handlebar main menu. -->
-  <string name="browser_main_menu_handlebar_content_description">Chjode u pannellu di u listinu principale</string>
+  <string name="browser_main_menu_handlebar_content_description" moz:removedIn="142" tools:ignore="UnusedResources">Chjode u pannellu di u listinu principale</string>
   <!-- Content description (not visible, for screen readers etc.) for main menu help button. -->
   <string name="browser_main_menu_content_description_help_button">Aiutu</string>
   <!-- Content description (not visible, for screen readers etc.) for main menu settings button. -->
@@ -384,7 +380,7 @@
     Browser menu label that is displayed when the current page has been translated by the translation feature.
     %1$s is the name of the language that page was translated to (e.g. English).
   -->
-  <string name="browser_menu_translated_to">Tradutta in %1$s</string>
+  <string name="browser_menu_translated_to" moz:removedIn="141" tools:ignore="UnusedResources">Tradutta in %1$s</string>
   <!-- Browser menu label for the print feature -->
   <string name="browser_menu_print" moz:removedIn="141" tools:ignore="UnusedResources">Stampà…</string>
   <!--
@@ -416,7 +412,7 @@
     Content description (not visible, for screen readers etc.): Erase button: Erase the browsing
     history and go back to the home screen.
   -->
-  <string name="browser_toolbar_erase">Squassà a cronolugia di navigazione</string>
+  <string name="browser_toolbar_erase" moz:removedIn="141" tools:ignore="UnusedResources">Squassà a cronolugia di navigazione</string>
   <!-- Content description for the translate page toolbar button that opens the translations dialog when no translation has occurred. -->
   <string name="browser_toolbar_translate">Traduce a pagina</string>
   <!--
@@ -491,7 +487,7 @@
   <!-- Text for the button to skip the onboarding on the home onboarding dialog. -->
   <string name="onboarding_home_skip_button" moz:removedIn="141" tools:ignore="UnusedResources">Ignurà</string>
   <!-- Onboarding home screen sync popup dialog message, shown on top of Recent Synced Tabs in the Jump back in section. -->
-  <string name="sync_cfr_message">E vostre unghjette sò sincrunizate ! Ripigliate induve vi site piantati nant’à u vostru altru apparechju.</string>
+  <string name="sync_cfr_message" moz:removedIn="142" tools:ignore="UnusedResources">E vostre unghjette sò sincrunizate ! Ripigliate induve vi site piantati nant’à u vostru altru apparechju.</string>
   <!-- Content description (not visible, for screen readers etc.): Close button for the home onboarding dialog -->
   <string name="onboarding_home_content_description_close_button">Chjode</string>
   <!--
@@ -849,7 +845,7 @@
   <!-- Preference for translations -->
   <string name="preferences_translations">Traduzzioni</string>
   <!-- Preference for data choices -->
-  <string name="preferences_data_choices">Scelta di dati</string>
+  <string name="preferences_data_choices" tools:ignore="UnusedResources" moz:removedIn="141">Scelta di dati</string>
   <!-- Preference for data collection -->
   <string name="preferences_data_collection">Culletta di dati</string>
   <!-- Preference for developers -->
@@ -911,7 +907,7 @@
   <!-- Preference for open links in third party apps never open in apps option -->
   <string name="preferences_open_links_in_apps_never">Mai</string>
   <!-- Preference for open download with an external download manager app -->
-  <string name="preferences_external_download_manager">Ghjestiunariu esternu di scaricamentu</string>
+  <string name="preferences_external_download_manager" tools:ignore="UnusedResources" moz:removedIn="141">Ghjestiunariu esternu di scaricamentu</string>
   <!-- Preference for enabling gecko engine logs -->
   <string name="preferences_enable_gecko_logs">Attivà i ghjurnali di Gecko</string>
   <!-- Message to indicate users that we are quitting the application to apply the changes -->
@@ -931,13 +927,13 @@
 
     The title of the required permissions section from addon's permissions screen
   -->
-  <string name="addons_permissions_heading_required" tools:ignore="UnusedResources">Richiestu</string>
+  <string name="addons_permissions_heading_required" tools:ignore="UnusedResources" moz:removedIn="141">Richiestu</string>
   <!-- The title of the optional permissions section from addon's permissions screen -->
-  <string name="addons_permissions_heading_optional" tools:ignore="UnusedResources">Ozzionale</string>
+  <string name="addons_permissions_heading_optional" tools:ignore="UnusedResources" moz:removedIn="141">Ozzionale</string>
   <!-- The title of the origin permission option allowing a user to enable the extension to run on all sites -->
-  <string name="addons_permissions_allow_for_all_sites" tools:ignore="UnusedResources">Permette per tutti i siti</string>
+  <string name="addons_permissions_allow_for_all_sites">Permette per tutti i siti</string>
   <!-- The subtitle for the allow for all sites preference toggle -->
-  <string name="addons_permissions_allow_for_all_sites_subtitle" tools:ignore="UnusedResources">S’è vo fate cunfidenza à st’estensione, pudete cuncede u permessu nant’à tutti i siti web.</string>
+  <string name="addons_permissions_allow_for_all_sites_subtitle">S’è vo fate cunfidenza à st’estensione, pudete cuncede u permessu nant’à tutti i siti web.</string>
   <!-- The text shown when an extension does not require permissions -->
   <string name="addons_does_not_require_permissions">St’estensione ùn richiede alcunu permessu.</string>
   <!--
@@ -1120,9 +1116,17 @@
   <!-- Preference switch for usage and technical data collection -->
   <string name="preference_usage_data_2">Mandà i dati tecnichi è d’interazzione</string>
   <!-- Preference switch for usage and technical learn more link -->
-  <string name="preference_usage_data_learn_more">Sapene di più</string>
+  <string name="preference_usage_data_learn_more" tools:ignore="UnusedResources" moz:removedIn="141">Sapene di più</string>
   <!-- Preference description for marketing data collection. Note: The words "Firefox" should NOT be translated -->
   <string name="preferences_usage_data_description_1" tools:ignore="BrandUsage">I dati apprupositu di u vostru apparechju, a cunfigurazione materiale è u vostru adopru ci aiutanu à amendà e funzioni, e perfurmenze è a stabilità di Firefox.</string>
+  <!-- Preference switch for daily usage ping data collection -->
+  <string name="preferences_daily_usage_ping_title">Ping d’aghjovu oghjincu</string>
+  <string name="preferences_daily_usage_ping_description">Què aiuta à Mozilla à prezzà u numeru d’utilizatori attivi.</string>
+  <string name="preferences_daily_usage_ping_learn_more">Sapene di più nant’à u Ping d’aghjovu oghjincu</string>
+  <!-- Preference switch title for automatically submitting crash reports -->
+  <string name="preferences_automatically_send_crashes_title" tools:ignore="UnusedResources" moz:removedIn="142">Mandà autumaticamente i raporti d’accidente</string>
+  <!-- Preference switch description for automatically submitting crash reports -->
+  <string name="preferences_automatically_send_crashes_description" tools:ignore="UnusedResources" moz:removedIn="142">Què ci aiuta à diagnosticà è currege i prublemi cù u navigatore. I raporti ponu cuntene dati persunali o sensibile.</string>
   <!-- Preference switch for campaign measurement data (marketing data) collection -->
   <string name="preferences_marketing_data_2">Dati di misura di e campagne</string>
   <!--
@@ -1132,16 +1136,8 @@
   <string name="preferences_marketing_data_description_4" tools:ignore="BrandUsage">Spartite cumu vo avete scupertu Firefox, è chì vo l’impiegate, cù i cumpagni cummerciali di Mozilla.</string>
   <!-- Learn more link for marketing data preference -->
   <string name="preferences_marketing_data_learn_more">Sapene di più nant’à i dati cummerciali</string>
-  <!-- Preference switch for daily usage ping data collection -->
-  <string name="preferences_daily_usage_ping_title">Ping d’aghjovu oghjincu</string>
-  <string name="preferences_daily_usage_ping_description">Què aiuta à Mozilla à prezzà u numeru d’utilizatori attivi.</string>
-  <string name="preferences_daily_usage_ping_learn_more">Sapene di più nant’à u Ping d’aghjovu oghjincu</string>
-  <!-- Preference switch title for automatically submitting crash reports -->
-  <string name="preferences_automatically_send_crashes_title">Mandà autumaticamente i raporti d’accidente</string>
-  <!-- Preference switch description for automatically submitting crash reports -->
-  <string name="preferences_automatically_send_crashes_description">Què ci aiuta à diagnosticà è currege i prublemi cù u navigatore. I raporti ponu cuntene dati persunali o sensibile.</string>
   <!-- Learn more link for crash reporting preference -->
-  <string name="onboarding_preferences_dialog_crash_reporting_learn_more">Sapene di più nant’à i raporti d’accidente</string>
+  <string name="onboarding_preferences_dialog_crash_reporting_learn_more" tools:ignore="UnusedResources" moz:removedIn="142">Sapene di più nant’à i raporti d’accidente</string>
   <!-- Title for studies preferences -->
   <string name="preference_experiments_2">Studii</string>
   <!-- Summary for studies preferences -->
@@ -1480,8 +1476,6 @@
   <string name="download_delete_item">Squassà</string>
   <!-- Content description for the toolbar "Navigate back" button -->
   <string name="download_navigate_back_description">Navigazione in daretu</string>
-  <!-- Content description for the toolbar "Navigate up" button -->
-  <string name="download_navigate_up_description" moz:removedIn="139" tools:ignore="UnusedResources">Navigà insù</string>
   <!-- Content description for the toolbar back button while searching the downloads -->
   <string name="download_close_search_description">Ritornu è chjode a ricerca</string>
   <string name="download_clear_search_description">Squassà</string>
@@ -2008,7 +2002,7 @@
   <!-- Text shown in snackbar when user closes a private tab -->
   <string name="snackbar_private_tab_closed">Unghjetta privata chjosa</string>
   <!-- Text shown in snackbar when user closes all private tabs -->
-  <string name="snackbar_private_tabs_closed">Unghjette private chjose</string>
+  <string name="snackbar_private_tabs_closed" moz:removedIn="141" tools:ignore="UnusedResources">Unghjette private chjose</string>
   <!-- Text shown in snackbar when user erases their private browsing data -->
   <string name="snackbar_private_data_deleted">I dati di navigazione privata sò stati squassati</string>
   <!-- Text shown in snackbar to undo deleting a tab, top site or collection -->
@@ -2756,11 +2750,7 @@
   <string name="synced_tabs_expand_group">Spiegà u gruppu d’unghjette sincrunizate</string>
   <!-- Content description for collapsing a group of synced tabs. -->
   <string name="synced_tabs_collapse_group">Ripiegà u gruppu d’unghjette sincrunizate</string>
-  <!--
-    Top Sites
-
-    Title text displayed in the dialog when shortcuts limit is reached.
-  -->
+  <!-- Title text displayed in the dialog when shortcuts limit is reached. -->
   <string name="shortcut_max_limit_title">Numeru massimu d’accurtatoghji toccu</string>
   <!-- Content description text displayed in the dialog when shortcut limit is reached. -->
   <string name="shortcut_max_limit_content">Per aghjunghje un novu accurtatoghju, ci vole à cacciane un’altru. Effettuate una longa incalcata nant’à u situ è selezziunate Caccià</string>
@@ -2896,7 +2886,7 @@
   <!-- Action label for links to a website containing documentation about a wallpaper collection. Talkback will append this to say "Double tap to open link to learn more about this collection". -->
   <string name="a11y_action_label_wallpaper_collection_learn_more">apre u liame per sapene di più nant’à sta cullezzione</string>
   <!-- Action label for links that point to an article. Talkback will append this to say "Double tap to read the article". -->
-  <string name="a11y_action_label_read_article">leghje l’articulu</string>
+  <string name="a11y_action_label_read_article" moz:removedIn="141" tools:ignore="UnusedResources">leghje l’articulu</string>
   <!-- Action label for links to the Firefox Pocket website. Talkback will append this to say "Double tap to open link to learn more". -->
   <string name="a11y_action_label_pocket_learn_more" moz:removedIn="140" tools:ignore="UnusedResources">apre u liame per sapene di più</string>
   <!-- Content description for headings announced by accessibility service. %s is the text of the heading. Talkback will announce the text and then speak the word "Heading" indicating to the user that this text is a heading for a section. -->
@@ -3150,9 +3140,9 @@
 
     Text for the protection panel header when the site is secure.
   -->
-  <string name="protection_panel_header_secure">Sicuru</string>
+  <string name="protection_panel_header_secure" moz:removedIn="142" tools:ignore="UnusedResources">Sicuru</string>
   <!-- Text for the protection panel header when the site is not secure. -->
-  <string name="protection_panel_header_not_secure">Nonsicuru</string>
+  <string name="protection_panel_header_not_secure" moz:removedIn="142" tools:ignore="UnusedResources">Nonsicuru</string>
   <!-- Title text for the protection panel banner when the site is not secure. -->
   <string name="protection_panel_banner_not_secure_title">Fate casu nant’à stu situ</string>
   <!-- Description text for the protection panel banner when the site is not secure. -->
@@ -3216,7 +3206,7 @@
   <string name="connection_security_panel_not_secure">Cunnessione micca assicurata</string>
   <!--
     Text for the connection security panel to indicate who the certificate was verified by.
-    %s is a placeholder for the name of the certificate authority that verified the ticket
+    %s is a placeholder for the name of the certificate authority that issued the certificate.
   -->
   <string name="connection_security_panel_verified_by">Verificatu da %s</string>
   <!--
@@ -3449,14 +3439,8 @@
   <string name="certificate_warning_push_notification_pnw2_message" tools:ignore="UnusedResources">Mittite à livellu prima di u 14 di marzu per cuntinuà à impiegà i moduli addiziunali è d’altre funzioni.</string>
   <!-- Push notification message about old Firefox version -->
   <string name="certificate_warning_push_notification_pnw3_message" tools:ignore="UnusedResources">Certe funzioni ùn funziuneranu più dumane.</string>
-  <!--
-    TextField Design System Component
+  <!-- TextField Design System Component -->
 
-    The default content description for the eye trailing icon button in TextField
-  -->
-  <string name="text_field_eye_trailing_icon_default_content_description" moz:removedIn="139" tools:ignore="UnusedResources">Affissà u testu piattatu</string>
-  <!-- The default content description for the cross trailing icon button in TextField -->
-  <string name="text_field_cross_trailing_icon_default_content_description" moz:removedIn="139" tools:ignore="UnusedResources">Squassà u testu</string>
   <!--
     Setup checklist feature
 

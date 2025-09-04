@@ -62,16 +62,6 @@ ChromeUtils.defineLazyGetter(lazy, "logger", () =>
   lazy.Log.get(lazy.Log.TYPES.MARIONETTE)
 );
 
-ChromeUtils.defineLazyGetter(lazy, "hasSystemAccess", () => {
-  // Bug 1955007: Remove temporary preference in Firefox 141
-  const skipCheck = !Services.prefs.getBoolPref(
-    "remote.system-access-check.enabled",
-    true
-  );
-
-  return skipCheck || lazy.RemoteAgent.allowSystemAccess;
-});
-
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
 ChromeUtils.defineLazyGetter(
@@ -353,7 +343,10 @@ Object.defineProperty(GeckoDriver.prototype, "context", {
   },
 
   set(context) {
-    if (context === lazy.Context.Chrome && !lazy.hasSystemAccess) {
+    if (
+      context === lazy.Context.Chrome &&
+      !lazy.RemoteAgent.allowSystemAccess
+    ) {
       throw new lazy.error.UnsupportedOperationError(
         `System access is required to switch to ${lazy.Context.Chrome} scope. ` +
           `Start ${lazy.AppInfo.name} with "-remote-allow-system-access" to enable it.`
@@ -2575,22 +2568,42 @@ GeckoDriver.prototype.newWindow = async function (cmd) {
     !["tab", "window"].includes(type) ||
     lazy.AppInfo.isAndroid
   ) {
-    type = "tab";
+    if (lazy.TabManager.supportsTabs()) {
+      type = "tab";
+    } else if (lazy.windowManager.supportsWindows()) {
+      type = "window";
+    } else {
+      throw new lazy.error.UnsupportedOperationError(
+        `Not supported in ${lazy.AppInfo.name}`
+      );
+    }
   }
 
   let contentBrowser;
 
   switch (type) {
     case "window": {
-      let win = await this.curBrowser.openBrowserWindow(focus, isPrivate);
-      contentBrowser = lazy.TabManager.getTabBrowser(win).selectedBrowser;
+      if (lazy.windowManager.supportsWindows()) {
+        let win = await this.curBrowser.openBrowserWindow(focus, isPrivate);
+        contentBrowser = lazy.TabManager.getTabBrowser(win).selectedBrowser;
+      } else {
+        throw new lazy.error.UnsupportedOperationError(
+          `Not supported in ${lazy.AppInfo.name}`
+        );
+      }
       break;
     }
     default: {
       // To not fail if a new type gets added in the future, make opening
       // a new tab the default action.
-      let tab = await this.curBrowser.openTab(focus);
-      contentBrowser = lazy.TabManager.getBrowserForTab(tab);
+      if (lazy.TabManager.supportsTabs()) {
+        let tab = await this.curBrowser.openTab(focus);
+        contentBrowser = lazy.TabManager.getBrowserForTab(tab);
+      } else {
+        throw new lazy.error.UnsupportedOperationError(
+          `Not supported in ${lazy.AppInfo.name}`
+        );
+      }
     }
   }
 
